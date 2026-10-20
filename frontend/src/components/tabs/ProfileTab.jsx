@@ -75,6 +75,7 @@ function ProfileTable({ children }) {
  * Reached from the account menu at the foot of the sidebar, not from the page list. Appearance is
  * the person's `user_settings` row (useUserSettings.js), so it follows them to any browser.
  *
+ * `singleKeyShortcuts` is whether `?`, `/`, `[` and `]` act (shortcuts.js), on unless turned off.
  * `settingsSource` is that hook's `source`; 'browser' means the row could not be read or written.
  * `passwordBlocked` is why Change Password is unavailable (a machine identity), or null.
  * `userRole` is undefined while it is still being read, and null for an account with no role.
@@ -82,7 +83,8 @@ function ProfileTable({ children }) {
  */
 export function ProfileTab({
   email, userRole, passwordBlocked = null, onChangePassword,
-  theme, onChangeTheme, sidebarMode, onChangeSidebarMode, settingsSource = 'account',
+  theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
+  singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account',
 }) {
   const [section, setSection] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
@@ -93,6 +95,9 @@ export function ProfileTab({
   const mode = SIDEBAR_MODES.find(m => m.id === (modeDraft ?? sidebarMode)) || SIDEBAR_MODES[0]
   const themeDirty = themeDraft !== null && themeDraft !== theme
   const modeDirty = modeDraft !== null && modeDraft !== sidebarMode
+  const [shortcutsDraft, setShortcutsDraft] = useState(null)
+  const shownShortcuts = shortcutsDraft ?? singleKeyShortcuts
+  const shortcutsDirty = shortcutsDraft !== null && shortcutsDraft !== singleKeyShortcuts
 
   return (
     <div className="page-layout page-fill">
@@ -201,6 +206,32 @@ export function ProfileTab({
                 actions={<SaveDiscard dirty={modeDirty}
                   onSave={() => { onChangeSidebarMode?.(modeDraft); setModeDraft(null) }}
                   onDiscard={() => setModeDraft(null)} />}
+              />
+              <ProfileRow
+                id="shortcuts"
+                label="Single-key shortcuts"
+                description={(<>
+                  Keys that act on one press: <kbd className="shortcut-key">?</kbd> lists the shortcuts,{' '}
+                  <kbd className="shortcut-key">/</kbd> goes to the page&apos;s search box, and{' '}
+                  <kbd className="shortcut-key">[</kbd> and <kbd className="shortcut-key">]</kbd> change tab.
+                  Speech input can type them by mistake, so they can be turned off. Ctrl K and the arrow keys stay.
+                </>)}
+                value={(
+                  <div className="profile-switch">
+                    {/* Named by the Setting cell's label; the word beside it is for the eye. */}
+                    <input
+                      id="profile-shortcuts"
+                      type="checkbox"
+                      role="switch"
+                      checked={shownShortcuts}
+                      onChange={e => setShortcutsDraft(e.target.checked)}
+                    />
+                    <span aria-hidden="true">{shownShortcuts ? 'On' : 'Off'}</span>
+                  </div>
+                )}
+                actions={<SaveDiscard dirty={shortcutsDirty}
+                  onSave={() => { onChangeSingleKeyShortcuts?.(shortcutsDraft); setShortcutsDraft(null) }}
+                  onDiscard={() => setShortcutsDraft(null)} />}
               />
             </ProfileTable>
           </>)}

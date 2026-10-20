@@ -639,7 +639,8 @@ export const SUITES = {
       "0188's per-person preferences, which the Profile page and the account menu write. A person " +
       "reads, creates and changes their own row and nobody else's, an Administrator included, and " +
       'cannot hand it to someone else; anon and service_role hold nothing; the CHECKs refuse a ' +
-      "value the dashboard does not know; the first sign-in's seed never overwrites a row another " +
+      'value the dashboard does not know, and single-key shortcuts (0194) start on and are never ' +
+      "null; the first sign-in's seed never overwrites a row another " +
       "tab created, and a one-column save leaves the other column alone; and the row goes with the " +
       'account, unaudited.',
   },

@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabaseClient'
 
 /*
- * The signed-in person's `user_settings` row (0188): RLS admits their own row and no other, so
+ * The signed-in person's `user_settings` row (0188, 0194): RLS admits their own row and no other, so
  * every call names the id only to say which row it means. Each throws on a refusal or a network
  * failure; useUserSettings.js decides what the page does then. Not through `api`: these run in the
  * background and do not light the top bar's activity line.
@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabaseClient'
 export async function readUserSettings(userId) {
   const { data, error } = await supabase
     .from('user_settings')
-    .select('theme,sidebar_mode')
+    .select('theme,sidebar_mode,single_key_shortcuts')
     .eq('user_id', userId)
     .maybeSingle()
   if (error) throw error
@@ -31,7 +31,7 @@ export async function seedUserSettings(userId, { theme, sidebarMode }) {
 
 /**
  * One choice. An upsert of that column alone, so it also creates a row the seed never wrote, and
- * leaves the other column as another browser last saved it.
+ * leaves the other columns as another browser last saved them.
  */
 export async function saveUserSetting(userId, column, value) {
   const { error } = await supabase

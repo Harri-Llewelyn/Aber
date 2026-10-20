@@ -5145,6 +5145,17 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* The chosen layout's own description, under its field. Wraps, unlike a setting's range. */
 .profile-detail { white-space: normal; line-height: 1.45; }
 
+/* An on/off setting: the switch, and the word for its state beside it, at a field's height. */
+.profile-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.profile-switch input { accent-color: var(--accent); }
+
 /* The note that the row could not be reached, above the table it explains. */
 .profile-source { flex-shrink: 0; padding-bottom: 0; }
 
@@ -5248,6 +5259,14 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   color: var(--text-muted);
   line-height: 1.45;
 }
+
+/* A single-key shortcut the person has turned off: its keys fade to dashed outlines, and the Off
+   tag beside the description says why in words. */
+.shortcut-row-off .shortcut-key {
+  border-style: dashed;
+  color: var(--text-dim);
+}
+.shortcut-off { margin-left: 8px; vertical-align: 1px; }
 
 /* The banner at the top of a dialog somebody may not save. Neutral, not a warning: nothing has gone
    wrong, so it takes the muted surface every other explanatory strip takes. The button is pushed to

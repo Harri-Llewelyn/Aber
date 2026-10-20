@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUserSettings } from '../hooks/useUserSettings'
 import { THEME_KEY } from '../hooks/useTheme'
 import { SIDEBAR_MODE_KEY } from '../hooks/useSidebarMode'
+import { SINGLE_KEY_SHORTCUTS_KEY } from '../hooks/useSingleKeyShortcuts'
 import { readUserSettings, seedUserSettings, saveUserSetting } from '../utils/userSettings'
 
 vi.mock('../utils/userSettings', () => ({
@@ -161,5 +162,44 @@ describe('when the row cannot be reached', () => {
     const { result } = renderHook(() => useUserSettings(undefined))
     expect(result.current.source).toBe('browser')
     expect(readUserSettings).not.toHaveBeenCalled()
+  })
+})
+
+describe('single-key shortcuts', () => {
+  it('are on for a person who has never chosen, and on a browser with no copy', async () => {
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', single_key_shortcuts: true })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    expect(result.current.singleKeyShortcuts).toBe(true)
+    await settle(result)
+    expect(result.current.singleKeyShortcuts).toBe(true)
+  })
+
+  it('follow the row over the browser copy, and the copy follows the row', async () => {
+    localStorage.setItem(SINGLE_KEY_SHORTCUTS_KEY, 'on')
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', single_key_shortcuts: false })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    expect(result.current.singleKeyShortcuts).toBe(true)
+    await settle(result)
+    expect(result.current.singleKeyShortcuts).toBe(false)
+    expect(localStorage.getItem(SINGLE_KEY_SHORTCUTS_KEY)).toBe('off')
+  })
+
+  it('are saved to the row as one column, and the seed leaves them to its default', async () => {
+    readUserSettings.mockResolvedValueOnce(null).mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', single_key_shortcuts: true })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    expect(seedUserSettings.mock.calls[0][1]).not.toHaveProperty('single_key_shortcuts')
+
+    act(() => result.current.setSingleKeyShortcuts(false))
+    expect(result.current.singleKeyShortcuts).toBe(false)
+    expect(saveUserSetting).toHaveBeenCalledWith(ALICE, 'single_key_shortcuts', false)
+  })
+
+  it('keep the browser copy when a row from before the column has none', async () => {
+    localStorage.setItem(SINGLE_KEY_SHORTCUTS_KEY, 'off')
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover' })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    expect(result.current.singleKeyShortcuts).toBe(false)
   })
 })

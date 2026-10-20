@@ -31,6 +31,7 @@ import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
 import { ConnectionStrip } from './components/common/ConnectionStrip'
 import { focusPageSearch } from './components/common/SearchInput'
+import { SingleKeyShortcutsContext, singleKeyShortcutAllowed, stepPageTab } from './shortcuts'
 
 /* There is no sign-up form. Registration is disabled server-side by GOTRUE_DISABLE_SIGNUP, so
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
@@ -461,7 +462,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const openProposalSubject = (proposal) => navigate(proposalSubjectUrl(proposal))
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
   // theme switch, the rail's foot control and the Profile page all write through it.
-  const { theme, setTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
+  const {
+    theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts, source: settingsSource,
+  } = useUserSettings(session?.user?.id)
   const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
@@ -477,27 +480,27 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('site-map', {}, { replace: true })
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
-  /* `?` opens the shortcuts list and `/` focuses the open page's search box. Both are printable
-     characters, read from `e.key` so a layout that types them with Shift still works, so the
-     handler stands down for any editable target, including contenteditable, and for any keystroke
-     carrying a modifier. `/` also stands down while a dialog is open, and on a page with no box. */
+  /* `?` opens the shortcuts list, `/` focuses the open page's search box, and `[` and `]` move to
+     the open page's previous and next tab. singleKeyShortcutAllowed (shortcuts.js) says when one
+     may act: not in a field, not with Ctrl, Cmd or Alt (AltGr passes), not behind a dialog, and not
+     while the person has turned single-key shortcuts off. A key with nothing to do (no box, no tab
+     bar, the last tab) is left to the browser. */
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.key !== '?' && e.key !== '/') || e.ctrlKey || e.metaKey || e.altKey) return
-      const el = e.target
-      const tag = el?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
-      if (e.key === '/') {
+      if (!singleKeyShortcutAllowed(e, singleKeyShortcuts)) return
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowShortcuts(true)
+      } else if (e.key === '/') {
         // Kept from the field it has just focused, which would otherwise type it.
         if (focusPageSearch()) e.preventDefault()
-        return
+      } else if (stepPageTab(e.key === '[' ? -1 : 1)) {
+        e.preventDefault()
       }
-      e.preventDefault()
-      setShowShortcuts(true)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [])
+  }, [singleKeyShortcuts])
 
   useQuarantineAlerts(showToast)
 
@@ -611,12 +614,14 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               is a reason to act, and this list holds resolved and routine messages too. */}
           <NotificationHistory entries={history} onMarkRead={markRead} onClear={clearHistory} />
 
-          {/* A discovery aid rather than a preference, so it stays in the bar. */}
+          {/* A discovery aid rather than a preference, so it stays in the bar, and the way to the
+              list while single-key shortcuts are off, when `?` is not named. */}
           <button
             className="topbar-icon-button"
             onClick={() => setShowShortcuts(true)}
             aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
+            aria-keyshortcuts={singleKeyShortcuts ? '?' : undefined}
+            title={singleKeyShortcuts ? 'Keyboard shortcuts (?)' : 'Keyboard shortcuts'}
           >
             <IconKeyboard size={15} />
           </button>
@@ -659,6 +664,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
             drawer itself sits outside it. */}
         <HelpDrawerContext.Provider value={closeHelp}>
+        {/* What a page's search box reads to say whether `/` reaches it. */}
+        <SingleKeyShortcutsContext.Provider value={singleKeyShortcuts}>
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
@@ -714,11 +721,14 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 onChangeTheme={setTheme}
                 sidebarMode={sidebarMode}
                 onChangeSidebarMode={setSidebarMode}
+                singleKeyShortcuts={singleKeyShortcuts}
+                onChangeSingleKeyShortcuts={setSingleKeyShortcuts}
                 settingsSource={settingsSource}
               />
             )}
           </Suspense>
         </main>
+        </SingleKeyShortcutsContext.Provider>
         </HelpDrawerContext.Provider>
 
         {/* Rendered beside the page so it survives tab switches (`tabId` follows `tab`) and is
@@ -728,7 +738,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
-      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      {showShortcuts && <ShortcutsModal singleKeyShortcuts={singleKeyShortcuts} onClose={() => setShowShortcuts(false)} />}
       {showChangePassword && (
         <ChangePasswordModal
           email={session?.user?.email}

@@ -309,12 +309,13 @@ row and all, so the two read alike.
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
   change this" in Actions. RLS already withholds the rows marked `sensitive`; a row another page's
   dialog edits is offered by the search only while that page is in the rail.
-- **Theme and sidebar layout are the person's `user_settings` row** (`supabase/README.md`,
-  `0188`), read and written by `hooks/useUserSettings.js`. `useTheme` and `useSidebarMode` keep the
-  browser's copy in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page paints at once and
+- **Theme, sidebar layout and single-key shortcuts are the person's `user_settings` row**
+  (`supabase/README.md`, `0188`, `0194`), read and written by `hooks/useUserSettings.js`. `useTheme`,
+  `useSidebarMode` and `useSingleKeyShortcuts` keep the browser's copy in localStorage
+  (`aber_theme`, `aber_sidebar_mode`, `aber_single_key_shortcuts`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
-  row is seeded from that copy (`utils/userSettings.js`, ON CONFLICT DO NOTHING, then a second
-  read). Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
+  row is seeded from that copy's theme and layout (`utils/userSettings.js`, ON CONFLICT DO NOTHING,
+  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
   the rail's control and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
@@ -624,10 +625,33 @@ page that passes one. So a page's main button is in the same place whether or no
 `/` focuses the open page's search box (`focusPageSearch` in `common/SearchInput.jsx`, bound in
 `App.jsx` beside `?`). It finds the first shown `SearchInput` in a `.filter-bar` inside `main`, so a
 search box added to a toolbar is reached with no wiring of its own. The top bar's search is outside
-`main`, and Ctrl K owns it. `/` does nothing in a text field, a select or a contenteditable, with
-Ctrl, Cmd or Alt held, while any `role="dialog"` (a modal or a popover) is open, or on a page with no
-box. The box shows a `/` hint while it is empty and unfocused, and App.css draws it only where `/`
-reaches.
+`main`, and Ctrl K owns it. The box shows a `/` hint while it is empty and unfocused, and App.css
+draws it only where `/` reaches.
+
+`[` and `]` move to the open page's previous and next tab (`stepPageTab` in `src/shortcuts.js`,
+bound beside `?`). They find the tab bar the way `/` finds the search box, the first shown
+`role="tablist"` inside `main`, so a page with a `TabStrip` needs no wiring. They click the tab, so
+the address, the history entry and the page's own reset follow as they do for a click, then focus
+it, so a screen reader reads its name. They stop at the first and last tab and do nothing on a page
+without tabs. A tab bar made of links would change only what `stepPageTab` looks for: the bar, its
+tabs and the open one.
+
+**One check decides when a shortcut may act** (`shortcutAllowed` in `src/shortcuts.js`). It stands
+down in a text field, a select or a contenteditable, with Ctrl, Cmd or Alt held, and while a dialog
+or popover is open: `role="dialog"`, `aria-modal="true"` or a native `dialog[open]`. AltGr passes,
+though Windows reports it as Ctrl+Alt, because German, French and Nordic layouts type `[` and `]`
+with it. Every shortcut is read from `e.key`, the character, never the key code. Ctrl K uses the
+dialog part alone: with a dialog open it does nothing, rather than moving focus behind it.
+
+**Single-key shortcuts can be turned off** (WCAG 2.2 SC 2.1.4, Character Key Shortcuts). `?`, `/`,
+`[` and `]` are one character with no modifier, which speech input can type by mistake. Profile ›
+Appearance has a Single-key shortcuts switch, on by default and saved in `user_settings`
+(`singleKeyShortcutAllowed`). Ctrl K and the arrow keys are not character keys, so it leaves them
+alone. While it is off, the shortcuts list stays one click away on the top bar's Keyboard shortcuts
+button, and marks the four rows Off. `aria-keyshortcuts` names `?` on that button, `/` on the page's
+search box (read from `SingleKeyShortcutsContext`) and Control+K or Meta+K on the top bar's search.
+The first two, and the `/` hint, go while the switch is off. `[` and `]` are named on no element,
+because the tab they open changes; the shortcuts list covers them.
 
 ---
 

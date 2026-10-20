@@ -1146,6 +1146,22 @@ Both columns are additive. `progress_reported_at` is nullable: a job claimed bef
 none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
 worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
 
+### Single-key shortcuts can be turned off (0194)
+
+The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts
+list, `/` the page's search box, and `[` and `]` move between a page's tabs. Speech input can type
+them by mistake, and WCAG 2.2 SC 2.1.4 asks for a way to turn such shortcuts off.
+
+- **`user_settings.single_key_shortcuts`**, `boolean NOT NULL DEFAULT true`. Profile › Appearance
+  writes it, as a one-column upsert like the theme's. Ctrl K and the arrow keys are not covered.
+- **On by default**, so nothing changes for anyone until they choose, and a row written before
+  `0194` reads on. The first sign-in's seed leaves it to the default.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column. The file's self-check asserts that `anon` holds nothing on it.
+
+The dashboard reads it through `useUserSettings.js` and keeps a copy in `aber_single_key_shortcuts`.
+`test_user_settings.py` holds the default and the save.
+
 ### Captures and replays leave an audit trail (0193)
 
 A capture holds the plant's raw traffic, and a replay writes readings into the historian. Neither
@@ -5658,6 +5674,7 @@ person's.
 | `user_id` | Primary key, `REFERENCES auth.users(id) ON DELETE CASCADE`: deleting the account deletes the row |
 | `theme` | `dark` (the default) or `light`, by CHECK |
 | `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
+| `single_key_shortcuts` | `true` (the default) or `false`: whether `?`, `/`, `[` and `]` act (`0194`) |
 | `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
 
 - **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
@@ -5668,7 +5685,8 @@ person's.
   business. `authenticated` holds `SELECT`, `INSERT` and `UPDATE`, and no `DELETE`. `anon` and
   `service_role` hold nothing.
 - **Not audited.** A display choice is not platform state, so the table has no audit trigger.
-- **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page
+- **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`,
+  `aber_single_key_shortcuts`), so the page
   paints in the right theme before the row arrives, and the sign-in screen, which has no account
   yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
 - **A first row keeps the browser's choice.** A person with no row gets one seeded from the

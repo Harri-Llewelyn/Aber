@@ -10,8 +10,9 @@ The settings for the whole site are on the **Settings** page, not here.
 
 - **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your role, on the **Access Control** page.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
-- **Appearance** holds your **Theme** (dark or light) and your **Sidebar layout**. Choose a value, then select **Save** on its row. **Discard** puts back the value you had.
+- **Appearance** holds your **Theme** (dark or light), your **Sidebar layout** and your **Single-key shortcuts**. Choose a value, then select **Save** on its row. **Discard** puts back the value you had.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
+- **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme switch in the account menu** and **the control at the foot of the sidebar** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark**.
 
 ## Where your choices are kept
