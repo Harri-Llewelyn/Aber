@@ -119,9 +119,9 @@ describe('the export warning about unmapped metrics', () => {
     fireEvent.click(await screen.findByRole('link', { name: /Open them on the Metrics page/ }))
     await screen.findByRole('button', { name: /^Unmapped \(\d+\)$/ })
 
-    fireEvent.click(within(screen.getByRole('navigation')).getByText('Devices'))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', { name: 'Devices' }))
     await waitFor(() => expect(window.location.pathname).toBe('/devices'))
-    fireEvent.click(within(screen.getByRole('navigation')).getByText('Metrics'))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', { name: 'Metrics' }))
 
     const unmapped = await screen.findByRole('button', { name: /^Unmapped \(\d+\)$/ })
     expect(unmapped).toHaveAttribute('aria-pressed', 'false')

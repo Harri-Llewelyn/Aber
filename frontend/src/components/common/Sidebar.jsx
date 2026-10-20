@@ -269,7 +269,7 @@ function SidebarPage({
   }
 
   return (
-    <div className="sidebar-page" ref={wrapRef}>
+    <div ref={wrapRef}>
       <div className="sidebar-page-row" ref={rowRef}>
         <PageLink
           page={page}

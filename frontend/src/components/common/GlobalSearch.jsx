@@ -197,7 +197,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       // than the five `resolveId` can name.
       onSelectTrail?.(result.trailId)
     } else if (result.kind === 'setting' && onSelectSetting) {
-      // A setting CAN be jumped to: the page is a tablist by category, so its category is an
+      // A setting CAN be jumped to: the page has a tab per category, so its category is an
       // anchor in all but name and landing on the wrong one would hide the row that was asked for.
       onSelectSetting(result.target.settingKey)
     } else if (result.kind === 'card' && result.target.section && onSelectSection) {
