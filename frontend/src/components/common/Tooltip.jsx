@@ -4,7 +4,15 @@ import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export const TOOLTIP_WIDTH = 320
-const GAP = 6
+/** From the trigger: room for the arrow's point. */
+const GAP = 8
+/** From the window's sides. */
+const MARGIN = 8
+/**
+ * The nearest the arrow's centre comes to the bubble's side: the 8px corner radius plus half the
+ * turned 8px square. App.css keeps the arrow inside a narrower bubble by the same distance.
+ */
+export const ARROW_INSET = 14
 
 /** How long the pointer rests on a control before its tooltip shows. Crossing a tab bar takes less. */
 export const TOOLTIP_DELAY_MS = 300
@@ -19,9 +27,32 @@ export const TOOLTIP_DELAY_MS = 300
 export const tooltipHost = (trigger) => trigger?.closest?.('dialog[open]') ?? document.body
 
 /**
- * Where a tooltip's bubble goes while `visible`: below the trigger, or above it when the trigger is
- * low in the window, and never past the window's sides, inside `tooltipHost(trigger)`. Null while
- * hidden. A scroll or a resize calls `onDismiss` rather than tracking the trigger.
+ * Where the bubble and its arrow go for a trigger at `r` in a `vw` by `vh` window. Below the
+ * trigger, or `above` it when the trigger is low in the window. The bubble starts at the trigger's
+ * left edge (a narrow trigger's centre less ARROW_INSET), or, where the widest bubble would pass the
+ * window's right side, ends at its right edge (`end`, placed by `right`), so a short bubble still
+ * reaches its trigger. `arrowX` is the trigger's centre from that edge of the bubble, kept
+ * ARROW_INSET inside it.
+ */
+export function placeTooltip(r, vw, vh) {
+  const width = Math.min(TOOLTIP_WIDTH, vw - 2 * MARGIN)
+  const centre = r.left + r.width / 2
+  const above = r.bottom + GAP + 160 > vh && r.top > vh / 2
+  const y = above ? { bottom: vh - r.top + GAP } : { top: r.bottom + GAP }
+  const arrow = (offset) => Math.max(ARROW_INSET, Math.min(offset, width - ARROW_INSET))
+  const start = Math.min(r.left, centre - ARROW_INSET)
+  const end = Math.max(r.left + r.width, centre + ARROW_INSET)
+  if (start + width + MARGIN > vw && end - width >= MARGIN) {
+    const right = Math.max(MARGIN, vw - end)
+    return { ...y, right, width, above, end: true, arrowX: arrow(vw - right - centre) }
+  }
+  const left = Math.max(MARGIN, Math.min(start, vw - width - MARGIN))
+  return { ...y, left, width, above, end: false, arrowX: arrow(centre - left) }
+}
+
+/**
+ * Where a tooltip's bubble goes while `visible` (placeTooltip), inside `tooltipHost(trigger)`. Null
+ * while hidden. A scroll or a resize calls `onDismiss` rather than tracking the trigger.
  *
  * @returns {{ pos: object|null, container: Element|null }}
  */
@@ -33,11 +64,8 @@ export function useTooltipPosition(triggerRef, visible, onDismiss) {
   useLayoutEffect(() => {
     const trigger = triggerRef.current
     if (!visible || !trigger) { setPlaced({ pos: null, container: null }); return }
-    const r = trigger.getBoundingClientRect()
-    const flip = r.bottom + GAP + 160 > window.innerHeight && r.top > window.innerHeight / 2
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - TOOLTIP_WIDTH - 8))
     setPlaced({
-      pos: flip ? { left, bottom: window.innerHeight - r.top + GAP } : { left, top: r.bottom + GAP },
+      pos: placeTooltip(trigger.getBoundingClientRect(), window.innerWidth, window.innerHeight),
       container: tooltipHost(trigger),
     })
     const close = () => dismiss.current?.()
@@ -56,7 +84,8 @@ export function useTooltipPosition(triggerRef, visible, onDismiss) {
  * The one tooltip bubble, which HelpTip and the tab bar's tabs both draw, so the two always look
  * alike. Portalled with a fixed position into `container` (`tooltipHost`), because most triggers
  * sit inside a `.card`, whose overflow is hidden, and an open dialog covers <body>. `role="tooltip"`;
- * the trigger names it by `id` in `aria-describedby`.
+ * the trigger names it by `id` in `aria-describedby`. Its arrow points at the trigger: `--arrow-x`
+ * from `pos`, and the classes say which border and edge it is measured on (App.css).
  *
  * Drawn only while `pos` is set, unless `keepMounted`: then it is in the document, hidden, while
  * closed, so a trigger whose `aria-describedby` is always set names an element that exists.
@@ -67,9 +96,14 @@ export function TooltipBubble({ id, text, pos, container = null, keepMounted = f
     <span
       role="tooltip"
       id={id}
-      className="tooltip-bubble"
+      className={`tooltip-bubble${pos?.above ? ' tooltip-bubble-above' : ''}${pos?.end ? ' tooltip-bubble-end' : ''}`}
       hidden={!pos}
-      style={pos ? { ...pos, maxWidth: TOOLTIP_WIDTH } : undefined}
+      style={pos ? {
+        ...(pos.above ? { bottom: pos.bottom } : { top: pos.top }),
+        ...(pos.end ? { right: pos.right } : { left: pos.left }),
+        maxWidth: pos.width,
+        '--arrow-x': `${pos.arrowX}px`,
+      } : undefined}
     >
       {text}
     </span>,

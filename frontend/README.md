@@ -131,6 +131,13 @@ screen, and screen readers read it unevenly.
 - **One bubble.** `common/Tooltip.jsx` draws the bubble for HelpTip and for every tab, so the two
   always look alike (`.tooltip-bubble`, beside `.help-tip` in `App.css`). Inside an open native
   dialog it goes into the dialog, which sits in the top layer above anything portalled to `<body>`.
+- **It points at its control.** The bubble carries an arrow on the border facing the control, drawn
+  as the popovers' are (*Popover arrows* in `App.css`). `placeTooltip` puts the bubble below the
+  control, or above a control low in the window, with the arrow hanging from the bottom border. It
+  sets `--arrow-x` to the control's centre, measured from the bubble's edge. Near the window's right
+  side the bubble ends at the control's right edge rather than being pushed left, so a short bubble
+  still reaches it. The script places the arrow for the widest bubble, 320px; the stylesheet keeps
+  it 14px (`ARROW_INSET`) inside a narrower one, which only the browser can measure.
 - **When it shows.** `useTooltip` shows it once the pointer has rested on the tab for 300ms
   (`TOOLTIP_DELAY_MS`, through `useHoverIntent`, as the rail does), so bubbles do not flash as the
   pointer crosses the bar. Keyboard focus shows it at once. A press, the pointer leaving, blur, a

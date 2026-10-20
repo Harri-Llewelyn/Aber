@@ -2,11 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import React, { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
 import { TabStrip } from '../components/common/TabStrip'
 import { HelpTip } from '../components/common/HelpTip'
-import { TOOLTIP_DELAY_MS } from '../components/common/Tooltip'
+import { ARROW_INSET, TOOLTIP_DELAY_MS } from '../components/common/Tooltip'
 import { useEscapeKey } from '../hooks/useEscapeKey'
+import { blankComments } from '../test/themeColours'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
@@ -159,6 +160,122 @@ describe('one bubble for HelpTip and the tabs', () => {
     expect(APP_CSS.indexOf('.tooltip-bubble {')).toBeGreaterThan(APP_CSS.indexOf('.help-tip {'))
   })
 
+})
+
+/**
+ * The bubble points at its control with an arrow on the border facing it. jsdom lays nothing out,
+ * so the trigger's rectangle and the window are given, and the numbers the bubble is drawn with
+ * are checked; the stylesheet half is checked against App.css, and the screenshots in both themes
+ * are the check that it lines up.
+ */
+describe('the bubble points at its control', () => {
+  const rect = ({ left, top, width, height = 28 }) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top })
+  const window_ = (width, height = 900) => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(height)
+  }
+  /** A help tip at `at`, hovered; its bubble. */
+  const helpTipAt = (at, size = [1440, 900]) => {
+    window_(...size)
+    render(<HelpTip label="About this" text="An explanation." />)
+    const trigger = screen.getByRole('button', { name: 'About this' })
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(rect(at))
+    fireEvent.mouseEnter(trigger)
+    return tip()
+  }
+  const arrowX = (bubble) => bubble.style.getPropertyValue('--arrow-x')
+  /** What the rule that starts a line with `selector {` gives `prop`. */
+  const declared = (selector, prop) => {
+    const css = blankComments(APP_CSS)
+    const start = css.indexOf(`\n${selector} {`)
+    if (start < 0) return undefined
+    const body = css.slice(css.indexOf('{', start) + 1, css.indexOf('}', start))
+    const decl = body.split(';').map(d => d.trim()).find(d => d.startsWith(`${prop}:`))
+    return decl?.slice(prop.length + 1).trim()
+  }
+
+  it('opens below the control with the arrow over its centre', () => {
+    const bubble = helpTipAt({ left: 200, top: 100, width: 120 })
+    expect(bubble.style.top).toBe('136px')
+    expect(bubble.style.left).toBe('200px')
+    expect(arrowX(bubble)).toBe('60px')
+    expect(bubble).not.toHaveClass('tooltip-bubble-above')
+    expect(bubble).not.toHaveClass('tooltip-bubble-end')
+  })
+
+  it('starts left of a control narrower than the arrow\'s inset, so the point is still on its centre', () => {
+    // An 18px help tip: the bubble starts ARROW_INSET left of its centre.
+    const bubble = helpTipAt({ left: 300, top: 100, width: 18, height: 18 })
+    expect(bubble.style.left).toBe(`${309 - ARROW_INSET}px`)
+    expect(arrowX(bubble)).toBe(`${ARROW_INSET}px`)
+  })
+
+  it('hangs the point from the bottom border when it opens above a low control', () => {
+    const bubble = helpTipAt({ left: 200, top: 820, width: 120 })
+    expect(bubble).toHaveClass('tooltip-bubble-above')
+    expect(bubble.style.bottom).toBe(`${900 - 820 + 8}px`)
+    expect(bubble.style.top).toBe('')
+    expect(arrowX(bubble)).toBe('60px')
+  })
+
+  it('ends at a control near the window\'s right side, measuring the arrow from that edge', () => {
+    // The widest bubble would pass the window's side, so a short one is placed by its right edge
+    // and still reaches the control.
+    const bubble = helpTipAt({ left: 1380, top: 100, width: 40 })
+    expect(bubble).toHaveClass('tooltip-bubble-end')
+    expect(bubble.style.right).toBe(`${1440 - 1420}px`)
+    expect(bubble.style.left).toBe('')
+    expect(arrowX(bubble)).toBe('20px')
+  })
+
+  it('keeps the arrow inside the bubble when the bubble is held at a window edge', () => {
+    const atLeft = helpTipAt({ left: 0, top: 100, width: 10 })
+    expect(atLeft.style.left).toBe('8px')
+    expect(arrowX(atLeft), 'past the rounded corner on the left').toBe(`${ARROW_INSET}px`)
+    cleanup(); vi.restoreAllMocks()
+
+    const atRight = helpTipAt({ left: 1425, top: 100, width: 15 })
+    expect(atRight.style.right).toBe('8px')
+    expect(arrowX(atRight), 'past the rounded corner on the right').toBe(`${ARROW_INSET}px`)
+    cleanup(); vi.restoreAllMocks()
+
+    // A window too narrow for the widest bubble either side of the control: the bubble narrows to
+    // fit the window, and the arrow is still over the control.
+    const narrow = helpTipAt({ left: 150, top: 100, width: 20 }, [320, 900])
+    expect(narrow.style.left).toBe('8px')
+    expect(narrow.style.maxWidth).toBe(`${320 - 16}px`)
+    expect(arrowX(narrow)).toBe(`${160 - 8}px`)
+  })
+
+  it('points a tab\'s tooltip at the tab, shown on focus as on hover', () => {
+    window_(1440)
+    render(<><button type="button">Before</button><Harness /></>)
+    vi.spyOn(tab('Quarantine, 2 waiting'), 'getBoundingClientRect')
+      .mockReturnValue(rect({ left: 140, top: 60, width: 150, height: 36 }))
+    fireEvent.focus(tab('Quarantine, 2 waiting'), { relatedTarget: screen.getByRole('button', { name: 'Before' }) })
+    expect(tip().style.left).toBe('140px')
+    expect(arrowX(tip())).toBe('75px')
+  })
+
+  it('draws the arrow in the bubble\'s own colours, turned down on the -above variant', () => {
+    expect(declared('.tooltip-bubble::before', 'content')).toBe("''")
+    expect(declared('.tooltip-bubble::before', 'background')).toBe('var(--bg-card)')
+    expect(declared('.tooltip-bubble', 'background'), 'the half inside hides the border').toBe('var(--bg-card)')
+    expect(declared('.tooltip-bubble::before', 'border-top')).toBe('1px solid var(--border)')
+    expect(declared('.tooltip-bubble::before', 'transform')).toBe('rotate(var(--arrow-turn, 45deg))')
+    expect(declared('.tooltip-bubble-above::before', '--arrow-turn')).toBe('225deg')
+    expect(declared('.tooltip-bubble-above::before', 'bottom')).toBe('-0.5px')
+  })
+
+  it('keeps the arrow ARROW_INSET inside a bubble narrower than the widest, in the stylesheet', () => {
+    // The script places the arrow for the widest bubble; a short text draws a narrower one, which
+    // only the browser can measure. 100% is the bubble inside its 1px border.
+    const clamp = `min(calc(var(--arrow-x) - 1px), calc(100% - ${ARROW_INSET - 1}px))`
+    expect(declared('.tooltip-bubble::before', 'left')).toBe(clamp)
+    expect(declared('.tooltip-bubble-end::before', 'right')).toBe(clamp)
+    expect(declared('.tooltip-bubble-end::before', 'left')).toBe('auto')
+  })
 })
 
 /**
