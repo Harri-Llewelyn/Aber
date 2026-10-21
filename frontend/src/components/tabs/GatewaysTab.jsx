@@ -720,11 +720,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             cells={cells}
             areas={areas}
             disabled={!formAcceptsCell}
-            title={formAcceptsCell
-              ? undefined
-              : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
             cellEmptyLabel="— No cell assigned —"
-            cellTitle="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
           />
 
           <div className="form-hint">

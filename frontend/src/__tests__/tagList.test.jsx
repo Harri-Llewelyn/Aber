@@ -25,8 +25,8 @@ describe('TagList', () => {
 
   it('names the hidden tags in the tooltip, so the row can be scanned without expanding', () => {
     render(<TagList tags={SIX} limit={2} />)
-    expect(screen.getByRole('button', { name: '+4' }).title)
-      .toBe('Machine, MotionDevice, OEE, Systems')
+    expect(screen.getByRole('button', { name: '+4' }))
+      .toHaveAccessibleDescription('Machine, MotionDevice, OEE, Systems')
   })
 
   it('expands and collapses again', () => {
@@ -55,7 +55,7 @@ describe('TagList', () => {
   it('keeps the order of the non-priority tags', () => {
     render(<TagList tags={[...SIX, tag('Unmodelled', { priority: true })]} limit={3} />)
     // Unmodelled floats to the front; Axes and Controller follow in their original order.
-    const shown = screen.getAllByText(/Unmodelled|Axes|Controller|Machine/).map(n => n.textContent)
+    const shown = screen.getAllByText(/Unmodelled|Axes|Controller|Machine/, { ignore: '[role=tooltip]' }).map(n => n.textContent)
     expect(shown).toEqual(['Unmodelled', 'Axes', 'Controller'])
   })
 

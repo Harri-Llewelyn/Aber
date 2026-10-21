@@ -140,7 +140,6 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
               cellEmptyLabel={derivedCellName
                 ? `— Inherit from gateway (${derivedCellName}) —`
                 : '— Inherit from gateway (gateway has no cell) —'}
-              cellTitle="Where this device sits. Leave on Inherit to follow the gateway above."
             />
 
             {willBeUnassigned ? (

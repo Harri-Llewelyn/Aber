@@ -166,7 +166,7 @@ describe('the Quarantine tab', () => {
     const row = within(card()).getByText('Unknown_Robot').closest('tr')
     // Relative time, with the exact time on hover; a plain dash for the missing gateway name.
     const when = within(row).getByText('3h ago')
-    expect(when).toHaveAttribute('title', formatDateTime(DISCOVERED))
+    expect(when).toHaveAccessibleDescription(formatDateTime(DISCOVERED))
     const gatewayCell = row.querySelectorAll('td')[2]
     expect(gatewayCell.textContent).toBe('—')
     expect(gatewayCell.querySelector('.mono')).toBeNull()
@@ -223,11 +223,11 @@ describe('the Registered tab', () => {
     expect(card().querySelector('.filter-bar .help-tip, .tab-strip .help-tip')).toBeNull()
     expect(tab('Registered')).toHaveAccessibleDescription(/Devices admitted to Aber/)
     expect(bar.getByRole('searchbox', { name: 'Search devices' })).toBeInTheDocument()
-    expect(bar.getByTitle('Filter by operational state')).toBeInTheDocument()
+    expect(bar.getByRole('combobox', { name: 'Status' })).toBeInTheDocument()
     expect(bar.getByRole('button', { name: /Needs attention/ })).toBeInTheDocument()
     expect(within(card().querySelector('.filter-bar-actions')).getByRole('button', { name: /New Device/ })).toBeInTheDocument()
     // The rest wait in the popover.
-    expect(screen.queryByTitle('Filter by serving gateway')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Gateway' })).toBeNull()
   })
 
   it('holds lifecycle, type, schema, gateway and cell in the Filters popover', async () => {
