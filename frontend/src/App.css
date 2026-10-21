@@ -1594,6 +1594,18 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .callout-info .callout-icon { color: var(--accent-text); }
 .callout strong { color: var(--text-primary); }
+/* A link inside a callout or an empty state (a HelpLink into the panel, a RepoLink out to GitHub):
+   accent text with no resting underline, as every link is, underlined on hover and focus. */
+.callout a,
+.empty-state a {
+  color: var(--accent-text);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+.callout a:hover,
+.callout a:focus-visible,
+.empty-state a:hover,
+.empty-state a:focus-visible { text-decoration: underline; }
 
 /* `.callout`'s own margin lines it up with a card's contents when it is a direct child of `.card`.
    Inside a card body, or a dialog, the container has already inset it, so the inline margin goes.
