@@ -90,6 +90,15 @@ describe('Tooltip', () => {
     expect(tip()).toHaveTextContent('Copy link')
   })
 
+  it('shows a cut-short text whole without reading it again as a description', () => {
+    render(<Tooltip text="Axes/C/ANGLE_ACTUAL"><span tabIndex={0}>Axes/C/ANGLE_ACTUAL</span></Tooltip>)
+    const span = screen.getByText('Axes/C/ANGLE_ACTUAL')
+    expect(span).not.toHaveAttribute('aria-describedby')
+    fireEvent.mouseEnter(span)
+    wait(TOOLTIP_DELAY_MS)
+    expect(tip()).toHaveTextContent('Axes/C/ANGLE_ACTUAL')
+  })
+
   it('adds its description to one the control already has', () => {
     render(<><span id="hint">Needs a semantic id.</span>
       <Tooltip text="Admins only"><button type="button" aria-describedby="hint">Save</button></Tooltip></>)

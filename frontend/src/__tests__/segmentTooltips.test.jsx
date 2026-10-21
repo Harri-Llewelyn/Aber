@@ -1,8 +1,7 @@
 /**
  * A segment with a `description` explains itself in the shared tooltip bubble, as a tab does: after
  * the hover delay, at once on keyboard focus, tied by aria-describedby, and with no `title`. A
- * segment without one keeps the browser's tooltip, its name, so the theme switch and the
- * notification filter are as they were.
+ * segment without one has no tooltip unless it has a count, which the bubble shows with its name.
  */
 import React, { useState } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
@@ -77,9 +76,9 @@ describe('a segment with a description', () => {
 })
 
 describe('a segment without one', () => {
-  it('keeps its name as the browser\'s tooltip, and no description', () => {
+  it('has no tooltip and no description, since its label says it all', () => {
     render(<Harness />)
-    expect(segment('Plain')).toHaveAttribute('title', 'Plain')
+    expect(segment('Plain')).not.toHaveAttribute('title')
     expect(segment('Plain')).not.toHaveAttribute('aria-describedby')
     act(() => segment('Plain').focus())
     expect(tip()).toBeNull()

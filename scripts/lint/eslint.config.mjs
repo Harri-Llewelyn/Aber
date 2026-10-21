@@ -61,17 +61,6 @@ export default function config ({ js, react, hooks, globals }) {
     {
       // Not yet swept.
       files: [
-        'frontend/src/components/common/AlertPill.jsx',
-        'frontend/src/components/common/CellPlacementPicker.jsx',
-        'frontend/src/components/common/ExpandAllToggle.jsx',
-        'frontend/src/components/common/GatewayRepositoryPanel.jsx',
-        'frontend/src/components/common/HoldToReveal.jsx',
-        'frontend/src/components/common/Modal.jsx',
-        'frontend/src/components/common/NotificationHistory.jsx',
-        'frontend/src/components/common/QuarantinePayloadCell.jsx',
-        'frontend/src/components/common/SegmentedControl.jsx',
-        'frontend/src/components/common/SemanticIdField.jsx',
-        'frontend/src/components/common/VocabularyPanel.jsx',
         'frontend/src/components/modals/ApproveQuarantineModal.jsx',
         'frontend/src/components/modals/ArchiveModal.jsx',
         'frontend/src/components/modals/AssetConfigModal.jsx',

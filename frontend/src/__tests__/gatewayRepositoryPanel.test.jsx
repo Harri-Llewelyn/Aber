@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
+import { getByTooltip, queryByTooltip } from '../test/tooltips'
 
 vi.mock('../constants', () => ({
   GITEA_URL: 'http://forge.plant.local',
@@ -28,7 +29,7 @@ const GATEWAY = {
 describe('GatewayRepositoryPanel — who sees it', () => {
   it('links a role the forge admits to the gateway repository, under the organisation', () => {
     render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)
-    const link = screen.getByTitle(/Open this gateway's repository/i)
+    const link = screen.getByRole('link', { name: /Open in the forge/ })
     expect(link.tagName).toBe('A')
     expect(link.getAttribute('href')).toBe('http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000')
     // A new tab, and no opener: the forge is another origin with its own session.
@@ -39,8 +40,8 @@ describe('GatewayRepositoryPanel — who sees it', () => {
   it('links the issues and the wiki beside the repository, as three acts rather than one', () => {
     render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)
     const base = 'http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000'
-    expect(screen.getByTitle(/Open this gateway's issues/i).getAttribute('href')).toBe(`${base}/issues`)
-    expect(screen.getByTitle(/Open this gateway's wiki/i).getAttribute('href')).toBe(`${base}/wiki`)
+    expect(getByTooltip(/issues in the forge/i).getAttribute('href')).toBe(`${base}/issues`)
+    expect(getByTooltip(/wiki in the forge/i).getAttribute('href')).toBe(`${base}/wiki`)
     for (const link of screen.getAllByRole('link')) {
       expect(link.getAttribute('target')).toBe('_blank')
       expect(link.getAttribute('rel')).toContain('noopener')
@@ -61,12 +62,12 @@ describe('GatewayRepositoryPanel — what the appliance reports', () => {
   it('offers the compare view only once the appliance has pushed its branch', () => {
     // Before the first push the branch does not exist and the forge would answer 404.
     render(<GatewayRepositoryPanel gateway={GATEWAY} canOpenForge />)
-    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+    expect(queryByTooltip(/against what was approved/i)).toBeNull()
   })
 
   it('links the direct diff between main and the appliance branch, two dots not three', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_appliance_sha: 'b'.repeat(40) }} canOpenForge />)
-    const link = screen.getByTitle(/against what was approved/i)
+    const link = getByTooltip(/against what was approved/i)
     expect(link.getAttribute('href')).toBe('http://forge.plant.local/gateways/gateway-gwy2a0000000000400080000/compare/main..appliance')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(gatewayCompareUrl({ sparkplug_id: 'gwyabc' })).toBe('http://forge.plant.local/gateways/gateway-gwyabc/compare/main..appliance')
@@ -84,7 +85,7 @@ describe('GatewayRepositoryPanel — before enrolment', () => {
 
   it("withholds the compare view too, even where the appliance branch was once reported", () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null, forge_appliance_sha: 'b'.repeat(40) }} canOpenForge />)
-    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+    expect(queryByTooltip(/against what was approved/i)).toBeNull()
   })
 
   it("shows a role the forge would refuse nothing at all, enrolled or not", () => {
@@ -119,7 +120,7 @@ describe('GatewayRepositoryPanel — enrolled, with no repository', () => {
         canOpenForge
       />
     )
-    expect(screen.queryByTitle(/against what was approved/i)).toBeNull()
+    expect(queryByTooltip(/against what was approved/i)).toBeNull()
   })
 
   // A gateway read through an embed rather than the gateways query: `undefined`, not `null`. The
@@ -142,7 +143,7 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
   it('explains that there is no repository, and offers no link', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
     expect(screen.getByText(/has no repository of its own/i)).toBeInTheDocument()
-    expect(screen.queryByTitle(/Open this gateway's repository/i)).toBeNull()
+    expect(screen.queryByRole('link', { name: /Open in the forge/ })).toBeNull()
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
@@ -191,9 +192,9 @@ describe('GatewayRepositoryPanel — archived in the forge', () => {
 
   it('keeps every link, because reading is the point of archiving rather than deleting', () => {
     render(<GatewayRepositoryPanel gateway={ARCHIVED} canOpenForge />)
-    expect(screen.getByTitle(/Open this gateway's repository/i)).toBeInTheDocument()
-    expect(screen.getByTitle(/issues/i)).toBeInTheDocument()
-    expect(screen.getByTitle(/wiki/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open in the forge/ })).toBeInTheDocument()
+    expect(getByTooltip(/issues/i)).toBeInTheDocument()
+    expect(getByTooltip(/wiki/i)).toBeInTheDocument()
   })
 
   it('stops inviting a pull request nothing could merge', () => {
