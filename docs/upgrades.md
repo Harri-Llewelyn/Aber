@@ -185,7 +185,7 @@ gateway keeps the clone URL and host key it enrolled with. So an upgrade is some
 
 - **A gateway's flow changes only through a pull request** in its own repository in the forge.
   Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,
-  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#11-proposing-a-flow)).
+  within five minutes by default ([`remote-gateways.md`](../help/site/remote-gateways.md#11-proposing-a-flow)).
 - **A gateway's operating system follows the platform playbook at the tag its `platform.yml` names.**
   An upgrade publishes the new version's playbook, but each gateway stays on its own tag until a pull
   request in its repository moves it. Move one gateway first.
@@ -487,7 +487,7 @@ workload once.
 
 An appliance now keeps its readings on disk while it cannot deliver them, and replays them afterwards,
 as a Sparkplug edge node configured with the primary host (#308,
-[`remote-gateways.md`](remote-gateways.md#when-the-platform-cannot-be-reached)). An appliance
+[`remote-gateways.md`](../help/site/remote-gateways.md#when-the-platform-cannot-be-reached)). An appliance
 already enrolled runs the flow in its own forge repository, so nothing changes on it until:
 
 - **its flow is updated**, through an approved pull request that takes the new sample flow
@@ -496,7 +496,7 @@ already enrolled runs the flow in its own forge repository, so nothing changes o
 - **it knows the primary host id.** A new bundle writes `GATEWAY_PRIMARY_HOST_ID` into
   `/data/gateway.env`. An older appliance has none and buffers only while the broker is unreachable,
   so a restart of ingestion still loses its readings
-  ([`remote-gateways.md`](remote-gateways.md#the-third-value-the-primary-host-id) says how to add it).
+  ([`remote-gateways.md`](../help/site/remote-gateways.md#the-third-value-the-primary-host-id) says how to add it).
 
 **An appliance's messages are now Sparkplug B protobuf, not JSON.** Ingestion reads both. A site tool
 that subscribes to an appliance's topics and parses JSON must decode protobuf instead.

@@ -5414,7 +5414,7 @@ started and exited.
 ### The one-liner (archived migration 0105)
 
 Commissioning as a pasted command
-([`docs/remote-gateways.md`](../docs/remote-gateways.md#on-the-appliance-the-command)).
+([`help/site/remote-gateways.md`](../help/site/remote-gateways.md#on-the-appliance-the-command)).
 `gateway-bundle` mints the token as before and, asked for `format: "command"`, answers JSON
 instead of a ZIP: the token, its expiry, the command, and the pin. `gateway-install` is what the
 command and the installer fetch from, three things against the token in `X-Enrolment-Token`: the

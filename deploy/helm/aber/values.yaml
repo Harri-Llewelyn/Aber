@@ -1068,7 +1068,7 @@ ingestion:
   # outage -- may be and still be written. Live readings stay at 24 hours. Matches the appliance
   # buffer's maximum age (flows.template.json, `store and forward`). A replay older than the 25
   # hours the rollups' refresh reaches back is brought into them by a historian job, from the hours
-  # ingestion records (docs/remote-gateways.md, "Late data after an outage").
+  # ingestion records (help/site/remote-gateways.md, "Late data after an outage").
   historicalMaxAgeSeconds: 604800
   # The Sparkplug primary host application id. REQUIRED, and deliberately without a default: this
   # is the name a third-party gateway is configured to watch on `spBv1.0/STATE/<id>` to learn

@@ -49,7 +49,7 @@ checks.
    [Sparkplug group](../guides/glossary.md#sparkplug-group) (`tck-id-topic-structure`). **If the ID
    is wrong,** the broker drops every message without an error, so nothing arrives. **If the group
    is wrong,** Aber still stores the data, and the Gateways page warns that the gateway publishes
-   under another group ([adding devices](../../docs/remote-gateways.md#10-adding-devices--nothing-is-pre-registered)).
+   under another group ([adding devices](remote-gateways.md#10-adding-devices--nothing-is-pre-registered)).
 4. **Hold a Sparkplug session.** Connect with an NDEATH as the MQTT Will, at QoS 1, carrying a bdSeq
    one more than the last connection's (`tck-id-message-flow-edge-node-birth-publish-will-message`,
    `tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq`,
@@ -93,13 +93,13 @@ checks.
    each metric, and pace them. **If it does not,** readings sent while Aber restarts are lost. A
    replay that is not marked historical and is more than 24 hours old is refused. A replay that is
    too fast fills Aber's queue, and readings are dropped
-   ([the primary host id](../../docs/remote-gateways.md#the-third-value-the-primary-host-id),
+   ([the primary host id](remote-gateways.md#the-third-value-the-primary-host-id),
    [loss model](../../ingestion/README.md#loss-model)).
 8. **Keep the clock right.** Set the node's clock from a time server. Aber refuses a reading that is
    more than 24 hours old, or more than 5 minutes in the future. A reading marked `is_historical`
    may be up to 7 days old. **If the clock is wrong,** readings are refused for their timestamp, and
    an alert fires. A clock far enough off also fails the certificate check
-   ([late data](../../docs/remote-gateways.md#late-data-after-an-outage),
+   ([late data](remote-gateways.md#late-data-after-an-outage),
    [the clock](../../docs/remote-gateways.md#the-clock-is-part-of-certificate-verification)).
 9. **Expect devices to wait in quarantine.** A device's first DBIRTH puts it in
    [quarantine](../guides/glossary.md#quarantine). Its data is dropped until someone approves it
@@ -109,7 +109,7 @@ checks.
     next node messages: when it started and ended, and how many readings were kept and dropped. The
     `Outage/` prefix is reserved, so use it for nothing else. **If you leave it out,** nothing
     breaks, but the dashboards cannot show what the outage cost
-    ([the outage report](../../docs/remote-gateways.md#the-outage-report)).
+    ([the outage report](remote-gateways.md#the-outage-report)).
 
 ## What such a node does not get
 
@@ -136,7 +136,7 @@ Aber does not manage the software on your node, so it gives it less than its own
 
 ## Where the detail is
 
-- [Remote gateways](../../docs/remote-gateways.md): the primary host, certificates, devices, and
+- [Remote gateways](remote-gateways.md): the primary host, certificates, devices, and
   what Aber's appliance does at each step.
 - [Ingestion](../../ingestion/README.md): how Aber reads each message, and where a reading can be lost.
 - [The broker](../../mosquitto/README.md): the accounts and roles that confine each gateway.

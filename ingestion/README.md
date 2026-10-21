@@ -2001,7 +2001,7 @@ its next birth it replays them with `is_historical` set on every metric, paced t
 second after a random delay of up to 30 s, and reports the outage. It publishes Sparkplug B
 protobuf. The flow, its limits
 and how it writes the files are in
-[`docs/remote-gateways.md`](../docs/remote-gateways.md#when-the-platform-cannot-be-reached). What the
+[`help/site/remote-gateways.md`](../help/site/remote-gateways.md#when-the-platform-cannot-be-reached). What the
 daemon does with it:
 
 - **`is_historical` is read on both encodings**: the protobuf field, and `"is_historical": true` on a
@@ -2042,7 +2042,7 @@ daemon does with it:
   hour, and a historian job refreshes it in `telemetry_1m`, `_5m` and `_1h` within five minutes
   ([The historian writer](#the-historian-writer)). An hour that could not be recorded is counted in
   `aber_ingestion_rollup_windows_failed_total` and is refreshed by hand
-  ([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)).
+  ([`help/site/remote-gateways.md`](../help/site/remote-gateways.md#late-data-after-an-outage)).
 
 ### What paho 1.6.1 cannot promise
 
