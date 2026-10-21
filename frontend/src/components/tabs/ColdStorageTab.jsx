@@ -394,7 +394,7 @@ function BacklogCard({ backlog, summary }) {
           : backlog ? 'Archiving is off, so nothing is tracked as unexported.' : 'How far behind the archive is could not be read.',
         verified > 0 && `${plural(verified, 'chunk')} exported and verified, with the raw rows still in the historian until the next drop.`,
         failed > 0 && `${failedWord} failed. Nothing was dropped: a chunk cannot be removed unless its export verified.`
-      ].filter(Boolean).join(' ')}
+      ].filter(Boolean)}
     />
   )
 }

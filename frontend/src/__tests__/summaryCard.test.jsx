@@ -130,6 +130,17 @@ describe('a summary card', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('The last backup failed, and none has succeeded since.')
   })
 
+  it('gives a tooltip of several facts a paragraph each, and the name all of them in one line', () => {
+    render(<SummaryCard title="Storage" testId="s" value="80.0 GiB" state="Room for the next backup"
+      tip={['Free space as last reported.', null, 'The oldest restorable backup was taken 5 Oct 2026.']} />)
+    const card = screen.getByTestId('s')
+    expect(card).toHaveAccessibleName('Storage. Free space as last reported. The oldest restorable backup was taken 5 Oct 2026.')
+    fireEvent.focus(card)
+    const tip = screen.getByRole('tooltip')
+    expect([...tip.querySelectorAll('.summary-card-tip')].map(p => p.textContent))
+      .toEqual(['Free space as last reported.', 'The oldest restorable backup was taken 5 Oct 2026.'])
+  })
+
   it('draws a badge after the title, on the card\'s own ground rather than its tint', () => {
     render(<SummaryCard title="Historian" testId="h" value="2h ago" state="Failed 1h ago" tone="danger" tip="t"
       badge={<span className="badge badge-warning">Requested: not picked up</span>} onOpen={() => {}} />)

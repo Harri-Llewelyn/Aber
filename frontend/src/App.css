@@ -2439,6 +2439,10 @@ main:focus { outline: none; }
 .summary-card.is-selected,
 .summary-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* A card's tooltip is several facts: one paragraph each, so it reads as a list, not a wall. */
+.summary-card-tip { display: block; }
+.summary-card-tip + .summary-card-tip { margin-top: 6px; }
+
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
   font-family: var(--font-mono);

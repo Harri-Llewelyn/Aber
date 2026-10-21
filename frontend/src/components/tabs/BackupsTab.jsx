@@ -453,8 +453,10 @@ export function backupWarnings(summary) {
   return { slow, space }
 }
 
-/** Sentences into one tooltip, leaving out the ones that do not apply. */
-const sentences = (...parts) => parts.filter(Boolean).join(' ')
+/** A card's tooltip as paragraphs, leaving out the ones that do not apply. */
+const paragraphs = (...parts) => parts.filter(Boolean)
+/** Sentences into one paragraph, or null when none applies. */
+const paragraph = (...parts) => parts.filter(Boolean).join(' ') || null
 
 /**
  * The row of cards under the toolbar: the backup runs, each database's own backup while it has
@@ -505,15 +507,19 @@ function RunsCard({ summary, selected, onOpen }) {
       flagged={missed && !failed}
       state={words}
       tone={failed ? 'danger' : state || slow ? 'warning' : undefined}
-      tip={sentences(
+      tip={paragraphs(
         backupStateSentence(summary, state),
         slow && `The last backup took ${formatDuration(slow.duration)}, more than half the ${formatDuration(slow.interval)} between scheduled backups. If backups keep growing, one will soon run into the next.`,
-        !state && (last ? `The last good backup was taken ${formatDateTime(last.started_at)}.` : 'No backup has completed yet.'),
-        summary.runs30d
-          ? `${summary.succeeded30d} of the ${summary.runs30d} runs that ended in the last 30 days completed. A cancelled run is not counted.`
-          : 'No run has ended in the last 30 days.',
-        last?.duration_seconds != null && !slow && `The last good backup took ${formatDuration(last.duration_seconds)}.`,
-        median != null && `The median of the last ${medianRuns} is ${formatDuration(median)}.`,
+        paragraph(
+          !state && (last ? `The last good backup was taken ${formatDateTime(last.started_at)}.` : 'No backup has completed yet.'),
+          summary.runs30d
+            ? `${summary.succeeded30d} of the ${summary.runs30d} runs that ended in the last 30 days completed. A cancelled run is not counted.`
+            : 'No run has ended in the last 30 days.'
+        ),
+        paragraph(
+          last?.duration_seconds != null && !slow && `The last good backup took ${formatDuration(last.duration_seconds)}.`,
+          median != null && `The median of the last ${medianRuns} is ${formatDuration(median)}.`
+        ),
         onOpen && !failed && 'The card opens the newest run.'
       )}
       selected={selected}
@@ -543,15 +549,17 @@ function StorageCard({ summary }) {
       detail={`${formatBytes(summary.bytesHeld ?? 0)} in ${plural(held, 'backup')} · ${offsite ? `newest off site ${formatRelative(offsite.taken_at)}` : 'none off site'}`}
       state={space ? 'May not fit' : service ? 'Room for the next backup' : 'Not reported yet'}
       tone={space ? 'warning' : undefined}
-      tip={sentences(
+      tip={paragraphs(
         space && `The next backup may not fit. The backup volume has ${formatBytes(space.free)} free, and the last backup was ${formatBytes(space.size)}. Release pinned backups you no longer need, shorten the retention window, or give the volume more space.`,
         service
           ? `Free space on the backup volume, as the backup service last reported it.${reported} On local-path this is the node's whole disk, shared with the databases.`
           : 'The backup service has not reported its volume yet. It does at start, and after each backup and each prune.',
-        `Every backup on the volume together is ${formatBytes(summary.bytesHeld ?? 0)}, in ${plural(held, 'backup')}.`,
-        summary.oldestTakenAt
-          ? `The oldest restorable backup was taken ${formatDateTime(summary.oldestTakenAt)}. Retention, pinning and the newest-three floor decide it.`
-          : 'No backup is on the volume.',
+        paragraph(
+          `Every backup on the volume together is ${formatBytes(summary.bytesHeld ?? 0)}, in ${plural(held, 'backup')}.`,
+          summary.oldestTakenAt
+            ? `The oldest restorable backup was taken ${formatDateTime(summary.oldestTakenAt)}. Retention, pinning and the newest-three floor decide it.`
+            : 'No backup is on the volume.'
+        ),
         offsite
           ? `The newest backup with a copy off site was taken ${formatDateTime(offsite.taken_at)} and copied ${formatDateTime(offsite.copied_at)}.`
           : summary.offsiteDestinationSet ? 'No backup has been copied to the destination yet.' : 'No off-site destination is set.'
@@ -652,14 +660,18 @@ function PhysicalBackupCard({ db, row: h, selected, onOpen }) {
         : state ? `None in ${BACKUP_STALE_HOURS} hours`
           : h.last_success_at ? 'Up to date' : 'Waiting for its first backup'}
       tone={failed ? 'danger' : state ? 'warning' : undefined}
-      tip={sentences(
-        failed && `${capitalised(db)}'s last backup failed ${formatRelative(h.last_failure_at)}, and none has succeeded since.`,
-        state && !failed && `No ${db.noun.replace(/^the /, '')} backup has succeeded in ${BACKUP_STALE_HOURS} hours.`,
-        lastGood,
+      tip={paragraphs(
+        paragraph(
+          failed && `${capitalised(db)}'s last backup failed ${formatRelative(h.last_failure_at)}, and none has succeeded since.`,
+          state && !failed && `No ${db.noun.replace(/^the /, '')} backup has succeeded in ${BACKUP_STALE_HOURS} hours.`,
+          lastGood
+        ),
         failed ? reason : state ? db.staleHint.trim() : null,
-        h.last_success_label && `Its label is ${h.last_success_label}.`,
-        nextLong,
-        h.repo_bytes != null && `The repository holds ${formatBytes(h.repo_bytes)}: every backup it keeps, WAL excluded.`,
+        paragraph(
+          h.last_success_label && `Its label is ${h.last_success_label}.`,
+          nextLong,
+          h.repo_bytes != null && `The repository holds ${formatBytes(h.repo_bytes)}: every backup it keeps, WAL excluded.`
+        ),
         request && `${request.label}. ${request.title}`
       )}
       selected={selected}

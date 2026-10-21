@@ -26,8 +26,8 @@ const STATE_ICONS = { warning: IconAlertTriangle, danger: IconShieldAlert }
  * With `onOpen` it is a button, `selected` while what it opens is showing; without, a focusable
  * group, so its tooltip still shows from the keyboard. `state` is the state in words, never the
  * colour alone, in a role="status" line so a change is announced. `tip` is the whole card in
- * sentences: the tooltip and, after the title, the accessible name. `flagged` marks the detail
- * line as a warning of its own.
+ * sentences, one paragraph per entry: the tooltip and, after the title, the accessible name.
+ * `flagged` marks the detail line as a warning of its own.
  *
  * @param {string} title
  * @param {React.ReactNode} value The figure.
@@ -35,7 +35,7 @@ const STATE_ICONS = { warning: IconAlertTriangle, danger: IconShieldAlert }
  * @param {React.ReactNode} [detail] The second line.
  * @param {React.ReactNode} [state] The state line; leave it out on a card that has no state.
  * @param {'warning'|'danger'} [tone]
- * @param {string} tip
+ * @param {string|string[]} tip
  * @param {React.ReactNode} [badge] Drawn after the title.
  */
 export function SummaryCard({ title, value, unit, detail, flagged = false, state, tone, tip, badge, onOpen, selected = false, testId }) {
@@ -45,7 +45,8 @@ export function SummaryCard({ title, value, unit, detail, flagged = false, state
   const StateIcon = STATE_ICONS[tone]
   const classes = ['summary-card', tone && `summary-card-${tone}`, onOpen && 'summary-card-opens', selected && 'is-selected']
     .filter(Boolean).join(' ')
-  const name = `${title}. ${tip}`
+  const paragraphs = (Array.isArray(tip) ? tip : [tip]).filter(Boolean)
+  const name = `${title}. ${paragraphs.join(' ')}`
 
   const lines = (
     <>
@@ -92,7 +93,12 @@ export function SummaryCard({ title, value, unit, detail, flagged = false, state
           {lines}
         </div>
       )}
-      <TooltipBubble {...tooltip.bubble} text={tip} />
+      <TooltipBubble
+        {...tooltip.bubble}
+        text={paragraphs.length > 1
+          ? paragraphs.map((p, i) => <span key={i} className="summary-card-tip">{p}</span>)
+          : paragraphs[0]}
+      />
     </>
   )
 }
