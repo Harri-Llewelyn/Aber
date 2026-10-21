@@ -275,10 +275,20 @@ on the backdrop.
 
 ### A plan and a 3D model open expanded
 
-An area's plan (Site Map card, Areas panel heading, beside the Cells panel's preview) and a device's
-3D model (the drawer viewer's corner) each have an Expand button (`common/ExpandButton.jsx`). It
-opens `Modal` at size `full`, the window less a 24px margin, with `fill`. The button's hover text is
-the shared tooltip (`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+An area's plan (on a Site Map card, and in the Areas and Cells panels) and a device's 3D model (in
+its drawer) each have an Expand button (`common/ExpandButton.jsx`). It opens `Modal` at size
+`full`, the window less a 24px margin, with `fill`. The button's hover text is the shared tooltip
+(`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+
+- **Where the button sits.** In the top-right corner of what it enlarges, so nobody misses it: one
+  rule, `.expand-corner`, inside an `.expand-frame` that holds the view and the button side by side.
+  On a Site Map card the frame is the space under the header (`.expand-frame-fill`), which the plan
+  is centred in. In the panels it is `.plan-card`, which draws the frame the plan used to draw,
+  across the panel, because the preview is a link and a button cannot sit inside one. On the model
+  it is the viewer's box. The button is above the pins, inside the plan's margin where the plan
+  fills the frame's width: it covers at most 16 by 5px of the drawing, at three columns. A pin
+  placed on the drawing's top-right corner has the upper part of its disc under the button; the
+  rest of the pin, and its label, can still be clicked.
 
 - **The plan viewer** (`common/PlanViewer.jsx`) zooms by laying the drawing out wider, never by a
   CSS scale: the SVG is redrawn sharp at every size, and the pins over it (`AreaPlanPin`, 40px) keep

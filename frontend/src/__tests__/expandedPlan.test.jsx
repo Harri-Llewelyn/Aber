@@ -89,6 +89,19 @@ describe('the Site Map', () => {
     expect(within(card('Yard')).queryByRole('button', { name: /Expand plan/ })).toBeNull()
   })
 
+  it('puts Expand in the corner of the plan\'s space, beside the plan and out of the header', async () => {
+    renderMap()
+    await screen.findByRole('button', { name: 'North Shop' })
+    const expand = within(card('North Shop')).getByRole('button', { name: 'Expand plan: North Shop' })
+    expect(expand.closest('.area-card-header')).toBeNull()
+    expect(expand).toHaveClass('expand-corner')
+    const frame = expand.parentElement
+    expect(frame).toHaveClass('expand-frame', 'expand-frame-fill')
+    expect(frame.querySelector(':scope > .area-plan')).not.toBeNull()
+    // The pins are the plan's, under the button, not the button's.
+    expect(expand.querySelector('.area-plan-pin')).toBeNull()
+  })
+
   it('opens the plan in a window-sized dialog titled with the area, and not the area panel', async () => {
     renderMap()
     await screen.findByRole('button', { name: 'North Shop' })
@@ -174,11 +187,12 @@ describe('the Areas panel', () => {
     <AreaPlanPanel area={SHOP} cells={CELLS.filter(c => c.area_id === 'area-1')} canManage={false} showToast={vi.fn()} onChanged={vi.fn()} onOpen={vi.fn()} {...props} />
   )
 
-  it('puts Expand in the heading for a reader, and opens the plan with its pins as marks', () => {
+  it("puts Expand on the preview's card for a reader, and opens the plan with its pins as marks", () => {
     const onOpen = vi.fn()
     panel({ onOpen })
     const expand = screen.getByRole('button', { name: 'Expand plan: North Shop' })
-    expect(expand.closest('.area-plan-panel-header')).not.toBeNull()
+    expect(expand.closest('.area-plan-panel-header')).toBeNull()
+    expect(expand.closest('.plan-card')).toBe(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }).closest('.plan-card'))
     press(expand)
 
     expect(within(dialog()).getByRole('heading', { name: 'North Shop' })).toBeInTheDocument()
@@ -192,10 +206,13 @@ describe('the Areas panel', () => {
     expect(document.activeElement).toBe(expand)
   })
 
-  it('offers Expand beside Replace and Remove for a plan a manager may change', () => {
+  it('keeps Replace and Remove in the heading, and Expand on the card, for a plan a manager may change', () => {
     panel({ area: OFFICE, cells: [], canManage: true })
     const expand = screen.getByRole('button', { name: 'Expand plan: Office Floor' })
-    expect(expand.closest('.area-plan-panel-actions')).toBe(screen.getByRole('button', { name: /Replace plan/ }).closest('.area-plan-panel-actions'))
+    expect(screen.getByRole('button', { name: /Replace plan/ }).closest('.area-plan-panel-header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Remove plan/ }).closest('.area-plan-panel-header')).not.toBeNull()
+    expect(expand.closest('.area-plan-panel-header')).toBeNull()
+    expect(expand.closest('.plan-card')).not.toBeNull()
   })
 
   it('offers none where the drop zone stands in for the plan, or the outline has no pin', () => {
@@ -208,12 +225,14 @@ describe('the Areas panel', () => {
 })
 
 describe('the Cells panel', () => {
-  it('opens the plan from beside the preview, the cell ringed and the rest dimmed, without following the link', () => {
+  it("opens the plan from the preview's card, the cell ringed and the rest dimmed, without following the link", () => {
     const onOpen = vi.fn()
     render(<ExpandablePlanPreview area={SHOP} cells={CELLS} highlightCellId="cell-1" onOpen={onOpen} />)
     const expand = screen.getByRole('button', { name: 'Expand plan: North Shop' })
-    // Beside the preview, not inside its link.
+    // On the preview's card, beside its link rather than inside it.
     expect(expand.closest('a')).toBeNull()
+    expect(expand.parentElement).toBe(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }).parentElement)
+    expect(expand.parentElement).toHaveClass('expand-frame', 'plan-card')
     press(expand)
 
     expect(onOpen).not.toHaveBeenCalled()

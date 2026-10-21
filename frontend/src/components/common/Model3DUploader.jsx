@@ -10,14 +10,15 @@ import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle } from
 import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
 import { ExpandButton } from './ExpandButton'
+import { HelpTip } from './HelpTip'
 import { Modal } from './Modal'
 import { deviceUrl } from '../../routes'
 
 /**
  * Attach one 3D visual model to a device. The model becomes an AAS `File` element in a
- * `VisualRepresentation` submodel on export, so the bucket is public-read and the banner says so.
- * Size is checked here as well as on the bucket, so an oversized file is refused before the upload
- * rather than after.
+ * `VisualRepresentation` submodel on export, so the bucket is public-read, and the section's label
+ * (Model3DLabel) says so in its tooltip. Size is checked here as well as on the bucket, so an
+ * oversized file is refused before the upload rather than after.
  */
 export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [busy, setBusy] = useState(false)
@@ -129,16 +130,16 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const downloadUrl = path ? model3dDownloadUrl(path) : null
 
   return (
-    /* No heading of its own: the container prints the section label, and the AAS consequence is on
-       the dropzone's title and the public-read banner. */
+    /* No heading of its own: the container prints the section label (Model3DLabel), and the AAS
+       consequence is on the dropzone's title and the label's tooltip. */
     <div>
       {/* The model itself, above the controls. Only rendered when something is attached; the
           dropzone is the empty state. Expand sits in its top-right corner, as the section has no
           heading row of its own. */}
       {path && (
-        <div className="model-viewer-holder">
+        <div className="expand-frame">
           <Model3DViewer path={path} name={modelName} />
-          <ExpandButton kind="model" name={modelName} className="model-viewer-expand" onClick={() => setExpanded(true)} />
+          <ExpandButton kind="model" name={modelName} onClick={() => setExpanded(true)} />
         </div>
       )}
       {path && expanded && (
@@ -167,8 +168,9 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
             </div>
           </div>
           {/* Outside the `canManage` gate: reading a public-read object is not a write, and
-              Operators and Auditors are the roles most likely to open a model. */}
-          <div style={{ display: 'flex', gap: '8px' }}>
+              Operators and Auditors are the roles most likely to open a model. A row of their own,
+              in equal columns across the card. */}
+          <div className="model-file-actions">
             {downloadUrl && (
               <a
                 className="btn btn-primary"
@@ -249,13 +251,6 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
         </div>
       )}
 
-      {canManage && (
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-          Stored in the public <span className="mono">asset-3d-models</span> bucket so exported
-          shells can be opened by any AAS viewer — anyone with the link can read it.
-        </div>
-      )}
-
       {error && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--warning-text)', marginTop: '8px' }}>
           <IconAlertTriangle size={13} /> {error}
@@ -270,6 +265,20 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
         onChange={(e) => handleFile(e.target.files?.[0])}
         data-testid="model-3d-input"
       />
+    </div>
+  )
+}
+
+/** Where an attached model is kept, and so who can read it. Every role sees it, on the label's tip. */
+export const MODEL_STORAGE_NOTE =
+  'Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.'
+
+/** The section label a page prints above Model3DUploader, with the storage note in its "?" tip. */
+export function Model3DLabel() {
+  return (
+    <div className="context-panel-section-label context-panel-section-label-icon">
+      <IconCube size={13} /> 3D Model
+      <HelpTip label="Where 3D models are kept" text={MODEL_STORAGE_NOTE} size={12} />
     </div>
   )
 }
