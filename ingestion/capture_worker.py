@@ -129,7 +129,8 @@ class _JobState:
         self.cap_code = None
         # Seconds from the start to the stop, set when the recording ends.
         self.stopped_after = None
-        self.first_ms = None
+        # time.monotonic_ns() at the first message: offsets count from it.
+        self.first_monotonic = None
         # What the file's head and the manifest say, kept as the messages arrive.
         self.epoch_ms = None
         self.last_offset_ms = 0
@@ -180,15 +181,19 @@ class _JobState:
             # which is worse than a capture that is honestly short. Same rule as capture.py record.
             return None
 
-        now_ms = int(time.time() * 1000)
+        received_ms = int(time.time() * 1000)
         payload_dict = capture.payload_to_dict(payload)
         with self.lock:
             if self.closed:
                 return None
-            if self.first_ms is None:
-                self.first_ms = now_ms
-                self.epoch_ms = capture.first_message_epoch_ms(payload_dict, now_ms)
-            self.last_offset_ms = now_ms - self.first_ms
+            # Offsets from the monotonic clock, read in the order the lines are written, so the file
+            # is in order by construction: the wall clock can step back, and the replay refuses
+            # offsets that run backwards. The wall clock only dates the first message.
+            now = time.monotonic_ns()
+            if self.first_monotonic is None:
+                self.first_monotonic = now
+                self.epoch_ms = capture.first_message_epoch_ms(payload_dict, received_ms)
+            self.last_offset_ms = (now - self.first_monotonic) // 1_000_000
             line = capture.message_line({
                 "offset_ms": self.last_offset_ms,
                 "topic": topic,

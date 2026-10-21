@@ -493,7 +493,9 @@ outside the window pass the worker's "would write nothing" refusal.
 **The capture's epoch is the first message's own clock**, or the time that message was received
 when its payload carries none. It is never the time the recording ended: the offsets count from the
 first receipt, and a later fallback would file every stamped reading early by the length of the
-recording.
+recording. The offsets themselves are counted on the monotonic clock, in the order the messages are
+written, so a file either recorder makes never runs backwards: the wall clock can step back, and the
+check below refuses a file whose offsets do.
 
 ### The file is JSON; the wire is whatever was recorded
 
