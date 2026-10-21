@@ -133,8 +133,8 @@
        90     the sidebar, and the context panel when it is a drawer below 800px (they sit on
               opposite edges, so the tie never overlaps)
        100    the topbar
-       200    a popover under the topbar: the user menu, global search, the sidebar mode menu
-       1200   the tooltip bubble (HelpTip and the tab bar)
+       200    a popover under the topbar: the user menu, global search
+       1200   the tooltip bubble (HelpTip, the tab bar, the account menu's layout switch)
        2000   the toast stack
      An open dialog is above every rung: showModal() draws it in the browser's top layer, and the
      confirm layer, a dialog opened over another, is above that one because it opened later. The
@@ -616,11 +616,10 @@ html, body, #root {
 .user-popover-theme .segmented-option { flex: 1; }
 
 /* The Sidebar layout section under it, laid out the same with three segments, its group named
-   Sidebar layout. The chosen layout's description is the line beneath the switch. */
+   Sidebar layout. Each segment's tooltip says what its layout does. */
 .user-popover-sidebar { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .user-popover-sidebar .segmented { display: flex; }
 .user-popover-sidebar .segmented-option { flex: 1; }
-.user-popover-hint { margin-top: 6px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
 
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

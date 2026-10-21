@@ -403,8 +403,8 @@ row and all, so the two read alike.
   `SegmentedControl` with `menu` across the whole row: a `role="group"` of `menuitemradio`s, each
   its icon and its name, the current one checked. Theme holds Light and Dark (a sun, a moon).
   Sidebar layout holds Hover, Expanded and Collapsed, the three `SIDEBAR_MODES` in short words so
-  they fit the menu, and the chosen layout's description is the line beneath it and the group's
-  `aria-describedby`. Neither row has a visible label: the segments' names say what they are, and
+  they fit the menu; each segment's tooltip is its layout's description, in the shared bubble. Neither
+  row has a visible label: the segments' names say what they are, and
   the group's name tells a screen reader what the row is for. Choosing applies at once and the menu
   stays open, since the result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
@@ -1031,7 +1031,9 @@ passes `{ record: false }`, as a Grafana alert does.
   choosing. Every segment draws its icon and its `label`; an option's `count` is said after the label
   in the tooltip and the accessible name. The chosen segment takes a sunken fill (`--bg-base`) and a
   border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes the option's
-  `tone`.
+  `tone`. A segment's tooltip is its name, the browser's own, unless the option has a
+  `description`: then it is that sentence in the shared bubble (`common/Tooltip.jsx`), tied by
+  `aria-describedby` and with no `title`, as the Sidebar layout switch's segments are.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a

@@ -355,7 +355,7 @@ describe('Merged navigation shell', () => {
       expect(section.previousElementSibling).toHaveClass('user-popover-head')
     })
 
-    it('offers the three sidebar layouts as a switch under the theme, the current one checked and described', async () => {
+    it('offers the three sidebar layouts as a switch under the theme, the current one checked, each explained in its tooltip', async () => {
       await renderShell()
       fireEvent.click(trigger())
 
@@ -365,8 +365,20 @@ describe('Merged navigation shell', () => {
       expect(segments.map(s => s.textContent)).toEqual(['Hover', 'Expanded', 'Collapsed'])
       for (const s of segments) expect(s.querySelector('.segmented-icon svg')).toBeTruthy()
       expect(within(layout).getByRole('menuitemradio', { name: 'Hover' })).toHaveAttribute('aria-checked', 'true')
-      // The chosen layout's description is the line under the switch, and the group's description.
-      expect(layout).toHaveAccessibleDescription('Icons only; labels appear while the pointer is over the rail.')
+      // Each segment's tooltip is its layout's description, in the shared bubble, never a title;
+      // nothing is printed under the switch.
+      const described = Object.fromEntries(segments.map(s => [s.textContent, s]))
+      expect(described.Hover).toHaveAccessibleDescription('Icons only; labels appear while the pointer is over the rail.')
+      expect(described.Expanded).toHaveAccessibleDescription('Labels always shown. The page makes room for the rail.')
+      expect(described.Collapsed).toHaveAccessibleDescription('Icons only. Hover does nothing; keyboard focus still shows labels.')
+      for (const s of segments) expect(s).not.toHaveAttribute('title')
+      expect(layout.closest('.user-popover-sidebar').textContent).toBe('HoverExpandedCollapsed')
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      fireEvent.focus(described.Collapsed)
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Icons only. Hover does nothing; keyboard focus still shows labels.')
+      // Portalled out of the menu, which clips its overflow; the ladder puts it above the menu.
+      expect(screen.getByRole('tooltip').parentElement).toBe(document.body)
+      fireEvent.blur(described.Collapsed)
 
       // A section of its own, straight after the theme's and before Profile.
       const section = layout.closest('.user-popover-sidebar')
@@ -384,7 +396,6 @@ describe('Merged navigation shell', () => {
       expect(sidebar()).toHaveAttribute('data-mode', 'expanded')
       expect(screen.getByRole('menu')).toBeTruthy()
       expect(within(layout).getByRole('menuitemradio', { name: 'Expanded' })).toHaveAttribute('aria-checked', 'true')
-      expect(layout).toHaveAccessibleDescription('Labels always shown. The page makes room for the rail.')
 
       fireEvent.click(within(layout).getByRole('menuitemradio', { name: 'Collapsed' }))
       expect(sidebar()).toHaveAttribute('data-mode', 'collapsed')

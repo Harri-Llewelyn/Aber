@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useId, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
@@ -288,15 +288,15 @@ const THEME_SEGMENTS = [
 
 /**
  * The account menu's Sidebar layout switch, one segment per mode useSidebarMode offers, in its
- * order. The segment's word is short so three fit the menu's width; the line under the switch
- * gives the chosen mode's description.
+ * order. The segment's word is short so three fit the menu's width; its tooltip is the mode's
+ * description.
  */
 const SIDEBAR_SEGMENT_LOOK = {
   hover: { label: 'Hover', icon: <IconMousePointer size={14} /> },
   expanded: { label: 'Expanded', icon: <IconPanelLeft size={14} /> },
   collapsed: { label: 'Collapsed', icon: <IconPanelLeftClose size={14} /> },
 }
-const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, ...SIDEBAR_SEGMENT_LOOK[m.id] }))
+const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, description: m.description, ...SIDEBAR_SEGMENT_LOOK[m.id] }))
 
 /**
  * The account control at the foot of the rail: the avatar, with the address beside it whenever the
@@ -312,7 +312,6 @@ function UserMenu({
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
-  const sidebarHintId = useId()
   const layout = SIDEBAR_MODES.find(m => m.id === sidebarMode) || SIDEBAR_MODES[0]
 
   /* Read from the injected global, which `config.js` set at page load. Comparing it with the baked
@@ -401,8 +400,8 @@ function UserMenu({
           </div>
 
           {/* The rail's three behaviours, the same setting as Profile > Appearance, under the theme
-              and staying open on a change for the same reason. The chosen mode's description is
-              the line beneath, and the group's description for a screen reader. */}
+              and staying open on a change for the same reason. Each segment's tooltip says what
+              its layout does. */}
           <div className="user-popover-sidebar">
             <SegmentedControl
               menu
@@ -410,9 +409,7 @@ function UserMenu({
               value={layout.id}
               onChange={onChangeSidebarMode}
               options={SIDEBAR_SEGMENTS}
-              describedBy={sidebarHintId}
             />
-            <div className="user-popover-hint" id={sidebarHintId}>{layout.description}</div>
           </div>
 
           {/* The first action: the whole of the person's own page, two clicks from anywhere. */}
