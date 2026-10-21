@@ -17,6 +17,7 @@ import { formatDateTime } from '../utils/format'
 import { approvalsForUrl } from '../routes'
 import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
 import { tabLink, tabLinks } from '../test/tabBar'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn() }
@@ -578,7 +579,7 @@ describe('the columns say one thing each', () => {
     await selectRow()
     expect(screen.getByText('Proposed at')).toBeInTheDocument()
     const shown = formatDateTime('2026-09-06T09:15:00Z')
-    expect(screen.getByText(new RegExp(shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   it('gives a decided proposal its decision time too', async () => {
@@ -889,7 +890,7 @@ describe('a relocation names the cells rather than their uuids', () => {
     await selectRow()
     await waitFor(() => expect(screen.getByText('Weld Bay')).toBeTruthy())
     expect(screen.getByText('Paint Line')).toBeTruthy()
-    expect(screen.queryByText('cell-weld')).toBeNull()
+    expect(screen.queryByText('cell-weld', { ignore: '[role=tooltip]' })).toBeNull()
   })
 
   /* The uuid is what the audit trail and the filter speak, so it is kept where it costs nothing. */
@@ -897,7 +898,7 @@ describe('a relocation names the cells rather than their uuids', () => {
     mockWithCells()
     renderTab()
     await selectRow()
-    await waitFor(() => expect(screen.getByText('Weld Bay').getAttribute('title')).toBe('cell-weld'))
+    await waitFor(() => expect(tooltipOf(screen.getByText('Weld Bay'))).toBe('cell-weld'))
   })
 
   /* Falls back rather than hides: an archived or deleted cell is a real state, and a reviewer
