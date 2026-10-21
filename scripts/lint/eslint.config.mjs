@@ -97,7 +97,6 @@ export default function config ({ js, react, hooks, globals }) {
         'frontend/src/components/tabs/ArchivesTab.jsx',
         'frontend/src/components/tabs/AreasTab.jsx',
         'frontend/src/components/tabs/AuditTrailTab.jsx',
-        'frontend/src/components/tabs/CaptureTab.jsx',
         'frontend/src/components/tabs/DirectoryTab.jsx',
         'frontend/src/components/tabs/ProfileTab.jsx',
         'frontend/src/components/tabs/SchemasTab.jsx',
