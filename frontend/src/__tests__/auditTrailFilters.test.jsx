@@ -904,8 +904,8 @@ describe('Audit Trail event drawer', () => {
  * Previous has to go back in time and Next forward.
  */
 describe('Audit Trail drawer navigation', () => {
-  const prev = () => screen.getByRole('button', { name: /Previous/ })
-  const next = () => screen.getByRole('button', { name: /Next/ })
+  const prev = () => screen.getByRole('button', { name: 'Previous' })
+  const next = () => screen.getByRole('button', { name: 'Next' })
   const position = () => document.querySelector('.trail-drawer-nav-pos').textContent
 
   /* Targeted by tooltip, not by lane: Press_02's two markers carry the same aria-label prefix and
@@ -924,7 +924,7 @@ describe('Audit Trail drawer navigation', () => {
     await show()
     await selectOldest()
     expect(position()).toMatch(/of 2/)
-    expect(position()).toContain('Press_02')
+    expect(document.querySelector('.context-panel-title')).toHaveTextContent('Press_02')
   })
 
   it('steps forward in time and updates the drawer', async () => {
@@ -953,12 +953,12 @@ describe('Audit Trail drawer navigation', () => {
 
     // Disabled rather than hidden: a control that vanishes at the boundary reflows the row under
     // the cursor, and the second click of a double-step lands on whatever moved into its place.
-    expect(prev()).toBeDisabled()
-    expect(next()).not.toBeDisabled()
+    expect(prev()).toHaveAttribute('aria-disabled', 'true')
+    expect(next()).not.toHaveAttribute('aria-disabled')
 
     fireEvent.click(next())
-    await waitFor(() => expect(next()).toBeDisabled())
-    expect(prev()).not.toBeDisabled()
+    await waitFor(() => expect(next()).toHaveAttribute('aria-disabled', 'true'))
+    expect(prev()).not.toHaveAttribute('aria-disabled')
   })
 
   it('moves the highlight on the timeline as it steps', async () => {
@@ -977,8 +977,8 @@ describe('Audit Trail drawer navigation', () => {
     await selectEvent(/UPDATE on Simulated_CNC_01/)
 
     expect(position()).toMatch(/^Event 1 of 1/)
-    expect(prev()).toBeDisabled()
-    expect(next()).toBeDisabled()
+    expect(prev()).toHaveAttribute('aria-disabled', 'true')
+    expect(next()).toHaveAttribute('aria-disabled', 'true')
   })
 })
 
@@ -1569,8 +1569,8 @@ describe('Audit Trail — removed tag filter', () => {
       await waitFor(() => expect(selected()).toBeTruthy())
 
       const first = selected()
-      const prev = screen.getByRole('button', { name: /Previous/ })
-      if (!prev.disabled) {
+      const prev = screen.getByRole('button', { name: 'Previous' })
+      if (prev.getAttribute('aria-disabled') !== 'true') {
         fireEvent.click(prev)
         // The ring follows the drawer rather than staying where it was clicked.
         await waitFor(() => expect(selected()).not.toBe(first))

@@ -2,8 +2,9 @@ import { createContext } from 'react'
 
 /*
  * When a keyboard shortcut bound on the whole document may act, in one place. App.jsx's `?`, `/`,
- * `[` and `]`, and Ctrl K's dialog check, read it. A shortcut is a character read from `e.key`,
- * never a key code, so a layout that types it with Shift or AltGr still works.
+ * `[` and `]`, Ctrl K's dialog check and the Audit Trail drawer's arrow keys read it. A shortcut
+ * that is a character reads it from `e.key`, never a key code, so a layout that types it with
+ * Shift or AltGr still works.
  */
 
 /**

@@ -5,7 +5,7 @@
  * filter bar's selects and date inputs consume arrow keys natively.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
@@ -142,8 +142,8 @@ describe('the arrow keys step the drawer', () => {
     press('ArrowRight')
     await waitFor(() => expect(position()).toMatch(/^Event 2 of 3/))
 
-    const nav = document.querySelector('.trail-drawer-nav-btns')
-    expect(nav.querySelector('button[title$="(←)"]')).toHaveTextContent('Previous')
-    expect(nav.querySelector('button[title$="(→)"]')).toHaveTextContent('Next')
+    const nav = within(document.querySelector('.trail-drawer-nav-btns'))
+    expect(nav.getByRole('button', { name: 'Previous' })).toHaveAccessibleDescription(/\(←\)$/)
+    expect(nav.getByRole('button', { name: 'Next' })).toHaveAccessibleDescription(/\(→\)$/)
   })
 })
