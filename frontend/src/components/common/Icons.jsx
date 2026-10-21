@@ -339,6 +339,22 @@ export const IconChevronsDownUp = ({ size = 14, className = "", style = {}, ...r
   </svg>
 )
 
+/* The same pair turned on its side: the help panel's Expand, pointing out, and pointing in once
+   it is expanded. */
+export const IconChevronsLeftRight = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="m9 7-5 5 5 5" />
+    <path d="m15 7 5 5-5 5" />
+  </svg>
+)
+
+export const IconChevronsRightLeft = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="m20 17-5-5 5-5" />
+    <path d="m4 17 5-5-5-5" />
+  </svg>
+)
+
 export const IconZap = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />

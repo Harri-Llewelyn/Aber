@@ -1033,7 +1033,7 @@ groups:
           summary: >-
             Ingestion could not record {{ printf "%.0f" $values.B.Value }} hour(s) of replayed
             telemetry for the rollups in the last hour. The readings are stored but missing from
-            telemetry_1m/5m/1h until refreshed by hand: see docs/remote-gateways.md, "Late data
+            telemetry_1m/5m/1h until refreshed by hand: see help/site/remote-gateways.md, "Late data
             after an outage".
         data:
           - refId: A

@@ -18,6 +18,10 @@ vi.mock('../api', () => ({
   api: { resolveId: vi.fn(), searchAssets: vi.fn(), get: vi.fn().mockResolvedValue([]) }
 }))
 
+// No help rows here, so a heading in help/ that shares a card's name cannot change these cases.
+// The Help group has its own suite, globalSearchHelp.test.jsx.
+vi.mock('../help/searchIndex', async (importOriginal) => ({ ...(await importOriginal()), searchHelp: () => [] }))
+
 import { api } from '../api'
 import { GlobalSearch } from '../components/common/GlobalSearch'
 

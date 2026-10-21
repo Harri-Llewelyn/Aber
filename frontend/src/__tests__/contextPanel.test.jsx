@@ -325,7 +325,7 @@ describe('On a narrow screen help replaces the details panel', () => {
       <>
         <button type="button" onClick={() => setHelp(v => !v)}>Help for this page</button>
         <div className="app-body">
-          <HelpDrawerContext.Provider value={closeHelp}>
+          <HelpDrawerContext.Provider value={{ close: closeHelp }}>
             <main className="content">{children}</main>
           </HelpDrawerContext.Provider>
           <HelpPanel open={help} tabId="cells" onClose={closeHelp} />
