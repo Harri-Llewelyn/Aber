@@ -142,7 +142,7 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 
 | Standard | Verified identity | Namespace / semanticId base |
 |---|---|---|
-| Machinery | **OPC 40001-1** v1.04.2, 2026-11-01 | `http://opcfoundation.org/UA/Machinery/` |
+| Machinery | **OPC 40001-1** v1.04.2, 2026-11-02 | `http://opcfoundation.org/UA/Machinery/` |
 | Robotics | **OPC 40010-1** v1.02, 2025-09-08 | `http://opcfoundation.org/UA/Robotics/` |
 | Machine Tools | **OPC 40501-1** v1.02.0, 2024-11-01 | `http://opcfoundation.org/UA/MachineTool/` |
 | Additive Manufacturing | **OPC 40540** v1.0.0, 2025-02-01 — **not 40450** | `http://opcfoundation.org/UA/AdditiveManufacturing/` |
