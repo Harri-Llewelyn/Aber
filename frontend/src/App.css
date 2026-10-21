@@ -2965,16 +2965,28 @@ main:focus { outline: none; }
 
 /* Wraps, so a card too narrow for the name and the counts together gives the counts their own
    line rather than shrinking the name away to nothing. Four tallies and an open context panel is
-   where that happens: the name is the one thing on the card that must survive. */
+   where that happens: the name is the one thing on the card that must survive. The chevron is out
+   of the flow, at the right of the name's line, so it never wraps alone: the right padding is its
+   column (the side padding, the 14px glyph and the gap). */
 .area-card-header {
+  position: relative;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 2px 8px;
-  padding: 0 10px;
+  padding: 0 32px 0 10px;
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
+}
+
+/* One line of the name, high: the name is 13px at the page's 1.6, and the tallest thing on its line. */
+.area-card-header > .area-card-chevron {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  height: 1lh;
+  align-items: center;
 }
 
 .area-card-header .zone-name { flex: 1 1 auto; }
