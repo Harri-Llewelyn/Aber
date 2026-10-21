@@ -94,7 +94,7 @@ describe('the capture lane', () => {
   it('offers the three kinds to a Shopfloor_Manager, who reads the asset lane', async () => {
     await show('Shopfloor_Manager')
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const kinds = [...screen.getByTitle('Show only events against one kind of entity').querySelectorAll('option')]
+    const kinds = [...screen.getByRole('combobox', { name: 'Entity' }).querySelectorAll('option')]
       .map(o => o.textContent)
     expect(kinds).toEqual(expect.arrayContaining(['Recordings', 'Captures', 'Playbacks']))
   })

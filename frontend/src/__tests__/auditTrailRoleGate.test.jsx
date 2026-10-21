@@ -70,7 +70,7 @@ describe('the filter bar on the page', () => {
     render(<AuditTrailTab userRole={userRole} />)
     // The kind filter lives in the Filters popover.
     fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    const select = await screen.findByTitle('Show only events against one kind of entity')
+    const select = await screen.findByRole('combobox', { name: 'Entity' })
     await waitFor(() => expect(api.get).toHaveBeenCalled())
     return [...select.options].map(o => o.textContent)
   }
