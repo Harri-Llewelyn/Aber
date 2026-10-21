@@ -5,6 +5,7 @@ import { captureSubjectUrl } from '../routes'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
+import { tabLink } from '../test/tabBar'
 
 /**
  * The Capture page. Two decisions here are destructive or unrecoverable: the replace confirmation
@@ -141,7 +142,7 @@ describe('the subject tables', () => {
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
     expect(screen.queryByText('CNC Spindle')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(await screen.findByText('CNC Spindle')).toBeInTheDocument()
   })
 
@@ -151,7 +152,7 @@ describe('the subject tables', () => {
   it('leaves out a device that is bound to no gateway', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(await screen.findByText('CNC Spindle')).toBeInTheDocument()
     expect(screen.queryByText('Orphan')).not.toBeInTheDocument()
   })
@@ -159,7 +160,7 @@ describe('the subject tables', () => {
   it('shows a device the gateway it publishes through', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     expect(within(row).getByText('Line 1 Gateway')).toBeInTheDocument()
   })
@@ -204,7 +205,7 @@ describe('the playback lane', () => {
     ))
     renderTab()
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: /devices/i }))
+    fireEvent.click(tabLink(/devices/i))
     expect(await screen.findByText('CNC Spindle')).toBeInTheDocument()
     expect(within(document.querySelector('table')).queryByText('Shadow Spindle')).toBeNull()
   })
@@ -223,15 +224,15 @@ describe('the playback lane', () => {
     bothLanes()
     renderTab()
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Gateways' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Devices' })).toBeInTheDocument()
+    expect(tabLink('Gateways')).toBeInTheDocument()
+    expect(tabLink('Devices')).toBeInTheDocument()
   })
 
   it('offers no playback gateway in the device tab gateway filter', async () => {
     bothLanes()
     renderTab()
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: /devices/i }))
+    fireEvent.click(tabLink(/devices/i))
     const filter = await screen.findByLabelText('Gateway filter')
     // Its own count is the same question one level down: the shadow device does not belong to a
     // gateway that can be captured, so it is not in anybody's total.
@@ -313,7 +314,7 @@ describe('a stored capture', () => {
     const gatewayRow = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(gatewayRow).getByText('—')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     const deviceRow = (await screen.findByText('CNC Spindle')).closest('tr')
     expect(within(deviceRow).getByText(/spindle only/)).toBeInTheDocument()
   })
@@ -389,7 +390,7 @@ describe('starting a capture', () => {
   it('tells a device capture that it also takes the gateway birth certificate', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
     // In the dialog: the Devices tab's tooltip says the same, hidden until the tab is pointed at.
@@ -1110,7 +1111,7 @@ describe('the playback strip', () => {
     renderTab()
     expect(await screen.findByText(/Playing back as Playback Target/)).toBeInTheDocument()
     expect(within(strips()).getByText(/Recording — Line 1 Gateway/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
+    fireEvent.click(tabLink('Devices'))
     expect(within(strips()).getByText(/Playing back as Playback Target/)).toBeInTheDocument()
     expect(within(strips()).getAllByRole('button', { name: /Stop/ })).toHaveLength(2)
   })
@@ -1262,15 +1263,15 @@ describe('the filter bar', () => {
     expect(card.querySelector(':scope > .card-heading + .tab-strip')).not.toBeNull()
     // Each tab says what it records in its own tooltip; the bar has no "?".
     expect(card.querySelector('.tab-strip .help-tip')).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Gateways' })).toHaveAccessibleDescription(/every device beneath it included/)
-    expect(screen.getByRole('tab', { name: 'Devices' })).toHaveAccessibleDescription(/plus its gateway's birth certificate/)
+    expect(tabLink('Gateways')).toHaveAccessibleDescription(/every device beneath it included/)
+    expect(tabLink('Devices')).toHaveAccessibleDescription(/plus its gateway's birth certificate/)
     // Both tabs have filters, so each keeps its toolbar row, which starts with the search box and
     // then the stored filter; the Devices tab adds the gateway filter after them.
     const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
     expect(bar.querySelector('.help-tip')).toBeNull()
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
     expect(bar.firstElementChild.nextElementSibling).toBe(screen.getByLabelText('Stored capture filter'))
-    fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
+    fireEvent.click(tabLink('Devices'))
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
     expect(screen.getByLabelText('Stored capture filter').nextElementSibling).toBe(screen.getByLabelText('Gateway filter'))
@@ -1297,7 +1298,7 @@ describe('the filter bar', () => {
     expect(screen.getByText(/No subjects match these filters/).closest('table')).toBeNull()
     expect(document.querySelector('tbody td[colspan]')).toBeNull()
 
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(screen.getByText(/No subjects match these filters/).closest('table')).toBeNull()
   })
 
@@ -1420,7 +1421,7 @@ describe('playing a file', () => {
     expect(inToolbar()).toHaveTextContent('Play a file…')
     // Filled, as a toolbar's action is on every page, on both tabs (#971).
     expect(inToolbar()).toHaveClass('btn-primary')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(inToolbar()).toHaveTextContent('Play a file…')
     expect(inToolbar()).toHaveClass('btn-primary')
     const button = screen.getByRole('button', { name: /Play a file…/ })
@@ -1529,7 +1530,7 @@ describe('the device schema on the panel', () => {
   const openDevice = async () => {
     renderTab({ onSelectSchema: vi.fn() })
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
   }
 
@@ -1537,7 +1538,7 @@ describe('the device schema on the panel', () => {
     const onSelectSchema = vi.fn()
     renderTab({ onSelectSchema })
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
 
     const link = screen.getByRole('link', { name: /CNC Mill/ })
@@ -1573,7 +1574,7 @@ describe('the gateway filter', () => {
     // On Gateways it would filter a list of gateways by gateway.
     expect(screen.queryByLabelText('Gateway filter')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(await screen.findByLabelText('Gateway filter')).toBeInTheDocument()
   })
 
@@ -1584,7 +1585,7 @@ describe('the gateway filter', () => {
         : [DEVICE, { ...DEVICE, id: 'dev-3', name: 'Other Device', gateway_id: 'gw-2' }]))
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    fireEvent.click(tabLink(/Devices/))
     expect(await screen.findByText('Other Device')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Gateway filter'), { target: { value: 'gw-1' } })

@@ -25,6 +25,6 @@ Open it to see whether the plant is up. When something is wrong, every lane, pin
 
 Every state is what Aber last read. If the dashboard cannot reach the server for about 10 seconds, a strip under the top bar says **Not updating since** and a time. While it shows, treat what you see as out of date. It goes away when the next refresh works. If your session has ended, the strip says so instead and offers **Sign In Again**.
 
-The sidebar marks the pages that have work waiting, with the reason in the item's tooltip: Devices while a device is in quarantine, Gateways while a gateway that should be reporting is offline (one still being set up does not count), and Areas while a cell is in no area.
+The sidebar marks the pages that have work waiting, with the reason in the item's tooltip: Devices while a device is in quarantine, Gateways while a gateway that should be reporting is offline (one still being set up does not count), and Areas while a cell is in no area. When a page's tabs are open in the sidebar, the number moves to the tab the work is in, such as Quarantine under Devices.
 
 Nothing on this page changes anything. Equipment is filed on the Devices, Gateways and Cells pages, an area's plan is uploaded on the Areas page, and a cell is placed on its plan from the Cells page. The plan in an area's or a cell's panel on those pages opens this map on that area.

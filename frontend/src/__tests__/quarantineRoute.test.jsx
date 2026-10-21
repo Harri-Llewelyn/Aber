@@ -3,6 +3,7 @@ import { render, screen, within, waitFor, fireEvent } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from '../App'
 import { api } from '../api'
+import { currentTabLink, tabLink } from '../test/tabBar'
 
 /**
  * Routes into the Devices page's Quarantine tab, through App: the rail's quarantine signal and the
@@ -57,7 +58,7 @@ const serve = (held) => (path) => {
 }
 
 const railItem = () => within(document.querySelector('.sidebar')).getByRole('link', { name: /^Devices/ })
-const selectedTab = () => screen.getByRole('tab', { selected: true })
+const selectedTab = () => currentTabLink()
 
 const renderApp = async (held) => {
   api.get.mockImplementation(serve(held))
@@ -82,7 +83,7 @@ describe('the routes into the Quarantine tab', () => {
     // The first visit loads the lazy page.
     await waitFor(() => expect(selectedTab()).toHaveAccessibleName('Quarantine, 1 waiting'), { timeout: 5000 })
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Registered' }))
+    fireEvent.click(tabLink('Registered'))
     fireEvent.click(railItem())
     await waitFor(() => expect(selectedTab()).toHaveAccessibleName('Quarantine, 1 waiting'))
   })

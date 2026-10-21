@@ -1,10 +1,8 @@
 import React, { useRef, useState } from 'react'
-import { groupedNav } from '../../navigation'
-import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
-import { useClickOutside } from '../../hooks/useClickOutside'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { currentTabOf, groupedNav, tabHref } from '../../navigation'
 import { useHoverIntent } from '../../hooks/useHoverIntent'
-import { IconPanelLeft, IconCheck } from './Icons'
+import { useUrl } from '../../hooks/useUrlState'
+import { IconChevronDown, IconChevronUp, IconChevronsDownUp } from './Icons'
 import { RouteLink } from './RouteLink'
 
 /** How long the pointer rests on the rail before hover mode opens it. A pointer crossing takes less. */
@@ -13,8 +11,8 @@ export const RAIL_OPEN_DELAY_MS = 150
 /**
  * The primary navigation: a 52px rail of icons with a labelled panel.
  *
- * Three behaviours, chosen from the control at the foot of the rail and saved with the person's
- * other preferences (useUserSettings.js):
+ * Three behaviours, `mode`, chosen in the account menu's Sidebar layout switch or on Profile ›
+ * Appearance and saved with the person's other preferences (useUserSettings.js):
  *
  *   hover      the panel paints OVER the page once the pointer rests on the rail, and reflows
  *              nothing. It shuts as soon as the pointer leaves.
@@ -31,22 +29,57 @@ export const RAIL_OPEN_DELAY_MS = 150
  * Each page is a link to `hrefFor(id)`, so Ctrl-click, middle-click and "Copy link address" work. A
  * plain click navigates in place, through `onNavigate(id)` when it is given.
  *
- * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above the
- * behaviour control.
+ * A page with tabs (`pageTabs`, navigation.jsx) lists them beneath it as links, behind a chevron:
+ * see SidebarPage. Arriving on a page opens its tabs, with the current one marked, and closes every
+ * other page's, those opened by hand included; until the next arrival, pages opened by hand stay
+ * open together. Collapse all tabs, at the foot, closes every list, the current page's too.
+ *
+ * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above
+ * Collapse all tabs.
  */
-export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {}, account = null }) {
+export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', signals = {}, account = null }) {
   const hover = useHoverIntent(RAIL_OPEN_DELAY_MS)
   const pointerOnRail = useRef(false)
   const [focused, setFocused] = useState(false)
   // What `focused` was when the window lost focus from inside the rail; null otherwise.
   const focusedAsWindowLeft = useRef(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useClickOutside(() => setMenuOpen(false), menuOpen)
-  useEscapeKey(() => setMenuOpen(false), menuOpen)
+
+  const url = useUrl()
+  const currentPageTab = currentTabOf(currentTab, url)?.id
+  // Pages whose tabs were opened by hand since the last arrival, and the current page if its tabs
+  // were closed since arriving on it.
+  const [opened, setOpened] = useState(() => new Set())
+  const [closedHere, setClosedHere] = useState(null)
+  const [arrivedOn, setArrivedOn] = useState(currentTab)
+  if (arrivedOn !== currentTab) {
+    setArrivedOn(currentTab)
+    setOpened(new Set())
+    setClosedHere(null)
+  }
 
   const expanded = mode === 'expanded' || (mode === 'hover' && hover.open) || focused
   const groups = groupedNav(tabs)
-  const current = SIDEBAR_MODES.find(m => m.id === mode) || SIDEBAR_MODES[0]
+
+  const isOpen = (id) => opened.has(id) || (id === currentTab && closedHere !== id)
+  const toggle = (id) => {
+    const open = isOpen(id)
+    setOpened(prev => {
+      const next = new Set(prev)
+      if (open) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    if (open && id === currentTab) setClosedHere(id)
+    else if (!open && closedHere === id) setClosedHere(null)
+  }
+
+  // Collapse all tabs has work only while a page the rail draws has its tabs open.
+  const anyOpen = groups.some(g => g.tabs.some(t => t.pageTabs?.length && isOpen(t.id)))
+  const collapseAll = () => {
+    if (!anyOpen) return
+    setOpened(new Set())
+    setClosedHere(currentTab)
+  }
 
   const onFocus = (e) => {
     const returning = focusedAsWindowLeft.current
@@ -57,7 +90,10 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
     else if (!pointerOnRail.current) setFocused(true)
   }
 
-  const onBlur = () => {
+  const onBlur = (e) => {
+    // Tab moving to another control in the rail is not leaving it. Collapsing in between would
+    // hide a page's tabs, and the chevron, from under the focus arriving on them.
+    if (!pointerOnRail.current && e.currentTarget.contains(e.relatedTarget)) return
     // `document.hasFocus()` is already false while the window's own loss of focus blurs the rail.
     focusedAsWindowLeft.current = document.hasFocus() ? null : focused
     setFocused(false)
@@ -79,75 +115,134 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
             {index > 0 && <div className="sidebar-divider" role="presentation" />}
 
             {group.tabs.map(t => {
-              // A page with work waiting takes the warning colour and its number, and says why on its title
-              // and label (the count is aria-hidden: the label already carries it).
-              const signal = signals[t.id]
+              const link = {
+                page: t,
+                href: hrefFor(t.id),
+                current: currentTab === t.id,
+                signal: signals[t.id],
+                onNavigate: onNavigate ? () => onNavigate(t.id) : undefined,
+              }
+              if (!t.pageTabs?.length) return <PageLink key={t.id} {...link} />
               return (
-                <RouteLink
+                <SidebarPage
                   key={t.id}
-                  to={hrefFor(t.id)}
-                  onNavigate={onNavigate ? () => onNavigate(t.id) : undefined}
-                  className={`sidebar-item${currentTab === t.id ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
-                  title={signal ? `${t.label} — ${signal.note}` : `Navigate to ${t.label} page`}
-                  aria-label={signal ? `${t.label} — ${signal.note}` : t.label}
-                  aria-current={currentTab === t.id ? 'page' : undefined}
-                >
-                  <span className="sidebar-item-icon">{t.icon}</span>
-                  <span className="sidebar-item-label">{t.label}</span>
-                  {signal?.count > 0 && <span className="sidebar-item-count" aria-hidden="true">{signal.count > 99 ? '99+' : signal.count}</span>}
-                </RouteLink>
+                  {...link}
+                  currentTabId={currentPageTab}
+                  open={isOpen(t.id)}
+                  onToggle={toggle}
+                  expanded={expanded}
+                />
               )
             })}
           </div>
         ))}
 
         {/* Pinned to the bottom of the rail while the page list scrolls behind it (App.css). The
-            account control comes first, then the rail's own behaviour. */}
-        {(account || onChangeMode) && (
-          <div className="sidebar-foot">
-            {account}
+            account control comes first, then Collapse all tabs. */}
+        <div className="sidebar-foot">
+          {account}
 
-            {onChangeMode && (
-              <div className="sidebar-mode" ref={menuRef}>
-                <button
-                  type="button"
-                  className="sidebar-mode-button"
-                  onClick={() => setMenuOpen(v => !v)}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  aria-label={`Sidebar behaviour: ${current.label}`}
-                  title={`Sidebar behaviour: ${current.label}`}
-                >
-                  <span className="sidebar-item-icon"><IconPanelLeft size={16} /></span>
-                  <span className="sidebar-item-label">{current.label}</span>
-                </button>
-
-                {menuOpen && (
-                  <div className="sidebar-mode-menu" role="menu" aria-label="Sidebar behaviour">
-                    {SIDEBAR_MODES.map(m => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={m.id === mode}
-                        className={`sidebar-mode-option${m.id === mode ? ' active' : ''}`}
-                        onClick={() => { onChangeMode(m.id); setMenuOpen(false) }}
-                        title={m.description}
-                      >
-                        <span className="sidebar-mode-option-tick">{m.id === mode && <IconCheck size={12} />}</span>
-                        <span>
-                          <span className="sidebar-mode-option-label">{m.label}</span>
-                          <span className="sidebar-mode-option-desc">{m.description}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+          {/* Disabled rather than hidden while nothing is open, so the foot never changes height
+              under the pointer. aria-disabled keeps it a Tab stop that says why it does nothing. */}
+          <button
+            type="button"
+            className="sidebar-collapse-all"
+            onClick={collapseAll}
+            aria-disabled={!anyOpen}
+            title={anyOpen ? 'Collapse all tabs' : 'Collapse all tabs: none are open'}
+          >
+            <span className="sidebar-item-icon"><IconChevronsDownUp size={16} aria-hidden="true" /></span>
+            <span className="sidebar-item-label">Collapse all tabs</span>
+          </button>
+        </div>
       </nav>
     </aside>
+  )
+}
+
+const countText = (n) => (n > 99 ? '99+' : n)
+
+/**
+ * A page's own entry. A page with work waiting takes the warning colour and its number, and says
+ * why on its title and label (the count is aria-hidden: the label already carries it).
+ * `ariaCurrent` is what the current page's link says: `page`, or `true` while the tab beneath it
+ * is the one marked `page`.
+ */
+function PageLink({ page, href, current, signal, onNavigate, ariaCurrent = 'page' }) {
+  return (
+    <RouteLink
+      to={href}
+      onNavigate={onNavigate}
+      className={`sidebar-item${current ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
+      title={signal ? `${page.label} — ${signal.note}` : `Navigate to ${page.label} page`}
+      aria-label={signal ? `${page.label} — ${signal.note}` : page.label}
+      aria-current={current ? ariaCurrent : undefined}
+    >
+      <span className="sidebar-item-icon">{page.icon}</span>
+      <span className="sidebar-item-label">{page.label}</span>
+      {signal?.count > 0 && <span className="sidebar-item-count" aria-hidden="true">{countText(signal.count)}</span>}
+    </RouteLink>
+  )
+}
+
+/**
+ * A page with tabs, as disclosure navigation rather than a tree: the page's link, then a chevron
+ * button (`aria-expanded`, `aria-controls`, its own name) that shows or hides a list of the tabs'
+ * links, so Tab reaches the link, the chevron, then each tab, and no arrow keys are involved. The
+ * list shows while the page is open and the rail is wide; the collapsed rail has no room for it,
+ * and the page's own tab bar is one click away. The tabs carry no tooltips: one on every entry
+ * would flash as the pointer moves down the rail.
+ *
+ * While the list is on screen the page's signal moves to the tab it is about (`signalTab`), with
+ * the tab bar's words ("Quarantine, 3 waiting"), so no number shows twice.
+ */
+function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, open, onToggle, expanded }) {
+  const listId = `sidebar-tabs-${page.id}`
+  const shown = open && expanded
+  const onTab = Boolean(shown && signal && page.pageTabs.some(t => t.id === page.signalTab))
+
+  return (
+    <div>
+      <div className="sidebar-page-row">
+        <PageLink
+          page={page}
+          href={href}
+          current={current}
+          signal={onTab ? null : signal}
+          onNavigate={onNavigate}
+          ariaCurrent={shown ? 'true' : 'page'}
+        />
+        <button
+          type="button"
+          className="sidebar-disclosure"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-label={`Show the ${page.label} tabs`}
+          onClick={() => onToggle(page.id)}
+        >
+          {open ? <IconChevronUp size={14} aria-hidden="true" /> : <IconChevronDown size={14} aria-hidden="true" />}
+        </button>
+      </div>
+
+      <ul id={listId} className="sidebar-tabs" aria-label={`${page.label} tabs`} hidden={!shown}>
+        {page.pageTabs.map(tab => {
+          const here = current && tab.id === currentTabId
+          const waiting = onTab && tab.id === page.signalTab ? signal.count : 0
+          return (
+            <li key={tab.id}>
+              <RouteLink
+                to={tabHref(page.id, tab.id)}
+                className={`sidebar-tab${here ? ' active' : ''}${waiting > 0 ? ` sidebar-tab-${signal.tone}` : ''}`}
+                aria-current={here ? 'page' : undefined}
+                aria-label={waiting > 0 ? `${tab.label}, ${waiting} waiting` : undefined}
+              >
+                <span className="sidebar-tab-label">{tab.label}</span>
+                {waiting > 0 && <span className="sidebar-tab-count" aria-hidden="true">{countText(waiting)}</span>}
+              </RouteLink>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }

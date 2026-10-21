@@ -92,7 +92,8 @@ describe('the tab title in the app', () => {
     render(<App />)
     await waitFor(() => expect(document.title).toBe('Aber | Site Map'))
     fireEvent.click(screen.getByRole('link', { name: /^Devices$/ }))
-    await waitFor(() => expect(document.title).toBe('Aber | Devices'))
+    // A tabbed page names its tab too, so two history entries for one page differ.
+    await waitFor(() => expect(document.title).toBe('Aber | Devices › Registered'))
   })
 
   it('carries the same count as the alert pill', async () => {

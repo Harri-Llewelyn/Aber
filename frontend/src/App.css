@@ -133,8 +133,8 @@
        90     the sidebar, and the context panel when it is a drawer below 800px (they sit on
               opposite edges, so the tie never overlaps)
        100    the topbar
-       200    a popover under the topbar: the user menu, global search, the sidebar mode menu
-       1200   the tooltip bubble (HelpTip and the tab bar)
+       200    a popover under the topbar: the user menu, global search
+       1200   the tooltip bubble (HelpTip, the tab bar, the account menu's layout switch)
        2000   the toast stack
      An open dialog is above every rung: showModal() draws it in the browser's top layer, and the
      confirm layer, a dialog opened over another, is above that one because it opened later. The
@@ -615,6 +615,12 @@ html, body, #root {
 .user-popover-theme .segmented { display: flex; }
 .user-popover-theme .segmented-option { flex: 1; }
 
+/* The Sidebar layout section under it, laid out the same with three segments, its group named
+   Sidebar layout. Each segment's tooltip says what its layout does. */
+.user-popover-sidebar { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.user-popover-sidebar .segmented { display: flex; }
+.user-popover-sidebar .segmented-option { flex: 1; }
+
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .user-popover-action:disabled,
@@ -782,6 +788,88 @@ html, body, #root {
 /* The page entries are links, so Ctrl-click and middle-click open a new tab; they keep the look
    of the rail's other controls. */
 a.sidebar-item { text-decoration: none; }
+
+/* A page with tabs (SidebarPage in Sidebar.jsx): its link and the chevron that shows its tabs share
+   a row. The chevron and the list need the wide rail, and show only on it. */
+.sidebar-page-row { display: flex; align-items: center; gap: 2px; }
+.sidebar-page-row > .sidebar-item { flex: 1 1 auto; min-width: 0; }
+
+/* 28px square, above WCAG 2.2's 24px minimum target. */
+.sidebar-disclosure {
+  display: none;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.sidebar-expanded .sidebar-disclosure { display: inline-flex; }
+.sidebar-disclosure:hover { color: var(--text-primary); }
+.sidebar-disclosure:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The tabs, on a guide line under the page's icon, their labels in line with the page's. No display
+   here, so `hidden` takes the list away. */
+.sidebar-tabs {
+  list-style: none;
+  margin: 0 0 4px 17px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--border);
+}
+
+/* 30px rows, lighter than a page's: no icon, the smaller step. */
+.sidebar-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sidebar-tab-label { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-tab:hover { color: var(--text-primary); }
+.sidebar-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sidebar-tab.sidebar-tab-warning:not(.active) { color: var(--warning-text); }
+
+/* The current tab: the accent at 600, and a 2px accent stroke over the guide line, a border so it
+   is not colour alone and survives forced-colours mode. -11px is the list's 10px padding and the
+   tab's 1px border. */
+.sidebar-tab.active { color: var(--accent-text); font-weight: 600; }
+.sidebar-tab.active::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: -11px;
+  border-left: 2px solid var(--accent);
+}
+
+/* The waiting count, at the end of the tab's row, as the page's count sits on the wide rail. */
+.sidebar-tab-count {
+  margin-left: auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warning);
+  color: var(--warning-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+}
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */
@@ -1032,6 +1120,8 @@ a.sidebar-item { text-decoration: none; }
 }
 .tab-strip-tab:hover { color: var(--text-primary); }
 .tab-strip-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The tabs are links (TabStrip): no underline, which the selected tab's accent rule would double. */
+a.tab-strip-tab { text-decoration: none; }
 .tab-strip-tab-selected {
   color: var(--text-primary);
   border-bottom-color: var(--accent);
@@ -3659,7 +3749,7 @@ a.chip { text-decoration: none; }
 }
 
 /* ===== Popover arrows =====
-   The five panels that open from a button point at it: a square turned 45 degrees, centred on the
+   The four panels that open from a button point at it: a square turned 45 degrees, centred on the
    panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
    of the panel, because the alert, notification and account panels clip or scroll their overflow;
    the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
@@ -3668,7 +3758,6 @@ a.chip { text-decoration: none; }
 .alert-pill-wrap:has(> .alert-pill-panel)::after,
 .notif-wrap:has(> .notif-panel)::after,
 .user-menu:has(> .user-popover)::after,
-.sidebar-mode:has(> .sidebar-mode-menu)::after,
 .filters-popover::before {
   --arrow-size: 10px;
   content: '';
@@ -3694,20 +3783,17 @@ a.chip { text-decoration: none; }
   z-index: 61;
 }
 
-/* Left, from the foot of the rail: fixed like the two panels, on their left border, and level with
-   the centre of the button that opened each. The foot is 10px of padding, the 34px behaviour
-   button, a 2px gap, then the 38px account row, so the centres are 27px and 65px up. */
-.user-menu:has(> .user-popover)::after,
-.sidebar-mode:has(> .sidebar-mode-menu)::after {
+/* Left, from the foot of the rail: fixed like the panel, on its left border, and level with the
+   centre of the account row. The foot is 10px of padding, the 34px Collapse all tabs button, a 2px
+   gap, then the 38px account row, so the centre is 65px up. */
+.user-menu:has(> .user-popover)::after {
   --arrow-turn: -45deg;
   position: fixed;
   left: 60.5px;
+  bottom: 65px;
   z-index: 201;
 }
-.user-menu:has(> .user-popover)::after { bottom: 65px; }
-.sidebar-mode:has(> .sidebar-mode-menu)::after { bottom: 27px; }
-.sidebar-mode-expanded .user-menu:has(> .user-popover)::after,
-.sidebar-mode-expanded .sidebar-mode:has(> .sidebar-mode-menu)::after { left: 240.5px; }
+.sidebar-mode-expanded .user-menu:has(> .user-popover)::after { left: 240.5px; }
 
 /* Up, from a toolbar's Filters button. The panel is kept inside the window, so FiltersPopover sets
    --arrow-x, the button's centre from the panel's outer left edge; the 1px is the border the
@@ -5572,7 +5658,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .auth-link:hover { color: var(--accent-strong); }
 .auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-/* Sidebar behaviour modes. `hover` is the rules above: a rigid gutter and a panel that paints over
+/* The sidebar layouts (the mode). `hover` is the rules above: a rigid gutter and a panel that paints over
    the page. `expanded` widens the gutter itself so the page makes room, and drops the shadow.
    `collapsed` is the resting state with the pointer ignored; see Sidebar.jsx. */
 .sidebar-mode-expanded {
@@ -5586,7 +5672,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   transition: none;
 }
 
-/* The foot of the rail: the account control, then the behaviour control, each shaped like an item so
+/* The foot of the rail: the account control, then Collapse all tabs, each shaped like an item so
    the rail reads as one column. Pinned: `sticky` to the panel's bottom edge, so the page list scrolls
    behind it on a short screen and the account is always one click away. The ground is opaque so a
    page scrolling under it does not show through. */
@@ -5604,9 +5690,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   flex-shrink: 0;
 }
 
-.sidebar-mode { position: relative; }
-
-.sidebar-mode-button {
+/* Collapse all tabs (Sidebar.jsx): 34px, the row the account menu's arrow is measured from. While
+   no page's tabs are open it is aria-disabled, dimmed and inert, and keeps its place. */
+.sidebar-collapse-all {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -5625,57 +5711,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   transition: var(--transition);
 }
 
-.sidebar-mode-button:hover,
-.sidebar-mode-button[aria-expanded="true"] { color: var(--text-primary); background: var(--bg-glass); }
-.sidebar-mode-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-/* Opens upward from the foot, beside the rail rather than inside it, so it is never clipped by
-   the panel's overflow and is readable in the collapsed state. */
-.sidebar-mode-menu {
-  position: fixed;
-  left: 60px;
-  bottom: 12px;
-  min-width: 260px;
-  padding: 4px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-popover);
-  z-index: 200;
-}
-
-.sidebar-mode-expanded .sidebar-mode-menu { left: 240px; }
-
-.sidebar-mode-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.sidebar-mode-option:hover { background: var(--bg-glass); }
-.sidebar-mode-option.active { color: var(--accent); }
-.sidebar-mode-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-.sidebar-mode-option-tick {
-  display: inline-flex;
-  width: 12px;
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-
-.sidebar-mode-option-label { display: block; font-weight: 600; }
-.sidebar-mode-option-desc { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sidebar-collapse-all:hover { color: var(--text-primary); background: var(--bg-glass); }
+.sidebar-collapse-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sidebar-collapse-all[aria-disabled="true"],
+.sidebar-collapse-all[aria-disabled="true"]:hover { color: var(--text-muted); background: none; opacity: 0.55; cursor: default; }
 
 /* The location picker (common/LocationPicker.jsx): three exclusive choices in a row, then the
    dropdown the choice calls for beneath. Native radios, so the exclusivity is the browser's. */

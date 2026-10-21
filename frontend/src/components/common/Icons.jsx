@@ -331,6 +331,14 @@ export const IconChevronsUpDown = ({ size = 14, className = "", style = {}, ...r
   </svg>
 )
 
+/* Folded together: the rail's Collapse all tabs. */
+export const IconChevronsDownUp = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="m7 20 5-5 5 5" />
+    <path d="m7 4 5 5 5-5" />
+  </svg>
+)
+
 export const IconZap = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -531,6 +539,22 @@ export const IconPanelLeft = ({ size = 14, className = "", style = {}, ...rest }
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <rect x="3" y="3" width="18" height="18" rx="2" />
     <line x1="9" y1="3" x2="9" y2="21" />
+  </svg>
+)
+
+/* The rail folded to its icons: the Collapsed sidebar layout. */
+export const IconPanelLeftClose = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="9" y1="3" x2="9" y2="21" />
+    <path d="m16 15-3-3 3-3" />
+  </svg>
+)
+
+/* A pointer: the Expand on hover sidebar layout. */
+export const IconMousePointer = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="M4.04 4.69a.5.5 0 0 1 .65-.65l16 6.5a.5.5 0 0 1-.06.95l-6.13 1.58a2 2 0 0 0-1.43 1.43l-1.58 6.13a.5.5 0 0 1-.95.06z" />
   </svg>
 )
 

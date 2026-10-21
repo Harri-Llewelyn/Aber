@@ -18,10 +18,10 @@ const TABS = [
 
 function Harness() {
   const [value, setValue] = useState('registered')
-  return <TabStrip tabs={TABS} value={value} onChange={setValue} ariaLabel="Devices" />
+  return <TabStrip tabs={TABS} value={value} onChange={setValue} hrefFor={id => `/devices/${id}`} ariaLabel="Devices" />
 }
 
-const tab = (name) => screen.getByRole('tab', { name })
+const tab = (name) => screen.getByRole('link', { name })
 const tip = () => screen.queryByRole('tooltip')
 const wait = (ms) => act(() => { vi.advanceTimersByTime(ms) })
 
@@ -74,13 +74,11 @@ describe('a tab\'s tooltip', () => {
     expect(document.getElementById(quarantine.getAttribute('aria-describedby'))).toHaveAttribute('hidden')
   })
 
-  it('follows the arrow keys, which move focus and selection exactly as before', () => {
+  it('follows the focus from tab to tab, one tooltip at a time', () => {
     render(<Harness />)
     act(() => tab('Registered').focus())
     expect(tip()).toHaveTextContent('Devices admitted to Aber.')
-    fireEvent.keyDown(tab('Registered'), { key: 'ArrowRight' })
-    expect(tab('Quarantine, 2 waiting')).toHaveAttribute('aria-selected', 'true')
-    expect(document.activeElement).toBe(tab('Quarantine, 2 waiting'))
+    act(() => tab('Quarantine, 2 waiting').focus())
     expect(screen.getAllByRole('tooltip')).toHaveLength(1)
     expect(tip()).toHaveTextContent('Births from devices nobody has registered.')
   })
@@ -117,7 +115,7 @@ describe('a tab\'s tooltip', () => {
     fireEvent.mouseDown(tab('Quarantine, 2 waiting'))
     fireEvent.focus(tab('Quarantine, 2 waiting'))
     fireEvent.click(tab('Quarantine, 2 waiting'))
-    expect(tab('Quarantine, 2 waiting')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Quarantine, 2 waiting')).toHaveAttribute('aria-current', 'page')
     wait(TOOLTIP_DELAY_MS * 10)
     expect(tip()).toBeNull()
   })

@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ProfileTab, PROFILE_SECTIONS } from '../components/tabs/ProfileTab'
 import { MIN_PASSWORD_LENGTH } from '../utils/passwords'
+import { tabLink, tabLinks } from '../test/tabBar'
 
 const renderProfile = (props = {}) => {
   const handlers = {
@@ -31,7 +32,7 @@ const renderProfile = (props = {}) => {
   return handlers
 }
 
-const tab = (name) => screen.getByRole('tab', { name })
+const tab = (name) => tabLink(name)
 const row = (label) => screen.getByText(label, { selector: '.setting-label' }).closest('tr')
 const headers = () => screen.getAllByRole('columnheader').map(h => h.textContent)
 
@@ -44,7 +45,7 @@ describe('the page', () => {
 
   it('has two tabs, Account then Appearance, with the ids the routing names', () => {
     renderProfile()
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Account', 'Appearance'])
+    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance'])
     expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance'])
   })
 
@@ -59,7 +60,7 @@ describe('the page', () => {
   it('keeps its tab in the path, so /profile/appearance opens Appearance', () => {
     window.history.replaceState({}, '', '/profile/appearance')
     renderProfile()
-    expect(tab('Appearance')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Appearance')).toHaveAttribute('aria-current', 'page')
     fireEvent.click(tab('Account'))
     expect(window.location.pathname).toBe('/profile')
   })

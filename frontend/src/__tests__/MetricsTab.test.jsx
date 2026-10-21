@@ -9,6 +9,7 @@ import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
 import { metricUrl, unmappedMetricsUrl } from '../routes'
 import { navigate } from '../hooks/useUrlState'
+import { queryTabLink, tabBar, tabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -124,9 +125,9 @@ const renderTab = (props = {}) => render(
  * not by position. Null until the tab's table renders.
  */
 const cardTable = (tabName) => {
-  const tab = screen.queryByRole('tab', { name: tabName })
+  const tab = queryTabLink(tabName)
   if (!tab) return null
-  if (tab.getAttribute('aria-selected') !== 'true') fireEvent.click(tab)
+  if (tab.getAttribute('aria-current') !== 'page') fireEvent.click(tab)
   return document.querySelector('.card table')
 }
 
@@ -181,11 +182,10 @@ describe('Metrics page: one card with three tabs', () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    const tablist = screen.getByRole('tablist')
-    expect(tablist.closest('.tab-strip').parentElement).toHaveClass('card')
-    await waitFor(() => expect(screen.getAllByRole('tab').map(t => t.textContent))
+    expect(tabBar().parentElement).toHaveClass('card')
+    await waitFor(() => expect(tabLinks().map(t => t.textContent))
       .toEqual(['Metric Catalog', 'Deprecated Metrics', 'Uncatalogued (0)']))
-    expect(screen.getByRole('tab', { name: 'Metric Catalog' }).getAttribute('aria-selected')).toBe('true')
+    expect(tabLink('Metric Catalog').getAttribute('aria-current')).toBe('page')
   })
 
   it('scrolls the table inside the card, not the page', async () => {
@@ -206,7 +206,7 @@ describe('Metrics page: one card with three tabs', () => {
     expect(document.querySelector('.card .section-count')).toBeNull()
     // Uncatalogued carries its count by design (metricsUncatalogued.test.jsx).
     for (const name of ['Metric Catalog', 'Deprecated Metrics']) {
-      expect(screen.getByRole('tab', { name }).textContent).not.toMatch(/\d/)
+      expect(tabLink(name).textContent).not.toMatch(/\d/)
     }
   })
 
@@ -214,7 +214,7 @@ describe('Metrics page: one card with three tabs', () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    const tabs = screen.getAllByRole('tab')
+    const tabs = tabLinks()
     expect(tabs[0]).toHaveAccessibleDescription(/schema authors build from/)
     expect(tabs[1]).toHaveAccessibleDescription(/withheld from the schema builder/)
     expect(tabs[2]).toHaveAccessibleDescription(/no catalog row describes/)
@@ -245,7 +245,7 @@ describe('Metrics page: one card with three tabs', () => {
 
     selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
     expect(drawer().getAttribute('aria-hidden')).toBe('false')
-    fireEvent.click(screen.getByRole('tab', { name: 'Deprecated Metrics' }))
+    fireEvent.click(tabLink('Deprecated Metrics'))
     expect(drawer().getAttribute('aria-hidden')).toBe('true')
   })
 })
@@ -338,7 +338,7 @@ describe('Deprecated Metrics tab', () => {
     renderTab()
     await waitForCatalog()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Deprecated Metrics' }))
+    fireEvent.click(tabLink('Deprecated Metrics'))
     expect(screen.getByText('No metric is deprecated.')).toBeTruthy()
     expect(document.querySelector('.card table')).toBeNull()
   })
@@ -945,7 +945,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
   })
 
   describe('opened with a filter handed over by another page', () => {
-    const tab = (name) => screen.getByRole('tab', { name })
+    const tab = (name) => tabLink(name)
 
     it('opens the catalog on the metrics with no semantic id, the toggle on', async () => {
       mockFilterCatalog()
@@ -968,12 +968,12 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
       fireEvent.change(search(), { target: { value: 'o' } })
       chooseStandard('MTConnect')
       fireEvent.click(tab('Deprecated Metrics'))
-      expect(tab('Deprecated Metrics').getAttribute('aria-selected')).toBe('true')
+      expect(tab('Deprecated Metrics').getAttribute('aria-current')).toBe('page')
 
       // The warning's link is an address, so what was on screen does not survive it.
       act(() => navigate(unmappedMetricsUrl()))
 
-      await waitFor(() => expect(tab('Metric Catalog').getAttribute('aria-selected')).toBe('true'))
+      await waitFor(() => expect(tab('Metric Catalog').getAttribute('aria-current')).toBe('page'))
       expect(search().value).toBe('')
       expect(standardFilter().value).toBe('')
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
@@ -2249,7 +2249,7 @@ describe('Metrics — sorting by a column (#801)', () => {
     renderTab()
 
     await waitFor(() => expect(listed()).toEqual(['old_one', 'old_two', 'old_three']))
-    expect(screen.getByRole('tab', { name: 'Deprecated Metrics' })).toHaveAttribute('aria-selected', 'true')
+    expect(tabLink('Deprecated Metrics')).toHaveAttribute('aria-current', 'page')
     expect(header('Superseded By')).toHaveAttribute('aria-sort', 'descending')
     expect(window.location.pathname + window.location.search).toBe('/metrics/deprecated?sort=-superseded_by')
   })

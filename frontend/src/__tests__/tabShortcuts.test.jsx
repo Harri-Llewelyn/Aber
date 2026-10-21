@@ -27,6 +27,7 @@ vi.mock('../components/tabs/SiteMapTab', async () => {
             ariaLabel="Devices view"
             value={tab}
             onChange={setTab}
+            hrefFor={id => `/site-map/${id}`}
             tabs={[
               { id: 'registered', label: 'Registered' },
               { id: 'quarantine', label: 'Quarantine', attention: 3 },
@@ -80,8 +81,8 @@ const session = {
 /** Presses `key` on `target` and says whether the app kept the character from being typed. */
 const press = (key, target = document.body, init = {}) => !fireEvent.keyDown(target, { key, ...init })
 
-const tab = (name) => screen.getByRole('tab', { name })
-const selected = () => screen.getAllByRole('tab').find(t => t.getAttribute('aria-selected') === 'true')
+const tab = (name) => within(document.querySelector('main')).getByRole('link', { name })
+const selected = () => within(document.querySelector('main')).getByRole('link', { current: 'page' })
 const shortcutsButton = () => screen.getByRole('button', { name: 'Keyboard shortcuts' })
 const topSearch = () => screen.getByRole('combobox', { name: /Search pages/ })
 const pageSearch = () => screen.getByRole('searchbox', { name: 'Search this page' })
@@ -142,7 +143,7 @@ describe('`[` and `]`', () => {
   it('do nothing on a page without tabs', async () => {
     page.tabs = false
     await renderApp()
-    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(document.querySelector('main .tab-strip')).toBeNull()
     const before = document.activeElement
     expect(press(']')).toBe(false)
     expect(press('[')).toBe(false)
@@ -190,20 +191,21 @@ describe('`[` and `]`', () => {
 
   it('are not named on the tab bar, since the tab they open changes', async () => {
     await renderApp()
-    expect(screen.getByRole('tablist')).not.toHaveAttribute('aria-keyshortcuts')
-    for (const t of screen.getAllByRole('tab')) expect(t).not.toHaveAttribute('aria-keyshortcuts')
+    const bar = document.querySelector('main .tab-strip')
+    expect(bar).not.toHaveAttribute('aria-keyshortcuts')
+    for (const t of within(bar).getAllByRole('link')) expect(t).not.toHaveAttribute('aria-keyshortcuts')
   })
 })
 
 describe('on a page whose tab is in the address', () => {
   it('moves the address and adds a history entry, as a click does', async () => {
     window.history.pushState({}, '', '/profile')
-    await renderApp({ ready: 'main [role="tablist"]' })
+    await renderApp({ ready: 'main .tab-strip' })
     const depth = window.history.length
     press(']')
     expect(window.location.pathname).toBe('/profile/appearance')
     expect(window.history.length).toBe(depth + 1)
-    expect(screen.getByRole('tab', { name: 'Appearance' })).toHaveFocus()
+    expect(tab('Appearance')).toHaveFocus()
     press('[')
     expect(window.location.pathname).toBe('/profile')
   })

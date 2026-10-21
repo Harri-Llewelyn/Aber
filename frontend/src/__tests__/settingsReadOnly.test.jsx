@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsTab } from '../components/tabs/SettingsTab'
 import { api } from '../api'
+import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -64,7 +65,7 @@ describe('for anyone but an Administrator', () => {
      it says what the category holds, never how to Save. */
   it("describes the tab by what it holds, not by Save and Discard", async () => {
     await show({ readOnly: true })
-    const retention = screen.getByRole('tab', { name: 'Retention' })
+    const retention = tabLink('Retention')
     expect(retention).toHaveAccessibleDescription(/How long Aber keeps records/)
     expect(retention).not.toHaveAccessibleDescription(/Save|Discard/)
     expect(screen.queryByRole('button', { name: /About Retention settings/ })).toBeNull()

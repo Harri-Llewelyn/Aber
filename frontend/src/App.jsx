@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
-import { navigate } from './hooks/useUrlState'
+import { navigate, useUrl } from './hooks/useUrlState'
 import {
   deviceUrl, gatewayUrl, cellUrl, areaUrl, schemaUrl, devicesForSchemaUrl, siteMapAreaUrl, trailUrl,
   approvalsForUrl, proposalSubjectUrl, settingUrl, unmappedMetricsUrl, tabUrl,
@@ -15,7 +15,7 @@ import { CONNECTION_OK } from './lib/connectionState'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
-import { TABS, tabIsVisible } from './navigation'
+import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
 import { HoldToReveal } from './components/common/HoldToReveal'
@@ -54,8 +54,12 @@ import {
   IconRefreshCw,
   IconAlertCircle,
   IconDownload,
-  IconLogOut
+  IconLogOut,
+  IconMousePointer,
+  IconPanelLeft,
+  IconPanelLeftClose
 } from './components/common/Icons'
+import { SIDEBAR_MODES } from './hooks/useSidebarMode'
 
 import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from './version'
 import {
@@ -283,16 +287,32 @@ const THEME_SEGMENTS = [
 ]
 
 /**
+ * The account menu's Sidebar layout switch, one segment per mode useSidebarMode offers, in its
+ * order. The segment's word is short so three fit the menu's width; its tooltip is the mode's
+ * description.
+ */
+const SIDEBAR_SEGMENT_LOOK = {
+  hover: { label: 'Hover', icon: <IconMousePointer size={14} /> },
+  expanded: { label: 'Expanded', icon: <IconPanelLeft size={14} /> },
+  collapsed: { label: 'Collapsed', icon: <IconPanelLeftClose size={14} /> },
+}
+const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, description: m.description, ...SIDEBAR_SEGMENT_LOOK[m.id] }))
+
+/**
  * The account control at the foot of the rail: the avatar, with the address beside it whenever the
  * rail shows labels. Its menu's head states the address, role and version; the Light/Dark theme
- * switch has a section of its own under it; then come Profile, Report Bug and Sign Out. Click, not
- * hover: a hover menu holding Sign Out puts an irreversible action one stray movement away. The
- * menu opens beside the rail (App.css).
+ * switch and the Sidebar layout switch each have a section of their own under it; then come
+ * Profile, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts an
+ * irreversible action one stray movement away. The menu opens beside the rail (App.css).
  */
-function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReportBug, onOpenProfile, profileOpen = false }) {
+function UserMenu({
+  persona, userRole, onSignOut, theme, onChangeTheme, sidebarMode, onChangeSidebarMode, onReportBug, onOpenProfile,
+  profileOpen = false,
+}) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
+  const layout = SIDEBAR_MODES.find(m => m.id === sidebarMode) || SIDEBAR_MODES[0]
 
   /* Read from the injected global, which `config.js` set at page load. Comparing it with the baked
      bundle version is how a page cached from before an upgrade, or a pinned frontend.image.tag,
@@ -379,6 +399,19 @@ function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReport
             <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
           </div>
 
+          {/* The rail's three behaviours, the same setting as Profile > Appearance, under the theme
+              and staying open on a change for the same reason. Each segment's tooltip says what
+              its layout does. */}
+          <div className="user-popover-sidebar">
+            <SegmentedControl
+              menu
+              label="Sidebar layout"
+              value={layout.id}
+              onChange={onChangeSidebarMode}
+              options={SIDEBAR_SEGMENTS}
+            />
+          </div>
+
           {/* The first action: the whole of the person's own page, two clicks from anywhere. */}
           <button
             className="user-popover-action"
@@ -462,7 +495,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
    */
   const openProposalSubject = (proposal) => navigate(proposalSubjectUrl(proposal))
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
-  // theme switch, the rail's foot control and the Profile page all write through it.
+  // two switches and the Profile page all write through it.
   const {
     theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts, source: settingsSource,
   } = useUserSettings(session?.user?.id)
@@ -513,9 +546,11 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // under the bar and the tab title.
   const connection = useConnectionStatus()
 
-  // The page's rail label, and the pill's count, so the tab and the bar never disagree. The icon's
-  // red dot follows the same count, for a pinned tab that shows no title.
-  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length, connection.status !== CONNECTION_OK)
+  // The page's rail label with its tab's ("Devices › Quarantine"), so two history entries for one
+  // page differ, and the pill's count, so the tab and the bar never disagree. The icon's red dot
+  // follows the same count, for a pinned tab that shows no title.
+  const url = useUrl()
+  useDocumentTitle(pageTitleOf(tab, url), firingAlerts.length, connection.status !== CONNECTION_OK)
   useAlertFavicon(firingAlerts.length)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
@@ -543,6 +578,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
       onSignOut={onSignOut}
       theme={theme}
       onChangeTheme={setTheme}
+      sidebarMode={sidebarMode}
+      onChangeSidebarMode={setSidebarMode}
       onReportBug={() => setShowBugReport(true)}
       onOpenProfile={() => handleNavClick('profile')}
       profileOpen={tab === 'profile'}
@@ -660,7 +697,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           expanded mode the row reflows. See Sidebar.jsx. */}
       <div className="app-body">
         {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
-        <Sidebar tabs={navTabs} currentTab={tab} hrefFor={railHref} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} account={accountMenu} />
+        <Sidebar tabs={navTabs} currentTab={tab} hrefFor={railHref} mode={sidebarMode} signals={navSignals} account={accountMenu} />
 
         {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
             drawer itself sits outside it. */}
@@ -711,7 +748,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} readOnly={userRole !== 'Administrator'} />}
             {/* Every person's own page. Appearance writes through useUserSettings, as the account
-                menu's theme switch and the rail's foot control do. */}
+                menu's theme and sidebar layout switches do. */}
             {tab === 'profile' && (
               <ProfileTab
                 email={session?.user?.email}
