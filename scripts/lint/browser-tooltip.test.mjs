@@ -37,6 +37,17 @@ test("a title on a button is an error, and neither a component's title prop nor 
   assert.match(errors[0].message, /<Tooltip>/)
 })
 
+test('a title on an icon is an error too, since every Icon* passes it to its <svg>', async () => {
+  const icon = `import React from 'react'
+import { IconArchive } from './Icons'
+
+export const Fixture = () => <IconArchive size={12} title="Archived" />
+`
+  const errors = await tooltipErrors('frontend/src/components/common', icon)
+  assert.equal(errors.length, 1, JSON.stringify(errors))
+  assert.equal(errors[0].line, 4)
+})
+
 test('the rule reaches a new file anywhere in frontend/src', async () => {
   for (const dir of ['frontend/src', 'frontend/src/components/modals', 'frontend/src/pages']) {
     assert.equal((await tooltipErrors(dir)).length, 1, dir)

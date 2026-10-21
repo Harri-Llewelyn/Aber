@@ -11,9 +11,10 @@ export default function config ({ js, react, hooks, globals }) {
   const unused = ['error', { varsIgnorePattern: '^React$', argsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }]
   // A `title` on an HTML element is the browser's tooltip, which a keyboard and a touch screen never
   // show. A component's `title` prop (Modal's heading, SortHeader's tooltip) is not one, so only a
-  // lowercase element is matched. `abbr` and `iframe` keep `title`: it is what the element means.
+  // lowercase element is matched, and an Icon*, which passes it to its <svg>. `abbr` and `iframe`
+  // keep `title`: it is what the element means.
   const browserTooltip = ['error', {
-    selector: 'JSXOpeningElement[name.name=/^[a-z]/]:not([name.name=/^(abbr|iframe)$/]) > JSXAttribute[name.name="title"]',
+    selector: 'JSXOpeningElement[name.name=/^([a-z]|Icon[A-Z])/]:not([name.name=/^(abbr|iframe)$/]) > JSXAttribute[name.name="title"]',
     message: "A title is the browser's tooltip, never shown to a keyboard. Drop it, wrap the control in <Tooltip> (common/Tooltip.jsx), or give the column header the hint: frontend/README.md, Tooltips.",
   }]
   return [
