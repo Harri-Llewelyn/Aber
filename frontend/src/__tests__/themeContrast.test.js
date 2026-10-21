@@ -139,11 +139,14 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
-    // The Site Map lanes tint their own ground; --text-muted is the text on it, because
-    // --text-dim measures exactly 4.50:1 on a bare card, so any tint pushes it under AA.
-    ['--text-muted on site-wide lane', '--text-muted',  on(paint('.site-lane-site'), card),      AA_TEXT],
-    ['--text-muted on simulated lane', '--text-muted',  on(paint('.site-lane-simulated'), card), AA_TEXT],
-    ['--text-muted on unassigned lane','--text-muted',  on(paint('.site-lane-queue'), card),     AA_TEXT],
+    // A Site Map lane that holds something is filled with its hue. Its counts are --text-primary
+    // on the fill, and its chevron, an icon, is --text-muted at the 3:1 an icon needs.
+    ['--text-primary on site-wide lane', '--text-primary', on(paint('.site-lane-site'), card),      AA_TEXT],
+    ['--text-primary on simulated lane', '--text-primary', on(paint('.site-lane-simulated'), card), AA_TEXT],
+    ['--text-primary on unassigned lane','--text-primary', on(paint('.site-lane-queue'), card),     AA_TEXT],
+    ['chevron on site-wide lane',        '--text-muted',   on(paint('.site-lane-site'), card),      AA_LARGE],
+    ['chevron on simulated lane',        '--text-muted',   on(paint('.site-lane-simulated'), card), AA_LARGE],
+    ['chevron on unassigned lane',       '--text-muted',   on(paint('.site-lane-queue'), card),     AA_LARGE],
     // A device chip's name is --text-primary on the chip's tint.
     ['online device chip',             '--text-primary', on(paint('.chip-success'), card),       AA_TEXT],
     ['quarantined device chip',        '--text-primary', on(paint('.chip-warning'), card),       AA_TEXT],
