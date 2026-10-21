@@ -26,6 +26,7 @@ import { ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -50,7 +51,7 @@ import {
   tokenStatus,
   tokenStatusDetail,
 } from '../../utils/serviceIdentities'
-import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
+import { gatewayType, gatewayTypeLabel, gatewayTypeTone } from '../../utils/gatewayType'
 
 /** The plugin's ACL types, as the verbs the page prints beside a topic. */
 const ACL_VERB = {
@@ -409,7 +410,6 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               value={credentialFilter}
               onChange={e => setCredentialFilter(e.target.value)}
               aria-label="Filter gateways by credential state"
-              title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
             >
               <option value="">Any state ({filterCounts.active + (showArchived ? filterCounts.archived : 0)})</option>
               <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
@@ -420,15 +420,16 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
             </select>
             {/* Offered only while a gateway is archived; the count is what it would list. */}
             {filterCounts.archived > 0 && (
-              <button
-                type="button"
-                className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setShowArchived(v => !v)}
-                aria-pressed={showArchived}
-                title="Archived gateways are left off the list. Their credential was rotated to a password nobody holds, and is issued again only after the gateway is restored."
-              >
-                <IconArchive size={13} /> Show archived ({filterCounts.archived})
-              </button>
+              <Tooltip text="Archived gateways are left off the list. Their credential was rotated to a password nobody holds until it is restored.">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowArchived(v => !v)}
+                  aria-pressed={showArchived}
+                >
+                  <IconArchive size={13} /> Show archived ({filterCounts.archived})
+                </button>
+              </Tooltip>
             )}
             {/* Clear sits in the actions group: two auto margins in one bar would split the row. */}
             <div className="filter-bar-actions">
@@ -480,8 +481,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                 <thead>
                   <tr>
                     <SortHeader sort={credentialSort} column="gateway">Gateway</SortHeader>
-                    <SortHeader sort={credentialSort} column="type" title="The kind of gateway: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</SortHeader>
-                    <SortHeader sort={credentialSort} column="username">MQTT username</SortHeader>
+                    <SortHeader sort={credentialSort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
+                    <SortHeader sort={credentialSort} column="username" title="The username the gateway authenticates to the broker as.">MQTT username</SortHeader>
                     <SortHeader sort={credentialSort} column="credential" title="What the platform issued and recorded, from the database">Credential</SortHeader>
                     <SortHeader sort={credentialSort} column="broker" title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</SortHeader>
                     <th className="row-actions">Actions</th>
@@ -501,11 +502,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                           {/* The same four words as the Gateways and Capture pages, from the same
                               helper: a simulator and a playback gateway hold a credential for
                               different reasons. */}
-                          <Badge
-                            size="sm"
-                            tone={gatewayTypeTone(gatewayType(g))}
-                            title={gatewayTypeDescription(gatewayType(g))}
-                          >
+                          <Badge size="sm" tone={gatewayTypeTone(gatewayType(g))}>
                             {gatewayTypeLabel(gatewayType(g))}
                           </Badge>
                         </td>
@@ -513,16 +510,11 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                             credential pair. Click-to-copy, because a transcription error is a
                             gateway whose every publish is silently dropped by the ACL. */}
                         <td>
-                          <CopyableId
-                            value={g.sparkplug_id}
-                            label="MQTT username"
-                            title={`Copy ${g.sparkplug_id} — the username this gateway authenticates as`}
-                            onNotify={showToast}
-                          />
+                          <CopyableId value={g.sparkplug_id} label="MQTT username" onNotify={showToast} />
                         </td>
                         <td>
-                          {/* The badge carries the explanation as its title as well, so the meaning
-                              is reachable from the row without the legend having to be on screen. */}
+                          {/* The badge carries the explanation as its tooltip, so the meaning is
+                              reachable from the row without the legend having to be on screen. */}
                           <Badge
                             size="sm"
                             tone={credentialStateTone(state)}
@@ -540,35 +532,37 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                         <td>{brokerBadge(brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory))}</td>
                         <td className="row-actions">
                           {action === 'mint' && (
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setCredentialForGw({
-                                gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
-                                // Decides which .env pairing the dialog prints. Without it a
-                                // playback gateway is told to edit a Node-RED node it does not have.
-                                is_shadow: g.is_shadow,
-                                // A Third-party gateway's dialog gives every setting its node needs.
-                                deployment: g.deployment, sparkplug_group: g.sparkplug_group
-                              })}
-                              title="Mint a broker credential and show it once"
-                            >
-                              <IconLock size={13} /> Generate
-                            </button>
+                            <Tooltip text="Mint a broker credential and show it once">
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setCredentialForGw({
+                                  gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
+                                  // Decides which .env pairing the dialog prints. Without it a
+                                  // playback gateway is told to edit a Node-RED node it does not have.
+                                  is_shadow: g.is_shadow,
+                                  // A Third-party gateway's dialog gives every setting its node needs.
+                                  deployment: g.deployment, sparkplug_group: g.sparkplug_group
+                                })}
+                              >
+                                <IconLock size={13} /> Generate
+                              </button>
+                            </Tooltip>
                           )}
                           {action === 'bundle' && (
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setBundleForGw({
-                                gateway_id: g.id,
-                                gateway_name: g.name,
-                                sparkplug_id: g.sparkplug_id,
-                                status: g.status,
-                                confirmFirst: true
-                              })}
-                              title="Generate the bootstrap bundle; the appliance mints its own credential"
-                            >
-                              <IconDownload size={13} /> Bundle
-                            </button>
+                            <Tooltip text="Generate the bootstrap bundle; the appliance mints its own credential">
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setBundleForGw({
+                                  gateway_id: g.id,
+                                  gateway_name: g.name,
+                                  sparkplug_id: g.sparkplug_id,
+                                  status: g.status,
+                                  confirmFirst: true
+                                })}
+                              >
+                                <IconDownload size={13} /> Bundle
+                              </button>
+                            </Tooltip>
                           )}
                           {!action && <span className="cell-meta">Restore to issue</span>}
                         </td>
@@ -598,25 +592,24 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               />
               {/* Offered only while an identity is withdrawn; the count is what it would list. */}
               {withdrawnCount > 0 && (
-                <button
-                  type="button"
-                  className={`btn btn-sm ${showWithdrawn ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setShowWithdrawn(v => !v)}
-                  aria-pressed={showWithdrawn}
-                  title="Withdrawn identities are left off the list. The API refuses every token that names one, and Reinstate lets it back."
-                >
-                  <IconArchive size={13} /> Show withdrawn ({withdrawnCount})
-                </button>
+                <Tooltip text="Withdrawn identities are left off the list. The API refuses every token naming one; Reinstate lets it back.">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${showWithdrawn ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setShowWithdrawn(v => !v)}
+                    aria-pressed={showWithdrawn}
+                  >
+                    <IconArchive size={13} /> Show withdrawn ({withdrawnCount})
+                  </button>
+                </Tooltip>
               )}
               <div className="filter-bar-actions">
                 <ClearFilters count={identityFilterCount} onClear={clearIdentityFilters} />
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setCreating(true)}
-                  title="Create a machine identity for a process that uses this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
-                >
-                  <IconPlus size={13} /> New Machine Identity
-                </button>
+                <Tooltip text="For a process that uses this stack through the API. It reaches the database, never the broker, and holds no token until issued.">
+                  <button className="btn btn-primary btn-sm" onClick={() => setCreating(true)}>
+                    <IconPlus size={13} /> New Machine Identity
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )}
@@ -645,7 +638,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                     <SortHeader sort={identitySort} column="identity">Identity</SortHeader>
                     {/* Its own column, as the Schemas page treats a UUID: it is the value a JWT's
                         `sub` claim has to equal. */}
-                    <SortHeader sort={identitySort} column="principal_id">Principal ID</SortHeader>
+                    <SortHeader sort={identitySort} column="principal_id" title="The subject a token for this identity must name.">Principal ID</SortHeader>
                     <SortHeader sort={identitySort} column="holds">Holds</SortHeader>
                     <SortHeader sort={identitySort} column="reaches">Reaches</SortHeader>
                     {/* What is outstanding, not when it was last minted (tokenStatus()): a re-mint
@@ -670,32 +663,30 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                       <tr key={p.principal_id}>
                         {/* The purpose is a tooltip: three lines of background on a row whose other
                             columns are the answer. The dotted underline says there is something to
-                            hover. */}
+                            hover, and the name takes focus so a keyboard reaches it too. */}
                         <td>
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            <strong className="hint-underline" title={meta.purpose}>{meta.name}</strong>
+                            <Tooltip text={meta.purpose}>
+                              <strong className="hint-underline" tabIndex={meta.purpose ? 0 : undefined}>{meta.name}</strong>
+                            </Tooltip>
                             {/* Only a row with a name of its own can be renamed: the three pinned
                                 identities are named in the registry, and the RPC refuses them. */}
                             {p.name && (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-icon"
-                                onClick={() => setDescribing(p)}
-                                title={`Rename ${meta.name} or change its purpose`}
-                                aria-label={`Describe ${meta.name}`}
-                              >
-                                <IconPencil size={12} />
-                              </button>
+                              <Tooltip text={`Rename ${meta.name} or change its purpose`}>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-icon"
+                                  onClick={() => setDescribing(p)}
+                                  aria-label={`Describe ${meta.name}`}
+                                >
+                                  <IconPencil size={12} />
+                                </button>
+                              </Tooltip>
                             )}
                           </span>
                         </td>
                         <td>
-                          <CopyableId
-                            value={p.principal_id}
-                            label="principal id"
-                            title={`Copy ${p.principal_id} — the subject a token for this identity must name`}
-                            onNotify={showToast}
-                          />
+                          <CopyableId value={p.principal_id} label="principal id" onNotify={showToast} />
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
@@ -728,16 +719,17 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                             to pick one. A dash when nothing is recorded to list. */}
                         <td>
                           {status.rows.length > 0 ? (
-                            <button
-                              type="button"
-                              className="count-link"
-                              onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
-                              title={`${tokenStatusDetail(status)} Click to list them and revoke one.`}
-                            >
-                              {status.outstanding} active
-                            </button>
+                            <Tooltip text={`${tokenStatusDetail(status)} Click to list them and revoke one.`}>
+                              <button
+                                type="button"
+                                className="count-link"
+                                onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
+                              >
+                                {status.outstanding} active
+                              </button>
+                            </Tooltip>
                           ) : (
-                            <span title={tokenStatusDetail(status)}>—</span>
+                            <Tooltip text={tokenStatusDetail(status)}><span>—</span></Tooltip>
                           )}
                         </td>
                         {/* A button where a token is actually read, and the command everywhere
@@ -752,35 +744,38 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                                   record_service_token_issued() refuses it. Reinstating is the
                                   action available, so it is the one shown. */}
                               {revocation ? (
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => setRevokeIdentity({
-                                    principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
-                                  })}
-                                  title="This identity is withdrawn and cannot be issued a token. Reinstate it first — its previous tokens stay revoked."
-                                >
-                                  Reinstate
-                                </button>
+                                <Tooltip text="A withdrawn identity cannot be issued a token. Reinstate it first; its previous tokens stay revoked.">
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => setRevokeIdentity({
+                                      principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
+                                    })}
+                                  >
+                                    Reinstate
+                                  </button>
+                                </Tooltip>
                               ) : (
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => setMintFor({ principal: p, name: meta.name })}
-                                  title="Sign a token for this identity and show it once. Recorded in the Audit Trail before it is returned, and revocable against the API afterwards."
-                                >
-                                  <IconLock size={13} /> Issue Token
-                                </button>
+                                <Tooltip text="Sign a token and show it once. It is recorded in the Audit Trail first, and can be revoked later.">
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => setMintFor({ principal: p, name: meta.name })}
+                                  >
+                                    <IconLock size={13} /> Issue Token
+                                  </button>
+                                </Tooltip>
                               )}
                               {/* Withdrawing is offered wherever minting is. */}
                               {!revocation && (
-                                <button
-                                  className="btn btn-sm btn-danger btn-danger-reveal"
-                                  onClick={() => setRevokeIdentity({
-                                    principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
-                                  })}
-                                  title="Withdraw this identity. Every token naming it is refused by the API, including any issued afterwards — which is what makes this different from revoking tokens one at a time."
-                                >
-                                  Withdraw
-                                </button>
+                                <Tooltip text="Refuse every token naming this identity, including any issued later, unlike revoking tokens one at a time.">
+                                  <button
+                                    className="btn btn-sm btn-danger btn-danger-reveal"
+                                    onClick={() => setRevokeIdentity({
+                                      principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
+                                    })}
+                                  >
+                                    Withdraw
+                                  </button>
+                                </Tooltip>
                               )}
                               {/* Kept beside it: `mint-mcp-token.mjs` survives as break-glass for a
                                   stack whose only Administrator cannot sign in. */}
@@ -790,7 +785,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                                 display="Copy Command"
                                 variant="button"
                                 className="btn-sm"
-                                title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
+                                title="The break-glass path: it works when nobody can sign in to this page."
                                 onNotify={showToast}
                               />
                             </>
@@ -804,7 +799,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                               // The tooltip carries the distinction the label cannot: this is `npm
                               // run keys:rotate`, because the identity's key is in the release
                               // Secret and its Deployment reads it at start.
-                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this key is ${meta.secretKey || 'a key'} in the release Secret, read by ${meta.readBy || `the ${meta.deployment || 'worker'} Deployment at start`}. Rotating it, not minting a token, changes what the process presents. With --apply it patches the Secret${meta.readBy ? '' : ' and restarts the Deployment'}.`}
+                              title={`The key is ${meta.secretKey || 'a key'} in the release Secret, read by ${meta.readBy || `the ${meta.deployment || 'worker'} Deployment at start`}. Rotating it, not minting a token, changes what the process presents.`}
                               onNotify={showToast}
                             />
                           )}
@@ -848,12 +843,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                   {accountRows.map(c => (
                     <tr key={c.username}>
                       <td>
-                        <CopyableId
-                          value={c.username}
-                          label="MQTT username"
-                          title={`Copy ${c.username}`}
-                          onNotify={showToast}
-                        />
+                        <CopyableId value={c.username} label="MQTT username" onNotify={showToast} />
                         {c.noGateway && (
                           <Badge
                             size="sm"

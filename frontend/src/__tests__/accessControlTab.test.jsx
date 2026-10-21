@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
-import { getAllByTooltip, tooltipOf } from '../test/tooltips'
+import { getAllByTooltip, getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: {
@@ -215,7 +215,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned, enrolled])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText(/Generate/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Generate/, { ignore: '[role=tooltip]' })).toBeTruthy())
     expect(screen.getByRole('button', { name: /Bundle/ })).toBeTruthy()
     expect(screen.getAllByText('Issued', { selector: '.badge' }).length).toBe(1)
   })
@@ -419,7 +419,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText(/Undocumented machine identity/i)).toBeTruthy())
     // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
     // come from a migration or from an RLS suite that seeded a fixture and did not clean up.
-    expect(screen.getByTitle(/by a migration, or by a test suite/i)).toBeTruthy()
+    expect(getByTooltip(/by a migration, or by a test suite/i)).toBeTruthy()
     // No grant of its own, said in a column because it answers "what can this reach". The wording
     // must not claim every policy refuses it: the asset inventory reads are `TO authenticated USING
     // (true)`, so a signed token reaches them with no grant at all.
@@ -497,7 +497,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
-    expect(screen.getByTitle('Reads the hourly rollup.')).toBeTruthy()
+    expect(getByTooltip('Reads the hourly rollup.')).toBeTruthy()
     expect(screen.queryByText(/Undocumented machine identity/i)).toBeNull()
     expect(within(screen.getByText('Line 4 OEE report').closest('tr')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
   })
@@ -528,7 +528,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByRole('button', { name: /New Machine Identity/i })).toBeTruthy())
     // Which plane, on the button itself.
-    expect(screen.getByRole('button', { name: /New Machine Identity/i }).title).toMatch(/never the broker/)
+    expect(tooltipOf(screen.getByRole('button', { name: /New Machine Identity/i }))).toMatch(/never the broker/)
   })
 
   it('withholds New Machine Identity when the principal read was refused', async () => {
@@ -620,7 +620,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
-    const cell = screen.getByTitle(/not the same as none existing/i)
+    const cell = getByTooltip(/not the same as none existing/i)
     expect(cell.textContent).toBe('—')
     expect(cell.tagName).toBe('SPAN')
     expect(within(cell.closest('tr')).queryByText(/active$/)).toBeNull()
@@ -636,7 +636,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
 
     const link = await screen.findByRole('button', { name: '0 active' })
-    expect(link.title).toMatch(/The last token expired on/)
+    expect(tooltipOf(link)).toMatch(/The last token expired on/)
   })
 
   /**
@@ -881,7 +881,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('2 active')).toBeTruthy())
     // The earliest expiry is the one reported: the next date on which something stops working. Read
     // off the tooltip; the link carries the count and the tooltip the detail.
-    expect(screen.getByText('2 active').getAttribute('title')).toMatch(/in 12 days/i)
+    expect(tooltipOf(screen.getByText('2 active'))).toMatch(/in 12 days/i)
   })
 
   it('says a principal has no token on record rather than implying it has none at all', async () => {
@@ -891,7 +891,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
     // An empty cell is a fact about the record, not the credential, stated on the dash's tooltip.
     const row = screen.getByText('MCP read-only client').closest('tr')
-    expect(within(row).getByTitle(/not the same as none existing/i).textContent).toBe('—')
+    expect(getByTooltip(/not the same as none existing/i, row).textContent).toBe('—')
   })
 
   /**
@@ -905,8 +905,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     // On the row: the dash itself says an empty cell is a statement about the record.
     const dash = within(screen.getByText('MCP read-only client').closest('tr')).getByText('—')
-    expect(dash.getAttribute('title')).toMatch(/not the same as none existing/i)
-    expect(dash.getAttribute('title')).toMatch(/before this database exists/i)
+    expect(tooltipOf(dash)).toMatch(/not the same as none existing/i)
+    expect(tooltipOf(dash)).toMatch(/before this database exists/i)
   })
 
   /**
@@ -981,7 +981,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    expect(screen.getByTitle(/No token recorded for this identity/).textContent).toBe('—')
+    expect(getByTooltip(/No token recorded for this identity/).textContent).toBe('—')
   })
 
   it('surfaces a failed read rather than rendering an empty inventory', async () => {
