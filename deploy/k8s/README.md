@@ -1954,7 +1954,7 @@ Two alerts watch it:
 While archiving fails, unarchived WAL collects on the data volume up to `archiveQueueMax`. After that
 pgBackRest drops it, and a restore cannot cross the gap. The second alert is there to prevent that.
 
-**The Backups page shows it**, on a Historian line above the list. It gives the last backup with
+**The Backups page shows it**, on a Historian card above the list. It gives the last backup with
 its type and label, and when the next is due. It also gives the repository's size, and the last
 failure with pgBackRest's reason. **Take a backup** on that page also asks the sidecar for a
 differential. The sidecar takes it within a minute, and the platform backup does not wait for it. From a shell:
@@ -2064,7 +2064,7 @@ Two alerts watch it:
   archived for 10 minutes. After `archiveQueueMax` (4 GiB) of unarchived WAL, pgBackRest drops it,
   and a restore cannot cross the gap.
 
-**The Backups page shows it** on a Platform database line, beside the historian's: the last backup
+**The Backups page shows it** on a Platform database card, beside the historian's: the last backup
 with its type and label, when the next is due, the repository's size and the last failure with
 pgBackRest's reason. From a shell:
 

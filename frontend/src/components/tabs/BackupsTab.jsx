@@ -15,10 +15,10 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconChevronRight, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
-import { Stat } from '../common/Stat'
+import { IconAlertTriangle, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { cronIntervalSeconds } from '../../utils/cronInterval'
-import { formatBytes, formatDate, formatDateTime, formatDuration, formatRelative, NO_VALUE } from '../../utils/format'
+import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
 import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
 
@@ -219,6 +219,14 @@ export function BackupsTab({ showToast }) {
   const selected = runs.find(r => r.id === selectedId) || null
   const toggleRun = (id) => setSelectedId(current => current === id ? null : id)
 
+  // The Backup runs card opens the newest run that completed or failed. A filter that hides it is
+  // cleared, so the run is in the list and its panel opens on the next load.
+  const newestId = summary?.latestOutcome?.id || null
+  const openNewest = () => {
+    if (selectedId !== newestId && filter !== 'all' && !runs.some(r => r.id === newestId)) onFilter('all')
+    toggleRun(newestId)
+  }
+
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
@@ -258,28 +266,30 @@ export function BackupsTab({ showToast }) {
             </div>
           </div>
 
-          <BackupStats summary={summary} />
-
-          <div className="card-body stack backup-callouts">
-            {error && (
+          {/* Above the cards, which it says cannot be trusted while it shows. */}
+          {error && (
+            <div className="card-body backup-banner">
               <div className="callout callout-danger">
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div>{error}</div>
               </div>
-            )}
+            </div>
+          )}
 
-            <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} historianOn={historianOn} />
-            <CurrentState summary={summary} />
-            <BackupWarnings summary={summary} />
-            {PHYSICAL.filter(db => physical[db.key] !== undefined).map(db => (
-              <React.Fragment key={db.key}>
-                <PhysicalBackupState db={db} row={physical[db.key]} />
-                {physical[db.key] && (
-                  <PhysicalBackupRow db={db} row={physical[db.key]} selected={selectedId === db.key} onSelect={() => toggleRun(db.key)} />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+          <BackupSummary
+            summary={summary}
+            physical={physical}
+            selectedId={selectedId}
+            onOpenNewest={newestId ? openNewest : null}
+            onOpenDatabase={toggleRun}
+          />
+
+          {/* Full width, outside the row: it holds a Cancel button, and no card can hold a button. */}
+          {activeJob && (
+            <div className="card-body backup-banner">
+              <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} historianOn={historianOn} />
+            </div>
+          )}
 
           {loading ? (
             <LoadingState label="backups" />
@@ -409,8 +419,8 @@ function backupState(summary, now = Date.now()) {
   return null
 }
 
-function CurrentState({ summary }) {
-  const state = backupState(summary)
+/** The page's statement about now as a sentence, or null while backups are working. */
+function backupStateSentence(summary, state) {
   if (!state) return null
   const failed = state.kind === 'failed'
   const lastGood = state.lastGoodAt
@@ -418,30 +428,13 @@ function CurrentState({ summary }) {
     : failed
       ? 'No backup has succeeded yet.'
       : `None has succeeded since the first was queued ${formatDateTime(summary.firstRecordedAt)}.`
-
-  return (
-    <div
-      className={failed ? 'callout callout-danger' : 'callout callout-warning'}
-      role="status"
-      data-testid="backup-state"
-    >
-      {failed
-        ? <IconShieldAlert size={14} className="callout-icon" />
-        : <IconAlertTriangle size={14} className="callout-icon" />}
-      <div>
-        <strong>{failed ? 'The last backup failed' : `No backup has succeeded in ${BACKUP_STALE_HOURS} hours`}</strong>
-        {failed ? ', and none has succeeded since. ' : '. '}
-        {lastGood}
-        {failed
-          ? ' The failed run below gives the reason.'
-          : ' If nothing is queued or running, the backup service is probably not running.'}
-      </div>
-    </div>
-  )
+  return failed
+    ? `The last backup failed, and none has succeeded since. ${lastGood} The card opens the failed run, with its reason.`
+    : `No backup has succeeded in ${BACKUP_STALE_HOURS} hours. ${lastGood} If nothing is queued or running, the backup service is probably not running.`
 }
 
 /**
- * The two warnings the strip raises, each null when it does not apply. `slow`: the last completed
+ * The two warnings the cards raise, each null when it does not apply. `slow`: the last completed
  * run took more than half the shortest gap between scheduled runs, so backups are heading for
  * running into the next one. `space`: free space on the backup volume is below the newest backup
  * plus the margin, so the next backup may not fit. Neither applies without the service's report.
@@ -460,101 +453,110 @@ export function backupWarnings(summary) {
   return { slow, space }
 }
 
+/** Sentences into one tooltip, leaving out the ones that do not apply. */
+const sentences = (...parts) => parts.filter(Boolean).join(' ')
+
 /**
- * The trend above the list, from one summary: the last good backup as an age, successes in 30 days,
- * the last run's duration beside the median, the oldest restorable point, the space held, free
- * space on the backup volume and the newest copy off site. Not on a stack that has never run.
+ * The row of cards under the toolbar: the backup runs, each database's own backup while it has
+ * one, and the backup volume. Backup runs and Storage wait for a stack that has run the service.
  */
-function BackupStats({ summary }) {
-  if (!summary?.firstRecordedAt) return null
-  const { slow, space } = backupWarnings(summary)
-  const last = summary.lastSuccess
-  const service = summary.service
-  const offsite = summary.newestOffsite
-  const reported = service?.reportedAt ? ` As of ${formatDateTime(service.reportedAt)}.` : ''
+function BackupSummary({ summary, physical, selectedId, onOpenNewest, onOpenDatabase }) {
+  const ran = !!summary?.firstRecordedAt
+  const databases = PHYSICAL.filter(db => physical[db.key] !== undefined)
+  if (!ran && databases.length === 0) return null
   return (
-    <div className="card-body stat-strip" data-testid="backup-stats">
-      <Stat
-        label="Last good backup"
-        value={last ? formatRelative(last.started_at) : 'None yet'}
-        title={last ? `Taken ${formatDateTime(last.started_at)}.` : 'No backup has completed yet.'}
-      />
-      <Stat
-        label="Succeeded, 30 days"
-        value={summary.runs30d ? `${summary.succeeded30d} of ${summary.runs30d}` : NO_VALUE}
-        tone={summary.succeeded30d < summary.runs30d ? 'warning' : undefined}
-        title="Runs that ended in the last 30 days and completed, out of those that completed or failed. A cancelled run never ran and is not counted."
-        testId="stat-succeeded"
-      />
-      <Stat
-        label="Last run"
-        value={formatDuration(last?.duration_seconds)}
-        detail={summary.medianDurationSeconds != null ? `median ${formatDuration(summary.medianDurationSeconds)}` : undefined}
-        tone={slow ? 'warning' : undefined}
-        title={`How long the last completed backup took, beside the median of the last ${summary.medianRuns || 14} that completed.`}
-        testId="stat-duration"
-      />
-      <Stat
-        label="Oldest restorable"
-        value={summary.oldestTakenAt ? formatDate(summary.oldestTakenAt) : NO_VALUE}
-        title={summary.oldestTakenAt
-          ? `The oldest backup still on the volume, taken ${formatDateTime(summary.oldestTakenAt)}. Retention, pinning and the newest-three floor decide it.`
-          : 'No backup is on the volume.'}
-      />
-      <Stat
-        label="Space held"
-        value={formatBytes(summary.bytesHeld ?? 0)}
-        detail={`${summary.backupsHeld ?? 0} backup${summary.backupsHeld === 1 ? '' : 's'}`}
-        title="Every backup on the volume together."
-      />
-      <Stat
-        label="Free on the volume"
-        value={service?.volumeFreeBytes != null ? formatBytes(service.volumeFreeBytes) : NO_VALUE}
-        detail={service?.volumeTotalBytes != null ? `of ${formatBytes(service.volumeTotalBytes)}` : undefined}
-        tone={space ? 'warning' : undefined}
-        title={service
-          ? `Free space on the backup volume, as the backup service last reported it.${reported} On local-path this is the node's whole disk, shared with the databases.`
-          : 'The backup service has not reported its volume yet. It does at start, and after each backup and each prune.'}
-        testId="stat-free"
-      />
-      <Stat
-        label="Newest off site"
-        value={offsite ? formatRelative(offsite.taken_at) : 'None'}
-        title={offsite
-          ? `The newest backup with a copy off site, taken ${formatDateTime(offsite.taken_at)} and copied ${formatDateTime(offsite.copied_at)}.`
-          : summary.offsiteDestinationSet ? 'No backup has been copied to the destination yet.' : 'No off-site destination is set.'}
-      />
-    </div>
+    <SummaryCards label="Backup summary" testId="backup-summary">
+      {ran && <RunsCard summary={summary} selected={!!onOpenNewest && selectedId === summary.latestOutcome?.id} onOpen={onOpenNewest} />}
+      {databases.map(db => (
+        <PhysicalBackupCard key={db.key} db={db} row={physical[db.key]} selected={selectedId === db.key} onOpen={() => onOpenDatabase(db.key)} />
+      ))}
+      {ran && <StorageCard summary={summary} />}
+    </SummaryCards>
   )
 }
 
-/** The strip's warnings in words, below the current-state line. */
-function BackupWarnings({ summary }) {
-  const { slow, space } = backupWarnings(summary)
+/**
+ * The backup runs: the last good backup's age and successes in 30 days, and whether backups are
+ * working now. A run that failed and is not yet followed by a success, no success in
+ * BACKUP_STALE_HOURS, or a run that took more than half the gap between runs. Opens the newest run.
+ */
+function RunsCard({ summary, selected, onOpen }) {
+  const state = backupState(summary)
+  const { slow } = backupWarnings(summary)
+  const last = summary.lastSuccess
+  const failed = state?.kind === 'failed'
+  const median = summary.medianDurationSeconds
+  const medianRuns = summary.medianRuns || 14
+  const missed = summary.runs30d > 0 && summary.succeeded30d < summary.runs30d
+
+  const words = failed ? 'Last run failed'
+    : state ? `None in ${BACKUP_STALE_HOURS} hours`
+      : slow ? `Slow: ${formatDuration(slow.duration)}${median != null ? `, median ${formatDuration(median)}` : ''}`
+        : last ? 'Up to date' : 'Waiting for the first backup'
+
   return (
-    <>
-      {slow && (
-        <div className="callout callout-warning" role="status" data-testid="backup-slow">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>
-            <strong>The last backup took {formatDuration(slow.duration)}</strong>, more than half
-            the {formatDuration(slow.interval)} between scheduled backups. If backups keep growing,
-            one will soon run into the next.
-          </div>
-        </div>
+    <SummaryCard
+      title="Backup runs"
+      testId="card-runs"
+      value={last ? formatRelative(last.started_at) : 'No good backup yet'}
+      unit={last ? 'last good backup' : undefined}
+      detail={summary.runs30d ? `${summary.succeeded30d} of ${summary.runs30d} succeeded in 30 days` : 'No runs in 30 days'}
+      // Any failure in the window is marked, unless the card already says the last one failed.
+      flagged={missed && !failed}
+      state={words}
+      tone={failed ? 'danger' : state || slow ? 'warning' : undefined}
+      tip={sentences(
+        backupStateSentence(summary, state),
+        slow && `The last backup took ${formatDuration(slow.duration)}, more than half the ${formatDuration(slow.interval)} between scheduled backups. If backups keep growing, one will soon run into the next.`,
+        !state && (last ? `The last good backup was taken ${formatDateTime(last.started_at)}.` : 'No backup has completed yet.'),
+        summary.runs30d
+          ? `${summary.succeeded30d} of the ${summary.runs30d} runs that ended in the last 30 days completed. A cancelled run is not counted.`
+          : 'No run has ended in the last 30 days.',
+        last?.duration_seconds != null && !slow && `The last good backup took ${formatDuration(last.duration_seconds)}.`,
+        median != null && `The median of the last ${medianRuns} is ${formatDuration(median)}.`,
+        onOpen && !failed && 'The card opens the newest run.'
       )}
-      {space && (
-        <div className="callout callout-warning" role="status" data-testid="backup-space">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>
-            <strong>The next backup may not fit.</strong> The backup volume has{' '}
-            {formatBytes(space.free)} free, and the last backup was {formatBytes(space.size)}.
-            Release pinned backups you no longer need, shorten the retention window, or give the
-            volume more space.
-          </div>
-        </div>
+      selected={selected}
+      onOpen={onOpen || undefined}
+    />
+  )
+}
+
+/**
+ * The backup volume: free space (of the total), the space every backup holds and the newest copy
+ * off site, with the oldest restorable backup in the tooltip. Warns when the next may not fit.
+ * Opens nothing.
+ */
+function StorageCard({ summary }) {
+  const { space } = backupWarnings(summary)
+  const service = summary.service
+  const offsite = summary.newestOffsite
+  const held = summary.backupsHeld ?? 0
+  const reported = service?.reportedAt ? ` As of ${formatDateTime(service.reportedAt)}.` : ''
+
+  return (
+    <SummaryCard
+      title="Storage"
+      testId="card-storage"
+      value={service?.volumeFreeBytes != null ? formatBytes(service.volumeFreeBytes) : NO_VALUE}
+      unit={service?.volumeTotalBytes != null ? `free of ${formatBytes(service.volumeTotalBytes)}` : 'free'}
+      detail={`${formatBytes(summary.bytesHeld ?? 0)} in ${plural(held, 'backup')} · ${offsite ? `newest off site ${formatRelative(offsite.taken_at)}` : 'none off site'}`}
+      state={space ? 'May not fit' : service ? 'Room for the next backup' : 'Not reported yet'}
+      tone={space ? 'warning' : undefined}
+      tip={sentences(
+        space && `The next backup may not fit. The backup volume has ${formatBytes(space.free)} free, and the last backup was ${formatBytes(space.size)}. Release pinned backups you no longer need, shorten the retention window, or give the volume more space.`,
+        service
+          ? `Free space on the backup volume, as the backup service last reported it.${reported} On local-path this is the node's whole disk, shared with the databases.`
+          : 'The backup service has not reported its volume yet. It does at start, and after each backup and each prune.',
+        `Every backup on the volume together is ${formatBytes(summary.bytesHeld ?? 0)}, in ${plural(held, 'backup')}.`,
+        summary.oldestTakenAt
+          ? `The oldest restorable backup was taken ${formatDateTime(summary.oldestTakenAt)}. Retention, pinning and the newest-three floor decide it.`
+          : 'No backup is on the volume.',
+        offsite
+          ? `The newest backup with a copy off site was taken ${formatDateTime(offsite.taken_at)} and copied ${formatDateTime(offsite.copied_at)}.`
+          : summary.offsiteDestinationSet ? 'No backup has been copied to the destination yet.' : 'No off-site destination is set.'
       )}
-    </>
+    />
   )
 }
 
@@ -565,7 +567,7 @@ const KIND_WORDS = { full: 'full', diff: 'differential', incr: 'incremental' }
 const kindWord = (kind) => KIND_WORDS[kind] || kind
 
 /**
- * One database's own backup in one statement about now, or null: the platform line's rule on the
+ * One database's own backup in one statement about now, or null: the Backup runs card's rule on the
  * clock its Backup Stale rule reads. A failure (the read returns one only while it is newer than the
  * last success) stands until a backup succeeds; otherwise stale when the last success, or before the
  * first the first recorded run, is older than BACKUP_STALE_HOURS. Null in is unreachable.
@@ -601,77 +603,68 @@ export function historianRequest(historian, now = Date.now()) {
     : { inFlight: false, tone: 'danger', label: 'Requested: failed', title: `Failed ${formatDateTime(historian.request_finished_at)}. The historian's panel gives pgBackRest's reason.` }
 }
 
-/** A database's line above the list: only when its backup is not working, or cannot be read. */
-function PhysicalBackupState({ db, row }) {
-  const state = physicalBackupState(row)
-  if (!state) return null
-  const testId = `${db.key}-state`
-  if (state.kind === 'unreachable') {
+/**
+ * A database's own backup as a card: the last success's age and type, when the next is due, the
+ * repository's size and, for the historian, a request from this page. Its state is failed (with the
+ * start of pgBackRest's reason), stale, or cannot be read. Opens its panel, which has the whole of
+ * any failure; one that cannot be read has no panel, so opens nothing.
+ */
+function PhysicalBackupCard({ db, row: h, selected, onOpen }) {
+  const state = physicalBackupState(h)
+  const testId = `card-${db.key}`
+  if (state?.kind === 'unreachable') {
     return (
-      <div className="callout callout-warning" role="status" data-testid={testId}>
-        <IconAlertTriangle size={14} className="callout-icon" />
-        <div>
-          <strong>{capitalised(db)} cannot be read</strong>, so this page cannot say whether its own backup is
-          working. {db.unreachable}
-        </div>
-      </div>
+      <SummaryCard
+        title={db.name}
+        testId={testId}
+        value="Not known"
+        detail={db.unreachable}
+        state="Cannot be read"
+        tone="warning"
+        tip={`${capitalised(db)} cannot be read, so this page cannot say whether its own backup is working. ${db.unreachable}`}
+      />
     )
   }
-  const failed = state.kind === 'failed'
-  const lastGood = row.last_success_at
-    ? `The last good one finished ${formatDateTime(row.last_success_at)}.`
-    : failed
-      ? 'None has succeeded yet.'
-      : `None has succeeded since backup was switched on ${formatDateTime(row.first_recorded_at)}.`
-  const reason = row.last_failure_detail || 'pgBackRest recorded no reason.'
-  return (
-    <div className={failed ? 'callout callout-danger' : 'callout callout-warning'} role="status" data-testid={testId}>
-      {failed
-        ? <IconShieldAlert size={14} className="callout-icon" />
-        : <IconAlertTriangle size={14} className="callout-icon" />}
-      <div className="backup-historian-state">
-        <strong>{failed ? `${capitalised(db)}'s last backup failed` : `No ${db.noun.replace(/^the /, '')} backup has succeeded in ${BACKUP_STALE_HOURS} hours`}</strong>
-        {failed ? ` ${formatRelative(row.last_failure_at)}, and none has succeeded since. ` : '. '}
-        {lastGood}
-        {failed
-          ? <div className="truncate" title={reason}>{reason}</div>
-          : db.staleHint}
-      </div>
-    </div>
-  )
-}
 
-/**
- * A database's own backup as one line: the last success with its type and label, when the next is
- * due, the repository's size and, for the historian, a request from this page. Opens its panel,
- * which has the whole of any failure.
- */
-function PhysicalBackupRow({ db, row: h, selected, onSelect }) {
   const next = nextHistorianBackup(h)
   const request = historianRequest(h)
+  const failed = state?.kind === 'failed'
+  const reason = h.last_failure_detail || 'pgBackRest recorded no reason.'
+  const lastGood = h.last_success_at
+    ? `The last good one finished ${formatDateTime(h.last_success_at)}, ${kindWord(h.last_success_kind)}.`
+    : failed
+      ? 'None has succeeded yet.'
+      : h.first_recorded_at ? `None has succeeded since backup was switched on ${formatDateTime(h.first_recorded_at)}.` : 'None has run yet.'
+  // A daily schedule's next run is within a day, so the card gives its time; the tooltip the date.
+  const nextShort = !next ? 'Next: not known yet' : next.due ? 'Next: due now' : `Next ${formatClockTime(next.at)}, ${kindWord(next.kind)}`
+  const nextLong = !next ? 'The next is not known until the backup sidecar starts.'
+    : next.due ? 'The next is due now.' : `The next is ${formatDateTime(next.at)}, ${kindWord(next.kind)}.`
+
   return (
-    <button
-      type="button"
-      className={`backup-historian${selected ? ' backup-historian-selected' : ''}`}
-      data-testid={`${db.key}-row`}
-      aria-pressed={selected}
-      onClick={onSelect}
-      title={`Open ${db.noun}'s own backup: its last run, its schedule and the whole of any failure`}
-    >
-      <span className="backup-historian-name"><IconDatabase size={14} /> {db.name}</span>
-      <span>
-        {h.last_success_at
-          ? <>Last backup {formatRelative(h.last_success_at)}, {kindWord(h.last_success_kind)}</>
-          : 'No backup yet'}
-        {h.last_success_label && <span className="mono cell-meta"> {h.last_success_label}</span>}
-      </span>
-      <span className="cell-meta">
-        {!next ? 'Next: not known yet' : next.due ? 'Next: due now' : `Next ${formatDateTime(next.at)}, ${kindWord(next.kind)}`}
-      </span>
-      {h.repo_bytes != null && <span className="cell-meta">{formatBytes(h.repo_bytes)} in the repository</span>}
-      {request && <Badge tone={request.tone} size="sm" title={request.title}>{request.label}</Badge>}
-      <span className="backup-historian-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
-    </button>
+    <SummaryCard
+      title={db.name}
+      testId={testId}
+      badge={request && <Badge tone={request.tone} size="sm">{request.label}</Badge>}
+      value={h.last_success_at ? formatRelative(h.last_success_at) : 'No backup yet'}
+      unit={h.last_success_at ? `last backup, ${kindWord(h.last_success_kind)}` : undefined}
+      detail={[nextShort, h.repo_bytes != null && `${formatBytes(h.repo_bytes)} held`].filter(Boolean).join(' · ')}
+      state={failed ? `Failed ${formatRelative(h.last_failure_at)}: ${reason}`
+        : state ? `None in ${BACKUP_STALE_HOURS} hours`
+          : h.last_success_at ? 'Up to date' : 'Waiting for its first backup'}
+      tone={failed ? 'danger' : state ? 'warning' : undefined}
+      tip={sentences(
+        failed && `${capitalised(db)}'s last backup failed ${formatRelative(h.last_failure_at)}, and none has succeeded since.`,
+        state && !failed && `No ${db.noun.replace(/^the /, '')} backup has succeeded in ${BACKUP_STALE_HOURS} hours.`,
+        lastGood,
+        failed ? reason : state ? db.staleHint.trim() : null,
+        h.last_success_label && `Its label is ${h.last_success_label}.`,
+        nextLong,
+        h.repo_bytes != null && `The repository holds ${formatBytes(h.repo_bytes)}: every backup it keeps, WAL excluded.`,
+        request && `${request.label}. ${request.title}`
+      )}
+      selected={selected}
+      onOpen={onOpen}
+    />
   )
 }
 

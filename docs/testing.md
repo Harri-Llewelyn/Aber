@@ -437,7 +437,7 @@ python supabase/migrations/test_user_settings.py
 # copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
 # newest backup and the last destination change.
 python supabase/migrations/test_backup_health.py
-# The Backups page's stat strip (0179). backup_summary() is an Administrator's and refuses anybody
+# The Backups page's summary cards (0179). backup_summary() is an Administrator's and refuses anybody
 # else with the code PostgREST answers 403. Successes count the runs that ended in the last 30 days,
 # not a cancelled one; the median is of the last 14 completed runs; the newest copy off site is at
 # the current destination once one is set. The service's report goes through a backup_* gate no
