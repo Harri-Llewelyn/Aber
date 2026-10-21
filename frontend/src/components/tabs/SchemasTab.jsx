@@ -19,6 +19,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ActionButton } from '../common/ActionButton'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -291,20 +292,21 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ariaLabel="Search the schema registry"
             />
 
-            <select
-              className="form-control control-md"
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              aria-label="Filter schemas by lifecycle state"
-              title="Filter by lifecycle state. Current hides superseded versions."
-            >
-              {/* Counts in the labels: they answer "is there any history at all?" without selecting. */}
-              <option value="current">Current ({currentCount})</option>
-              <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
-              <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
-              <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
-              <option value="all">All versions ({schemas.length})</option>
-            </select>
+            <Tooltip text="Current hides superseded versions.">
+              <select
+                className="form-control control-md"
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                aria-label="Filter schemas by lifecycle state"
+              >
+                {/* Counts in the labels: they answer "is there any history at all?" without selecting. */}
+                <option value="current">Current ({currentCount})</option>
+                <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
+                <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
+                <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
+                <option value="all">All versions ({schemas.length})</option>
+              </select>
+            </Tooltip>
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
@@ -337,11 +339,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             <table>
               <thead>
                 <tr>
-                  <SortHeader sort={sort} column="name" title="Schema descriptive name">Schema Name</SortHeader>
+                  <SortHeader sort={sort} column="name">Schema Name</SortHeader>
                   <SortHeader sort={sort} column="version" title="Lineage position and lifecycle state. Only a draft is editable.">Version</SortHeader>
                   <SortHeader sort={sort} column="change" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
-                  <SortHeader sort={sort} column="uuid" title="Schema unique UUID">Schema UUID</SortHeader>
-                  <SortHeader sort={sort} column="devices" title="Devices provisioned with this schema">Devices</SortHeader>
+                  <SortHeader sort={sort} column="uuid">Schema UUID</SortHeader>
+                  <SortHeader sort={sort} column="devices">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -362,27 +364,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                         e.preventDefault()
                         toggle()
                       }}
-                      title="Click to inspect this schema in the details panel"
                     >
                       <td>
                         <strong>{sch.schema_name}</strong>
-                        {/* A published version is read-only, and the lock says so on the row. */}
+                        {/* A published version is read-only, and the lock says so on the row; the
+                            Version header says why. */}
                         {!isSchemaEditable(sch) && (
-                          <span
-                            className="cell-meta badge-follow"
-                            title={`Read-only — this version is ${statusLabel(status)}`}
-                          >
+                          <span className="cell-meta badge-follow" role="img" aria-label="Read-only">
                             <IconLock size={11} />
                           </span>
                         )}
                       </td>
                       <td>
-                        <span
-                          className={`badge badge-sm ${statusBadgeClass(status)}`}
-                          title={isSchemaEditable(sch)
-                            ? 'Draft — editable until published'
-                            : `${statusLabel(status)} and immutable`}
-                        >
+                        <span className={`badge badge-sm ${statusBadgeClass(status)}`}>
                           {schemaVersionLabel(sch)}
                         </span>
                       </td>

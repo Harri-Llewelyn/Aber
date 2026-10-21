@@ -90,7 +90,7 @@ describe('Account', () => {
     renderProfile({ email: null, passwordBlocked: 'Machine identities have no password to change.' })
     const button = within(row('Password')).getByRole('button', { name: /change password/i })
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', 'Machine identities have no password to change.')
+    expect(button).toHaveAccessibleDescription('Machine identities have no password to change.')
   })
 })
 

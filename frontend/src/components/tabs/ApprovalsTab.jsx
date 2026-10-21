@@ -14,6 +14,7 @@ import { severityRank } from '../../utils/tableSort'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -117,7 +118,7 @@ export function locationNameMap(cells, areas) {
  */
 function ValueCell({ value, names }) {
   const named = typeof value === 'string' ? names?.get(value) : undefined
-  if (named) return <span title={value}>{named}</span>
+  if (named) return <Tooltip text={value}><span>{named}</span></Tooltip>
   return <>{displayValue(value)}</>
 }
 
@@ -161,15 +162,15 @@ function ProposalStatus({ status }) {
 export function ActorLabel({ id, email, machineName, currentUserId }) {
   if (!id) return <span className="context-field-empty">—</span>
   if (id === currentUserId) return <strong>you</strong>
-  if (email) return <span title={id}>{email}</span>
+  if (email) return <Tooltip text={id}><span>{email}</span></Tooltip>
   if (machineName) {
     return (
-      <span title={`A machine identity, ${id}`}>
-        {machineName} <span className="badge badge-neutral">machine</span>
-      </span>
+      <Tooltip text={`A machine identity, ${id}`}>
+        <span>{machineName} <span className="badge badge-neutral">machine</span></span>
+      </Tooltip>
     )
   }
-  return <span className="mono" title={id}>{String(id).slice(0, 8)}</span>
+  return <Tooltip text={id}><span className="mono">{String(id).slice(0, 8)}</span></Tooltip>
 }
 
 /**
@@ -322,9 +323,9 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
               facts. */}
           <tr>
             <SortHeader sort={sort} column="subject" title="The device, area, cell or gateway this proposal is about">Subject</SortHeader>
-            <SortHeader sort={sort} column="change" title="Which kind of change this is">Change</SortHeader>
-            <SortHeader sort={sort} column="fields" title="The fields this proposal would change">Field(s) changed</SortHeader>
-            <SortHeader sort={sort} column="status" title="Its current state">Status</SortHeader>
+            <SortHeader sort={sort} column="change">Change</SortHeader>
+            <SortHeader sort={sort} column="fields">Field(s) changed</SortHeader>
+            <SortHeader sort={sort} column="status">Status</SortHeader>
             <SortHeader sort={sort} column="when" title="When it was decided, or when it was filed while it is still open">When</SortHeader>
           </tr>
         </thead>
@@ -345,7 +346,6 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
                   e.preventDefault()
                   onSelect(p.id)
                 }}
-                title="Click to inspect this proposal in the details panel"
               >
                 <td>
                   <strong>{p.target_label}</strong>
@@ -359,9 +359,9 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
                 <td><Badge size="sm">{kind?.label || p.entity_type}</Badge></td>
                 <td className="cell-meta">{summary}</td>
                 <td><ProposalStatus status={p.status} /></td>
-                <td className="cell-meta" title={formatDateTime(p.decided_at || p.proposed_at)}>
-                  {formatRelative(p.decided_at || p.proposed_at)}
-                </td>
+                <Tooltip text={formatDateTime(p.decided_at || p.proposed_at)}>
+                  <td className="cell-meta">{formatRelative(p.decided_at || p.proposed_at)}</td>
+                </Tooltip>
               </tr>
             )
           })}
@@ -404,7 +404,6 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
         className="form-control control-md"
         value={kind}
         onChange={e => onKind(e.target.value)}
-        title="Filter by the kind of change"
         aria-label={`Filter ${label} by kind`}
       >
         <option value="all">All kinds ({rows.length})</option>
