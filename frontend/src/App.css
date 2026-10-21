@@ -2883,13 +2883,14 @@ main:focus { outline: none; }
   user-select: none;
 }
 
-/* On the Site Map the plan sits straight on its card, with no frame, and the same sum is taken for
-   the pin the grid draws (--pin-size): half the disc + 3px across, half the disc + 13.6px (rounded
-   to 14px) above and below. That is 23 by 34px at 40px, 21 by 32px at 36px, 17 by 28px at 28px.
-   A plan's own sheet, drawn in its SVG, stays. */
+/* On the Site Map the plan sits straight on its card, with no frame, and the sum is taken for the
+   pin the grid draws (--pin-size) and its widest ring: the focus outline, 2px at a 2px offset, 4px
+   past the disc, as far as the alert ring reaches. Half the disc + 4px across, + 14.6px (rounded to
+   15px) above and below: 24 by 35px at 40px, 22 by 33px at 36px, 18 by 29px at 28px. A plan's own
+   sheet, drawn in its SVG, stays. */
 .area-card .area-plan {
-  --plan-inset-x: calc(var(--pin-size, 40px) / 2 + 3px);
-  --plan-inset-y: calc(var(--pin-size, 40px) / 2 + 14px);
+  --plan-inset-x: calc(var(--pin-size, 40px) / 2 + 4px);
+  --plan-inset-y: calc(var(--pin-size, 40px) / 2 + 15px);
   background: none;
   border: 0;
   border-radius: 0;

@@ -54,7 +54,15 @@ describe('An area card on the Site Map', () => {
     const gap = parseFloat(prop('.area-plan-pin', 'gap'))
     const labelHeight = parseFloat(prop('.area-plan-pin-label', 'font-size')) * Number(prop('.area-plan-pin-label', 'line-height'))
       + 2 * sides(prop('.area-plan-pin-label', 'padding')).top + 2 * parseFloat(prop('.area-plan-pin-label', 'border'))
-    const ring = Number(prop('.area-plan-pin-selected .area-plan-pin-disc', 'box-shadow').match(/^0 0 0 (\d+)px/)[1])
+    // The widest ring a pin draws past its disc: the selection ring, the focus outline (its width
+    // plus its offset) or the alert ring at rest (its negative inset).
+    const ring = Math.max(
+      Number(prop('.area-plan-pin-selected .area-plan-pin-disc', 'box-shadow').match(/^0 0 0 (\d+)px/)[1]),
+      parseFloat(prop('.area-plan-pin:focus-visible .area-plan-pin-disc', 'outline'))
+        + parseFloat(prop('.area-plan-pin:focus-visible .area-plan-pin-disc', 'outline-offset')),
+      -parseFloat(prop('.area-plan-pin-alert .area-plan-pin-disc::after', 'inset'))
+    )
+    expect(ring).toBe(4)
     const insetX = halfPinPlus(prop('.area-card .area-plan', '--plan-inset-x'))
     const insetY = halfPinPlus(prop('.area-card .area-plan', '--plan-inset-y'))
     for (const disc of PIN_SIZES) {
@@ -67,8 +75,8 @@ describe('An area card on the Site Map', () => {
       expect(insetY(disc), `${disc}px pin down`).toBeGreaterThanOrEqual(down)
       expect(insetY(disc), `${disc}px pin down`).toBeLessThan(down + 1)
     }
-    // At three columns: 17px across and 28px down.
-    expect([insetX(28), insetY(28)]).toEqual([17, 28])
+    // At three columns: 18px across and 29px down.
+    expect([insetX(28), insetY(28)]).toEqual([18, 29])
   })
 
   it('adds no padding of the card\'s own at the sides or the bottom of the plan', () => {
