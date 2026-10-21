@@ -97,7 +97,7 @@ describe('remote enrolment readiness', () => {
     await show(NOT_READY)
     await banner()
     openNew()
-    fireEvent.change(screen.getByTitle('Friendly label for this gateway'), { target: { value: 'Bench' } })
+    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
     fireEvent.change(typeSelect(), { target: { value: 'host' } })
     expect(screen.queryByText(/cannot issue an install command or bundle yet/)).toBeNull()
     expect(save().disabled).toBe(false)

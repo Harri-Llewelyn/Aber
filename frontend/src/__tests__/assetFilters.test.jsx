@@ -298,7 +298,7 @@ describe('GatewaysTab filters', () => {
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
     // Both rows have status: 'ONLINE' stored; only one is live.
-    fireEvent.change(screen.getByTitle(/Stale is a heartbeat older than 90 seconds/i), { target: { value: 'STALE' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'STALE' } })
     await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
@@ -311,7 +311,7 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'remote' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'remote' } })
     await waitFor(() => expect(screen.queryByText('Sim_Gateway')).toBeNull())
     expect(screen.getByText('Line_A_Gateway')).toBeTruthy()
   })
@@ -328,7 +328,7 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Host_Connector')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'simulated' } })
     await waitFor(() => expect(screen.queryByText('Host_Connector')).toBeNull())
     expect(screen.getByText('Sim_Fleet')).toBeTruthy()
   })
@@ -338,7 +338,7 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle(/gateways currently reporting devices held in quarantine/i))
+    fireEvent.click(screen.getByRole('button', { name: /Has quarantined devices/ }))
     await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
