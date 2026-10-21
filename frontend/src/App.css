@@ -1962,16 +1962,20 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Buttons ===== */
+/* One height whatever the element and the variant. The line-height is set because a <button> takes
+   the browser's `normal` and an <a> would inherit the page's 1.6. The border is transparent rather
+   than none, so a variant without one (primary, warning) is as tall as one with (ghost, danger). */
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 9px 18px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-family: var(--font-display);
   font-size: 14px;
   font-weight: 500;
+  line-height: 1.25;
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
@@ -4379,12 +4383,10 @@ a.chip { text-decoration: none; }
 
 /* Archive and its kin. Separated from the reads above it rather than tinted red on arrival: this
    is a list someone scans, and a permanently red row teaches people to ignore red. The colour
-   arrives on hover, when the pointer is already on it. */
+   arrives on hover, when the pointer is already on it. The separation is a gap above the button,
+   not padding inside it, so the button is as tall as the others. */
 .context-action-danger {
-  margin-top: 4px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  margin-top: 6px;
 }
 
 .context-action-danger:hover:not(:disabled) {
