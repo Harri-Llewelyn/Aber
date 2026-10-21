@@ -1347,15 +1347,18 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 }
 
 // -------------------------------------------------------------------------------------------------
-// 111. A reference page whose operator steps moved into help/site/ and the help page they moved to
-// link to each other in their opening lines, before the first `## `: the design stayed where the
-// code cites it, and a reader of either half has to find the other. A page that moved whole leaves
-// a stub at its old path (`back: false`): the stub points on, and the help page owes it nothing.
+// 111. A reference page whose operator steps moved into help/site/, or that a page there sums up,
+// and that help page link to each other in their opening lines, before the first `## `: the design
+// stayed where the code cites it, and a reader of either half has to find the other. A page that
+// moved whole leaves a stub at its old path (`back: false`): the stub points on, and the help page
+// owes it nothing.
 // -------------------------------------------------------------------------------------------------
 const OPERATOR_PAIRS = [
   { design: 'docs/remote-gateways.md', help: 'help/site/remote-gateways.md' },
   { design: 'docs/upgrades.md', help: 'help/site/upgrading.md', back: false },
   { design: 'deploy/k8s/README.md', help: 'help/site/running-the-server.md' },
+  // A plain summary for administrators, not moved steps (`moved: false`): 112 has nothing to compare.
+  { design: 'docs/security-model.md', help: 'help/site/security.md', moved: false },
 ];
 {
   const opening = (file) => read(file).split(/\n## /)[0];
@@ -1400,7 +1403,8 @@ const OPERATOR_PAIRS = [
   };
   const wrong = [];
   let given = 0;
-  for (const { design, help } of OPERATOR_PAIRS.filter((p) => existsSync(join(REPO, p.design)) && existsSync(join(REPO, p.help)))) {
+  const moved = OPERATOR_PAIRS.filter((p) => p.moved !== false && existsSync(join(REPO, p.design)) && existsSync(join(REPO, p.help)));
+  for (const { design, help } of moved) {
     const own = steps(help);
     const reference = new Set(steps(design));
     if (!own.length) wrong.push(`${help} gives no step in a code block or span; the extraction no longer matches`);
@@ -1411,7 +1415,7 @@ const OPERATOR_PAIRS = [
     fail('an operator step in help/site/ is also written out in the reference page it moved from, so the two can drift:\n' +
       wrong.map((w) => `        ${w}`).join('\n') + '\n        Keep the step in the help page, and link to it from the reference page.');
   } else {
-    pass(`the ${given} code block(s) and command span(s) in ${OPERATOR_PAIRS.length} operator page(s) of help/site/ appear in none of the reference pages they moved from`);
+    pass(`the ${given} code block(s) and command span(s) in ${moved.length} operator page(s) of help/site/ appear in none of the reference pages they moved from`);
   }
 }
 
