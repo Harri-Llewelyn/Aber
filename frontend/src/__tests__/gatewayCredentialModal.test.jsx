@@ -57,9 +57,9 @@ const confirmAndMint = async () => {
 
 describe('GatewayCredentialModal', () => {
   /**
-   * The confirmation is unconditional, unlike GatewayBundleModal, which skips its confirm step
-   * straight after creating a gateway. Minting always replaces, since the broker holds one password
-   * per username, so there is no safe moment.
+   * The confirmation is the default. Minting replaces, since the broker holds one password per
+   * username; only a Third-party gateway just registered, which has none yet, skips it
+   * (thirdPartyCredentialModal.test.jsx), as GatewayBundleModal does straight after creating one.
    */
   it('opens on the confirmation step and mints nothing until the name matches', () => {
     renderModal()

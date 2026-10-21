@@ -15,7 +15,7 @@ import {
 import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplugId'
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
-  gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
+  gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
 } from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
@@ -31,6 +31,7 @@ import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { RepoLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
@@ -90,7 +91,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose setup dialog is open, held as the object: the dialog stays open across a poll.
   const [bundleForGw, setBundleForGw] = useState(null)
-  // The Host and Simulated counterpart to bundleForGw: only this one puts a password on screen.
+  // The Host, Simulated and Third-party counterpart to bundleForGw: only this one puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [shownCredentialForGw, setShownCredentialForGw] = useState(null)
   // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until answered
@@ -182,6 +183,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       setShowForm(false); load()
       const createdName = created.name || form.gateway_name
       const createdTo = gatewayUrl(created.id || created.gateway_id)
+
+      // A Third-party edge node can publish only once it holds a credential, so the credential
+      // dialog opens at once and issues without confirming: there is nothing yet to replace.
+      if (form.deployment === 'third_party') {
+        setCredentialForGw({
+          gateway_id: created.id || created.gateway_id,
+          gateway_name: created.name || form.gateway_name,
+          sparkplug_id: created.sparkplug_id,
+          sparkplug_group: created.sparkplug_group,
+          deployment: 'third_party',
+          confirmFirst: false
+        })
+      }
 
       // A Remote gateway needs setup on a machine before it can publish, so the setup dialog opens at
       // once and issues without confirming: the row is seconds old, so there is nothing to replace.
@@ -348,7 +362,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // else Edit. The Playback gateway cannot be edited, so its credential takes Edit's place.
   const selectedPending = !!selected && isGatewayPending(selected)
   const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && selectedPending && canManage
-  const offersCredential = !!selected && !selected.is_archived && selected.deployment === 'host' && canManage
+  const offersCredential = !!selected && !selected.is_archived && credentialIssuedHere(selected) && canManage
   // Administrator only, as show_gateway_credential() is; never the Playback gateway, which keeps no copy.
   const offersShownCredential = offersCredential && !selected.is_shadow && userRole === 'Administrator'
   const primaryAction = !selected ? null
@@ -396,7 +410,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
             the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
-            in the chart&rsquo;s values and restart the functions service (docs/remote-gateways.md,
+            in the chart&rsquo;s values and restart the functions service (<RepoLink path="docs/remote-gateways.md" anchor="7-the-two-addresses-that-must-be-right">docs/remote-gateways.md</RepoLink>,
             section 7). Host and Simulated gateways are unaffected.
           </span>
         </div>
@@ -438,7 +452,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         </select>
 
         {/* The same value the Type column prints, through the same helper. */}
-        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), Simulated (host-run, readings generated), or Playback (republishes recorded captures)">
+        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (a connector inside this stack), Simulated (host-run, readings generated), or Playback (republishes recorded captures)">
           <option value="">Any type</option>
           {LISTED_TYPES.map(t => (
             <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
@@ -483,7 +497,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                  <tr>
                    <SortHeader sort={sort} column="name" title="Human-readable gateway name">Gateway Name</SortHeader>
                    {!compact && <SortHeader sort={sort} column="uuid" title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</SortHeader>}
-                   <SortHeader sort={sort} column="type" title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</SortHeader>
+                   <SortHeader sort={sort} column="type" title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</SortHeader>
                    <SortHeader sort={sort} column="location" title="Where this gateway serves: a cell, a whole area, or the whole site">Location</SortHeader>
                    <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
                    <SortHeader sort={sort} column="last_heartbeat" title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</SortHeader>
@@ -689,7 +703,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {remoteWithheld
               ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. Save is withheld for a Remote gateway until it can; Host and Simulated gateways are unaffected.</>
               : !editing && formType === GATEWAY_TYPES.REMOTE
-                && ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'}
+                ? ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'
+                : !editing && formType === GATEWAY_TYPES.THIRD_PARTY
+                && ' On save you will be given its broker credential and every setting its edge node needs.'}
           </div>
         </div>
         {/* One exclusive scope, then the cell or area it calls for. A simulated gateway reads as In a
@@ -865,10 +881,20 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          // What a Third-party gateway does not get, said rather than left as missing rows. No claim
+          // about the root it holds: Aber cannot tell.
+          ...(gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY ? [{
+            label: 'Not Provided',
+            value: 'No setup bundle, no forge repository, no flow drift check and no appliance health.',
+            full: true,
+            title: 'Aber does not manage the software on this edge node, so it sets nothing up there, '
+              + 'keeps no flow for it and reads no health from it. The engineer who runs the node '
+              + 'looks after those.'
+          }] : []),
           // What the appliance reports about itself, once `health_reported_at` is set: a gateway that
           // never reported would show a dozen rows of dashes. Current values only; the trend is in
-          // Grafana's Gateway Fleet Health dashboard.
-          ...(selected.health_reported_at ? [
+          // Grafana's Gateway Fleet Health dashboard. Never for a Third-party node, which has none.
+          ...(selected.health_reported_at && gatewayType(selected) !== GATEWAY_TYPES.THIRD_PARTY ? [
             {
               label: 'Health Reported',
               value: formatHeartbeat(selected.health_reported_at),
@@ -1071,9 +1097,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
                 : 'Issue an install command, or a bundle, to set this gateway up on its appliance'
           },
-          // Host and Simulated gateways (`deployment === 'host'`) have no enrolment lifecycle. Not on an
-          // archived gateway, since a credential issued then would resurrect the row. This is the only
-          // place a password appears in the product.
+          // Host, Simulated and Third-party gateways have no enrolment lifecycle. Not on an archived
+          // gateway, since a credential issued then would resurrect the row. This is the only place a
+          // password appears in the product.
           offersCredential && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
@@ -1082,16 +1108,23 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
               sparkplug_id: selected.sparkplug_id,
+              sparkplug_group: selected.sparkplug_group,
+              deployment: selected.deployment,
               is_shadow: selected.is_shadow
             }),
-            title: 'Issue this Host or Simulated gateway a broker account and show its password. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
+            title: gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY
+              ? 'Issue this Third-party gateway a broker account, and show its password with every setting its edge node needs.'
+              : 'Issue this Host or Simulated gateway a broker account and show its password. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
           },
           offersShownCredential && {
             label: 'Show Broker Credential',
             icon: <IconEye size={13} />,
             onClick: () => setShownCredentialForGw({
               gateway_id: selected.gateway_id,
-              gateway_name: selected.gateway_name
+              gateway_name: selected.gateway_name,
+              sparkplug_id: selected.sparkplug_id,
+              sparkplug_group: selected.sparkplug_group,
+              deployment: selected.deployment
             }),
             title: 'Show the password last issued to this gateway. Each showing is recorded in the Audit Trail.'
           },
@@ -1109,7 +1142,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             primary: primaryAction === 'restore',
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore gateway back to active service'
           } : !selected.is_shadow && {
-            // Not offered for the Playback gateway: two of the three Type options are refused on it.
+            // Not offered for the Playback gateway: three of the four Type options are refused on it.
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             primary: primaryAction === 'edit',
             onClick: () => {
@@ -1220,6 +1253,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       {credentialForGw && (
         <GatewayCredentialModal
           gateway={credentialForGw}
+          confirmFirst={credentialForGw.confirmFirst !== false}
           onClose={() => setCredentialForGw(null)}
           showToast={showToast}
         />

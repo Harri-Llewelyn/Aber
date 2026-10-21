@@ -17,6 +17,7 @@ import { Badge, ArchivedBadge } from '../common/Badge'
 import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { HelpLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
@@ -479,7 +480,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               filtered={rows.length > 0}
               message={<>
                 No gateways registered. Create one on the Gateways page —{' '}
-                <code>help/guides/tutorial.md</code> walks through it.
+                <HelpLink to="guides/tutorial">the tutorial</HelpLink> walks through it.
               </>}
               filteredMessage="No gateway matches these filters."
             />
@@ -489,7 +490,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                 <thead>
                   <tr>
                     <SortHeader sort={credentialSort} column="gateway">Gateway</SortHeader>
-                    <SortHeader sort={credentialSort} column="type" title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</SortHeader>
+                    <SortHeader sort={credentialSort} column="type" title="The kind of gateway: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</SortHeader>
                     <SortHeader sort={credentialSort} column="username">MQTT username</SortHeader>
                     <SortHeader sort={credentialSort} column="credential" title="What the platform issued and recorded, from the database">Credential</SortHeader>
                     <SortHeader sort={credentialSort} column="broker" title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</SortHeader>
@@ -555,7 +556,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                                 gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
                                 // Decides which .env pairing the dialog prints. Without it a
                                 // playback gateway is told to edit a Node-RED node it does not have.
-                                is_shadow: g.is_shadow
+                                is_shadow: g.is_shadow,
+                                // A Third-party gateway's dialog gives every setting its node needs.
+                                deployment: g.deployment, sparkplug_group: g.sparkplug_group
                               })}
                               title="Mint a broker credential and show it once"
                             >

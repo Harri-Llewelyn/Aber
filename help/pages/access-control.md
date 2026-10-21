@@ -46,9 +46,9 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
 - The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count.
 - Archived gateways are hidden. Select **Show archived** to list them. While it is on, the state filter also offers **Archived**. **Clear filters** resets the search, the filter and Show archived.
-- **Type** is the kind of gateway: Remote, Host, Simulated or Playback.
+- **Type** is the kind of gateway: Remote, Third-party, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.
-- **Generate** issues a broker credential for a Host, Simulated or Playback gateway, and shows it. An Administrator can show a Host or Simulated gateway's credential again, from the gateway's drawer on the Gateways page.
+- **Generate** issues a broker credential for a Third-party, Host, Simulated or Playback gateway, and shows it. An Administrator can show a Third-party, Host or Simulated gateway's credential again, from the gateway's drawer on the Gateways page.
 - **Bundle** is offered for a Remote gateway. It produces the setup bundle. The gateway creates its own credential when it enrols, so the password never passes through a browser.
 - An archived gateway offers neither, only **Restore to issue**. Its credential was disabled at the broker. Once the gateway is restored, it can be issued a new one.
 - The Playback gateway's credential is shown only once. If it is lost, issue another.

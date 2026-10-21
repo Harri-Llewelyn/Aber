@@ -442,7 +442,7 @@ So each principal is confined, holding a role from
 | :--- | :--- |
 | `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), its own `spBv1.0/STATE/<primaryHostId>`, the Directory and the Unified Namespace |
 | `aber_i3x` | read `spBv1.0/#`; it reads the Directory from the database. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| any `gwy…` account | one per gateway, each confined to its own edge node by the `gateway` role's `%u` rule. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
+| any `gwy…` account | one per gateway, each confined to its own edge node by the `gateway` role's `%u` rule. Issued against a row that already exists — from the dashboard for a Host or Third-party gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 | `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |

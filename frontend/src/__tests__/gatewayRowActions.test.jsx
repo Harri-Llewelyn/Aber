@@ -262,8 +262,8 @@ describe('the playback gateway', () => {
 
   /**
    * Edit is withdrawn because the form offers writes the database refuses:
-   * `gateways_shadow_is_simulated` is `NOT is_shadow OR is_simulated`, and two of the Type
-   * control's three options set is_simulated = false.
+   * `gateways_shadow_is_simulated` is `NOT is_shadow OR is_simulated`, and three of the Type
+   * control's four options set is_simulated = false.
    */
   it('cannot have its details edited', async () => {
     await show([playback()])
@@ -402,7 +402,7 @@ describe('the playback gateway is listed', () => {
   it('offers every type in the Type filter, Playback included', async () => {
     await open([gateway(), playbackRow()])
 
-    expect([...typeFilter().options].map(o => o.value)).toEqual(['', 'remote', 'host', 'simulated', 'playback'])
+    expect([...typeFilter().options].map(o => o.value)).toEqual(['', 'remote', 'third_party', 'host', 'simulated', 'playback'])
     fireEvent.change(typeFilter(), { target: { value: 'playback' } })
     expect(listed()).toEqual(['Playback'])
   })

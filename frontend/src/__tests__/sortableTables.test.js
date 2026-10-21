@@ -11,6 +11,10 @@ import path from 'node:path'
  * table takes one of the hooks below, so the file holds one hook call per sortable table.
  */
 const TABLES = {
+  'components/common/HelpMarkdown.jsx': {
+    sortable: 0,
+    fixed: ['A table in a help page: its rows in the order the page writes them, as GitHub shows them.']
+  },
   'components/modals/AssetConfigModal.jsx': { sortable: 2 },
   'components/modals/ServiceTokenInventoryModal.jsx': { sortable: 1 },
   'components/modals/StartPlaybackModal.jsx': {

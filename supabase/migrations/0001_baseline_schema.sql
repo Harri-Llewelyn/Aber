@@ -3499,7 +3499,7 @@ CREATE TABLE IF NOT EXISTS public.gateways (
     forge_archived_at timestamp with time zone,
     CONSTRAINT gateways_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL))),
     CONSTRAINT gateways_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL))),
-    CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text]))),
+    CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text, 'third_party'::text]))),
     CONSTRAINT gateways_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text]))),
     CONSTRAINT gateways_shadow_is_simulated CHECK (((NOT is_shadow) OR is_simulated)),
     CONSTRAINT gateways_simulated_is_host CHECK (((NOT is_simulated) OR (deployment = 'host'::text))),
@@ -3640,14 +3640,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_deployment_valid'
                 AND conrelid = 'public.gateways'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((deployment = ANY (ARRAY[''host''::text, ''remote''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((deployment = ANY (ARRAY[''host''::text, ''remote''::text, ''third_party''::text])))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_deployment_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'gateways_deployment_valid'
                     AND conrelid = 'public.gateways'::regclass) THEN
     ALTER TABLE public.gateways
-        ADD CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text])));
+        ADD CONSTRAINT gateways_deployment_valid CHECK ((deployment = ANY (ARRAY['host'::text, 'remote'::text, 'third_party'::text])));
   END IF;
 END $c$;
 
@@ -3861,7 +3861,7 @@ COMMENT ON COLUMN public.gateways.is_shadow IS 'True when this gateway exists on
 --
 
 -- COLUMN gateways.deployment :: COMMENT
-COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge appliance on the plant network). This is the axis every behaviour that used to branch on the retired `is_virtual` flag was actually about -- bundles, enrolment -- and since that column went it is the only one stating it.';
+COMMENT ON COLUMN public.gateways.deployment IS 'Where this gateway''s connector runs: ''host'' (inside this stack), ''remote'' (Aber''s gateway appliance on the plant network) or ''third_party'' (an edge node on its own machine, running software Aber does not manage; issued its credential in the dashboard, 0196). This is the axis every behaviour that used to branch on the retired `is_virtual` flag was actually about -- bundles, enrolment -- and since that column went it is the only one stating it.';
 
 --
 

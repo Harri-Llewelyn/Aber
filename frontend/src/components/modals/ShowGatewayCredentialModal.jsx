@@ -5,14 +5,15 @@ import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { IconCheck, IconCopy, IconEye, IconShieldAlert } from '../common/Icons'
 import { NodeRedCredentialSteps } from './GatewayCredentialModal'
+import { EdgeNodeSettings } from './EdgeNodeSettings'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
 const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
- * Show a Host or Simulated gateway's broker credential again, for an Administrator who has lost it
- * (0164). Nothing is fetched until they ask, because each showing is a CREDENTIAL_SHOWN row in the
+ * Show a Host, Simulated or Third-party gateway's broker credential again, for an Administrator who
+ * has lost it (0164). A Third-party gateway's comes with every setting its edge node needs. Nothing is fetched until they ask, because each showing is a CREDENTIAL_SHOWN row in the
  * Audit Trail. The password lives in this component's state until the modal closes.
  */
 export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
@@ -76,6 +77,8 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
             </div>
           </div>
         </div>
+      ) : gateway.deployment === 'third_party' ? (
+        <EdgeNodeSettings gateway={gateway} credential={credential} copy={copy} copied={copied} />
       ) : (
         <>
           <div className="form-group">

@@ -5,7 +5,8 @@ import { ActionButton } from '../common/ActionButton'
 import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { typedNameMatches } from '../../utils/gatewayType'
-import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
+import { IconCheck, IconCopy, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { gatewayUrl } from '../../routes'
 
 const COPY_FEEDBACK_MS = 1600
@@ -13,17 +14,18 @@ const COPY_FEEDBACK_MS = 1600
 const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
- * Issue a host-run gateway's broker credential and show it once. A remote gateway's appliance is
- * issued its credential when it enrols; a host-run gateway has no appliance, so the password is
+ * Issue a Host or Third-party gateway's broker credential and show it once. A Remote gateway's
+ * appliance is issued its credential when it enrols; these have no appliance, so the password is
  * shown to a person.
  *
- * It always confirms: a broker account has one password, so issuing replaces any existing one,
- * possibly one a running Node-RED holds, and the broker drops that session within a second. The
- * password lives in this component's state until the modal closes: not in a toast, the URL or the
- * Audit Trail.
+ * It confirms first: a broker account has one password, so issuing replaces any existing one,
+ * possibly one a running node holds, and the broker drops that session within a second.
+ * `confirmFirst={false}` is for the gateway just registered, which has nothing to replace: it
+ * issues on open, once per mount. The password lives in this component's state until the modal
+ * closes: not in a toast, the URL or the Audit Trail.
  */
-export function GatewayCredentialModal({ gateway, onClose, showToast }) {
-  const [step, setStep] = useState('confirm')
+export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFirst = true }) {
+  const [step, setStep] = useState(confirmFirst ? 'confirm' : 'issuing')
   const [typed, setTyped] = useState('')
   const [credential, setCredential] = useState(null)
   const [error, setError] = useState(null)
@@ -32,9 +34,13 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   const [copyFailed, setCopyFailed] = useState(false)
 
   const copyTimer = useRef(null)
+  const requested = useRef(false)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const confirmed = typedNameMatches(typed, gateway.gateway_name)
+  // A Third-party node is configured by its engineer, who needs every setting rather than a step in
+  // Aber's own editor.
+  const isThirdParty = gateway.deployment === 'third_party'
 
   const mint = useCallback(async () => {
     setBusy(true)
@@ -61,6 +67,12 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
       setBusy(false)
     }
   }, [gateway, showToast])
+
+  useEffect(() => {
+    if (confirmFirst || requested.current) return
+    requested.current = true
+    mint()
+  }, [confirmFirst, mint])
 
   const copy = useCallback(async (label, value) => {
     const ok = await copyText(value)
@@ -105,6 +117,17 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
         </ActionButton>
       </>
     )
+  } else if (step === 'issuing') {
+    footer = (
+      <>
+        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
+        {error && (
+          <ActionButton pending={busy} pendingLabel="Retrying…" onClick={mint} title="Try issuing again">
+            <IconRefreshCw size={14} /> Try again
+          </ActionButton>
+        )}
+      </>
+    )
   } else {
     footer = <button className="btn btn-primary" onClick={onClose}>I have copied it</button>
   }
@@ -116,7 +139,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
       title={<>Broker credential for “{gateway.gateway_name}”</>}
       size="lg"
       onClose={onClose}
-      error={step === 'confirm'
+      error={step !== 'reveal'
         ? error
         : copyFailed
           ? COPY_REFUSED
@@ -143,9 +166,9 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 <div>
                   The broker holds <strong>one password per gateway</strong>, so this{' '}
                   <strong>replaces any credential this gateway already has</strong> — including one
-                  a running Node-RED is using. That connection is <strong>dropped
-                  immediately</strong>: the gateway goes stale on the dashboard within 90 seconds and
-                  cannot reconnect until the new password reaches it.
+                  {isThirdParty ? ' its edge node' : ' a running Node-RED'} is using. That connection
+                  is <strong>dropped immediately</strong>: the gateway goes stale on the dashboard
+                  within 90 seconds and cannot reconnect until the new password reaches it.
                 </div>
               )}
               {gateway.is_shadow ? (
@@ -181,13 +204,17 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
         </>
       )}
 
+      {step === 'issuing' && busy && (
+        <p className="form-hint">Issuing the broker credential…</p>
+      )}
+
       {step === 'reveal' && credential && (
         <>
           {credential.credential_kept ? (
             <div className="callout callout-info">
               <IconShieldAlert size={14} className="callout-icon" />
               <div>
-                <strong>Copy this into Node-RED now.</strong>
+                <strong>{isThirdParty ? 'Copy these into the edge node now.' : 'Copy this into Node-RED now.'}</strong>
                 <div>
                   An Administrator can show it again from the gateway’s drawer (
                   <strong>Show Broker Credential</strong>), and each showing is recorded in the
@@ -208,6 +235,9 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
             </div>
           )}
 
+          {isThirdParty ? (
+            <EdgeNodeSettings gateway={gateway} credential={credential} copy={copy} copied={copied} />
+          ) : (<>
           <div className="form-group">
             <label className="form-label">MQTT username</label>
             <div className="gateway-copy-row">
@@ -304,6 +334,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               </div>
             </div>
           )}
+          </>)}
         </>
       )}
     </Modal>

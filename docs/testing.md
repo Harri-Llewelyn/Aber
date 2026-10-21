@@ -542,6 +542,10 @@ python supabase/migrations/test_uncatalogued_metrics.py
 # back; after the chain, every one matches, running the calls takes no ACCESS EXCLUSIVE lock, and
 # running the guards keeps every constraint's oid.
 python supabase/migrations/test_replay_recreates_only_what_differs.py
+# A Third-party gateway (0196): minted a credential and shown it again, refused a bundle, counted as
+# holding an account once issued so the archive disables it, and kept by a replay of 0001's CHECK.
+# Remote and Host answer as before. Every test rolls back.
+python supabase/migrations/test_third_party_gateway.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.

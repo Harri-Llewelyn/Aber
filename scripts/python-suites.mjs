@@ -955,6 +955,13 @@ export const SUITES = {
       'device attached through set_device_schemas(), the Devices page\'s writer, beside the ' +
       'shared fixture\'s, so the reverse lookup is asserted over a set.',
   },
+  'supabase/migrations/test_third_party_gateway.py': {
+    lanes: ['db'],
+    why:
+      'A Third-party gateway (0196) may be minted a credential and shown it again, cannot be ' +
+      'issued a bundle, and counts as holding an account once issued, so archiving disables it; ' +
+      'Remote and Host answer as before, and a replay of 0001 keeps the widened CHECK.',
+  },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
     // its assertions is made AS a seeded demo account, and the db lane deliberately applies no

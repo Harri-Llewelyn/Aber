@@ -31,4 +31,4 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 
 **Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings and backups. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 
-Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](https://github.com/Harri-Llewelyn/Aber/blob/main/deploy/k8s/README.md#trimming-the-audit-trail).
+Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](../../deploy/k8s/README.md#trimming-the-audit-trail).

@@ -403,10 +403,11 @@ the cluster is shared with anything else.
 
 ### Host gateway passwords are kept, and Administrators can see them
 
-A Host or Simulated gateway's broker password is typed into the Node-RED editor by a person. So that
-it is not lost, the platform keeps an encrypted copy in Vault, and an Administrator can show it again
-from the gateway's drawer (`0164`). Anyone who holds `Administrator`, or who holds both a database
-dump and its Vault key, can therefore read every Host gateway's broker password. Before `0164` the
+A Host or Simulated gateway's broker password is typed into the Node-RED editor by a person, and a
+Third-party gateway's into its edge node's own settings (`0196`). So that it is not lost, the
+platform keeps an encrypted copy in Vault, and an Administrator can show it again from the gateway's
+drawer (`0164`). Anyone who holds `Administrator`, or who holds both a database dump and its Vault
+key, can therefore read every Host and Third-party gateway's broker password. Before `0164` the
 platform kept no copy at all: the broker stores only a hash.
 
 **Accepted because** the copy is limited to the passwords a person handles anyway. Remote gateways'

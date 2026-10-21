@@ -1151,9 +1151,9 @@ database, because `ensure_shadow_devices()` finds the gateway *by flag* and the 
 otherwise surface weeks later at job time. A rebirth from the page would reach the worker only
 while a replay runs, and the daemon already asks for one whenever it needs it. And **editing is withdrawn because the
 form offers writes the database refuses**: `gateways_shadow_is_simulated` is `NOT is_shadow OR
-is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated = false` and the
-save comes back a CHECK violation. Two of that control's three options are dead ends on this one
-row. **Deleting it is refused too** (`0193`), and so is deleting any gateway a playback was
+is_simulated`, so choosing Remote, Third-party or Host in the Type control sets `is_simulated = false`
+and the save comes back a CHECK violation. Three of that control's four options are dead ends on
+this one row. **Deleting it is refused too** (`0193`), and so is deleting any gateway a playback was
 published as. The seed would bring the row back at the next boot, but not the record of who
 replayed what, because the `playback_jobs` rows would go with the gateway.
 

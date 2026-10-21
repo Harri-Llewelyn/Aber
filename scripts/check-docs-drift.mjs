@@ -1001,6 +1001,10 @@ function edgeFunctionNames() {
     'public.set_backup_offsite_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',
     'public.backup_offsite_credential_is_set': '0178 asks foreign_credential_is_set(), the one probe every foreign credential shares; the baseline carried its own copy',
     'public.issue_capture_download': '0195 also opens the 60-second grant in capture_downloads that the broker-captures read policy admits a person by, so a capture file is read only through this audited call; 0193 recorded the download and the bucket admitted every reader role to every file',
+    'public.authorize_host_gateway_credential': '0196 mints for a Third-party gateway as for a Host one, since neither can enrol; the baseline refused every gateway but Host',
+    'public.keep_gateway_credential': '0196 keeps the copy of a Third-party gateway\'s password too, so an Administrator can show it again; 0164 kept a Host or Simulated gateway\'s alone',
+    'public.issue_gateway_enrollment_token': '0196 refuses a Third-party gateway as it refuses a Host one, because a bundle enrols Aber\'s gateway appliance; the baseline refused Host alone',
+    'public.gateway_has_broker_credential': '0196 counts a Third-party gateway\'s CREDENTIAL_ISSUED row as a Host gateway\'s, so archiving it disables its account; the baseline counted Host alone',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -1084,14 +1088,15 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 105. The dashboard bundles the help pages in help/pages/, and nothing outside frontend/ but help/.
-// frontend/src/help/index.js's glob is the door: every page file in help/pages/ matches it, or the
-// panel never shows that page. No import in the bundle's source reaches outside frontend/ except
-// into help/, so a contributor document under docs/ cannot ship by accident.
+// 105. The dashboard bundles every page in help/, and nothing outside frontend/ but help/.
+// frontend/src/help/index.js's glob is the door: every Markdown file in help/ matches it, or the
+// panel's contents, search and links never reach that page. No import in the bundle's source
+// reaches outside frontend/ except into help/, so a contributor document under docs/ cannot ship
+// by accident.
 // -------------------------------------------------------------------------------------------------
 {
   const INDEX = 'frontend/src/help/index.js';
-  const PAGES = 'help/pages';
+  const PAGES = 'help';
   const GLOB = /import\.meta\.glob\(\s*(\[[^\]]*\]|'[^']*'|"[^"]*")/g;
   const quoted = (s) => [...s.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
   const globs = [...read(INDEX).matchAll(GLOB)].flatMap((m) => quoted(m[1])).filter((g) => !g.startsWith('!'));
@@ -1101,8 +1106,10 @@ function edgeFunctionNames() {
   const wrong = [];
   if (!resolved.length) wrong.push(`${INDEX} has no import.meta.glob, so the help panel bundles no page`);
   for (const r of resolved.filter((g) => !g.startsWith('help/'))) wrong.push(`${INDEX} globs ${r}, which is outside help/`);
-  const pages = readdirSync(join(REPO, PAGES)).filter((f) => f.endsWith('.md')).map((f) => `${PAGES}/${f}`);
-  for (const f of pages.filter((p) => !resolved.some((g) => matcher(g).test(p)))) {
+  const pages = allFiles.filter((f) => f.startsWith(`${PAGES}/`) && f.endsWith('.md')).sort();
+  // `**/` matches no folder as well as any, as Vite's glob does.
+  const globbed = (p) => resolved.some((g) => matcher(g).test(p) || matcher(g.replace('**/', '')).test(p));
+  for (const f of pages.filter((p) => !globbed(p))) {
     wrong.push(`${f} is not matched by ${INDEX}'s glob, so the dashboard never shows it`);
   }
 
@@ -1120,9 +1127,9 @@ function edgeFunctionNames() {
     }
   }
   if (wrong.length) {
-    fail('the dashboard bundle does not take its help from help/pages/ alone:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+    fail('the dashboard bundle does not take its help from help/ alone:\n' + wrong.map((w) => `        ${w}`).join('\n'));
   } else {
-    pass(`all ${pages.length} page file(s) in ${PAGES} are in the help glob, and none of ${specifiers} relative import(s) in frontend/src leaves frontend/ but for help/`);
+    pass(`all ${pages.length} Markdown file(s) in ${PAGES}/ are in the help glob, and none of ${specifiers} relative import(s) in frontend/src leaves frontend/ but for help/`);
   }
 }
 
@@ -1204,6 +1211,138 @@ function edgeFunctionNames() {
       wrong.map((w) => `        ${w}`).join('\n'));
   } else {
     pass(`${steps} workflow step(s), the dev loop and ${commands.length} documented docker build(s) hand the dashboard image help/, and ${DOCKERFILE} copies it to ${copied}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 108. Every construct in help/ is one the help panel's walker draws. frontend/helpCorpus.js parses
+// each file with marked when the bundle is built and stops the build on anything else; this finds
+// it without a build. The types are frontend/src/help/syntax.js's, the list the parse and the walker
+// (HelpMarkdown.jsx) share. marked is a devDependency of frontend/, so this needs its `npm ci`.
+// -------------------------------------------------------------------------------------------------
+/** marked as frontend/ installs it, or null where `npm ci` has not run there. */
+function helpParser(createRequire) {
+  try {
+    return createRequire(join(REPO, 'frontend', 'package.json'))('marked').marked;
+  } catch {
+    return null;
+  }
+}
+const HELP_PAGES = allFiles.filter((f) => f.startsWith('help/') && f.endsWith('.md')).sort();
+const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).href;
+{
+  const helpMarked = helpParser((await import('node:module')).createRequire);
+  const helpSyntax = await import(HELP_SYNTAX);
+  if (!helpMarked) {
+    fail('check 108 parses help/ with marked, a devDependency of the dashboard, and frontend/node_modules has none: run `npm ci` in frontend/');
+  } else {
+    const { HELP_BLOCKS, HELP_INLINES, unsupported, entityIn } = helpSyntax;
+    const offences = [];
+    const types = new Set();
+    for (const file of HELP_PAGES) {
+      const source = read(file);
+      const at = (raw) => {
+        const i = raw ? source.indexOf(raw) : -1;
+        return i < 0 ? file : `${file}:${source.slice(0, i).split('\n').length}`;
+      };
+      // Children of a heading, a paragraph, a list item's text, a table cell and every inline token
+      // are inline; children of a list item and a quote are blocks.
+      const visit = (t, inline) => {
+        types.add(t.type);
+        if (!(inline ? HELP_INLINES : HELP_BLOCKS).includes(t.type)) offences.push(`${at(t.raw)} uses ${unsupported(t.type)}`);
+        if (t.task) offences.push(`${at(t.raw)} uses ${unsupported('checkbox')}`);
+        const entity = inline && (t.type === 'text' || t.type === 'escape') ? entityIn(t.text) : null;
+        if (entity) offences.push(`${at(t.raw)} uses an HTML entity, ${entity}: type the character itself`);
+        const blocksInside = t.type === 'list_item' || t.type === 'blockquote';
+        for (const c of t.tokens || []) visit(c, !blocksInside);
+        for (const item of t.items || []) visit(item, false);
+        for (const cell of [...(t.header || []), ...(t.rows || []).flat()]) for (const c of cell.tokens) visit(c, true);
+      };
+      for (const t of helpMarked.lexer(source)) visit(t, false);
+    }
+    if (offences.length) {
+      fail('help/ uses Markdown the help panel does not draw, and the dashboard build stops on it:\n' +
+        [...new Set(offences)].map((o) => `        ${o}`).join('\n') +
+        '\n      The walker draws what frontend/src/help/syntax.js lists (frontend/README.md, Contextual help).');
+    } else {
+      pass(`all ${HELP_PAGES.length} page(s) of help/ use only constructs the help walker draws (${[...types].sort().join(', ')})`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 109. help/README.md, the help panel's contents, lists every page of help/ exactly once, and every
+// link in help/ goes where the panel can follow it: a page of help/ and a heading in it, by the ids
+// the panel gives its headings, or a file of the repository. Links are resolved by
+// frontend/src/help/syntax.js's resolveLink(), as the build resolves them. A repository anchor is
+// check 1's. help/ holds pages only: the bundle takes nothing else from it.
+// -------------------------------------------------------------------------------------------------
+{
+  const helpMarked = helpParser((await import('node:module')).createRequire);
+  const helpSyntax = await import(HELP_SYNTAX);
+  if (!helpMarked) {
+    fail('check 109 reads help/ with marked too, and frontend/node_modules has none: run `npm ci` in frontend/');
+  } else {
+    const { resolveLink, headingIds } = helpSyntax;
+    const wrong = [];
+    for (const f of allFiles.filter((p) => p.startsWith('help/') && !p.endsWith('.md'))) {
+      wrong.push(`${f} is not a page: help/ holds Markdown pages only, and the dashboard bundles nothing else from it`);
+    }
+
+    const plain = (tokens = []) => tokens.map((t) => (t.type === 'text' || t.type === 'escape') && !t.tokens ? t.text
+      : t.type === 'codespan' ? t.text : t.type === 'br' ? ' ' : plain(t.tokens)).join('');
+    const parsed = new Map();
+    for (const file of HELP_PAGES) {
+      const key = file.slice('help/'.length, -'.md'.length);
+      const nextId = headingIds();
+      const ids = new Set();
+      const links = [];
+      const visit = (t) => {
+        if (t.type === 'heading') ids.add(nextId(plain(t.tokens).replace(/\s+/g, ' ').trim()));
+        if (t.type === 'link') links.push(t.href);
+        for (const c of t.tokens || []) visit(c);
+        for (const item of t.items || []) visit(item);
+        for (const cell of [...(t.header || []), ...(t.rows || []).flat()]) cell.tokens.forEach(visit);
+      };
+      helpMarked.lexer(read(file)).forEach(visit);
+      parsed.set(key, { file, ids, links });
+    }
+
+    const counts = { help: 0, repo: 0, external: 0 };
+    for (const [key, { file, links }] of parsed) {
+      for (const href of links) {
+        const to = resolveLink(key, href);
+        if (to.kind === 'invalid') { wrong.push(`${file} links to \`${href}\`, which the panel cannot follow: ${to.reason}`); continue; }
+        counts[to.kind] += 1;
+        if (to.kind === 'help') {
+          const target = parsed.get(to.file);
+          if (!target) wrong.push(`${file} links to \`${href}\`, and help/${to.file}.md does not exist`);
+          else if (to.anchor && !target.ids.has(to.anchor)) wrong.push(`${file} links to \`${href}\`, and help/${to.file}.md has no heading with the id ${to.anchor}`);
+        } else if (to.kind === 'repo' && !existsSync(join(REPO, to.path))) {
+          wrong.push(`${file} links to \`${href}\`, and ${to.path} does not exist`);
+        }
+      }
+    }
+
+    const CONTENTS = 'README';
+    const listed = new Map();
+    for (const href of parsed.get(CONTENTS)?.links || []) {
+      const to = resolveLink(CONTENTS, href);
+      if (to.kind === 'help') listed.set(to.file, (listed.get(to.file) || 0) + 1);
+    }
+    if (!parsed.has(CONTENTS)) wrong.push('help/README.md is missing, and the help panel draws its contents from it');
+    for (const key of [...parsed.keys()].filter((k) => k !== CONTENTS)) {
+      const n = listed.get(key) || 0;
+      if (n === 0) wrong.push(`help/README.md does not list help/${key}.md, so the panel's contents never show it`);
+      if (n > 1) wrong.push(`help/README.md lists help/${key}.md ${n} times; list each page once`);
+    }
+
+    if (wrong.length) {
+      fail('the help panel cannot reach every page of help/, or a link in help/ goes nowhere it can follow:\n' +
+        wrong.map((w) => `        ${w}`).join('\n'));
+    } else {
+      pass(`help/README.md lists all ${parsed.size - 1} other page(s) of help/ once each, and all ${counts.help + counts.repo + counts.external} link(s) in help/ resolve (${counts.help} in help/, ${counts.repo} to the repository, ${counts.external} to other sites)`);
+    }
   }
 }
 
@@ -3432,11 +3571,9 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 // 16. Every navigable page has help, and every help file names a page that exists.
 //
-// The help corpus, help/pages/ as frontend/src/help/index.js globs it, is resolved by filename at
+// The page help, help/pages/ as frontend/src/help/index.js globs it, is resolved by filename at
 // runtime and a missing file fails quietly. Both directions: a help file left behind by a renamed
-// page is invisible.
-// The markdown subset is checked too: HelpMarkdown.jsx renders headings, lists, paragraphs, bold,
-// inline code and absolute links, and an unsupported construct renders as itself.
+// page is invisible. What the files may contain is check 108's; where their links go, 109's.
 // -------------------------------------------------------------------------------------------------
 {
   const HELP_DIR = 'help/pages';
@@ -3473,47 +3610,8 @@ function edgeFunctionNames() {
       );
     }
 
-    // The subset HelpMarkdown.jsx actually implements. Each entry is what the reader would SEE if
-    // this check were not here, because none of these fails at runtime.
-    const UNSUPPORTED = [
-      [/^# /m, 'a top-level heading (the panel title is the h1; corpus headings start at ##)'],
-      [/^\s*```/m, 'a fenced code block'],
-      [/^\s*\|/m, 'a table'],
-      [/!\[[^\]]*\]\(/, 'an image'],
-      [/<[a-zA-Z/][^>]*>/, 'raw HTML (it renders as text -- there is no HTML sink in the renderer)'],
-      [/(?<!\*)\*(?!\*)[^*\n]+\*(?!\*)/, 'single-asterisk emphasis (use **bold**)'],
-      [/^\s*>/m, 'a block quote'],
-      // HelpMarkdown.jsx reads an item only at the start of a line: an indented one joins the
-      // paragraph around it, dash and all, and so does every item after it.
-      [/^[ \t]+([-*]|\d+\.)\s/m, 'an indented (nested) list item; make it a top-level item'],
-    ];
-
-    const offences = [];
-    for (const name of helpFiles.slice().sort()) {
-      const source = read(`${HELP_DIR}/${name}.md`);
-      for (const [pattern, what] of UNSUPPORTED) {
-        if (pattern.test(source)) offences.push(`${name}.md uses ${what}`);
-      }
-      // Links must be absolute: a repository-relative link is correct in the file and dead in the
-      // browser, where it resolves against the dashboard's own routes.
-      for (const m of source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
-        if (!/^https?:\/\//.test(m[1])) {
-          offences.push(`${name}.md links to \`${m[1]}\`, which is not an absolute http(s) URL`);
-        }
-      }
-    }
-
-    if (offences.length) {
-      fail(
-        `help corpus uses markdown the panel does not render:\n` +
-          offences.map((o) => `        ${o}`).join('\n') +
-          '\n      HelpMarkdown.jsx renders headings, lists, paragraphs, bold, inline code and\n' +
-          '      absolute links. Anything else reaches the reader as its own source text.'
-      );
-    }
-
-    if (!unhelped.length && !orphaned.length && !offences.length) {
-      pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, in the supported subset`);
+    if (!unhelped.length && !orphaned.length) {
+      pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, and every file there names a page`);
     }
   }
 }
