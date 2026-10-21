@@ -3,6 +3,7 @@ import { render, screen, waitFor, within, fireEvent } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * A Third-party gateway on the Site Map follows Remote: it is shown in the cell it serves, and its
@@ -65,7 +66,7 @@ describe('a Third-party gateway on the Site Map', () => {
     await waitFor(() => expect(chipNamed('Vendor_Wide')).toBeTruthy())
 
     expect(chipNamed('Vendor_Wide').querySelector('[title="Runs on this host"]')).toBeNull()
-    expect(chipNamed('Vendor_Wide').getAttribute('title')).not.toMatch(/Host-run/)
+    expect(tooltipOf(chipNamed('Vendor_Wide'))).not.toMatch(/Host-run/)
     expect(chipNamed('Host_Wide').querySelector('[title="Runs on this host"]')).not.toBeNull()
   })
 })

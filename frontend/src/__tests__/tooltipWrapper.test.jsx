@@ -8,6 +8,7 @@ import React, { useRef, useState } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Tooltip, TOOLTIP_DELAY_MS } from '../components/common/Tooltip'
+import { escapeStackDepth } from '../hooks/useEscapeKey'
 
 const tip = () => screen.queryByRole('tooltip')
 const wait = (ms) => act(() => { vi.advanceTimersByTime(ms) })
@@ -115,6 +116,18 @@ describe('Tooltip', () => {
     expect(after, 'the control was remounted').toBe(before)
     expect(document.activeElement).toBe(before)
     expect(after).toHaveAccessibleDescription('Enter a semantic id first')
+  })
+
+  it('shows nothing, and holds no Escape, once its text goes while the pointer rests', () => {
+    function Harness({ text }) {
+      return <Tooltip text={text}><button type="button">Collapse</button></Tooltip>
+    }
+    const { rerender } = render(<Harness text="Collapse all tabs" />)
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Collapse' }))
+    rerender(<Harness text={null} />)
+    wait(TOOLTIP_DELAY_MS * 2)
+    expect(tip()).toBeNull()
+    expect(escapeStackDepth()).toBe(0)
   })
 
   it('draws the bubble inside the open dialog the control sits in', () => {

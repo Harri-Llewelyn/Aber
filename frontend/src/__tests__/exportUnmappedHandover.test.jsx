@@ -99,7 +99,7 @@ describe('the export warning about unmapped metrics', () => {
     await exportAs('Administrator')
 
     const toast = await screen.findByRole('link', { name: /2 metrics carried no semantic id\. Open them on the Metrics page/ })
-    expect(toast).toHaveAttribute('title', 'Go to Metrics')
+    expect(toast).toHaveAccessibleDescription('Go to Metrics')
     expect(toast).toHaveAttribute('href', '/metrics?unmapped=1')
     fireEvent.click(toast)
 

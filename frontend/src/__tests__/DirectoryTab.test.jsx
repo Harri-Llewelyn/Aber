@@ -360,7 +360,7 @@ describe('DirectoryTab service groups', () => {
     ])
     await renderTab()
 
-    expect(screen.getByText(/not observed/i)).toBeInTheDocument()
+    expect(screen.getByText(/^not observed$/i)).toBeInTheDocument()
     expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument()
     expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
@@ -413,7 +413,7 @@ describe('DirectoryTab service groups', () => {
     await renderTab()
 
     expect(screen.getByText('DOWN')).toHaveClass('badge')
-    expect(screen.getByText(/not observed/i)).not.toHaveClass('badge')
+    expect(screen.getByText(/^not observed$/i)).not.toHaveClass('badge')
   })
 
   it('still lists what is deployed and how to reach it', async () => {

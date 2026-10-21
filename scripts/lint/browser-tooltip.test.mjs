@@ -52,12 +52,13 @@ test('every file the rule lets through still carries a title, so the list only s
     overrideConfigFile: true,
     overrideConfig: config.filter(block => block.rules?.['no-restricted-syntax'] !== 'off'),
   })
+  const clean = []
   for (const path of allowed) {
     // A file another change deletes drops out of the list with it.
     if (!existsSync(join(REPO, path))) continue
     const text = readFileSync(join(REPO, path), 'utf8')
     const [result] = await strict.lintText(text, { filePath: join(REPO, path) })
-    const found = result.messages.filter(m => m.ruleId === 'no-restricted-syntax').length
-    assert.ok(found > 0, `${path} carries no title now: take it off the list in scripts/lint/eslint.config.mjs`)
+    if (!result.messages.some(m => m.ruleId === 'no-restricted-syntax')) clean.push(path)
   }
+  assert.deepEqual(clean, [], 'these carry no title now: take them off the list in scripts/lint/eslint.config.mjs')
 })

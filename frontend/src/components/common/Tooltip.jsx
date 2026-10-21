@@ -121,9 +121,10 @@ export function TooltipBubble({ id, text, pos, container = null, keepMounted = f
  * control as its window is activated again: that one leaves the tooltip as it was when the window
  * lost focus.
  *
- * Spread `trigger` onto the control, and pass `bubble` to TooltipBubble.
+ * Spread `trigger` onto the control, and pass `bubble` to TooltipBubble. While `disabled` it never
+ * shows, whatever the pointer and focus do, so a control whose text has gone holds no Escape.
  */
-export function useTooltip({ delay = TOOLTIP_DELAY_MS } = {}) {
+export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false } = {}) {
   const id = useId()
   const ref = useRef(null)
   const hover = useHoverIntent(delay)
@@ -131,7 +132,7 @@ export function useTooltip({ delay = TOOLTIP_DELAY_MS } = {}) {
   const pressed = useRef(false)
   // What `focused` was when the window lost focus from this control; null otherwise.
   const focusedAsWindowLeft = useRef(null)
-  const visible = hover.open || focused
+  const visible = !disabled && (hover.open || focused)
 
   const { hide: hideHover } = hover
   const hide = useCallback(() => { hideHover(); setFocused(false) }, [hideHover])
@@ -173,8 +174,8 @@ const setRefs = (...refs) => (el) => {
 
 /**
  * The shared tooltip on one control: wrap the control, and `text` shows in the bubble, as useTooltip
- * shows it. The control's own ref and handlers still run. With no `text` the control is drawn as it
- * is, in the same place, so a tooltip that comes and goes never remounts it. The bubble describes
+ * shows it. The control's own ref and handlers still run. With no `text` nothing shows and the
+ * control is drawn in the same place, so a tooltip that comes and goes never remounts it. The bubble describes
  * the control (`aria-describedby`) unless its text is the control's `aria-label`: an icon-only
  * button carries its name there, so the name never depends on the tooltip, and is not read twice.
  *
@@ -186,14 +187,12 @@ const setRefs = (...refs) => (el) => {
  * something that takes no focus the tooltip shows to a pointer only, so keep it to controls.
  */
 export function Tooltip({ text, delay, children }) {
-  const tip = useTooltip({ delay })
+  const tip = useTooltip({ delay, disabled: !text })
   const child = React.Children.only(children)
-  if (!text) return <>{child}{null}</>
-
   const own = child.props
   const { trigger } = tip
   const both = (ours, theirs) => (e) => { ours(e); theirs?.(e) }
-  const describes = own['aria-label'] !== text
+  const describes = Boolean(text) && own['aria-label'] !== text
   const describedBy = [own['aria-describedby'], describes && trigger['aria-describedby']].filter(Boolean).join(' ')
   return (
     <>
@@ -207,7 +206,7 @@ export function Tooltip({ text, delay, children }) {
         onFocus: both(trigger.onFocus, own.onFocus),
         onBlur: both(trigger.onBlur, own.onBlur),
       })}
-      <TooltipBubble {...tip.bubble} text={text} keepMounted={describes} />
+      {text ? <TooltipBubble {...tip.bubble} text={text} keepMounted={describes} /> : null}
     </>
   )
 }

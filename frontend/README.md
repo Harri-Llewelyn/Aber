@@ -182,7 +182,13 @@ screen readers read it unevenly, and on an icon-only button it was often the onl
   and draws the bubble beside it. With no `text` it draws the control alone, in the same place, so
   a tooltip that comes and goes never remounts it. Text that is the control's `aria-label` is not
   read again as its description. A tooltip shows on hover and focus, so it goes on something that
-  takes focus; a sentence about anything else belongs in visible text or a `HelpTip`.
+  takes focus; a sentence about anything else belongs in visible text or a `HelpTip`. A component
+  that draws a control takes the text as a prop and wraps its own element: `ActionButton`'s
+  `title` and `deniedTitle`, `RouteLink`'s and `CopyableId`'s `title`. `Badge`'s `title` is the one
+  on something that takes no focus, so a pointer alone sees it.
+- **In a test**, `src/test/tooltips.js` finds a control by its tooltip (`getByTooltip`) and reads
+  one (`tooltipOf`). A closed bubble is in the document, hidden, so a `getByText` that would also
+  match a tooltip's words passes `{ ignore: '[role=tooltip]' }`.
 - **The words.** About 20 words, plain sentences, no code, and never the visible label again.
 - **The guard.** `npm run lint:js` fails on a `title` on an HTML element in `frontend/src`, a
   `no-restricted-syntax` rule in `scripts/lint/eslint.config.mjs`. A component's prop named

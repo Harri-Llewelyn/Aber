@@ -127,7 +127,7 @@ describe('CopyableId', () => {
       setClipboard({ writeText });
       render(<CopyableId value={LONG} label="semantic id" truncate="start" />);
       const button = screen.getByRole('button', { name: `Copy semantic id ${LONG}` });
-      expect(button.title).toContain('semantic id');
+      expect(button).toHaveAccessibleDescription(/semantic id/);
       fireEvent.click(button);
       expect(writeText).toHaveBeenCalledWith(LONG);
     });
