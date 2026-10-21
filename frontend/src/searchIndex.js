@@ -1,7 +1,8 @@
 /**
  * What the search bar can find, and how it ranks it. Pages are derived from the nav, never listed
  * here. Cards are the sections inside a page, listed below; a guard test asserts every entry names
- * a real page. Assets are resolved from a UUID against the database at search time. Matching is substring and initials, not fuzzy: everything here is a
+ * a real page. Assets are resolved from a UUID against the database at search time. Headings in the
+ * help are matched by the help panel's own index (help/searchIndex.js), not here. Matching is substring and initials, not fuzzy: everything here is a
  * short label from a closed set, and a fuzzy matcher returns things the typed letters do not appear
  * in.
  */

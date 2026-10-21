@@ -1002,6 +1002,17 @@ a.sidebar-item { text-decoration: none; }
 
 .global-search-result-enter { color: var(--accent); flex-shrink: 0; }
 
+/* The Help group's label: its rows are headings in the help, and their detail is a help page's
+   title, which would otherwise read as the page a card is on. */
+.global-search-group {
+  padding: 8px 12px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .global-search-empty {
   display: flex;
   align-items: center;
