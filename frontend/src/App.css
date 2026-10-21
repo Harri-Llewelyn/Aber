@@ -4004,6 +4004,16 @@ a.chip { text-decoration: none; }
 .plan-card .area-plan { border: 0; border-radius: 0; background: none; }
 .plan-card:has(> a.area-plan-preview:hover) { border-color: var(--border-hover); }
 
+/* The attached model's Download, Replace and Remove: equal columns across the card, two or one to
+   a row in a very narrow drawer. */
+.model-file-actions {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+.model-file-actions > .btn { justify-content: center; }
+
 /* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
    placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
 .plan-viewer { display: flex; flex-direction: column; gap: 8px; }
