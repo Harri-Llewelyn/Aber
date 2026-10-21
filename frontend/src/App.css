@@ -5364,6 +5364,36 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   pointer-events: none;
 }
 
+/* The point at the trigger, drawn as the popovers' are (Popover arrows): a square turned 45 degrees
+   on the border facing the trigger, the half inside hiding the border. --arrow-x is the trigger's
+   centre from the bubble's outer left edge, or its right edge on `-end`, less the 1px border. The
+   script places it for the widest bubble; min() keeps it 14px (ARROW_INSET in Tooltip.jsx) inside
+   a narrower one. */
+.tooltip-bubble::before {
+  --arrow-size: 8px;
+  content: '';
+  position: absolute;
+  top: -0.5px;
+  left: min(calc(var(--arrow-x) - 1px), calc(100% - 13px));
+  width: var(--arrow-size);
+  height: var(--arrow-size);
+  margin: calc(var(--arrow-size) / -2);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  transform: rotate(var(--arrow-turn, 45deg));
+}
+/* Above a low trigger, the point hangs from the bottom border. */
+.tooltip-bubble-above::before {
+  --arrow-turn: 225deg;
+  top: auto;
+  bottom: -0.5px;
+}
+.tooltip-bubble-end::before {
+  left: auto;
+  right: min(calc(var(--arrow-x) - 1px), calc(100% - 13px));
+}
+
 /* ===== Password field with a hold-to-reveal button ===== */
 .password-field { position: relative; }
 .password-field .form-control { padding-right: 40px; }
