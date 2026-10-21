@@ -80,7 +80,7 @@ describe('a Third-party gateway in the list', () => {
 
   it('is what the Type filter lists under Third-party', async () => {
     await show([gateway(), gateway({ gateway_id: 'gw-host', gateway_name: 'Host_Node', deployment: 'host' })])
-    const filter = screen.getByTitle(/^Filter by the Type column/)
+    const filter = screen.getByRole('combobox', { name: 'Type' })
     expect([...filter.options].map(o => o.textContent)).toContain('Third-party')
     fireEvent.change(filter, { target: { value: 'third_party' } })
     const names = [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
@@ -100,7 +100,7 @@ describe('registering a Third-party gateway', () => {
     fireEvent.click(screen.getByRole('button', { name: /New Gateway/ }))
     const type = document.querySelector('#gateway-type')
     expect([...type.options].map(o => o.textContent)).toEqual(['Remote', 'Third-party', 'Host', 'Simulated'])
-    fireEvent.change(screen.getByTitle('Friendly label for this gateway'), { target: { value: 'New_Vendor_Node' } })
+    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'New_Vendor_Node' } })
     fireEvent.change(type, { target: { value: 'third_party' } })
     expect(screen.getByText(/On save you will be given its broker credential and every setting/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
