@@ -1344,9 +1344,10 @@ def cmd_record(args):
     skipped = []
     ignored = []
     started_ms = None
+    started_monotonic = None
 
     def on_message(client, userdata, msg):
-        nonlocal started_ms
+        nonlocal started_ms, started_monotonic
         # What the daemon's on_message() ingests and nothing else: STATE, NCMD, DCMD and an empty
         # payload are left out, so the file holds only what a playback can publish.
         try:
@@ -1367,17 +1368,21 @@ def cmd_record(args):
             print("  skipped undecodable payload on %s" % msg.topic, file=sys.stderr)
             return
 
-        now_ms = int(time.time() * 1000)
-        if started_ms is None:
-            started_ms = now_ms
+        # Offsets from the monotonic clock, as the daemon's recorder stamps them: the wall clock can
+        # step back, and a file whose offsets run backwards is refused at replay.
+        now = time.monotonic_ns()
+        if started_monotonic is None:
+            started_monotonic = now
+            started_ms = int(time.time() * 1000)
+        offset_ms = (now - started_monotonic) // 1_000_000
         messages.append({
-            "offset_ms": now_ms - started_ms,
+            "offset_ms": offset_ms,
             "topic": msg.topic,
             "encoding": encoding,
             "payload": payload_to_dict(payload),
         })
         if args.verbose:
-            print("  %6dms  %s" % (now_ms - started_ms, msg.topic))
+            print("  %6dms  %s" % (offset_ms, msg.topic))
 
     client = _connect(RECORD_USER, RECORD_PASSWORD, "aber-capture-record")
     client.on_message = on_message

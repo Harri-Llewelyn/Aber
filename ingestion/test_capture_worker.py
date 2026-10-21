@@ -35,6 +35,7 @@ import io
 import json
 import os
 import sys
+import threading
 import tracemalloc
 import types
 import unittest
@@ -230,6 +231,61 @@ class Buffering(unittest.TestCase):
         j = job()
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
         self.assertFalse(j.birth_captured)
+
+
+class TheOffsetsRunForwards(unittest.TestCase):
+    """
+    The replay refuses a file whose offsets run backwards, so the recorder stamps them from the
+    monotonic clock. Stamped from the wall clock, a capture recorded under load once held two
+    messages a millisecond out of order, and its whole replay was refused.
+    """
+
+    TOPIC = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+
+    def _append_at(self, j, wall_s, monotonic_ns):
+        with patch.object(capture_worker.time, "time", return_value=wall_s), \
+                patch.object(capture_worker.time, "monotonic_ns", return_value=monotonic_ns):
+            j.append(self.TOPIC, wire(), "NDATA")
+
+    def _replayable(self, j):
+        """The finished file, through the order check a playback runs before it plans anything."""
+        uploads = []
+        storage = MagicMock()
+        storage.from_.return_value.upload.side_effect = lambda **kw: uploads.append(kw["file"].read())
+        with patch.object(capture_worker, "_storage", storage), \
+                patch.object(capture_worker, "_supabase", MagicMock()):
+            capture_worker._finish(j, "duration reached")
+        return capture.check_capture(json.loads(uploads[0]))
+
+    def test_a_wall_clock_that_steps_back_does_not_reorder_the_file(self):
+        j = job()
+        self._append_at(j, 1_800_000_035.440, 500_000_000_000)
+        self._append_at(j, 1_800_000_035.439, 500_001_000_000)
+        offsets = [m["offset_ms"] for m in self._replayable(j)]
+        self.assertEqual(offsets, [0, 1])
+
+    def test_two_messages_at_the_same_instant_share_an_offset(self):
+        j = job()
+        self._append_at(j, 1_800_000_035.440, 500_000_000_000)
+        self._append_at(j, 1_800_000_035.440, 500_000_400_000)
+        offsets = [m["offset_ms"] for m in self._replayable(j)]
+        self.assertEqual(offsets, [0, 0])
+
+    def test_messages_appended_from_two_threads_are_written_in_order(self):
+        j = job()
+
+        def feed():
+            for _ in range(300):
+                j.append(self.TOPIC, wire(), "NDATA")
+
+        threads = [threading.Thread(target=feed) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        offsets = [m["offset_ms"] for m in self._replayable(j)]
+        self.assertEqual(len(offsets), 600)
+        self.assertEqual(offsets, sorted(offsets))
 
 
 class Caps(unittest.TestCase):
