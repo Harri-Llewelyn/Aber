@@ -138,7 +138,7 @@ describe('the People tab', () => {
     const mine = await row('me@site.test')
     const select = within(mine).getByRole('combobox')
     expect(select).toBeDisabled()
-    expect(select).toHaveAttribute('title', 'You cannot change your own role. Ask another Administrator.')
+    expect(select).toHaveAccessibleDescription('You cannot change your own role. Ask another Administrator.')
     const remove = within(mine).getByRole('button', { name: 'Remove Access' })
     expect(remove).toBeDisabled()
     expect(remove).toHaveAccessibleDescription('You cannot remove your own access. Ask another Administrator.')
