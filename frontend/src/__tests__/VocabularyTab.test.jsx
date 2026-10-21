@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { VocabularyTab } from '../components/tabs/VocabularyTab'
-import { HELP_CORPUS } from '../help'
+import { HELP_SOURCES as HELP_CORPUS } from './helpSources'
 import { api } from '../api'
 
 /**

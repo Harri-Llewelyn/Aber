@@ -4250,6 +4250,139 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 
 .help-missing { color: var(--text-muted); font-style: italic; }
 
+.help-prose h5, .help-prose h6 {
+  margin: 10px 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--text-primary);
+}
+
+/* Clear of the sticky search bar when the panel scrolls a heading to the top. */
+.help-prose [data-heading] { scroll-margin-top: 92px; }
+
+.help-prose li > ul, .help-prose li > ol { margin: 4px 0 0; }
+.help-prose li > p { margin-bottom: 4px; }
+.help-prose em { font-style: italic; }
+.help-prose hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+.help-prose blockquote {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--border-hover);
+  background: var(--bg-glass);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+.help-prose blockquote > *:last-child { margin-bottom: 0; }
+
+/* A table or a command keeps the panel's width and scrolls sideways inside it. */
+.help-table-wrap {
+  margin: 0 0 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+.help-prose table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; }
+.help-prose th, .help-prose td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.help-prose th { background: var(--bg-glass); font-weight: 600; color: var(--text-muted); }
+/* A topic or a path in a cell may break, so its column need not hold it on one line. */
+.help-prose td code { overflow-wrap: anywhere; }
+.help-prose tbody tr:last-child td { border-bottom: none; }
+.help-prose .help-align-center { text-align: center; }
+.help-prose .help-align-right { text-align: right; }
+
+.help-code { margin: 0 0 10px; }
+.help-code-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 3px; }
+.help-code-lang { flex: 1; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.help-code-copy.btn-sm { padding: 2px 8px; font-size: 11.5px; gap: 4px; }
+.help-code-error { flex-basis: 100%; font-size: 11.5px; color: var(--danger-text); }
+.help-code pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.help-prose .help-code pre code { padding: 0; border-radius: 0; background: none; font-size: inherit; }
+.help-code pre:focus-visible, .help-table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A link out of the dashboard: the globe and the word say it needs the internet. An inline-flex box,
+   so the link's underline does not run under the mark. */
+.online-link-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 3px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The help panel's contents: the search bar, then whichever view it shows. */
+.help-browser { display: flex; flex-direction: column; }
+/* This page's link, then help/README.md: a gap between the two, each ending without one. */
+.help-contents > .help-prose + .help-prose { margin-top: 12px; }
+/* Room below the last result for its focus ring, which the scroller would clip. */
+.help-results { padding-bottom: 4px; }
+
+/* The help panel's search box, Back and Contents, kept in view over a long guide. */
+.help-toolbar {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -10px 0 12px;
+  padding: 10px 0 8px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.help-toolbar .search-input, .help-toolbar .search-input.control-lg { width: 100%; }
+.help-toolbar-nav { display: flex; gap: 6px; }
+.help-toolbar-nav .btn-sm { padding: 3px 10px; font-size: 12px; gap: 5px; }
+.help-back-icon { transform: scaleX(-1); }
+.help-view:focus { outline: none; }
+
+.help-results-count { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
+.help-results-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.help-result {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.help-result:hover { background: var(--bg-glass); }
+.help-result:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.help-result-title { font-weight: 600; }
+.help-result-page { font-weight: 400; color: var(--text-muted); }
+.help-result-snippet {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Below 800px there is no room for the drawer beside the list, so it slides over the page, still
    not modal and still dismissible. Above that it keeps its column: at half a 1080p screen the list
    still gets about 540px beside it. */
@@ -5362,6 +5495,36 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
      and wrapping still collapse. */
   white-space: pre-line;
   pointer-events: none;
+}
+
+/* The point at the trigger, drawn as the popovers' are (Popover arrows): a square turned 45 degrees
+   on the border facing the trigger, the half inside hiding the border. --arrow-x is the trigger's
+   centre from the bubble's outer left edge, or its right edge on `-end`, less the 1px border. The
+   script places it for the widest bubble; min() keeps it 14px (ARROW_INSET in Tooltip.jsx) inside
+   a narrower one. */
+.tooltip-bubble::before {
+  --arrow-size: 8px;
+  content: '';
+  position: absolute;
+  top: -0.5px;
+  left: min(calc(var(--arrow-x) - 1px), calc(100% - 13px));
+  width: var(--arrow-size);
+  height: var(--arrow-size);
+  margin: calc(var(--arrow-size) / -2);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  transform: rotate(var(--arrow-turn, 45deg));
+}
+/* Above a low trigger, the point hangs from the bottom border. */
+.tooltip-bubble-above::before {
+  --arrow-turn: 225deg;
+  top: auto;
+  bottom: -0.5px;
+}
+.tooltip-bubble-end::before {
+  left: auto;
+  right: min(calc(var(--arrow-x) - 1px), calc(100% - 13px));
 }
 
 /* ===== Password field with a hold-to-reveal button ===== */
