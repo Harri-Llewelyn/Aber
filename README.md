@@ -73,7 +73,7 @@ Mosquitto, Node-RED, Grafana and Gitea, running on Kubernetes (k3s).
 | :--- | :--- |
 | Install Aber and sign in | [Installing Aber](help/site/install.md) |
 | Build your first machine | [The tutorial](help/guides/tutorial.md) |
-| Set up gateways on their own hardware | [Remote gateways](docs/remote-gateways.md) |
+| Set up gateways on their own hardware | [Remote gateways](help/site/remote-gateways.md) |
 | Look up a term | [Glossary](help/guides/glossary.md) |
 | See every page for newcomers, and the dashboard's help | [Help](help/README.md) |
 | See how it works | [How Aber fits together](docs/architecture.md) |

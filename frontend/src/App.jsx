@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
@@ -74,6 +74,7 @@ import { SegmentedControl } from './components/common/SegmentedControl'
 import { Tooltip } from './components/common/Tooltip'
 import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
+import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
@@ -455,6 +456,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const [showHelp, setShowHelp] = useState(false)
   const closeHelp = useCallback(() => setShowHelp(false), [])
   const openHelp = useCallback(() => setShowHelp(true), [])
+  const { expanded: helpExpanded, setExpanded: setHelpExpanded } = useHelpExpanded()
+  const helpDrawer = useMemo(() => ({ close: closeHelp, expanded: helpExpanded }), [closeHelp, helpExpanded])
 
   const { tab, setTab, handleNavClick } = useAppRouting()
 
@@ -699,9 +702,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
         <Sidebar tabs={navTabs} currentTab={tab} hrefFor={railHref} mode={sidebarMode} signals={navSignals} account={accountMenu} />
 
-        {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
-            drawer itself sits outside it. */}
-        <HelpDrawerContext.Provider value={closeHelp}>
+        {/* A page's drawer closes help through this on a narrow screen, or with help expanded
+            (ContextPanel.jsx). The help drawer itself sits outside it. */}
+        <HelpDrawerContext.Provider value={helpDrawer}>
         {/* What a page's search box reads to say whether `/` reaches it. */}
         <SingleKeyShortcutsContext.Provider value={singleKeyShortcuts}>
         <main className="content">
@@ -771,7 +774,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
         {/* Rendered beside the page so it survives tab switches (`tabId` follows `tab`) and is
             available on pages with no drawer of their own. See HelpPanel.jsx. */}
-        <HelpPanel open={showHelp} tabId={tab} onClose={closeHelp} onOpen={openHelp} />
+        <HelpPanel open={showHelp} tabId={tab} onClose={closeHelp} onOpen={openHelp} expanded={helpExpanded} onExpandedChange={setHelpExpanded} />
       </div>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
