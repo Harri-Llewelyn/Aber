@@ -48,7 +48,7 @@ describe('the filter', () => {
 
     const radios = within(filter()).getAllByRole('radio')
     expect(radios.map(r => r.getAttribute('aria-label'))).toEqual(['All, 6', 'Info, 3', 'Warnings, 3'])
-    for (const r of radios) expect(r).toHaveAttribute('title', r.getAttribute('aria-label'))
+    for (const r of radios) expect(r).not.toHaveAttribute('title')
     expect(segment('All, 6')).toHaveAttribute('aria-checked', 'true')
     expect(within(filter()).queryByRole('radio', { name: /^Alerts/ })).toBeNull()
   })
@@ -127,10 +127,10 @@ describe('Clear while filtered', () => {
     render(<NotificationHistory entries={ENTRIES} onClear={onClear} />)
     fireEvent.click(bell())
     const clear = within(panel()).getByRole('button', { name: 'Clear' })
-    expect(clear).toHaveAttribute('title', 'Empty this list. The toasts on screen stay.')
+    expect(clear).toHaveAccessibleDescription('Empty this list. The toasts on screen stay.')
 
     fireEvent.click(segment('Warnings, 3'))
-    expect(clear).toHaveAttribute('title', 'Empty the whole list, not only the warnings shown. The toasts on screen stay.')
+    expect(clear).toHaveAccessibleDescription('Empty the whole list, not only the warnings shown. The toasts on screen stay.')
     fireEvent.click(clear)
     expect(onClear).toHaveBeenCalledTimes(1)
   })

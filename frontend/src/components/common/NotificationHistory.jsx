@@ -7,6 +7,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { HISTORY_LIMIT, groupOf, isSafeDestination } from '../../hooks/useToast'
 import { formatRelative } from '../../utils/format'
+import { Tooltip } from './Tooltip'
 
 /**
  * The list's filter: All, then each group the list records, with its icon. `name` is the
@@ -124,21 +125,22 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
 
   return (
     <div className="notif-wrap" ref={wrapRef} onBlur={onBlur}>
-      <button
-        ref={buttonRef}
-        className={`topbar-icon-button notif-button${open ? ' topbar-icon-button-active' : ''}`}
-        onClick={toggle}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label={label}
-        title={title}
-      >
-        <IconBell size={15} />
-        {/* Not rendered at zero, the same rule as the alert pill's count. */}
-        {count > 0 && (
-          <span className={`notif-badge notif-badge-${tone}`} aria-hidden="true">{count}</span>
-        )}
-      </button>
+      <Tooltip text={title}>
+        <button
+          ref={buttonRef}
+          className={`topbar-icon-button notif-button${open ? ' topbar-icon-button-active' : ''}`}
+          onClick={toggle}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label={label}
+        >
+          <IconBell size={15} />
+          {/* Not rendered at zero, the same rule as the alert pill's count. */}
+          {count > 0 && (
+            <span className={`notif-badge notif-badge-${tone}`} aria-hidden="true">{count}</span>
+          )}
+        </button>
+      </Tooltip>
 
       {open && (
         <div ref={panelRef} className="notif-panel" role="dialog" aria-label="Notifications" tabIndex={-1}>
@@ -147,26 +149,18 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
             <div className="notif-panel-head">
               <span>Notifications</span>
               <div className="notif-panel-actions">
-                <button
-                  type="button"
-                  className="notif-clear"
-                  onClick={clear}
-                  disabled={entries.length === 0}
-                  title={filter === 'all'
-                    ? 'Empty this list. The toasts on screen stay.'
-                    : `Empty the whole list, not only the ${chosen.noun} shown. The toasts on screen stay.`}
-                >
-                  Clear
-                </button>
-                <button
-                  type="button"
-                  className="notif-close"
-                  onClick={closeToButton}
-                  aria-label="Close notifications"
-                  title="Close (Esc)"
-                >
-                  <IconX size={13} />
-                </button>
+                <Tooltip text={filter === 'all'
+                  ? 'Empty this list. The toasts on screen stay.'
+                  : `Empty the whole list, not only the ${chosen.noun} shown. The toasts on screen stay.`}>
+                  <button type="button" className="notif-clear" onClick={clear} disabled={entries.length === 0}>
+                    Clear
+                  </button>
+                </Tooltip>
+                <Tooltip text="Close (Esc)">
+                  <button type="button" className="notif-close" onClick={closeToButton} aria-label="Close notifications">
+                    <IconX size={13} />
+                  </button>
+                </Tooltip>
               </div>
             </div>
 
@@ -211,9 +205,9 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
                         {isSafeDestination(e.to) ? <MessageLink to={e.to} className="notif-item-link" onFollow={(ev) => followed(e.to, ev)}>{text}</MessageLink> : text}
                       </div>
                       <div className="notif-item-meta">
-                        <time dateTime={when.toISOString()} title={when.toLocaleString()}>
-                          {relativeTime(e.at, now)}
-                        </time>
+                        <Tooltip text={when.toLocaleString()}>
+                          <time dateTime={when.toISOString()}>{relativeTime(e.at, now)}</time>
+                        </Tooltip>
                         {e.count > 1 && <span> · {e.count} times in a row</span>}
                       </div>
                     </div>

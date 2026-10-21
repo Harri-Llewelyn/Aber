@@ -107,7 +107,7 @@ describe('SegmentedControl as a radio group', () => {
     expect(info.querySelector('.segmented-label')).toHaveTextContent('Info')
     // WCAG 2.5.3: the accessible name starts with the visible word, so "Info" chooses it by voice.
     expect(info.getAttribute('aria-label').startsWith(info.textContent)).toBe(true)
-    expect(info).toHaveAttribute('title', 'Info, 2')
+    expect(info).not.toHaveAttribute('title')
   })
 
   it('names a segment with no count by its visible name alone', () => {
@@ -118,7 +118,7 @@ describe('SegmentedControl as a radio group', () => {
     const dark = radio('Dark')
     expect(dark.textContent).toBe('Dark')
     expect(dark).not.toHaveAttribute('aria-label')
-    expect(dark).toHaveAttribute('title', 'Dark')
+    expect(dark).not.toHaveAttribute('title')
     expect(dark.querySelector('.segmented-icon')).toHaveAttribute('aria-hidden', 'true')
   })
 

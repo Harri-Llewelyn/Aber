@@ -5,6 +5,7 @@ import { NotificationHistory, relativeTime, worstType } from '../components/comm
 import { useToast, HISTORY_STORAGE_KEY } from '../hooks/useToast'
 import { supabase } from '../lib/supabaseClient'
 import App from '../App'
+import { tooltipOf } from '../test/tooltips'
 
 // For the App suite at the end. NotificationHistory and useToast never reach the client.
 vi.mock('../lib/supabaseClient', () => ({
@@ -104,12 +105,12 @@ describe('NotificationHistory', () => {
     it('ignores a read error when choosing the tone', () => {
       render(<NotificationHistory entries={[entry({ id: 2, type: 'success' }), entry({ id: 1, type: 'error', read: true })]} />)
       expect(badge()).toHaveClass('notif-badge-success')
-      expect(bell().getAttribute('title')).not.toMatch(/error/)
+      expect(tooltipOf(bell())).not.toMatch(/error/)
     })
 
     it('mentions an unread error in its title', () => {
       render(<NotificationHistory entries={[entry({ type: 'error' })]} />)
-      expect(bell().getAttribute('title')).toMatch(/1 unread notification, including an error/)
+      expect(tooltipOf(bell())).toMatch(/1 unread notification, including an error/)
     })
   })
 
@@ -153,7 +154,7 @@ describe('NotificationHistory', () => {
       const time = items[1].querySelector('time')
       expect(time).toHaveTextContent('5m ago')
       expect(time).toHaveAttribute('dateTime', new Date(NOW - 5 * 60 * 1000).toISOString())
-      expect(time.getAttribute('title')).toBe(new Date(NOW - 5 * 60 * 1000).toLocaleString())
+      expect(tooltipOf(time)).toBe(new Date(NOW - 5 * 60 * 1000).toLocaleString())
       expect(items[1]).toHaveTextContent('4 times in a row')
       expect(items[2].querySelector('time')).toHaveTextContent('2h ago')
     })
@@ -176,7 +177,7 @@ describe('NotificationHistory', () => {
 
     it('says that Grafana alerts are in the alert counter, not in this list', () => {
       render(<NotificationHistory entries={[]} />)
-      expect(bell().getAttribute('title')).toMatch(/Grafana alerts are in the alert counter\.$/)
+      expect(tooltipOf(bell())).toMatch(/Grafana alerts are in the alert counter\.$/)
       fireEvent.click(bell())
       const panel = screen.getByRole('dialog', { name: 'Notifications' })
       expect(panel.querySelector('.notif-empty')).toHaveTextContent('Grafana alerts are in the alert counter.')

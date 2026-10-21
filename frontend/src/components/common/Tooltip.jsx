@@ -175,9 +175,10 @@ const setRefs = (...refs) => (el) => {
 /**
  * The shared tooltip on one control: wrap the control, and `text` shows in the bubble, as useTooltip
  * shows it. The control's own ref and handlers still run. With no `text` nothing shows and the
- * control is drawn in the same place, so a tooltip that comes and goes never remounts it. The bubble describes
- * the control (`aria-describedby`) unless its text is the control's `aria-label`: an icon-only
- * button carries its name there, so the name never depends on the tooltip, and is not read twice.
+ * control is drawn in the same place, so a tooltip that comes and goes never remounts it. The bubble
+ * describes the control (`aria-describedby`) unless its text is the control's name: its
+ * `aria-label`, which an icon-only button carries so its name never depends on the tooltip, or its
+ * own text, which a tooltip shows whole where the text is cut short. A name is not read twice.
  *
  *   <Tooltip text="Send the bundle to the gateway again">
  *     <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
@@ -192,7 +193,7 @@ export function Tooltip({ text, delay, children }) {
   const own = child.props
   const { trigger } = tip
   const both = (ours, theirs) => (e) => { ours(e); theirs?.(e) }
-  const describes = Boolean(text) && own['aria-label'] !== text
+  const describes = Boolean(text) && own['aria-label'] !== text && own.children !== text
   const describedBy = [own['aria-describedby'], describes && trigger['aria-describedby']].filter(Boolean).join(' ')
   return (
     <>

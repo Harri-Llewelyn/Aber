@@ -4,6 +4,7 @@ import {
   SEMANTIC_ID_TYPES, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair
 } from '../../utils/standards'
 import { searchSemanticIdCandidates, foreignConcept } from '../../utils/semanticIdSources'
+import { Tooltip } from './Tooltip'
 
 /** The most matches the picker lists at once; the rest are reached by narrowing the search. */
 const PICKER_LIMIT = 50
@@ -135,17 +136,18 @@ export function SemanticIdField({
               {hasId && semanticIdType ? semanticIdType : '—'}
             </div>
           ) : (
-            <select
-              id={typeFor}
-              className="form-control"
-              value={hasId ? semanticIdType : ''}
-              disabled={!hasId}
-              onChange={e => onChange?.({ semanticId, semanticIdType: e.target.value })}
-              title={hasId ? undefined : 'Enter a semantic id first: a type with no id says nothing'}
-            >
-              <option value="">— None —</option>
-              {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <Tooltip text={hasId ? null : 'Enter a semantic id first: a type with no id says nothing'}>
+              <select
+                id={typeFor}
+                className="form-control"
+                value={hasId ? semanticIdType : ''}
+                disabled={!hasId}
+                onChange={e => onChange?.({ semanticId, semanticIdType: e.target.value })}
+              >
+                <option value="">— None —</option>
+                {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -155,30 +157,28 @@ export function SemanticIdField({
       {!readOnly && (showingSuggestion || canRestore || canPick) && (
         <div className="semantic-id-actions">
           {showingSuggestion && (
-            <span className="semantic-id-suggested" title={suggestion.note}>Suggested</span>
+            <Tooltip text={suggestion.note}><span className="semantic-id-suggested">Suggested</span></Tooltip>
           )}
           {canRestore && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => onChange?.({ ...suggested })}
-              title={`Put the suggested id back: ${suggested.semanticId}`}
-            >
-              Use suggested
-            </button>
+            <Tooltip text={`Put the suggested id back: ${suggested.semanticId}`}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange?.({ ...suggested })}>
+                Use suggested
+              </button>
+            </Tooltip>
           )}
           {canPick && (
-            <button
-              ref={toggleRef}
-              type="button"
-              className="btn btn-ghost btn-sm"
-              aria-expanded={picking}
-              aria-controls={`${idPrefix}-semantic-id-picker`}
-              onClick={() => (picking ? closePicker() : setPicking(true))}
-              title="Find a concept's id in the standard vocabularies and the IDTA templates"
-            >
-              {picking ? 'Close search' : 'Search vocabularies'}
-            </button>
+            <Tooltip text={picking ? null : "Find a concept's id in the standard vocabularies and the IDTA templates"}>
+              <button
+                ref={toggleRef}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-expanded={picking}
+                aria-controls={`${idPrefix}-semantic-id-picker`}
+                onClick={() => (picking ? closePicker() : setPicking(true))}
+              >
+                {picking ? 'Close search' : 'Search vocabularies'}
+              </button>
+            </Tooltip>
           )}
         </div>
       )}
@@ -207,18 +207,19 @@ export function SemanticIdField({
             <ul className="semantic-id-picker-list" aria-label="Matching concepts">
               {matches.map(c => (
                 <li key={`${c.standard}|${c.semanticId}|${c.label}`}>
-                  <button
-                    type="button"
-                    className="semantic-id-picker-option"
-                    onClick={() => choose(c)}
-                    title={c.detail || undefined}
-                  >
-                    <span className="semantic-id-picker-head">
-                      <span>{c.label}</span>
-                      <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{c.standard}</span>
-                    </span>
-                    <span className="mono semantic-id-picker-id">{c.semanticId}</span>
-                  </button>
+                  <Tooltip text={c.detail}>
+                    <button
+                      type="button"
+                      className="semantic-id-picker-option"
+                      onClick={() => choose(c)}
+                    >
+                      <span className="semantic-id-picker-head">
+                        <span>{c.label}</span>
+                        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{c.standard}</span>
+                      </span>
+                      <span className="mono semantic-id-picker-id">{c.semanticId}</span>
+                    </button>
+                  </Tooltip>
                 </li>
               ))}
             </ul>

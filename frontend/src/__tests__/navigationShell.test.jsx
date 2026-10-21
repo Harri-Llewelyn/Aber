@@ -312,8 +312,9 @@ describe('Merged navigation shell', () => {
       const segment = (name) => within(theme).getByRole('menuitemradio', { name })
       expect(segment('Dark')).toHaveAttribute('aria-checked', 'true')
       expect(segment('Light')).toHaveAttribute('aria-checked', 'false')
-      // Each segment names its own theme: the sun is Light, the moon is Dark.
-      expect(segment('Light')).toHaveAttribute('title', 'Light')
+      // Each segment names its own theme in words beside the icon, so it needs no tooltip.
+      expect(segment('Light')).toHaveTextContent('Light')
+      expect(segment('Light')).not.toHaveAttribute('title')
 
       fireEvent.click(segment('Light'))
       // STILL OPEN. The theme is the one choice here whose result is visible behind the menu, so

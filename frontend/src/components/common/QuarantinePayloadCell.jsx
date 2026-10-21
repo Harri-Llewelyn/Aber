@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { IconChevronDown, IconChevronUp } from './Icons'
+import { Tooltip } from './Tooltip'
 
 /** Names shown before the cell collapses the rest behind a count. */
 const COLLAPSED_LIMIT = 3
@@ -23,9 +24,11 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
       // Not the array we expect -- show the raw string rather than nothing.
       return (
         <td style={{ maxWidth: '320px' }}>
-          <code style={{ fontSize: '11px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fallbackJson}>
-            {fallbackJson}
-          </code>
+          <Tooltip text={fallbackJson}>
+            <code style={{ fontSize: '11px', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {fallbackJson}
+            </code>
+          </Tooltip>
         </td>
       )
     }
@@ -41,20 +44,21 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
   return (
     <td style={{ maxWidth: '320px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+        {/* A long name is ellipsed, so the tooltip carries it whole. */}
         {shown.map(name => (
-          <span
-            key={name}
-            className="mono"
-            style={{
-              fontSize: '11px', padding: '2px 6px', borderRadius: 'var(--radius)',
-              border: '1px solid var(--border)', background: 'var(--bg-glass)',
-              color: 'var(--text-muted)', maxWidth: '100%',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-            }}
-            title={name}
-          >
-            {name}
-          </span>
+          <Tooltip key={name} text={name}>
+            <span
+              className="mono"
+              style={{
+                fontSize: '11px', padding: '2px 6px', borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)', background: 'var(--bg-glass)',
+                color: 'var(--text-muted)', maxWidth: '100%',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+              }}
+            >
+              {name}
+            </span>
+          </Tooltip>
         ))}
 
         {hidden > 0 && (
@@ -64,7 +68,6 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
             aria-expanded={expanded}
             className="btn btn-ghost btn-sm"
             style={{ fontSize: '11px', padding: '2px 6px' }}
-            title={expanded ? 'Collapse the payload' : `Show the remaining ${hidden} metric${hidden === 1 ? '' : 's'}`}
           >
             {expanded
               ? <>Show less <IconChevronUp size={10} /></>

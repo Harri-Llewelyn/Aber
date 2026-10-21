@@ -1281,9 +1281,10 @@ passes `{ record: false }`, as a Grafana alert does.
   choosing. Every segment draws its icon and its `label`; an option's `count` is said after the label
   in the tooltip and the accessible name. The chosen segment takes a sunken fill (`--bg-base`) and a
   border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes the option's
-  `tone`. A segment's tooltip is its name, the browser's own, unless the option has a
-  `description`: then it is that sentence in the shared bubble (`common/Tooltip.jsx`), tied by
-  `aria-describedby` and with no `title`, as the Sidebar layout switch's segments are.
+  `tone`. Tooltips are the shared bubble (`common/Tooltip.jsx`): an option's `description`, tied by
+  `aria-describedby`, as the Sidebar layout switch's segments are; otherwise the name with its
+  count, which the label does not show; and none where the label says it all, as on the theme
+  switch.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a

@@ -1,5 +1,6 @@
 import React from 'react'
 import { IconChevronDown, IconChevronUp } from './Icons'
+import { Tooltip } from './Tooltip'
 
 /**
  * One button that opens or closes every collapsible section or group of a list. It reads
@@ -20,15 +21,16 @@ import { IconChevronDown, IconChevronUp } from './Icons'
  */
 export function ExpandAllToggle({ anyOpen, onExpandAll, onCollapseAll, noun = 'sections', disabled = false }) {
   return (
-    <button
-      type="button"
-      className={`btn btn-ghost btn-sm${disabled ? ' btn-disabled' : ''}`}
-      onClick={anyOpen ? onCollapseAll : onExpandAll}
-      disabled={disabled}
-      title={anyOpen ? `Close every ${noun}` : `Open every ${noun}`}
-    >
-      {anyOpen ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-      {anyOpen ? 'Collapse all' : 'Expand all'}
-    </button>
+    <Tooltip text={anyOpen ? `Close all the ${noun}` : `Open all the ${noun}`}>
+      <button
+        type="button"
+        className={`btn btn-ghost btn-sm${disabled ? ' btn-disabled' : ''}`}
+        onClick={anyOpen ? onCollapseAll : onExpandAll}
+        disabled={disabled}
+      >
+        {anyOpen ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+        {anyOpen ? 'Collapse all' : 'Expand all'}
+      </button>
+    </Tooltip>
   )
 }
