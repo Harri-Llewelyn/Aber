@@ -24,10 +24,12 @@ gives it a [schema](#schema).
 ### Gateway
 
 The computer that talks to your machines and sends their data to Aber's [broker](#broker). There
-are four types:
+are five types:
 
 - **Remote:** runs on its own hardware beside the machines. It is the usual type
   ([remote gateways](../../docs/remote-gateways.md)).
+- **Third-party:** an edge node on its own machine, running software Aber does not manage. The
+  dashboard issues its broker credential, and the engineer who runs it configures it.
 - **Host:** runs inside the server's own Node-RED.
 - **Simulated:** for synthetic data, such as a Node-RED flow that imitates a machine. It runs
   inside the server, and its devices are kept apart from real ones.

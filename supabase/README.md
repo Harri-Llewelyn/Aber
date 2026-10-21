@@ -1264,6 +1264,40 @@ does. `test_capture_retention.py` runs the policies and their self-check verbati
 table, and `test_recorded_capture_replay.py` holds the refusal and the link against the real
 storage-api.
 
+### A Third-party gateway is issued its credential in the dashboard (0196)
+
+An engineer may bring an edge node of their own: equipment with Sparkplug B built in, or software
+they chose. Before `0196` the only way to give one a broker credential was to register it as Host,
+and Aber then described it as running inside itself. `third_party` is a third value of
+`gateways.deployment`: an edge node on its own machine, running software Aber does not manage. It
+cannot enrol, so it is issued its credential the way a Host gateway is. It is placed on the plant
+the way a Remote gateway is.
+
+- **The CHECK is widened in `0001`, not here.** `gateways_deployment_valid` names `third_party`
+  in the baseline's table, its guard and its re-add, as `0171` did for `ExpandedNodeId`. `0001`
+  replays first on every boot and drops a CHECK whose definition differs from its own. A CHECK
+  widened in `0196` would be narrowed again on the next boot, and the re-add would fail on the
+  first Third-party row. `gateways_simulated_is_host` is unchanged, so a Third-party gateway is
+  never simulated.
+- **The mint admits it.** `authorize_host_gateway_credential()` refuses only a Remote or archived
+  gateway, so `gateway-credential` mints for Host and Third-party alike. `keep_gateway_credential()`
+  keeps the copy `show_gateway_credential()` shows again (`0164`), Administrator only, each showing a
+  `CREDENTIAL_SHOWN` row. The function names keep "host": a renamed RPC is a removed one.
+- **The bundle refuses it.** `issue_gateway_enrollment_token()` refuses a Third-party gateway as it
+  refuses a Host one, naming the credential as the way instead. A bundle enrols Aber's gateway
+  appliance, and a token for anything else would mint a credential nothing presents.
+  `gateway-bundle` refuses it before minting, with the same reason.
+- **Its credential counts.** `gateway_has_broker_credential()` counts a Third-party gateway's
+  `CREDENTIAL_ISSUED` row as it counts a Host gateway's. So archiving or deleting it disables its
+  account at the broker, and the revocation sweep retries it. One never issued a credential is
+  passed over, as before.
+
+Nothing changes for an existing row: every gateway keeps its type. The file's self-check asserts
+that the CHECK admits the value, that each of the four functions names it, that `anon` may execute
+none of them, and that a Third-party gateway with no issue on record holds no account.
+`test_third_party_gateway.py` holds each guard both ways, Remote and Host as before, and a replay
+of `0001`'s CHECK block over a Third-party row.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

@@ -109,6 +109,10 @@ async function loadDeviceLocations() {
 // submits exactly that.
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+// gateways_deployment_valid's three values. Anything else reads as 'remote', the type that needs an
+// appliance, so a gateway is never created that quietly gets no hardware.
+const deploymentFrom = (v) => (v === 'host' || v === 'third_party' ? v : 'remote');
+
 /**
  * `semantic_id` and `semantic_id_type` as every write stores them: the id trimmed, and the type NULL
  * whenever the id is, so the pair is never half-populated. A type with no id would export as an AAS
@@ -1177,8 +1181,9 @@ const apiMethods = {
         .from('gateway_status')
         // `is_shadow` so the credential dialog can tell an operator where the password actually
         // goes: a playback gateway has no Node-RED broker node, so the .env pairing it would
-        // otherwise print is advice that cannot be followed.
-        .select('id,name,sparkplug_id,deployment,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        // otherwise print is advice that cannot be followed. `sparkplug_group` is one of the
+        // settings the dialog gives a Third-party gateway's engineer.
+        .select('id,name,sparkplug_id,sparkplug_group,deployment,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
         .from('audit_trail')
@@ -1229,15 +1234,16 @@ const apiMethods = {
   },
 
   /**
-   * Mint a host-run gateway's broker credential and get it back once.
+   * Mint a Host or Third-party gateway's broker credential and get it back once.
    *
    * A raw fetch so both gateway-credential paths read the same way. The password is returned once
    * and is not recoverable: mosquitto_passwd stores a hash, and minting again replaces the account.
    */
   /**
-   * The kept copy of a Host or Simulated gateway's broker credential (0164). Administrator only, and
-   * every call is a CREDENTIAL_SHOWN row in the Audit Trail. The error carries the RPC's own sentence
-   * ("no copy ... is kept; issue a new one ..."), which is the one an operator can act on.
+   * The kept copy of a Host, Simulated or Third-party gateway's broker credential (0164).
+   * Administrator only, and every call is a CREDENTIAL_SHOWN row in the Audit Trail. The error carries
+   * the RPC's own sentence ("no copy ... is kept; issue a new one ..."), which is the one an
+   * operator can act on.
    */
   showGatewayCredential: async (gatewayId) => {
     const { data, error } = await supabase.rpc('show_gateway_credential', { p_gateway_id: gatewayId });
@@ -2740,7 +2746,7 @@ const apiMethods = {
         // 'remote' when the caller says nothing, matching the create form's own default: the
         // case that needs an appliance is the one an operator must opt OUT of, or a gateway can be
         // created that quietly never gets hardware.
-        deployment: body.deployment === 'host' ? 'host' : 'remote',
+        deployment: deploymentFrom(body.deployment),
         // Defaulted rather than omitted so a simulated gateway is created flagged in one step. The
         // column is NOT NULL DEFAULT false (0052), so `false` here and an absent key reach the same
         // row -- being explicit is for the reader, not the database. `is_shadow` is never sent: the
@@ -3086,7 +3092,7 @@ const apiMethods = {
         name: body.gateway_name,
         access_url: body.access_url
       };
-      if ('deployment' in body) patch.deployment = body.deployment === 'host' ? 'host' : 'remote';
+      if ('deployment' in body) patch.deployment = deploymentFrom(body.deployment);
       // Sent separately from deployment, but not independent of it: the table holds a simulated
       // gateway to 'host' (gateways_simulated_is_host), so pairing it with 'remote' is refused.
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;

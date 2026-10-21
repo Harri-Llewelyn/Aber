@@ -4,12 +4,13 @@
 something goes wrong. For your first gateway, the dashboard's **Gateways** page walks you through
 setup. This page explains each step, and what to do when one fails.
 
-A gateway is one of three types, chosen with the dashboard's **Type** control. A **Host** gateway is
+A gateway is one of four types, chosen with the dashboard's **Type** control. A **Host** gateway is
 a connector running inside Aber. It exists as soon as its row does, and needs nothing installed. A
 **Simulated** gateway also runs inside Aber, and its readings are generated rather than observed. A
 **Remote** gateway runs on its own machine: a Raspberry Pi, an industrial PC, or a spare server in a
 cabinet. Before it can publish anything, it needs an identity, a credential and a way to verify the
-broker. This page is about Remote gateways.
+broker. A **Third-party** gateway also runs on its own machine, but its software is not Aber's: it
+does not enrol, and the dashboard issues its credential instead. This page is about Remote gateways.
 
 > **The short version.** Create the gateway in the dashboard with its **Type** set to *Remote*.
 > Paste the command it shows on a fresh Ubuntu machine: it installs everything, enrols, and prints

@@ -61,6 +61,21 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
     )
   }
 
+  // A Third-party gateway never enrols, so it never gets a repository, and Aber does not manage the
+  // software it runs.
+  if (gateway?.deployment === 'third_party') {
+    return (
+      <div>
+        <div className="form-label" style={{ margin: 0 }}>Repository</div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+          A Third-party gateway has no repository of its own. Aber does not manage the software on
+          its machine, so there is no flow here to propose a change to. Change the node on the node
+          itself.
+        </div>
+      </div>
+    )
+  }
+
   // Not enrolled yet: the repository is created when the appliance enrols, so every address 404s.
   if (!gateway?.enrolled_at) {
     return (

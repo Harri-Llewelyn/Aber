@@ -121,11 +121,11 @@ describe('the Type column', () => {
 
 describe('the Type control', () => {
 
-  it('offers exactly the three types a person may set', async () => {
+  it('offers exactly the four types a person may set', async () => {
     await show([gateway()])
     openEdit()
     const values = [...typeSelect().options].map(o => o.value)
-    expect(values).toEqual(['remote', 'host', 'simulated'])
+    expect(values).toEqual(['remote', 'third_party', 'host', 'simulated'])
   })
 
   it('does not offer Playback', async () => {
