@@ -2731,13 +2731,15 @@ main:focus { outline: none; }
 
 /* ===== The Site Map card: area plans and pins ===== */
 /* Area cards sit in the tracks of `.shopfloor-grid`. Each is a container so its header can drop
-   the counts when the card itself is narrow, whatever the window or the column count. */
+   the counts when the card itself is narrow, whatever the window or the column count. Padded at
+   the top only: the header and the line under the plan pad their own sides, and the plan's margin
+   is the card's at the sides and the bottom. */
 .area-card {
   container: area-card / inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px;
+  padding: 10px 0 0;
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2775,6 +2777,7 @@ main:focus { outline: none; }
   align-items: center;
   flex-wrap: wrap;
   gap: 2px 8px;
+  padding: 0 10px;
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
@@ -2827,7 +2830,7 @@ main:focus { outline: none; }
   width: 100%;
   background: none;
   border: 0;
-  padding: 0;
+  padding: 0 10px 10px;
   font-size: 11px;
   color: var(--text-muted);
   text-align: center;
@@ -2839,12 +2842,11 @@ main:focus { outline: none; }
 
 /* The grid is the map, so it follows the number of areas rather than a fixed minimum width: one
    area takes the row, two split it, three or more settle on thirds. On a card under 760px wide
-   every area takes the row, whatever the count. */
+   every area takes the row, whatever the count. The cards in a row stretch to share its height. */
 .shopfloor-grid {
   display: grid;
   grid-template-columns: repeat(var(--map-columns, 3), minmax(0, 1fr));
   gap: 12px;
-  align-items: start;
 }
 
 @container site-map (max-width: 760px) {
@@ -2857,15 +2859,18 @@ main:focus { outline: none; }
 .shopfloor-grid[style*="--map-columns: 2"] .area-card { --plan-max-height: 340px; }
 .shopfloor-grid[style*="--map-columns: 1"] .area-card { --plan-max-height: 440px; }
 
+/* Auto margins centre the plan across, and on a card stretched taller than its plan, between the
+   header and the line under it. */
 .area-card .area-plan,
 .area-plan-preview .area-plan {
   width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333) + 2 * var(--plan-inset-x)));
-  margin: 0 auto;
+  margin: auto;
 }
 
-/* The frame keeps a margin of half a pin round the drawing, so a pin centred on the plan's edge is
-   drawn whole: across, half the disc and its selection ring; down, half the disc, gap and label
-   (`.area-plan-pin`) and the ring. Resize these with the pin. */
+/* The plan keeps a margin round the drawing, so a pin centred on the plan's edge is drawn whole.
+   Across: half the disc, plus its 3px selection ring. Up and down: half the whole pin (disc, 4px
+   gap, and the label's 17.2px: 11px at line-height 1.2, 1px padding and 1px border each side),
+   plus the ring. Here, in the framed previews and placement picker, that is for the 40px pin. */
 .area-plan {
   --plan-inset-x: 24px;
   --plan-inset-y: 34px;
@@ -2876,6 +2881,18 @@ main:focus { outline: none; }
   border-radius: var(--radius-sm);
   overflow: hidden;
   user-select: none;
+}
+
+/* On the Site Map the plan sits straight on its card, with no frame, and the same sum is taken for
+   the pin the grid draws (--pin-size): half the disc + 3px across, half the disc + 13.6px (rounded
+   to 14px) above and below. That is 23 by 34px at 40px, 21 by 32px at 36px, 17 by 28px at 28px.
+   A plan's own sheet, drawn in its SVG, stays. */
+.area-card .area-plan {
+  --plan-inset-x: calc(var(--pin-size, 40px) / 2 + 3px);
+  --plan-inset-y: calc(var(--pin-size, 40px) / 2 + 14px);
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 /* What a place is a fraction of. A container, so a pin's label can measure the plan's width. */
