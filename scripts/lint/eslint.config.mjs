@@ -51,7 +51,6 @@ export default function config ({ js, react, hooks, globals }) {
         'frontend/src/components/common/AreaPlanPanel.jsx',
         'frontend/src/components/tabs/BackupsTab.jsx',
         'frontend/src/components/tabs/ColdStorageTab.jsx',
-        'frontend/src/components/common/Stat.jsx',
         'frontend/src/components/tabs/CellsTab.jsx',
         'frontend/src/components/common/Model3DUploader.jsx',
         'frontend/src/components/common/GlobalSearch.jsx',
