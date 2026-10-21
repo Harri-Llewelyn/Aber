@@ -1102,6 +1102,15 @@ file at that heading. The index and the matcher are exported for the top bar's s
 | `searchHelp(query, { currentFile, limit, index })` | ranked results, `{ file, id, heading, page, kind, snippet }`; `limit` defaults to `HELP_RESULT_LIMIT` (20) |
 | `helpTerms(text)` | the matcher's split, for highlighting |
 
+**The top bar's search has a Help group** (`GlobalSearch.jsx`). It calls `searchHelp` on the same
+index, ranked for the open page's help file, and shows at most five results (`HELP_GROUP_LIMIT`),
+so a common word leaves room for pages and records. The panel's own search lists the rest. The
+group sits after the pages, cards and settings and before the records, under a Help label, and
+waits for two characters as the name search does. A row is the heading, with the title of the page
+or guide it is in beside it (none when the heading is that title). The arrow keys and Enter walk it
+like any other row. Choosing one calls `openHelpAt(file, id)` and closes the search. The panel
+opens itself on that call, so `App.jsx` needs no wiring for it.
+
 ### Opening help from anywhere
 
 - **From code:** `openHelpAt(file, headingId?)` in `src/help/openHelp.js` opens the panel at a file
