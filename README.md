@@ -78,7 +78,7 @@ Mosquitto, Node-RED, Grafana and Gitea, running on Kubernetes (k3s).
 | See every page for newcomers, and the dashboard's help | [Help](help/README.md) |
 | See how it works | [How Aber fits together](docs/architecture.md) |
 | See how it is secured | [Security model](docs/security-model.md) |
-| Upgrade to a new release | [Upgrades](docs/upgrades.md) |
+| Upgrade to a new release | [Upgrades](help/site/upgrading.md) |
 | Run it day to day | [The Kubernetes runbook](deploy/k8s/README.md) |
 | See what is planned | The [milestones](https://github.com/Harri-Llewelyn/Aber/milestones), one per release, and [what has already shipped](docs/roadmap.md) |
 
