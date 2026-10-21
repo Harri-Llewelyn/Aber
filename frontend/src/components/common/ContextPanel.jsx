@@ -8,11 +8,15 @@ import { grafanaAlertUrl } from '../../constants'
 
 /**
  * Below this width only one drawer shows: an open help drawer hides a page's (the media query in
- * App.css, which must match), and a page's drawer that opens or changes subject closes help.
+ * App.css, which must match), and a page's drawer that opens or changes subject closes help. An
+ * expanded help drawer does the same at every width.
  */
 export const ONE_DRAWER_QUERY = '(max-width: 1439px)'
 
-/** Provided by the App around the page, not around the help drawer: closes the help drawer. */
+/**
+ * Provided by the App around the page, not around the help drawer: `{ close, expanded }`, the
+ * function that closes the help drawer and whether it is expanded.
+ */
 export const HelpDrawerContext = createContext(null)
 
 /**
@@ -59,8 +63,10 @@ export const HelpDrawerContext = createContext(null)
  *
  * @param {string} className Extra classes on the <aside>; the app-level instance sits in a
  * different row (`.context-panel-app`).
+ *
+ * @param {node} headerActions Controls drawn in the header before the X: the help drawer's Expand.
  */
-export function ContextPanel({ open, type, title, icon, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '' }) {
+export function ContextPanel({ open, type, title, icon, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '', headerActions = null }) {
   const closeRef = useRef(null)
 
   // Escape closes, caught at the document because the panel does not take focus. Through the shared
@@ -69,10 +75,14 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
   useEscapeKey(onClose, open)
 
   // A page's drawer opening, or turning to another entity, is what the person asked to see, so on a
-  // narrow screen it closes the help drawer that would otherwise hide it.
-  const closeHelp = useContext(HelpDrawerContext)
+  // narrow screen, or with help expanded, it closes the help drawer that would otherwise hide it.
+  // Expanding help is not a reason to run: that hides this drawer instead (App.css).
+  const help = useContext(HelpDrawerContext)
+  const closeHelp = help?.close
+  const helpExpanded = useRef(false)
+  helpExpanded.current = Boolean(help?.expanded)
   useEffect(() => {
-    if (open && closeHelp && window.matchMedia?.(ONE_DRAWER_QUERY)?.matches) closeHelp()
+    if (open && closeHelp && (helpExpanded.current || window.matchMedia?.(ONE_DRAWER_QUERY)?.matches)) closeHelp()
   }, [open, type, title, closeHelp])
 
   const firstPrimary = actions.findIndex(a => a.primary)
@@ -102,6 +112,7 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
             </div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
           </div>
+          {headerActions}
           <button
             ref={closeRef}
             className="context-panel-close"
