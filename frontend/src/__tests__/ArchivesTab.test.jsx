@@ -435,6 +435,7 @@ describe('ArchivesTab restore asks first', () => {
  * reads three lists, so these route the mock by path rather than answering every GET alike.
  */
 import { downloadBlob } from '../utils/downloadBlob'
+import { tooltipOf } from '../test/tooltips'
 
 const ARCHIVED_AREA = {
   entity_id: 'area-1', name: 'North Hall', entity_type: 'area',
@@ -742,8 +743,8 @@ describe('ArchivesTab layout', () => {
 
   it('names the roles behind a disabled button', async () => {
     await showArchives(() => false)
-    expect(screen.getByRole('button', { name: /Restore/i }).getAttribute('title')).toMatch(/^Requires /)
-    expect(screen.getByRole('button', { name: /Restore/i }).getAttribute('title')).not.toMatch(/Admin permissions/)
+    expect(tooltipOf(screen.getByRole('button', { name: /Restore/i }))).toMatch(/^Requires /)
+    expect(tooltipOf(screen.getByRole('button', { name: /Restore/i }))).not.toMatch(/Admin permissions/)
   })
 })
 

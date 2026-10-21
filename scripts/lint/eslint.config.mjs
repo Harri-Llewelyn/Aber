@@ -94,7 +94,6 @@ export default function config ({ js, react, hooks, globals }) {
         'frontend/src/components/modals/TelemetryModal.jsx',
         'frontend/src/components/modals/ValidatePayloadModal.jsx',
         'frontend/src/components/tabs/ApprovalsTab.jsx',
-        'frontend/src/components/tabs/ArchivesTab.jsx',
         'frontend/src/components/tabs/AreasTab.jsx',
         'frontend/src/components/tabs/DirectoryTab.jsx',
         'frontend/src/components/tabs/ProfileTab.jsx',
