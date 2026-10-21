@@ -189,7 +189,7 @@ export function ProfileTab({
               <ProfileRow
                 id="sidebar"
                 label="Sidebar layout"
-                description="How the sidebar shows the page names. The control at the foot of the sidebar switches the same setting."
+                description="How the sidebar shows the page names. The Sidebar layout switch in the account menu changes the same setting."
                 value={(<>
                   <select
                     id="profile-sidebar"

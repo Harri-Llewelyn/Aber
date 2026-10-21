@@ -1,12 +1,9 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { currentTabOf, groupedNav, tabHref } from '../../navigation'
-import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
-import { useClickOutside } from '../../hooks/useClickOutside'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { useUrl } from '../../hooks/useUrlState'
-import { IconPanelLeft, IconCheck, IconChevronDown, IconChevronUp } from './Icons'
-import { RouteLink, isPlainClick } from './RouteLink'
+import { IconChevronDown, IconChevronUp, IconChevronsDownUp } from './Icons'
+import { RouteLink } from './RouteLink'
 
 /** How long the pointer rests on the rail before hover mode opens it. A pointer crossing takes less. */
 export const RAIL_OPEN_DELAY_MS = 150
@@ -14,8 +11,8 @@ export const RAIL_OPEN_DELAY_MS = 150
 /**
  * The primary navigation: a 52px rail of icons with a labelled panel.
  *
- * Three behaviours, chosen from the control at the foot of the rail and saved with the person's
- * other preferences (useUserSettings.js):
+ * Three behaviours, `mode`, chosen in the account menu's Sidebar layout switch or on Profile ›
+ * Appearance and saved with the person's other preferences (useUserSettings.js):
  *
  *   hover      the panel paints OVER the page once the pointer rests on the rail, and reflows
  *              nothing. It shuts as soon as the pointer leaves.
@@ -33,42 +30,35 @@ export const RAIL_OPEN_DELAY_MS = 150
  * plain click navigates in place, through `onNavigate(id)` when it is given.
  *
  * A page with tabs (`pageTabs`, navigation.jsx) lists them beneath it as links, behind a chevron:
- * see SidebarPage. Its tabs open on arriving at the page, with the current one marked; a page
- * opened by hand stays open until it is closed by hand, and a close lasts until the next arrival.
+ * see SidebarPage. Arriving on a page opens its tabs, with the current one marked, and closes every
+ * other page's, those opened by hand included; until the next arrival, pages opened by hand stay
+ * open together. Collapse all tabs, at the foot, closes every list, the current page's too.
  *
- * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above the
- * behaviour control.
+ * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above
+ * Collapse all tabs.
  */
-export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {}, account = null }) {
+export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', signals = {}, account = null }) {
   const hover = useHoverIntent(RAIL_OPEN_DELAY_MS)
   const pointerOnRail = useRef(false)
   const [focused, setFocused] = useState(false)
   // What `focused` was when the window lost focus from inside the rail; null otherwise.
   const focusedAsWindowLeft = useRef(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useClickOutside(() => setMenuOpen(false), menuOpen)
-  useEscapeKey(() => setMenuOpen(false), menuOpen)
 
   const url = useUrl()
   const currentPageTab = currentTabOf(currentTab, url)?.id
-  // Pages whose tabs were opened by hand; the current page, if its tabs were closed by hand since
-  // arriving on it; and the page whose tabs are popped out beside the collapsed rail.
+  // Pages whose tabs were opened by hand since the last arrival, and the current page if its tabs
+  // were closed since arriving on it.
   const [opened, setOpened] = useState(() => new Set())
   const [closedHere, setClosedHere] = useState(null)
-  const [popout, setPopout] = useState(null)
   const [arrivedOn, setArrivedOn] = useState(currentTab)
   if (arrivedOn !== currentTab) {
     setArrivedOn(currentTab)
+    setOpened(new Set())
     setClosedHere(null)
-    setPopout(null)
   }
 
   const expanded = mode === 'expanded' || (mode === 'hover' && hover.open) || focused
   const groups = groupedNav(tabs)
-  const current = SIDEBAR_MODES.find(m => m.id === mode) || SIDEBAR_MODES[0]
-
-  // The pop-out is for a rail too narrow for the list; once it is wide, the list is in place.
-  useEffect(() => { if (expanded) setPopout(null) }, [expanded])
 
   const isOpen = (id) => opened.has(id) || (id === currentTab && closedHere !== id)
   const toggle = (id) => {
@@ -82,7 +72,14 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
     if (open && id === currentTab) setClosedHere(id)
     else if (!open && closedHere === id) setClosedHere(null)
   }
-  const pop = useCallback((id, on) => setPopout(was => (on ? id : (was === id ? null : was))), [])
+
+  // Collapse all tabs has work only while a page the rail draws has its tabs open.
+  const anyOpen = groups.some(g => g.tabs.some(t => t.pageTabs?.length && isOpen(t.id)))
+  const collapseAll = () => {
+    if (!anyOpen) return
+    setOpened(new Set())
+    setClosedHere(currentTab)
+  }
 
   const onFocus = (e) => {
     const returning = focusedAsWindowLeft.current
@@ -134,9 +131,6 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
                   open={isOpen(t.id)}
                   onToggle={toggle}
                   expanded={expanded}
-                  collapsed={mode === 'collapsed'}
-                  popped={popout === t.id && mode === 'collapsed' && !expanded}
-                  onPop={pop}
                 />
               )
             })}
@@ -144,51 +138,23 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
         ))}
 
         {/* Pinned to the bottom of the rail while the page list scrolls behind it (App.css). The
-            account control comes first, then the rail's own behaviour. */}
-        {(account || onChangeMode) && (
-          <div className="sidebar-foot">
-            {account}
+            account control comes first, then Collapse all tabs. */}
+        <div className="sidebar-foot">
+          {account}
 
-            {onChangeMode && (
-              <div className="sidebar-mode" ref={menuRef}>
-                <button
-                  type="button"
-                  className="sidebar-mode-button"
-                  onClick={() => setMenuOpen(v => !v)}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  aria-label={`Sidebar behaviour: ${current.label}`}
-                  title={`Sidebar behaviour: ${current.label}`}
-                >
-                  <span className="sidebar-item-icon"><IconPanelLeft size={16} /></span>
-                  <span className="sidebar-item-label">{current.label}</span>
-                </button>
-
-                {menuOpen && (
-                  <div className="sidebar-mode-menu" role="menu" aria-label="Sidebar behaviour">
-                    {SIDEBAR_MODES.map(m => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={m.id === mode}
-                        className={`sidebar-mode-option${m.id === mode ? ' active' : ''}`}
-                        onClick={() => { onChangeMode(m.id); setMenuOpen(false) }}
-                        title={m.description}
-                      >
-                        <span className="sidebar-mode-option-tick">{m.id === mode && <IconCheck size={12} />}</span>
-                        <span>
-                          <span className="sidebar-mode-option-label">{m.label}</span>
-                          <span className="sidebar-mode-option-desc">{m.description}</span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+          {/* Disabled rather than hidden while nothing is open, so the foot never changes height
+              under the pointer. aria-disabled keeps it a Tab stop that says why it does nothing. */}
+          <button
+            type="button"
+            className="sidebar-collapse-all"
+            onClick={collapseAll}
+            aria-disabled={!anyOpen}
+            title={anyOpen ? 'Collapse all tabs' : 'Collapse all tabs: none are open'}
+          >
+            <span className="sidebar-item-icon"><IconChevronsDownUp size={16} aria-hidden="true" /></span>
+            <span className="sidebar-item-label">Collapse all tabs</span>
+          </button>
+        </div>
       </nav>
     </aside>
   )
@@ -202,12 +168,11 @@ const countText = (n) => (n > 99 ? '99+' : n)
  * `ariaCurrent` is what the current page's link says: `page`, or `true` while the tab beneath it
  * is the one marked `page`.
  */
-function PageLink({ page, href, current, signal, onNavigate, onClick, ariaCurrent = 'page' }) {
+function PageLink({ page, href, current, signal, onNavigate, ariaCurrent = 'page' }) {
   return (
     <RouteLink
       to={href}
       onNavigate={onNavigate}
-      onClick={onClick}
       className={`sidebar-item${current ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
       title={signal ? `${page.label} — ${signal.note}` : `Navigate to ${page.label} page`}
       aria-label={signal ? `${page.label} — ${signal.note}` : page.label}
@@ -224,60 +189,27 @@ function PageLink({ page, href, current, signal, onNavigate, onClick, ariaCurren
  * A page with tabs, as disclosure navigation rather than a tree: the page's link, then a chevron
  * button (`aria-expanded`, `aria-controls`, its own name) that shows or hides a list of the tabs'
  * links, so Tab reaches the link, the chevron, then each tab, and no arrow keys are involved. The
- * list shows while the page is open and the rail is wide. The tabs carry no tooltips: one on every
- * entry would flash as the pointer moves down the rail.
- *
- * In collapsed mode the rail has no room for the list, so a plain click (or Enter) on the page's
- * icon pops the list out beside the rail instead of navigating. Escape, a click elsewhere, a scroll,
- * a resize or choosing a tab closes it.
+ * list shows while the page is open and the rail is wide; the collapsed rail has no room for it,
+ * and the page's own tab bar is one click away. The tabs carry no tooltips: one on every entry
+ * would flash as the pointer moves down the rail.
  *
  * While the list is on screen the page's signal moves to the tab it is about (`signalTab`), with
  * the tab bar's words ("Quarantine, 3 waiting"), so no number shows twice.
  */
-function SidebarPage({
-  page, href, current, signal, onNavigate, currentTabId, open, onToggle, expanded, collapsed, popped, onPop,
-}) {
-  const wrapRef = useClickOutside(() => onPop(page.id, false), popped)
-  useEscapeKey(() => onPop(page.id, false), popped)
-  const rowRef = useRef(null)
-  const listRef = useRef(null)
+function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, open, onToggle, expanded }) {
   const listId = `sidebar-tabs-${page.id}`
-  const shown = (open && expanded) || popped
+  const shown = open && expanded
   const onTab = Boolean(shown && signal && page.pageTabs.some(t => t.id === page.signalTab))
 
-  // Beside the page's row, kept inside the window; it does not follow a scroll, so one closes it.
-  useLayoutEffect(() => {
-    const row = rowRef.current
-    const list = listRef.current
-    if (!popped || !row || !list) return
-    const top = row.getBoundingClientRect().top
-    list.style.top = `${Math.max(8, Math.min(top, window.innerHeight - list.offsetHeight - 8))}px`
-    const close = () => onPop(page.id, false)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
-    return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
-      list.style.top = ''
-    }
-  }, [popped, onPop, page.id])
-
-  const onPageClick = (e) => {
-    if (!collapsed || expanded || !isPlainClick(e)) return
-    e.preventDefault()
-    onPop(page.id, !popped)
-  }
-
   return (
-    <div ref={wrapRef}>
-      <div className="sidebar-page-row" ref={rowRef}>
+    <div>
+      <div className="sidebar-page-row">
         <PageLink
           page={page}
           href={href}
           current={current}
           signal={onTab ? null : signal}
           onNavigate={onNavigate}
-          onClick={onPageClick}
           ariaCurrent={shown ? 'true' : 'page'}
         />
         <button
@@ -292,13 +224,7 @@ function SidebarPage({
         </button>
       </div>
 
-      <ul
-        id={listId}
-        ref={listRef}
-        className={`sidebar-tabs${popped ? ' sidebar-tabs-popout' : ''}`}
-        aria-label={`${page.label} tabs`}
-        hidden={!shown}
-      >
+      <ul id={listId} className="sidebar-tabs" aria-label={`${page.label} tabs`} hidden={!shown}>
         {page.pageTabs.map(tab => {
           const here = current && tab.id === currentTabId
           const waiting = onTab && tab.id === page.signalTab ? signal.count : 0
@@ -309,7 +235,6 @@ function SidebarPage({
                 className={`sidebar-tab${here ? ' active' : ''}${waiting > 0 ? ` sidebar-tab-${signal.tone}` : ''}`}
                 aria-current={here ? 'page' : undefined}
                 aria-label={waiting > 0 ? `${tab.label}, ${waiting} waiting` : undefined}
-                onClick={() => onPop(page.id, false)}
               >
                 <span className="sidebar-tab-label">{tab.label}</span>
                 {waiting > 0 && <span className="sidebar-tab-count" aria-hidden="true">{countText(waiting)}</span>}

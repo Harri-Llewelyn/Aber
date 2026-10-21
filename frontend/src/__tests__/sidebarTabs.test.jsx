@@ -1,8 +1,9 @@
 /**
  * The sidebar lists each page's tabs beneath it, as disclosure navigation: the page's link, a
  * chevron button that shows or hides the tabs, and a list of the tabs' links. Arriving on a page
- * opens its tabs and marks the current one; a page opened by hand stays open. A tab's waiting count
- * shows on its entry while the list is on screen, and on the page's entry otherwise, never on both.
+ * opens its tabs, marks the current one and closes every other page's; pages opened by hand stay
+ * open together until then. Collapse all tabs closes every list. A tab's waiting count shows on its
+ * entry while the list is on screen, and on the page's entry otherwise, never on both.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -131,14 +132,34 @@ describe('arriving on a page', () => {
     expect(chevron('Devices')).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('closes the tabs of a page it opened on leaving it, and keeps a page opened by hand open', () => {
+  it('keeps pages opened by hand open together while the page stays the same', () => {
+    window.history.replaceState(null, '', '/devices')
+    renderRail({ currentTab: 'devices' })
+    fireEvent.click(chevron('Metrics'))
+    fireEvent.click(chevron('Settings'))
+    // A change of tab is not an arrival.
+    act(() => navigate('/devices/quarantine'))
+    for (const page of ['Devices', 'Metrics', 'Settings']) {
+      expect(chevron(page), page).toHaveAttribute('aria-expanded', 'true')
+    }
+  })
+
+  it('closes every other page\'s tabs on arriving at a page, those opened by hand included', () => {
     window.history.replaceState(null, '', '/devices')
     const { rerender } = renderRail({ currentTab: 'devices' })
     fireEvent.click(chevron('Metrics'))
+    fireEvent.click(chevron('Approvals'))
+    act(() => navigate('/vocabulary'))
+    rerender(<Sidebar tabs={adminTabs()} currentTab="vocabulary" mode="expanded" />)
+    expect(chevron('Vocabulary')).toHaveAttribute('aria-expanded', 'true')
+    for (const page of ['Devices', 'Metrics', 'Approvals']) {
+      expect(chevron(page), page).toHaveAttribute('aria-expanded', 'false')
+      expect(tabList(page), page).toHaveAttribute('hidden')
+    }
+    // A page without tabs closes them all.
     act(() => navigate('/cells'))
     rerender(<Sidebar tabs={adminTabs()} currentTab="cells" mode="expanded" />)
-    expect(chevron('Devices')).toHaveAttribute('aria-expanded', 'false')
-    expect(chevron('Metrics')).toHaveAttribute('aria-expanded', 'true')
+    expect([...rail().querySelectorAll('.sidebar-disclosure[aria-expanded="true"]')]).toHaveLength(0)
   })
 })
 
@@ -179,6 +200,58 @@ describe('counts', () => {
     expect(isExpanded()).toBe(false)
     expect(tabList('Devices')).toHaveAttribute('hidden')
     expect(pageLink('Devices').querySelector('.sidebar-item-count')).toHaveTextContent('3')
+  })
+})
+
+describe('Collapse all tabs', () => {
+  const collapseAll = () => within(rail()).getByRole('button', { name: 'Collapse all tabs' })
+
+  it('sits at the rail\'s foot under the account control, shaped like a rail item but not a page', () => {
+    renderRail({ account: <div className="user-menu">Account</div> })
+    const foot = rail().querySelector('.sidebar-foot')
+    expect([...foot.children].map(c => c.className)).toEqual(['user-menu', 'sidebar-collapse-all'])
+    expect(collapseAll()).not.toHaveClass('sidebar-item')
+    expect(collapseAll().querySelector('.sidebar-item-icon svg')).toBeTruthy()
+    expect(collapseAll().querySelector('.sidebar-item-label')).toHaveTextContent('Collapse all tabs')
+  })
+
+  it('closes every open list, the current page\'s and those opened by hand', () => {
+    window.history.replaceState(null, '', '/devices')
+    renderRail({ currentTab: 'devices' })
+    fireEvent.click(chevron('Metrics'))
+    fireEvent.click(chevron('Directory'))
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'false')
+
+    fireEvent.click(collapseAll())
+    expect([...rail().querySelectorAll('.sidebar-disclosure[aria-expanded="true"]')]).toHaveLength(0)
+    expect([...rail().querySelectorAll('.sidebar-tabs:not([hidden])')]).toHaveLength(0)
+    // The current page's stays closed through a change of tab, and opens again on the next arrival.
+    act(() => navigate('/devices/quarantine'))
+    expect(chevron('Devices')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(chevron('Devices'))
+    expect(chevron('Devices')).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('is disabled, and stays in its place, while no list is open', () => {
+    renderRail()
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'true')
+    // Still a Tab stop, so it says why it does nothing; a click changes nothing.
+    expect(collapseAll()).not.toHaveAttribute('disabled')
+    fireEvent.click(collapseAll())
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'true')
+
+    fireEvent.click(chevron('Capture'))
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'false')
+    fireEvent.click(collapseAll())
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('counts the current page\'s list as open while the hover rail is shut', () => {
+    window.history.replaceState(null, '', '/devices')
+    renderRail({ currentTab: 'devices', mode: 'hover' })
+    expect(collapseAll()).toHaveAttribute('aria-disabled', 'false')
+    fireEvent.click(collapseAll())
+    expect(chevron('Devices')).toHaveAttribute('aria-expanded', 'false')
   })
 })
 
@@ -238,53 +311,25 @@ describe('the rail\'s modes', () => {
     expect(isExpanded()).toBe(false)
   })
 
-  it('collapsed: a plain click on a tabbed page\'s icon pops its tabs out beside the rail', () => {
+  it('collapsed: a click on a tabbed page navigates, as any page does, and draws no list', () => {
     const onNavigate = vi.fn()
     renderRail({ mode: 'collapsed', onNavigate })
-    const devices = within(primary()).getByRole('link', { name: 'Devices' })
     fireEvent.mouseEnter(rail())
-    expect(click(devices)).toBe(true)
-    expect(onNavigate).not.toHaveBeenCalled()
-    expect(tabList('Devices')).not.toHaveAttribute('hidden')
-    expect(tabList('Devices')).toHaveClass('sidebar-tabs-popout')
+    expect(click(within(primary()).getByRole('link', { name: 'Devices' }))).toBe(true)
+    expect(onNavigate).toHaveBeenCalledWith('devices')
+    expect(tabList('Devices')).toHaveAttribute('hidden')
     expect(isExpanded()).toBe(false)
-
-    // Escape closes it.
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(tabList('Devices')).toHaveAttribute('hidden')
-
-    // A second click toggles it, and a click elsewhere closes it.
-    click(devices)
-    expect(tabList('Devices')).not.toHaveAttribute('hidden')
-    fireEvent.mouseDown(document.body)
-    expect(tabList('Devices')).toHaveAttribute('hidden')
+    // Ctrl-click is still the browser's.
+    expect(click(within(primary()).getByRole('link', { name: 'Gateways' }), { ctrlKey: true })).toBe(false)
   })
 
-  it('collapsed: Ctrl-click is still the browser\'s, and a page without tabs still navigates', () => {
-    const onNavigate = vi.fn()
-    renderRail({ mode: 'collapsed', onNavigate })
-    expect(click(within(primary()).getByRole('link', { name: 'Devices' }), { ctrlKey: true })).toBe(false)
-    expect(tabList('Devices')).toHaveAttribute('hidden')
-    expect(click(within(primary()).getByRole('link', { name: 'Gateways' }))).toBe(true)
-    expect(onNavigate).toHaveBeenCalledWith('gateways')
-  })
-
-  it('collapsed: choosing a tab in the pop-out goes there and closes it', () => {
-    renderRail({ mode: 'collapsed' })
-    fireEvent.mouseEnter(rail())
-    click(within(primary()).getByRole('link', { name: 'Devices' }))
-    expect(click(entry('Devices', 'Quarantine'))).toBe(true)
-    expect(window.location.pathname).toBe('/devices/quarantine')
-    expect(tabList('Devices')).toHaveAttribute('hidden')
-  })
-
-  it('collapsed: keyboard focus widens the rail, and the tabs are in place there, not popped out', () => {
+  it('collapsed: keyboard focus widens the rail, and the open page\'s tabs are in place there', () => {
     window.history.replaceState(null, '', '/devices')
     renderRail({ currentTab: 'devices', mode: 'collapsed' })
+    expect(tabList('Devices')).toHaveAttribute('hidden')
     fireEvent.focus(within(primary()).getByRole('link', { name: 'Devices' }))
     expect(isExpanded()).toBe(true)
     expect(tabList('Devices')).not.toHaveAttribute('hidden')
-    expect(tabList('Devices')).not.toHaveClass('sidebar-tabs-popout')
   })
 })
 
@@ -300,9 +345,7 @@ describe('the stylesheet', () => {
     expect(bar).toMatch(/border-left:\s*2px solid var\(--accent\)/)
   })
 
-  it('pops the list out beside the rail, fixed so the panel does not clip it', () => {
-    const popout = APP_CSS.match(/\n\.sidebar-tabs-popout \{([\s\S]*?)\n\}/)[1]
-    expect(popout).toMatch(/position:\s*fixed/)
-    expect(popout).toMatch(/left:\s*60px/)
+  it('has no pop-out beside the collapsed rail', () => {
+    expect(APP_CSS).not.toMatch(/sidebar-tabs-popout/)
   })
 })

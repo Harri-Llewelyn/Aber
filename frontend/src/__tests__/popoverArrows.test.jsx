@@ -7,7 +7,7 @@ import { FiltersPopover } from '../components/common/FiltersPopover'
 import { blankComments } from '../test/themeColours'
 
 /**
- * The five panels that open from a button point at it with an arrow, and share one shape. jsdom
+ * The four panels that open from a button point at it with an arrow, and share one shape. jsdom
  * lays nothing out, so the CSS half is asserted against the stylesheet: each panel has an arrow,
  * the arrow is drawn where the panel cannot clip it, and the numbers that place it agree with the
  * panel's own. The screenshots in both themes and every rail mode are the check that it lines up.
@@ -35,7 +35,6 @@ const PANELS = [
   { panel: '.alert-pill-panel', arrow: '.alert-pill-wrap:has(> .alert-pill-panel)::after' },
   { panel: '.notif-panel', arrow: '.notif-wrap:has(> .notif-panel)::after' },
   { panel: '.user-popover', arrow: '.user-menu:has(> .user-popover)::after' },
-  { panel: '.sidebar-mode-menu', arrow: '.sidebar-mode:has(> .sidebar-mode-menu)::after' },
   { panel: '.filters-popover', arrow: '.filters-popover::before' }
 ]
 
@@ -73,8 +72,8 @@ describe('the popover arrows', () => {
     }
   })
 
-  it('points the rail arrows left, from the panels\' left border, in both rail positions', () => {
-    for (const { panel, arrow } of PANELS.slice(2, 4)) {
+  it('points the account menu\'s arrow left, from the panel\'s left border, in both rail positions', () => {
+    for (const { panel, arrow } of PANELS.slice(2, 3)) {
       expect(declared(panel, 'position')).toBe('fixed')
       expect(declared(arrow, 'position')).toBe('fixed')
       expect(declared(arrow, '--arrow-turn')).toBe('-45deg')
@@ -83,8 +82,10 @@ describe('the popover arrows', () => {
       expect(declared(`.sidebar-mode-expanded ${arrow}`, 'left'))
         .toBe(`${parseFloat(declared(`.sidebar-mode-expanded ${panel}`, 'left')) + 0.5}px`)
     }
-    // The account row sits above the behaviour button, so its arrow is the higher of the two.
-    expect(parseFloat(declared(PANELS[2].arrow, 'bottom'))).toBeGreaterThan(parseFloat(declared(PANELS[3].arrow, 'bottom')))
+    // Level with the account row: the foot's 10px, the 34px Collapse all tabs row, a 2px gap and half
+    // of the 38px account row.
+    expect(declared(PANELS[2].arrow, 'bottom')).toBe('65px')
+    expect(declared('.sidebar-collapse-all', 'padding')).toBe('6px 9px')
   })
 
   it('places the Filters arrow from the --arrow-x its component sets', () => {

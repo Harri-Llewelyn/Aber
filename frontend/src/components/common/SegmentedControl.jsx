@@ -18,8 +18,10 @@ import React, { useRef } from 'react'
  * with the visible word, as WCAG 2.5.3 (Label in Name) asks. The chosen segment takes a fill and a
  * border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes `tone`, a
  * `signal-tone-*` name; the others are muted.
+ *
+ * `describedBy` is the id of a line that explains the choice, read with the group's name.
  */
-export function SegmentedControl({ label, options, value, onChange, menu = false }) {
+export function SegmentedControl({ label, options, value, onChange, menu = false, describedBy }) {
   const refs = useRef([])
   const chosen = Math.max(0, options.findIndex(o => o.id === value))
 
@@ -33,7 +35,7 @@ export function SegmentedControl({ label, options, value, onChange, menu = false
   }
 
   return (
-    <div role={menu ? 'group' : 'radiogroup'} aria-label={label} className="segmented">
+    <div role={menu ? 'group' : 'radiogroup'} aria-label={label} aria-describedby={describedBy} className="segmented">
       {options.map((o, i) => {
         const checked = o.id === value
         const name = o.count == null ? o.label : `${o.label}, ${o.count}`

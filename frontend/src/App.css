@@ -615,6 +615,13 @@ html, body, #root {
 .user-popover-theme .segmented { display: flex; }
 .user-popover-theme .segmented-option { flex: 1; }
 
+/* The Sidebar layout section under it, laid out the same with three segments, its group named
+   Sidebar layout. The chosen layout's description is the line beneath the switch. */
+.user-popover-sidebar { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.user-popover-sidebar .segmented { display: flex; }
+.user-popover-sidebar .segmented-option { flex: 1; }
+.user-popover-hint { margin-top: 6px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .user-popover-action:disabled,
@@ -784,7 +791,7 @@ html, body, #root {
 a.sidebar-item { text-decoration: none; }
 
 /* A page with tabs (SidebarPage in Sidebar.jsx): its link and the chevron that shows its tabs share
-   a row. The chevron and the list need the wide rail; the collapsed rail pops the list out. */
+   a row. The chevron and the list need the wide rail, and show only on it. */
 .sidebar-page-row { display: flex; align-items: center; gap: 2px; }
 .sidebar-page-row > .sidebar-item { flex: 1 1 auto; min-width: 0; }
 
@@ -864,22 +871,6 @@ a.sidebar-item { text-decoration: none; }
   text-align: center;
   letter-spacing: 0;
 }
-
-/* The collapsed rail's pop-out, beside the rail as the account menu opens: fixed, so the panel's
-   overflow never clips it. Sidebar.jsx sets its top from the page's row. */
-.sidebar-tabs-popout {
-  position: fixed;
-  left: 60px;
-  z-index: 200;
-  min-width: 200px;
-  margin: 0;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  box-shadow: var(--shadow-popover);
-}
-.sidebar-tabs-popout .sidebar-tab.active::before { left: -1px; }
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */
@@ -3759,7 +3750,7 @@ a.chip { text-decoration: none; }
 }
 
 /* ===== Popover arrows =====
-   The five panels that open from a button point at it: a square turned 45 degrees, centred on the
+   The four panels that open from a button point at it: a square turned 45 degrees, centred on the
    panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
    of the panel, because the alert, notification and account panels clip or scroll their overflow;
    the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
@@ -3768,7 +3759,6 @@ a.chip { text-decoration: none; }
 .alert-pill-wrap:has(> .alert-pill-panel)::after,
 .notif-wrap:has(> .notif-panel)::after,
 .user-menu:has(> .user-popover)::after,
-.sidebar-mode:has(> .sidebar-mode-menu)::after,
 .filters-popover::before {
   --arrow-size: 10px;
   content: '';
@@ -3794,20 +3784,17 @@ a.chip { text-decoration: none; }
   z-index: 61;
 }
 
-/* Left, from the foot of the rail: fixed like the two panels, on their left border, and level with
-   the centre of the button that opened each. The foot is 10px of padding, the 34px behaviour
-   button, a 2px gap, then the 38px account row, so the centres are 27px and 65px up. */
-.user-menu:has(> .user-popover)::after,
-.sidebar-mode:has(> .sidebar-mode-menu)::after {
+/* Left, from the foot of the rail: fixed like the panel, on its left border, and level with the
+   centre of the account row. The foot is 10px of padding, the 34px Collapse all tabs button, a 2px
+   gap, then the 38px account row, so the centre is 65px up. */
+.user-menu:has(> .user-popover)::after {
   --arrow-turn: -45deg;
   position: fixed;
   left: 60.5px;
+  bottom: 65px;
   z-index: 201;
 }
-.user-menu:has(> .user-popover)::after { bottom: 65px; }
-.sidebar-mode:has(> .sidebar-mode-menu)::after { bottom: 27px; }
-.sidebar-mode-expanded .user-menu:has(> .user-popover)::after,
-.sidebar-mode-expanded .sidebar-mode:has(> .sidebar-mode-menu)::after { left: 240.5px; }
+.sidebar-mode-expanded .user-menu:has(> .user-popover)::after { left: 240.5px; }
 
 /* Up, from a toolbar's Filters button. The panel is kept inside the window, so FiltersPopover sets
    --arrow-x, the button's centre from the panel's outer left edge; the 1px is the border the
@@ -5509,7 +5496,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .auth-link:hover { color: var(--accent-strong); }
 .auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-/* Sidebar behaviour modes. `hover` is the rules above: a rigid gutter and a panel that paints over
+/* The sidebar layouts (the mode). `hover` is the rules above: a rigid gutter and a panel that paints over
    the page. `expanded` widens the gutter itself so the page makes room, and drops the shadow.
    `collapsed` is the resting state with the pointer ignored; see Sidebar.jsx. */
 .sidebar-mode-expanded {
@@ -5523,7 +5510,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   transition: none;
 }
 
-/* The foot of the rail: the account control, then the behaviour control, each shaped like an item so
+/* The foot of the rail: the account control, then Collapse all tabs, each shaped like an item so
    the rail reads as one column. Pinned: `sticky` to the panel's bottom edge, so the page list scrolls
    behind it on a short screen and the account is always one click away. The ground is opaque so a
    page scrolling under it does not show through. */
@@ -5541,9 +5528,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   flex-shrink: 0;
 }
 
-.sidebar-mode { position: relative; }
-
-.sidebar-mode-button {
+/* Collapse all tabs (Sidebar.jsx): 34px, the row the account menu's arrow is measured from. While
+   no page's tabs are open it is aria-disabled, dimmed and inert, and keeps its place. */
+.sidebar-collapse-all {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -5562,57 +5549,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   transition: var(--transition);
 }
 
-.sidebar-mode-button:hover,
-.sidebar-mode-button[aria-expanded="true"] { color: var(--text-primary); background: var(--bg-glass); }
-.sidebar-mode-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-/* Opens upward from the foot, beside the rail rather than inside it, so it is never clipped by
-   the panel's overflow and is readable in the collapsed state. */
-.sidebar-mode-menu {
-  position: fixed;
-  left: 60px;
-  bottom: 12px;
-  min-width: 260px;
-  padding: 4px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-popover);
-  z-index: 200;
-}
-
-.sidebar-mode-expanded .sidebar-mode-menu { left: 240px; }
-
-.sidebar-mode-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.sidebar-mode-option:hover { background: var(--bg-glass); }
-.sidebar-mode-option.active { color: var(--accent); }
-.sidebar-mode-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-.sidebar-mode-option-tick {
-  display: inline-flex;
-  width: 12px;
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-
-.sidebar-mode-option-label { display: block; font-weight: 600; }
-.sidebar-mode-option-desc { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sidebar-collapse-all:hover { color: var(--text-primary); background: var(--bg-glass); }
+.sidebar-collapse-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sidebar-collapse-all[aria-disabled="true"],
+.sidebar-collapse-all[aria-disabled="true"]:hover { color: var(--text-muted); background: none; opacity: 0.55; cursor: default; }
 
 /* The location picker (common/LocationPicker.jsx): three exclusive choices in a row, then the
    dropdown the choice calls for beneath. Native radios, so the exclusivity is the browser's. */

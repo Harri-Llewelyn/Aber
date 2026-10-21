@@ -259,12 +259,12 @@ describe('Merged navigation shell', () => {
       expect(screen.queryByRole('menu')).toBeNull()
     })
 
-    it('sits at the foot of the rail above the behaviour control, outside the page list', async () => {
+    it('sits at the foot of the rail above Collapse all tabs, outside the page list', async () => {
       await renderShell()
 
       const foot = sidebar().querySelector('.sidebar-foot')
-      const controls = [...foot.querySelectorAll(':scope > .user-menu, :scope > .sidebar-mode')]
-      expect(controls.map(c => c.className)).toEqual(['user-menu', 'sidebar-mode'])
+      const controls = [...foot.querySelectorAll(':scope > .user-menu, :scope > .sidebar-collapse-all')]
+      expect(controls.map(c => c.className)).toEqual(['user-menu', 'sidebar-collapse-all'])
       expect(foot.contains(trigger())).toBe(true)
       // Not a page entry: Profile is reached through the menu, and the page list stays the pages.
       expect(trigger()).not.toHaveClass('sidebar-item')
@@ -276,10 +276,10 @@ describe('Merged navigation shell', () => {
 
       fireEvent.click(trigger())
       const menu = screen.getByRole('menu')
-      // In order, the theme's two segments first, then the actions.
+      // In order, the theme's two segments and the sidebar layout's three first, then the actions.
       const rows = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
       expect(rows.map(i => i.getAttribute('aria-label') || i.textContent.trim())).toEqual([
-        'Light', 'Dark', 'Profile', 'Report Bug', 'Sign Out'
+        'Light', 'Dark', 'Hover', 'Expanded', 'Collapsed', 'Profile', 'Report Bug', 'Sign Out'
       ])
       const items = within(menu).getAllByRole('menuitem')
 
@@ -353,6 +353,41 @@ describe('Merged navigation shell', () => {
       expect(section.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       // Straight after the head, so nothing else sits between the session's facts and the switch.
       expect(section.previousElementSibling).toHaveClass('user-popover-head')
+    })
+
+    it('offers the three sidebar layouts as a switch under the theme, the current one checked and described', async () => {
+      await renderShell()
+      fireEvent.click(trigger())
+
+      const menu = screen.getByRole('menu')
+      const layout = within(menu).getByRole('group', { name: 'Sidebar layout' })
+      const segments = within(layout).getAllByRole('menuitemradio')
+      expect(segments.map(s => s.textContent)).toEqual(['Hover', 'Expanded', 'Collapsed'])
+      for (const s of segments) expect(s.querySelector('.segmented-icon svg')).toBeTruthy()
+      expect(within(layout).getByRole('menuitemradio', { name: 'Hover' })).toHaveAttribute('aria-checked', 'true')
+      // The chosen layout's description is the line under the switch, and the group's description.
+      expect(layout).toHaveAccessibleDescription('Icons only; labels appear while the pointer is over the rail.')
+
+      // A section of its own, straight after the theme's and before Profile.
+      const section = layout.closest('.user-popover-sidebar')
+      expect(section.parentElement).toBe(menu)
+      expect(section.previousElementSibling).toHaveClass('user-popover-theme')
+      expect(section.nextElementSibling).toBe(within(menu).getByRole('menuitem', { name: /^profile$/i }))
+    })
+
+    it('changes the rail\'s layout from the switch, and stays open, as the theme does', async () => {
+      await renderShell()
+      fireEvent.click(trigger())
+
+      const layout = within(screen.getByRole('menu')).getByRole('group', { name: 'Sidebar layout' })
+      fireEvent.click(within(layout).getByRole('menuitemradio', { name: 'Expanded' }))
+      expect(sidebar()).toHaveAttribute('data-mode', 'expanded')
+      expect(screen.getByRole('menu')).toBeTruthy()
+      expect(within(layout).getByRole('menuitemradio', { name: 'Expanded' })).toHaveAttribute('aria-checked', 'true')
+      expect(layout).toHaveAccessibleDescription('Labels always shown. The page makes room for the rail.')
+
+      fireEvent.click(within(layout).getByRole('menuitemradio', { name: 'Collapsed' }))
+      expect(sidebar()).toHaveAttribute('data-mode', 'collapsed')
     })
 
     it('closes on the items whose result is NOT visible behind it', async () => {
@@ -659,7 +694,7 @@ describe('the current page in the rail', () => {
 
   it('keeps the rows at 36px and the dividers tight', () => {
     expect(rule('.sidebar-item')).toMatch(/padding:\s*6px 9px/)
-    expect(rule('.sidebar-mode-button')).toMatch(/padding:\s*6px 9px/)
+    expect(rule('.sidebar-collapse-all')).toMatch(/padding:\s*6px 9px/)
     expect(rule('.sidebar-divider')).toMatch(/margin:\s*6px 2px/)
   })
 })
