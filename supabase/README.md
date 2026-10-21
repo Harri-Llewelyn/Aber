@@ -1298,6 +1298,34 @@ none of them, and that a Third-party gateway with no issue on record holds no ac
 `test_third_party_gateway.py` holds each guard both ways, Remote and Host as before, and a replay
 of `0001`'s CHECK block over a Third-party row.
 
+### Only the platform's own OAuth clients remain (0197)
+
+GoTrue runs an OAuth 2.1 server for the stack's own clients: Grafana, Node-RED, and the Studio and
+forge doors. `0002` seeds all four, with `registration_type` `manual`. Up to 1.5.0 the chart also
+left GoTrue's dynamic client registration on, so anyone holding the publishable key could register a
+client of their own at `/auth/v1/oauth/clients/register`. That key is public by design: every browser
+is served it. A token issued to any client carries its person's whole role, because `has_role()`
+reads `auth.uid()` and not the client the token was issued to. So a registered client was one
+approval on the consent page away from a token as capable as the person who approved it.
+
+The chart now sets `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION` to `"false"`. It is not a chart
+value: nothing the stack uses registers itself.
+
+- **`0197` deletes every client registered dynamically** while the flag was on. Each foreign key to
+  `auth.oauth_clients` cascades, so its authorizations, its consents and the sessions issued to it go
+  too, and with a session its refresh tokens. Nothing it was issued can be refreshed. An access
+  token it already holds lasts until it expires (`supabaseAuth.jwtExpiry`, an hour by default).
+- **The deletion is reported**, as a NOTICE in db-init's log naming each client and its id.
+- **It replays harmlessly.** With registration off, a later boot finds nothing to delete. On the test
+  database, whose GoTrue-shaped fixture has no OAuth tables, it does nothing.
+- **Two checks hold the flag off.** `check-docs-drift` check 115 reads the template and every
+  migration's `INSERT INTO auth.oauth_clients`. `check-gateway-surface --authenticated` posts an
+  empty registration with the publishable key to a live stack, and expects GoTrue's 403
+  `oauth_dynamic_client_registration_disabled`. An empty body is refused whether or not
+  registration is on, so the probe never creates a client; only the reason differs.
+
+The file's self-check asserts that no dynamically registered client remains.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

@@ -13,7 +13,8 @@
  * trusts from a direct caller only: run it against a port-forward. `--authenticated`: extends --runtime with
  * a credentialled pass, presenting a valid key by header and by query and an unregistered key,
  * and asserting that on a route which hides credentials the header and query forms are
- * indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
+ * indistinguishable upstream, and that GoTrue refuses dynamic OAuth client registration to the
+ * publishable key. Both modes share EXPECTED so two inventories cannot drift.
  *
  * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
  * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY). The base URL is the first non-flag
@@ -475,6 +476,30 @@ if (RUNTIME) {
       }
     }
 
+    // Every OAuth client the stack uses is seeded, and a token issued to any client carries its
+    // person's whole role. An empty registration is refused whether or not registration is on, so
+    // this creates nothing; only the refusal's reason tells the two apart.
+    {
+      const label = 'dynamic OAuth client registration (/auth/v1/oauth/clients/register)';
+      const res = await probeOnce(
+        `${base}/auth/v1/oauth/clients/register`,
+        { apikey: anonKey, 'Content-Type': 'application/json' },
+        { method: 'POST', body: '{}' },
+      );
+      if (res.error) {
+        authProblems.push(`${label}: ${res.error}`);
+      } else if (res.status === 403 && res.body.includes('oauth_dynamic_client_registration_disabled')) {
+        authOk.push('GoTrue refuses dynamic OAuth client registration to the publishable key');
+      } else {
+        authProblems.push(
+          `${label} answered HTTP ${res.status} (${res.body.slice(0, 120)}), not GoTrue's 403 `
+          + 'oauth_dynamic_client_registration_disabled. Anyone holding the publishable key could '
+          + 'register a client and ask a person to approve it: GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION '
+          + 'must be "false" (deploy/helm/aber/templates/supabase/auth.yaml).'
+        );
+      }
+    }
+
     for (const line of authOk) console.log(`  ok   ${line}`);
 
     if (authProblems.length) {
@@ -487,7 +512,7 @@ if (RUNTIME) {
     console.log(
       `\nCredential handling at ${base} matches the reviewed surface: ${checked} gated route(s) `
       + 'accept a valid key by header and by query, hide it where the route hides it, and refuse an '
-      + 'unregistered one.'
+      + 'unregistered one; GoTrue registers no OAuth client itself.'
     );
   }
 
