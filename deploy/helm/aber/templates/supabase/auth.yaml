@@ -153,8 +153,12 @@ spec:
             # /oauth/authorize, /oauth/token and /oauth/userinfo real.
             - name: GOTRUE_OAUTH_SERVER_ENABLED
               value: "true"
+            # Off, and not a value: every client the stack uses is seeded by 0002, and a token
+            # issued to any client carries its person's whole role (has_role() reads auth.uid(),
+            # not the client). check-docs-drift check 115 and check-gateway-surface --authenticated
+            # hold it off.
             - name: GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION
-              value: "true"
+              value: "false"
             # GoTrue SHIPS NO CONSENT UI. On /oauth/authorize it redirects the browser to
             # GOTRUE_SITE_URL + this path with ?authorization_id=..., and the application is
             # expected to render consent and POST the decision back. Without it /oauth/authorize

@@ -3787,6 +3787,46 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 }
 
 // -------------------------------------------------------------------------------------------------
+// 115. GoTrue registers no OAuth client itself. auth.yaml sets
+// GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
+// every client a migration writes into auth.oauth_clients is 'manual'. A token issued to any client
+// carries its person's whole role, so a client anyone could register is a consent page away from
+// one (0197). check-gateway-surface --authenticated asserts the same of a live stack.
+// -------------------------------------------------------------------------------------------------
+{
+  const FLAG = 'GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION';
+  const authYaml = 'deploy/helm/aber/templates/supabase/auth.yaml';
+  const value = read(authYaml).match(/- name: GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION\s*\n\s*value:\s*(\S+)/)?.[1];
+  const chartFiles = (dir) => readdirSync(join(REPO, dir), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? chartFiles(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
+  const elsewhere = chartFiles('deploy/helm/aber')
+    .filter((f) => f !== authYaml && /\.(ya?ml|tpl|txt|json)$/.test(f) && read(f).includes(FLAG));
+
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const inserts = files.flatMap((f) => {
+    const text = read(`${dir}/${f}`);
+    const found = [];
+    for (let at = text.indexOf('INSERT INTO auth.oauth_clients'); at >= 0;
+      at = text.indexOf('INSERT INTO auth.oauth_clients', at + 1)) {
+      found.push({ file: f, statement: text.slice(at, text.indexOf(';', at)) });
+    }
+    return found;
+  });
+  const notManual = inserts.filter((i) => !i.statement.includes("'manual'") || i.statement.includes("'dynamic'"));
+
+  if (value !== '"false"') {
+    fail(`${authYaml} sets ${FLAG} to ${value ?? 'nothing'}, not "false": anyone holding the publishable key can register an OAuth client and ask a person to approve it (0197)`);
+  } else if (elsewhere.length) {
+    fail(`${elsewhere.join(', ')} name(s) ${FLAG}: auth.yaml holds it "false", and nothing else in the chart may set it (0197)`);
+  } else if (!inserts.length || notManual.length) {
+    fail(`${notManual.length ? `${notManual.map((i) => i.file).join(', ')} write(s) an OAuth client that is not registration_type 'manual'` : 'no migration seeds an OAuth client, so this check reads nothing'}: the stack's clients are the ones its migrations seed (0197)`);
+  } else {
+    pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, and the ${inserts.length} client(s) the migrations seed are all 'manual'`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 110. The page for an engineer who brings an edge node states Aber's limits as the code sets them.
 //
 // help/site/bring-your-own-edge-node.md says which readings are refused for their timestamp, and how

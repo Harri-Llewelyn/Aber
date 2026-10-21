@@ -211,8 +211,9 @@ SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
 
 The runtime pass asserts posture, not configuration: gated routes refused before their upstream,
 open ones through, a valid key accepted by header and by query, an unregistered key refused, and
-on a route that hides credentials the header and query forms indistinguishable upstream. It also
-checks the response headers, and sends wrong-password grants from one address until the gateway
+on a route that hides credentials the header and query forms indistinguishable upstream. With the
+key, it also posts an empty OAuth client registration, which GoTrue must refuse as disabled
+(`0197`, in `supabase/README.md`). It also checks the response headers, and sends wrong-password grants from one address until the gateway
 answers `429`, then a grant from another address and a refresh, which must reach GoTrue. Those
 addresses are named in `X-Forwarded-For`, so run it against a port-forward, as above: through the
 ingress, Traefik replaces them with yours. CI runs it against the k3d stack. `validate.py`'s check 14 adds the refusal the probe cannot see from
