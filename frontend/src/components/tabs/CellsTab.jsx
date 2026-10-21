@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -13,7 +13,7 @@ import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
+import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
@@ -126,20 +126,21 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       if (proposeMode) {
         if (!editing) throw new Error('A cell can only be created by an Administrator.')
         const patch = patchFromForm('cell', editing, form)
-        await submitProposal({
+        const filed = await submitProposal({
           kind: 'cell', entityId: editing.cell_id, patch,
           rationale: formVal.__rationale, proposalId: editingProposal?.id
         })
         setShowForm(false); setEditingProposal(null); loadAll()
-        showToast(editingProposal
-          ? 'Your proposal was updated. An approver decides from here.'
-          : 'Proposed. An approver applies it, or says why not.', 'success')
+        const { msg, to } = proposalNotice(editing.cell_name, filed?.id ?? editingProposal?.id, !!editingProposal)
+        showToast(msg, 'success', { to })
         return
       }
 
-      if (editing) await api.put(`/api/v1/cells/${editing.cell_id}`, form)
-      else         await api.post('/api/v1/cells', form)
-      setShowForm(false); loadAll(); showToast(editing ? 'Cell saved' : 'Cell created', 'success')
+      const saved = editing
+        ? await api.put(`/api/v1/cells/${editing.cell_id}`, form)
+        : await api.post('/api/v1/cells', form)
+      setShowForm(false); loadAll()
+      showToast(`Cell '${form.cell_name}' ${editing ? 'saved' : 'created'}`, 'success', { to: cellUrl(editing?.cell_id ?? saved?.id) })
     } catch (e) { setFormError(e.message) }
   }
 
@@ -152,14 +153,15 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     try {
       await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
       // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
-      setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success')
+      setArchiveTarget(null); loadAll()
+      showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success', { to: cellUrl(archiveTarget.cell_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const restoreCell = async (cellId, name) => {
     try {
       await api.post(`/api/v1/cells/${cellId}/restore`, {})
-      loadAll(); showToast(`Cell '${name}' restored to active service`, 'success')
+      loadAll(); showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 

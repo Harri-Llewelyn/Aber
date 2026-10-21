@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { cellUrl, deviceUrl, trailUrl } from '../../routes'
+import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -37,7 +37,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
+import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
@@ -159,14 +159,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       if (proposeMode) {
         if (!editing) throw new Error(`${requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)} to register a gateway.`)
         const patch = patchFromForm('gateway', editing, form)
-        await submitProposal({
+        const filed = await submitProposal({
           kind: 'gateway', entityId: editing.gateway_id, patch,
           rationale: form.__rationale, proposalId: editingProposal?.id
         })
         setShowForm(false); setEditingProposal(null); load()
-        showToast(editingProposal
-          ? 'Your proposal was updated. An approver decides from here.'
-          : 'Proposed. An approver applies it, or says why not.', 'success')
+        const { msg, to } = proposalNotice(editing.gateway_name, filed?.id ?? editingProposal?.id, !!editingProposal)
+        showToast(msg, 'success', { to })
         return
       }
 
@@ -175,25 +174,28 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         // copy the dialog opened with would undo a change made meanwhile.
         const { sparkplug_group: group, ...unchanged } = form
         await api.put(`/api/v1/gateways/${editing.gateway_id}`, group === editing.sparkplug_group ? unchanged : form)
-        setShowForm(false); load(); showToast('Gateway saved', 'success')
+        setShowForm(false); load()
+        showToast(`Gateway '${form.gateway_name}' saved`, 'success', { to: gatewayUrl(editing.gateway_id) })
         return
       }
 
       const created = await api.post('/api/v1/gateways', form)
       setShowForm(false); load()
+      const createdName = created.name || form.gateway_name
+      const createdTo = gatewayUrl(created.id || created.gateway_id)
 
       // A Remote gateway needs setup on a machine before it can publish, so the setup dialog opens at
       // once and issues without confirming: the row is seconds old, so there is nothing to replace.
       if (form.deployment === 'remote') {
         setBundleForGw({
           gateway_id: created.id || created.gateway_id,
-          gateway_name: created.name || form.gateway_name,
+          gateway_name: createdName,
           sparkplug_id: created.sparkplug_id,
           confirmFirst: false
         })
-        showToast('Remote gateway created — issue its install command, or a bundle, to finish setup', 'success')
+        showToast(`Remote gateway '${createdName}' created — issue its install command, or a bundle, to finish setup`, 'success', { to: createdTo })
       } else {
-        showToast('Gateway created', 'success')
+        showToast(`Gateway '${createdName}' created`, 'success', { to: createdTo })
       }
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -202,14 +204,15 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     try {
       await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
       // Closes after the request, so ArchiveModal holds its pending state for the whole round trip.
-      setArchiveTarget(null); load(); showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success')
+      setArchiveTarget(null); load()
+      showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success', { to: gatewayUrl(archiveTarget.gateway_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const restoreGateway = async (gatewayId, name) => {
     try {
       await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
-      load(); showToast(`Gateway '${name}' restored to active service`, 'success')
+      load(); showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -322,7 +325,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     searchQuery,
     gateways,
     (g, term) => g.gateway_id === term || (g.sparkplug_id || gatewaySparkplugId(g.gateway_id)) === term,
-    (g) => setSelectedId(g.gateway_id)
+    (g) => {
+      // An archived gateway is off the default list, so the list shows it as well as the drawer.
+      if (g.is_archived && filterMode === 'active') setFilterMode('all')
+      setSelectedId(g.gateway_id)
+    }
   )
 
   // Resolved fresh every render; a gateway that disappears resolves to null and the drawer closes.
@@ -1035,7 +1042,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             onClick: () => runRebirth(selected.gateway_id, async () => {
               try {
                 await api.requestRebirth(selected.gateway_id)
-                showToast(`Rebirth requested for '${selected.gateway_name}'. The daemon sends it within a few seconds.`, 'success')
+                showToast(`Rebirth requested for '${selected.gateway_name}'. The daemon sends it within a few seconds.`, 'success', { to: gatewayUrl(selected.gateway_id) })
               } catch (err) {
                 showToast(err.message, 'error')
               }

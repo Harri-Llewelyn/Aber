@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { trailUrl } from '../../routes'
+import { entityUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -102,7 +102,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
     try {
       await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
       setConfirmRestore(null)
-      load(); showToast(`Entity '${item.name}' restored to active service`, 'success')
+      load(); showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 

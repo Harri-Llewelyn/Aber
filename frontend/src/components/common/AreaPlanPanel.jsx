@@ -6,6 +6,7 @@ import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { AreaPlanPreview } from './AreaPlanPreview'
 import { IconUpload, IconTrash } from './Icons'
+import { areaUrl, siteMapAreaUrl } from '../../routes'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
@@ -32,7 +33,8 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
     setBusy(true)
     try {
       await api.uploadAreaPlan(area, file)
-      showToast?.(`Plan attached to ${area.area_name}`, 'success')
+      // To the Site Map, where the plan is drawn with its cells.
+      showToast?.(`Plan attached to ${area.area_name}`, 'success', { to: siteMapAreaUrl(area.area_id) })
       onChanged?.()
     } catch (e) { showToast?.(e.message, 'error') }
     finally {
@@ -46,7 +48,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
     try {
       await api.removeAreaPlan(area)
       setConfirm(false)
-      showToast?.(`Plan removed from ${area.area_name}`, 'success')
+      showToast?.(`Plan removed from ${area.area_name}`, 'success', { to: areaUrl(area.area_id) })
       onChanged?.()
     } catch (e) { showToast?.(e.message, 'error') }
     finally { setBusy(false) }

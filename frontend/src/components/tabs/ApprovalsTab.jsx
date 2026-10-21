@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react'
-import { proposalSubjectUrl, trailUrl } from '../../routes'
+import { proposalSubjectUrl, proposalUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -536,7 +536,11 @@ export function ApprovalsTab({
     setBusyId(proposal.id)
     try {
       await api.post(`/api/v1/proposals/${proposal.id}/${action}`, reason ? { reason } : {})
-      showToast?.(action === 'approve' ? 'Approved, and applied.' : 'Rejected.', 'success')
+      // Named, and linked to the proposal where it now sits, since the notification list shows this
+      // away from the queue.
+      const about = `the change to '${proposal.target_label}'`
+      showToast?.(action === 'approve' ? `Approved ${about}, and applied it.` : `Rejected ${about}.`, 'success',
+        { to: proposalUrl(proposal.id, true) })
       setRejecting(null)
       await refresh()
     } catch (e) {
@@ -552,7 +556,7 @@ export function ApprovalsTab({
     setBusyId(proposal.id)
     try {
       await api.post(`/api/v1/proposals/${proposal.id}/withdraw`, {})
-      showToast?.('Withdrawn.', 'success')
+      showToast?.(`Withdrew your proposal for '${proposal.target_label}'.`, 'success', { to: proposalUrl(proposal.id, true) })
       await refresh()
     } catch (e) {
       showToast?.(e?.message || 'That was refused.', 'error')

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -16,7 +16,7 @@ import {
 import { isPlaced } from '../../utils/areaPlans'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
-import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
+import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
@@ -133,20 +133,21 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       if (proposeMode) {
         if (!editing) throw new Error('An area can only be created by an Administrator.')
         const patch = patchFromForm('area', editing, formVal)
-        await submitProposal({
+        const filed = await submitProposal({
           kind: 'area', entityId: editing.area_id, patch,
           rationale: formVal.__rationale, proposalId: editingProposal?.id
         })
         setShowForm(false); setEditingProposal(null); loadAll()
-        showToast(editingProposal
-          ? 'Your proposal was updated. An approver decides from here.'
-          : 'Proposed. An approver applies it, or says why not.', 'success')
+        const { msg, to } = proposalNotice(editing.area_name, filed?.id ?? editingProposal?.id, !!editingProposal)
+        showToast(msg, 'success', { to })
         return
       }
 
-      if (editing) await api.put(`/api/v1/areas/${editing.area_id}`, formVal)
-      else         await api.post('/api/v1/areas', formVal)
-      setShowForm(false); loadAll(); showToast(editing ? 'Area saved' : 'Area created', 'success')
+      const saved = editing
+        ? await api.put(`/api/v1/areas/${editing.area_id}`, formVal)
+        : await api.post('/api/v1/areas', formVal)
+      setShowForm(false); loadAll()
+      showToast(`Area '${formVal.area_name}' ${editing ? 'saved' : 'created'}`, 'success', { to: areaUrl(editing?.area_id ?? saved?.id) })
     } catch (e) { setFormError(e.message) }
   }
 
@@ -160,14 +161,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
       // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
       setArchiveTarget(null); setSelectedId(null); loadAll()
-      showToast(`Area '${archiveTarget.area_name}' archived`, 'success')
+      showToast(`Area '${archiveTarget.area_name}' archived`, 'success', { to: areaUrl(archiveTarget.area_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const restoreArea = async (area) => {
     try {
       await api.post(`/api/v1/areas/${area.area_id}/restore`, {})
-      loadAll(); showToast(`Area '${area.area_name}' restored to active service`, 'success')
+      loadAll(); showToast(`Area '${area.area_name}' restored to active service`, 'success', { to: areaUrl(area.area_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -178,7 +179,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, access_url: cell.access_url, area_id: areaId || '' })
       loadAll()
       const areaName = areas.find(a => a.area_id === areaId)?.area_name
-      showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success')
+      showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success', { to: cellUrl(cell.cell_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 

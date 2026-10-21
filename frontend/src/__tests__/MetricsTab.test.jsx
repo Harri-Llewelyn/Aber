@@ -7,7 +7,7 @@ import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
-import { unmappedMetricsUrl } from '../routes'
+import { metricUrl, unmappedMetricsUrl } from '../routes'
 import { navigate } from '../hooks/useUrlState'
 
 vi.mock('../api', async () => {
@@ -441,7 +441,7 @@ describe('Restore Metric', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog/m9/restore'))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/temperature.*restored/), 'success'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/temperature.*restored/), 'success', { to: metricUrl('m9') }))
     expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length).toBeGreaterThan(loads)
     expect(document.querySelector('.modal')).toBeNull()
   })
@@ -473,7 +473,7 @@ describe('Restore Metric', () => {
     fireEvent.click(drawerButton('Deprecate'))
     fireEvent.click(screen.getByRole('button', { name: 'Deprecate Metric' }))
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/deprecated.*restore it/), 'success'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/deprecated.*restore it/), 'success', { to: metricUrl('m1', true) }))
   })
 })
 
@@ -575,7 +575,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
       '/api/v1/metric-catalog/m2', { semantic_id: IEC_CDD, semantic_id_type: 'IRDI' }
     ))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Controller\/EXECUTION.*saved/), 'success'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Controller\/EXECUTION.*saved/), 'success', { to: metricUrl('m2') }))
     expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/metric-catalog')).length).toBeGreaterThan(loads)
     expect(document.querySelector('.modal')).toBeNull()
   })
@@ -594,7 +594,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
       '/api/v1/metric-catalog/m2', { semantic_id: '', semantic_id_type: '' }
     ))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cleared/), 'success'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cleared/), 'success', { to: metricUrl('m2') }))
   })
 
   it('reports a refused edit and leaves the dialog open', async () => {

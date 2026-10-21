@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { deviceUrl } from '../routes'
 import { Model3DUploader } from '../components/common/Model3DUploader'
 import { api } from '../api'
 
@@ -68,7 +69,7 @@ describe('Model3DUploader', () => {
     expect(api.uploadDeviceModel.mock.calls[0][0]).toBe(DEVICE_ID)
     expect(api.uploadDeviceModel.mock.calls[0][1].name).toBe('cnc.glb')
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(`${DEVICE_ID}/cnc.glb`))
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('cnc.glb'), 'success')
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('cnc.glb'), 'success', { to: deviceUrl(DEVICE_ID) })
   })
 
   it('refuses an unsupported format without calling the API at all', async () => {

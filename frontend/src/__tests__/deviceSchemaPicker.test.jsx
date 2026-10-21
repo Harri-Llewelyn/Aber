@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { deviceUrl } from '../routes'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 
@@ -130,7 +131,7 @@ describe('creating a device', () => {
     save()
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      expect.stringMatching(/^Device created, but its schemas were not attached/), 'error'
+      expect.stringMatching(/^Device 'Lathe_7' created, but its schemas were not attached/), 'error', { to: deviceUrl('new-device-id') }
     ))
     expect(screen.queryByRole('group', { name: /Schemas/ })).toBeNull()
     expect(api.post).toHaveBeenCalledTimes(1)

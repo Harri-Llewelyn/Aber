@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { gatewayUrl } from '../../routes'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { copyText } from '../common/CopyableId'
@@ -58,7 +59,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
         setNow(Date.now())
         setTyped('')
         setStep('ready')
-        showToast?.(`Install command issued for '${gateway.gateway_name}'`, 'success')
+        showToast?.(`Install command issued for '${gateway.gateway_name}'`, 'success', { to: gatewayUrl(gateway.gateway_id) })
         return
       }
 

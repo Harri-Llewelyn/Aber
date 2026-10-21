@@ -1,6 +1,7 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { personUrl } from '../routes'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
@@ -121,7 +122,7 @@ describe('the People tab', () => {
     fireEvent.change(select, { target: { value: 'Auditor' } })
     await waitFor(() => expect(api.setPersonRole).toHaveBeenCalledWith(OPERATOR, 'Auditor'))
     await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
-    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success')
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success', { to: personUrl('operator@site.test') })
   })
 
   it('shows the database refusing a role change', async () => {
@@ -158,7 +159,8 @@ describe('the People tab', () => {
     fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Remove Access' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove Access' }))
     await waitFor(() => expect(api.removePersonAccess).toHaveBeenCalledWith(OPERATOR))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith('operator@site.test can no longer sign in', 'success'))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('operator@site.test can no longer sign in', 'success',
+      { to: personUrl('operator@site.test', true) }))
   })
 
   it('restores access after it is confirmed, naming the role that comes back', async () => {
@@ -175,7 +177,8 @@ describe('the People tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Access' }))
     await waitFor(() => expect(api.restorePersonAccess).toHaveBeenCalledWith(REMOVED))
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith('removed@site.test can sign in again as Shopfloor Manager', 'success'))
+      expect(toast).toHaveBeenCalledWith('removed@site.test can sign in again as Shopfloor Manager', 'success',
+        { to: personUrl('removed@site.test') }))
   })
 
   it('offers removal again when sign-in was not blocked', async () => {
@@ -361,7 +364,7 @@ describe('setting a new password', () => {
     expect(dialog).toHaveTextContent('it is not shown again')
     expect(within(dialog).getByLabelText('Password')).toHaveValue(MINTED)
     expect(within(dialog).getByLabelText('Email')).toHaveValue('operator@site.test')
-    expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success')
+    expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success', { to: personUrl('operator@site.test') })
     // Never in a toast.
     expect(JSON.stringify(toast.mock.calls)).not.toContain(MINTED)
 

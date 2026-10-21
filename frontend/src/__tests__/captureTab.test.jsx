@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { captureSubjectUrl } from '../routes'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
@@ -401,6 +402,7 @@ describe('starting a capture', () => {
 describe('the running card', () => {
   const JOB = {
     id: 'job-1', status: 'RECORDING', subject_sparkplug_id: 'gwy120000000000400080000',
+    subject_kind: 'gateway', gateway_id: 'gw-1', device_id: null,
     gateways: { name: 'Line 1 Gateway' }, devices: null, note: 'night shift',
     messages: 120, bytes: 45000, elapsed_seconds: 3, max_seconds: 600, birth_captured: true,
     // The three caps a recording stops at. NOT NULL on the row, so a fixture without them was
@@ -457,7 +459,7 @@ describe('the running card', () => {
     const { props } = renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
     await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
-      expect.stringContaining('already finished'), 'success'
+      expect.stringContaining('already finished'), 'success', { to: captureSubjectUrl('gateway', 'gw-1') }
     ))
   })
 })

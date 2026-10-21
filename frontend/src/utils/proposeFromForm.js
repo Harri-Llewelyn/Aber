@@ -14,6 +14,7 @@
  * disabled in propose mode, not hidden; `nonProposableFields()` tells the form which.
  */
 import { api } from '../api'
+import { proposalUrl } from '../routes'
 
 /**
  * One entry per form: the kind of change it files (`kind`, the table name), and how the form's fields map onto its columns. A
@@ -174,4 +175,18 @@ export async function submitProposal({ kind, entityId, patch, rationale, proposa
   const body = { entity_type: def.kind, entity_id: entityId, patch, rationale: rationale || null }
   if (proposalId) return api.put(`/api/v1/proposals/${proposalId}`, body)
   return api.post('/api/v1/proposals', body)
+}
+
+/**
+ * What filing a proposal reports: the record it is about, by name, since the notification list
+ * shows the message away from the form, and a link to the proposal on Approvals. `proposalId` is
+ * the id of the row `submitProposal` returned, or of the one being updated.
+ */
+export function proposalNotice(name, proposalId, updated = false) {
+  return {
+    msg: updated
+      ? `Your proposal for '${name}' was updated. An approver decides from here.`
+      : `Change to '${name}' proposed. An approver applies it, or says why not.`,
+    to: proposalUrl(proposalId)
+  }
 }
