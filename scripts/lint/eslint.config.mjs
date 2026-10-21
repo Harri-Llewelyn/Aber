@@ -47,8 +47,6 @@ export default function config ({ js, react, hooks, globals }) {
       // Still carrying a browser tooltip. Rewritten by other work now, so swept once that lands: the
       // Site Map and area plans, Backups and Cold Storage, Cells, the 3D model, the search, the drawer.
       files: [
-        'frontend/src/components/tabs/BackupsTab.jsx',
-        'frontend/src/components/tabs/ColdStorageTab.jsx',
         'frontend/src/components/tabs/CellsTab.jsx',
         'frontend/src/components/common/GlobalSearch.jsx',
         'frontend/src/components/common/ContextPanel.jsx',

@@ -12,6 +12,7 @@ import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
 import { formatBytes, formatDate, NO_VALUE, plural } from '../../utils/format'
 import { ColdStorageDestinationModal } from '../modals/ColdStorageDestinationModal'
+import { Tooltip } from '../common/Tooltip'
 import {
   ARCHIVE_BACKLOG_TOLERANCE_DAYS,
   COLD_STATES,
@@ -328,30 +329,28 @@ function DestinationButton({ enabled, missing, destination, onOpen }) {
   const describedBy = useId()
   if (!enabled) {
     return (
-      <button
-        className="btn btn-primary btn-sm"
-        onClick={onOpen}
-        title="Archiving is off: raw telemetry past the retention window is dropped and cannot be recovered."
-      >
-        Set up cold storage
-      </button>
+      <Tooltip text="Archiving is off: raw telemetry past the retention window is dropped and cannot be recovered.">
+        <button className="btn btn-primary btn-sm" onClick={onOpen}>Set up cold storage</button>
+      </Tooltip>
     )
   }
   if (missing.length > 0) {
     const message = `Archiving is on and cannot run. Still to set: ${missing.join(', ')}.`
     return (
       <>
-        <button className="btn btn-warning btn-sm" onClick={onOpen} title={message} aria-describedby={describedBy}>
-          <IconAlertTriangle size={14} /> Complete the destination
-        </button>
+        <Tooltip text={message} describe={false}>
+          <button className="btn btn-warning btn-sm" onClick={onOpen} aria-describedby={describedBy}>
+            <IconAlertTriangle size={14} /> Complete the destination
+          </button>
+        </Tooltip>
         <span id={describedBy} className="sr-only">{message}</span>
       </>
     )
   }
   return (
-    <button className="btn btn-primary btn-sm" onClick={onOpen} title={`Objects are written to ${destination}`}>
-      Change destination
-    </button>
+    <Tooltip text={`Objects are written to ${destination}`}>
+      <button className="btn btn-primary btn-sm" onClick={onOpen}>Change destination</button>
+    </Tooltip>
   )
 }
 

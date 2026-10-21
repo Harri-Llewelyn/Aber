@@ -41,6 +41,7 @@ vi.mock('../hooks/usePolling', () => ({ usePolling: vi.fn() }))
 
 import { api } from '../api'
 import { expectCardHeading, pageToolbar } from '../test/cardHeading'
+import { getByTooltip } from '../test/tooltips'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
@@ -163,7 +164,7 @@ describe('the list of runs', () => {
     serveRuns([{ ...FAILED, error: reason }])
     renderTab()
     const failed = await screen.findByTestId('run-j-3')
-    expect(within(failed).getByTitle(reason)).toHaveClass('truncate')
+    expect(within(failed).getByText(reason)).toHaveClass('truncate')
     fireEvent.click(within(failed).getAllByRole('cell')[2])
     expect(within(panel()).getByText(reason)).toBeInTheDocument()
   })
@@ -314,7 +315,7 @@ describe('the retention floor', () => {
     renderTab()
     const kept = await screen.findByTestId('run-j-1')
     await waitFor(() => expect(kept).toHaveTextContent('Kept: one of the newest three'))
-    expect(within(kept).getByTitle(/Older than the 14-day retention window/)).toBeInTheDocument()
+    expect(getByTooltip(/Older than the 14-day retention window/, kept)).toBeInTheDocument()
     expect(screen.getByTestId('run-j-3')).toHaveTextContent('Kept: one of the newest three')
     // Past the window and outside the floor: the next prune takes it.
     expect(screen.getByTestId('run-j-4')).toHaveTextContent('Retention window')
@@ -384,7 +385,8 @@ describe('the off-site copy', () => {
     expect(button.querySelector('svg')).not.toBeNull()
     expect(description).toHaveClass('sr-only')
     expect(description).toHaveTextContent('Every backup is on the same disk as the data it protects')
-    expect(button).toHaveAttribute('title', description.textContent)
+    expect(button).toHaveAccessibleDescription(description.textContent)
+    expect(button).not.toHaveAttribute('title')
     expect(screen.queryByTestId('offsite-line')).toBeNull()
   })
 
@@ -409,12 +411,11 @@ describe('the off-site copy', () => {
     const change = await screen.findByRole('button', { name: 'Change destination' })
     // Filled, as a toolbar's actions are: it sits beside Take a backup, also filled (#971).
     expect(change).toHaveClass('btn-primary')
-    expect(change).not.toHaveAttribute('aria-describedby')
-    expect(change).toHaveAttribute('title', `Every backup is copied, encrypted, to ${BASE}`)
+    expect(change).toHaveAccessibleDescription(`Every backup is copied, encrypted, to ${BASE}`)
     expect(screen.getByTestId('run-j-1')).toHaveTextContent('Copied')
     const failed = screen.getByTestId('run-j-2')
     expect(failed).toHaveTextContent('Failed, retrying')
-    expect(within(failed).getByTitle(/AccessDenied/)).toBeInTheDocument()
+    expect(getByTooltip(/AccessDenied/, failed)).toBeInTheDocument()
     expect(screen.getByTestId('run-j-3')).toHaveTextContent('Waiting')
     // Copied to a destination since replaced: the service copies it again.
     expect(screen.getByTestId('run-j-4')).toHaveTextContent('Waiting')

@@ -21,6 +21,8 @@ import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
 import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
+import { Tooltip } from '../common/Tooltip'
+import { ColumnHeader } from '../common/SortHeader'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -245,7 +247,6 @@ export function BackupsTab({ showToast }) {
                 value={filter}
                 onChange={e => onFilter(e.target.value)}
                 aria-label="Run status filter"
-                title="Show every run, or only the ones that completed or failed"
               >
                 {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
               </select>
@@ -255,14 +256,15 @@ export function BackupsTab({ showToast }) {
               <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
               {/* The main button, last. Disabled rather than hidden while one is in flight: the
                   gate refuses a second anyway, and the callout below says why. */}
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={!!activeJob}
-                onClick={() => setAsking(true)}
-                title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
-              >
-                <IconHardDrive size={14} /> Take a backup
-              </button>
+              <Tooltip text={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!!activeJob}
+                  onClick={() => setAsking(true)}
+                >
+                  <IconHardDrive size={14} /> Take a backup
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -308,14 +310,14 @@ export function BackupsTab({ showToast }) {
               <table>
                 <thead>
                   <tr>
-                    <th title="When the backup was taken, or when a run without one ended. Open a run for its queued, started and finished times.">When</th>
-                    <th title="How the run ended, with the reason when it failed or was withdrawn">Status</th>
-                    <th title="Whether a person asked for the run or the schedule started it">Origin</th>
-                    <th title="The note kept with the backup, saying why it was taken">Note</th>
-                    <th title="The size of every file in the backup together">Size</th>
-                    <th title="The components the backup holds. Open a run for each file and its size.">Holds</th>
-                    <th title="Why the backup is still kept, or that the retention window applies">Retention</th>
-                    <th title="Whether the encrypted copy has reached the off-site bucket">Off site</th>
+                    <ColumnHeader title="When the backup was taken, or when a run without one ended. A run's panel gives every time.">When</ColumnHeader>
+                    <ColumnHeader title="How the run ended, with the reason when it failed or was withdrawn">Status</ColumnHeader>
+                    <ColumnHeader title="Whether a person asked for the run or the schedule started it">Origin</ColumnHeader>
+                    <ColumnHeader title="The note kept with the backup, saying why it was taken">Note</ColumnHeader>
+                    <ColumnHeader title="The size of every file in the backup together">Size</ColumnHeader>
+                    <ColumnHeader title="The components the backup holds. A run's panel gives each file and its size.">Holds</ColumnHeader>
+                    <ColumnHeader title="Why the backup is still kept, or that the retention window applies">Retention</ColumnHeader>
+                    <ColumnHeader title="Whether the encrypted copy has reached the off-site bucket. Waiting: a coming poll copies it, newest first. A dash: no destination.">Off site</ColumnHeader>
                     <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
@@ -803,7 +805,6 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       onClick={rowSelectHandler(onSelect)}
       // Enter on the row itself only: Enter on the Release button inside it is that button's.
       onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onSelect() } }}
-      title="Open this run's details: its times, its files and the whole of any failure"
     >
       <td className="backup-run-short">
         {formatDateTime(runWhen(run))}
@@ -811,13 +812,13 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       </td>
       <td>
         <Badge tone={badge.tone} size="sm">{badge.label}</Badge>
+        {/* Cut to one line; the tooltip, and the run's panel, give the whole of it. */}
         {outcome && (
-          <div
-            className={`cell-meta truncate backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}
-            title={outcome}
-          >
-            {outcome}
-          </div>
+          <Tooltip text={outcome}>
+            <div className={`cell-meta truncate backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}>
+              {outcome}
+            </div>
+          </Tooltip>
         )}
       </td>
       <td className="backup-run-short">{run.origin === 'requested' ? 'On request' : 'Scheduled'}</td>
@@ -825,7 +826,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       {b ? (
         <>
           <td className="backup-run-short">{formatBytes(b.size_bytes)}</td>
-          <td><div className="truncate backup-run-holds" title={componentSummary(b.components)}>{componentSummary(b.components)}</div></td>
+          <td><Tooltip text={componentSummary(b.components)}><div className="truncate backup-run-holds">{componentSummary(b.components)}</div></Tooltip></td>
           <td className="backup-run-short"><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
           <td className="backup-run-short"><OffsiteCell backup={b} base={base} /></td>
         </>
@@ -908,10 +909,12 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
           <div className="context-panel-section-label">Files</div>
           <ul className="backup-files">
             {b.components.map(c => (
-              <li key={c.file} title={COMPONENT_LABELS[c.name] || c.name}>
-                <span className="mono">{c.file}</span>
-                <span className="cell-meta">{formatBytes(c.size_bytes)}</span>
-              </li>
+              <Tooltip key={c.file} text={COMPONENT_LABELS[c.name] || c.name}>
+                <li>
+                  <span className="mono">{c.file}</span>
+                  <span className="cell-meta">{formatBytes(c.size_bytes)}</span>
+                </li>
+              </Tooltip>
             ))}
           </ul>
         </>
@@ -966,13 +969,13 @@ function RetentionCell({ backup, kept, retentionDays }) {
   }
   if (kept === 'floor') {
     return (
-      <span className="cell-meta" title={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
-        Kept: one of the newest {floorWord}
-      </span>
+      <Tooltip text={`Older than the ${retentionDays}-day retention window. The prune never removes the newest ${floorWord} backups, so this one stays until newer backups succeed.`}>
+        <span className="cell-meta">Kept: one of the newest {floorWord}</span>
+      </Tooltip>
     )
   }
   if (kept === 'off') {
-    return <span className="cell-meta" title="backup.retentionDays is 0, so the service prunes nothing">Kept: pruning is off</span>
+    return <Tooltip text="The retention window is 0 days, so the service prunes nothing"><span className="cell-meta">Kept: pruning is off</span></Tooltip>
   }
   if (backup.released_at) return <span className="cell-meta">Released {formatDateTime(backup.released_at)}</span>
   return <span className="cell-meta">Retention window</span>
@@ -1002,7 +1005,7 @@ function offsiteBase(destination) {
  * The off-site destination as a toolbar button, left of Take a backup. Unset or incomplete is a
  * warning rather than an error: the backups are good, and they share a disk with the data they
  * protect. The warning is the button's description as well as its tooltip, so a screen reader
- * hears it. Set, it is filled, as a toolbar's actions are, and its tooltip names where copies go.
+ * hears it once. Set, it is filled, as a toolbar's actions are, and its tooltip names where copies go.
  */
 function DestinationButton({ destination, onEdit }) {
   const descriptionId = useId()
@@ -1010,9 +1013,9 @@ function DestinationButton({ destination, onEdit }) {
   const base = offsiteBase(destination)
   if (base) {
     return (
-      <button className="btn btn-primary btn-sm" onClick={onEdit} title={`Every backup is copied, encrypted, to ${base}`}>
-        Change destination
-      </button>
+      <Tooltip text={`Every backup is copied, encrypted, to ${base}`}>
+        <button className="btn btn-primary btn-sm" onClick={onEdit}>Change destination</button>
+      </Tooltip>
     )
   }
   const missing = offsiteMissing(destination)
@@ -1022,9 +1025,11 @@ function DestinationButton({ destination, onEdit }) {
     : `The off-site copy cannot run. Still to set: ${missing.join(', ')}.`
   return (
     <>
-      <button className="btn btn-warning btn-sm" onClick={onEdit} title={message} aria-describedby={descriptionId}>
-        <IconAlertTriangle size={14} /> {untouched ? 'Set a destination' : 'Complete the destination'}
-      </button>
+      <Tooltip text={message} describe={false}>
+        <button className="btn btn-warning btn-sm" onClick={onEdit} aria-describedby={descriptionId}>
+          <IconAlertTriangle size={14} /> {untouched ? 'Set a destination' : 'Complete the destination'}
+        </button>
+      </Tooltip>
       <span id={descriptionId} className="sr-only">{message}</span>
     </>
   )
@@ -1040,17 +1045,17 @@ function OffsiteCell({ backup, base }) {
     )
   }
   if (!base) {
-    return <span className="cell-meta" title="No off-site destination is set">{NO_VALUE}</span>
+    return <span className="cell-meta">{NO_VALUE}</span>
   }
   if (backup.offsite_state === 'FAILED') {
     const reason = backup.offsite_error || 'The service recorded no reason.'
     return (
-      <span style={{ color: 'var(--danger-text)' }} title={`${reason}\nTried ${backup.offsite_attempts} time(s), last ${formatDateTime(backup.offsite_attempted_at)}; the service tries again.`}>
-        Failed, retrying
-      </span>
+      <Tooltip text={`${reason}\nTried ${backup.offsite_attempts} time(s), last ${formatDateTime(backup.offsite_attempted_at)}; the service tries again.`}>
+        <span style={{ color: 'var(--danger-text)' }}>Failed, retrying</span>
+      </Tooltip>
     )
   }
-  return <span className="cell-meta" title="The service copies it on a coming poll, newest first">Waiting</span>
+  return <span className="cell-meta">Waiting</span>
 }
 
 const COMPONENT_LABELS = {
