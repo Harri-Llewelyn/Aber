@@ -233,7 +233,7 @@ the shared tooltip (`common/TipButton.jsx`), and the dialog hands focus back to 
 - **The cap is 4 times the fitted size,** measured on the plan of an office floor with about a
   hundred room labels (3 units high in a 387-unit-wide drawing). Fitted, the labels are 7.7px on
   screen in a 1280×720 window, 10.1px at 1440×900 and 13.4px at 1920×1080; they pass 12px by 1.6×,
-  and are 29 to 54px at 4×. Memory did not grow with the zoom: zoomed and panned up to 8× (a drawing
+  and are 31 to 54px at 4×. Memory did not grow with the zoom: zoomed and panned up to 8× (a drawing
   13,865px wide), the JS heap stayed at 12 to 15 MiB and Chrome's private memory showed no trend, at
   a device pixel ratio of 1 and of 2. Chrome draws an SVG image by tiles, so the cap is about use,
   not memory.
