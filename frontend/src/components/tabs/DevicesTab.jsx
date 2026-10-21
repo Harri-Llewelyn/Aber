@@ -21,7 +21,8 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { SearchInput } from '../common/SearchInput'
-import { SortHeader } from '../common/SortHeader'
+import { ColumnHeader, SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader } from '../common/Model3DUploader'
@@ -696,11 +697,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             <table>
               <thead>
                 <tr>
-                  <SortHeader sort={quarantineSort} column="name" title="Reported device name">Reported Name</SortHeader>
+                  <SortHeader sort={quarantineSort} column="name">Reported Name</SortHeader>
                   <SortHeader sort={quarantineSort} column="published_id" title="Sparkplug B id the device published under">Published ID</SortHeader>
-                  <SortHeader sort={quarantineSort} column="gateway" title="Source gateway">Gateway</SortHeader>
+                  <SortHeader sort={quarantineSort} column="gateway">Gateway</SortHeader>
                   <SortHeader sort={quarantineSort} column="discovered_at" title="When the platform first heard from it">Discovered At</SortHeader>
-                  <th title="Sparkplug B birth payload">Payload</th>
+                  <ColumnHeader title="The metrics the device declared in its Sparkplug B birth">Payload</ColumnHeader>
                   <th className="row-actions">Actions</th>
                 </tr>
               </thead>
@@ -721,15 +722,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </div>
                       )}
                       {suggestion && (
-                        <div className="cell-flag cell-flag-warning" title={suggestion.evidence}>
-                          <IconAlertTriangle size={10} />
-                          <span>Possible match: {suggestion.candidateName}</span>
-                        </div>
+                        <Tooltip text={suggestion.evidence}>
+                          <div className="cell-flag cell-flag-warning">
+                            <IconAlertTriangle size={10} />
+                            <span>Possible match: {suggestion.candidateName}</span>
+                          </div>
+                        </Tooltip>
                       )}
                     </td>
                     <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
                     <td>{q.gateway_name || '—'}</td>
-                    <td className="cell-meta" title={formatDateTime(q.discovered_at)}>{formatRelative(q.discovered_at)}</td>
+                    <Tooltip text={formatDateTime(q.discovered_at)}><td className="cell-meta">{formatRelative(q.discovered_at)}</td></Tooltip>
                     <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
                     <td className="row-actions">
                       <ActionButton
@@ -773,7 +776,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           ariaLabel="Search devices"
         />
 
-        <select className="form-control control-md" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} title="Filter by operational state">
+        <select className="form-control control-md" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Status">
           <option value="">Any status</option>
           <option value="online">Online</option>
           <option value="offline">Offline / DDEATH</option>
@@ -782,14 +785,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <option value="unmodelled">Publishing unmodelled metrics</option>
         </select>
 
-        <button
-          className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setAttentionOnly(v => !v)}
-          aria-pressed={attentionOnly}
-          title="Show only devices that need action: past their first-birth window, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
-        >
-          <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
-        </button>
+        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, in a cell apart from their gateway's, or in an archived cell.">
+          <button
+            className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setAttentionOnly(v => !v)}
+            aria-pressed={attentionOnly}
+          >
+            <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
+          </button>
+        </Tooltip>
 
         <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
           {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
@@ -798,55 +802,58 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             value={filterMode}
             onChange={e => setFilterMode(e.target.value)}
             aria-label="Lifecycle"
-            title="Filter by lifecycle state"
           >
             <option value="all">All ({roster.length})</option>
             <option value="active">Active ({roster.length - archivedCount})</option>
             <option value="archived">Archived ({archivedCount})</option>
           </select>
 
-          <select
-            className="form-control"
-            value={tagFilter}
-            onChange={e => setTagFilter(e.target.value)}
-            disabled={tagOptions.length === 0}
-            aria-label="Type"
-            title={tagOptions.length === 0
-              ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
-              : 'Filter by device type, derived from the metric groups the assigned schema models'}
-          >
-            <option value="">Any type</option>
-            {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <Tooltip text={tagOptions.length === 0
+            ? 'No device has a type yet. A type comes from the metric groups its schema models.'
+            : 'A device\'s types come from the metric groups its schema models.'}>
+            <select
+              className="form-control"
+              value={tagFilter}
+              onChange={e => setTagFilter(e.target.value)}
+              disabled={tagOptions.length === 0}
+              aria-label="Type"
+            >
+              <option value="">Any type</option>
+              {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Tooltip>
 
-          <select className="form-control" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} aria-label="Schema" title="Filter by the schema a device was provisioned with">
+          <select className="form-control" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} aria-label="Schema">
             <option value="">Any schema</option>
             {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
           </select>
 
-          <select className="form-control" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} aria-label="Gateway" title="Filter by serving gateway">
+          <select className="form-control" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} aria-label="Gateway">
             <option value="">Any gateway</option>
             {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
           </select>
 
           {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
-          <select className="form-control" value={cellFilter} onChange={e => setCellFilter(e.target.value)} aria-label="Cell" title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
-            <option value="">Any cell</option>
-            <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
-            <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
-            {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
-          </select>
+          <Tooltip text="A device's own cell if it has one, otherwise its gateway's.">
+            <select className="form-control" value={cellFilter} onChange={e => setCellFilter(e.target.value)} aria-label="Cell">
+              <option value="">Any cell</option>
+              <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
+              <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
+              {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
+            </select>
+          </Tooltip>
 
           {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
           {shadowCount > 0 && (
-            <button
-              className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setShowShadows(v => !v)}
-              aria-pressed={showShadows}
-              title="Replay lanes created by broker playback, one per device a capture recorded, so a replay is never mistaken for live plant data. Hidden by default because they are not machines."
-            >
-              <IconPlay size={13} /> Show replay lanes ({shadowCount})
-            </button>
+            <Tooltip text="Playback makes one replay lane per device a capture recorded. They are hidden by default because they are not machines.">
+              <button
+                className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setShowShadows(v => !v)}
+                aria-pressed={showShadows}
+              >
+                <IconPlay size={13} /> Show replay lanes ({shadowCount})
+              </button>
+            </Tooltip>
           )}
         </FiltersPopover>
 
@@ -857,7 +864,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             permitted={canManage}
             deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)}
             onClick={() => (setEditing(null), setForm(blank), setShowForm(true))}
-            title="Register a new shopfloor device"
           >
             <IconPlus size={14} /> New Device
           </ActionButton>
@@ -886,11 +892,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             <table>
               <thead>
                 <tr>
-                  <SortHeader sort={rosterSort} column="name" title="Human-readable device name">Name</SortHeader>
-                  <SortHeader sort={rosterSort} column="uuid" title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</SortHeader>
-                  <SortHeader sort={rosterSort} column="status" title="Device status">Status</SortHeader>
-                  <SortHeader sort={rosterSort} column="type" style={{ width: 'auto' }} title="Device classification">Type</SortHeader>
-                  <SortHeader sort={rosterSort} column="cell" title="The cell the device resolves to">Cell</SortHeader>
+                  <SortHeader sort={rosterSort} column="name">Name</SortHeader>
+                  <SortHeader sort={rosterSort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug id is derived from it.">Device UUID</SortHeader>
+                  <SortHeader sort={rosterSort} column="status">Status</SortHeader>
+                  <SortHeader sort={rosterSort} column="type" style={{ width: 'auto' }} title="The metric groups the device's schema models. Unmodelled counts metrics its last birth declared outside it.">Type</SortHeader>
+                  <SortHeader sort={rosterSort} column="cell" title="The device's own cell if it has one, otherwise its gateway's. A cell set on the device stays if the gateway moves.">Cell</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -909,7 +915,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                           e.preventDefault()
                           setSelectedId(id => id === a.asset_id ? null : a.asset_id)
                         }}
-                        title="Click to inspect this device in the details panel"
                       >
                         <td>
                           <strong>{a.asset_name}</strong>
@@ -918,12 +923,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               happened, wherever the row is seen. */}
                           {a.shadow_of && (
                             <Badge size="sm" className="cell-tag" icon={<IconPlay size={11} />}
-                                   title="A replay lane, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
+                                   title="A replay lane, not a machine. Its readings are a capture's, republished: they happened on the real device, on the day of the capture.">
                               Replay lane
                             </Badge>
                           )}
                           {a.is_archived && (
-                            <ArchivedBadge size="sm" className="cell-tag" title="Archived: out of commission" />
+                            <ArchivedBadge size="sm" className="cell-tag" />
                           )}
                         </td>
                         <td>
@@ -931,7 +936,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td>
                           {a.is_archived ? (
-                            <ArchivedBadge size="sm" title="Archived: out of commission" />
+                            <ArchivedBadge size="sm" />
                           ) : (
                             // Resolved by utils/deviceStatus.js, so this cell, the drawer and the
                             // Site Map chip agree.
@@ -989,7 +994,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             } : {
                               key: tag,
                               className: 'badge badge-sm badge-neutral',
-                              title: `This device's schema models ${tag}.* metrics`,
                               content: tag
                             })
 
@@ -1030,16 +1034,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               <>
                                 <div>{cellName}</div>
                                 {a.location_source === SOURCE_EXPLICIT && (
-                                  <div className="cell-meta"
-                                       title="Set on the device itself — it will not move if the gateway is reassigned">
-                                    Set on device
-                                  </div>
+                                  <div className="cell-meta">Set on device</div>
                                 )}
                                 {a.cell_mismatch && (
-                                  <div className="cell-flag cell-flag-warning"
-                                       title={`Its gateway serves ${cellById.get(a.gateway_cell_id)?.cell_name || 'another cell'}`}>
-                                    <IconAlertTriangle size={10} /> Gateway elsewhere
-                                  </div>
+                                  <Tooltip text={`Its gateway serves ${cellById.get(a.gateway_cell_id)?.cell_name || 'another cell'}`}>
+                                    <div className="cell-flag cell-flag-warning">
+                                      <IconAlertTriangle size={10} /> Gateway elsewhere
+                                    </div>
+                                  </Tooltip>
                                 )}
                               </>
                             )
@@ -1063,7 +1065,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel edits">Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
@@ -1074,7 +1076,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   ? 'Choose which area the device serves'
                   : proposeMode
                     ? 'Ask for these changes — an approver applies them, or says why not'
-                    : 'Save device configuration and gateway assignment'}
+                    : undefined}
               >
                 {proposeMode
                   ? (editingProposal ? 'Update your proposal' : 'Propose a change')
@@ -1086,21 +1088,21 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             {/* Every field here is editable. The identifiers and the topic helper are facts, and
                 live on the drawer where they are copyable. */}
             <div className="form-group">
-              <label className="form-label">Device Name</label>
-              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. CNC Mill 01" />
+              <label className="form-label" htmlFor="device-name">Device Name</label>
+              <input id="device-name" className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} placeholder="e.g. CNC Mill 01" />
               <div className="form-hint">
                 A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Description</label>
+              <label className="form-label" htmlFor="device-description">Description</label>
               <textarea
+                id="device-description"
                 className="form-control"
                 rows={2}
                 value={form.description || ''}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                title="Optional free-text note about this device"
                 placeholder="e.g. Spindle rebuilt 2026-03; runs warmer than its twin"
               />
               <div className="form-hint">
@@ -1111,9 +1113,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </div>
 
             <div className="form-group">
-              <label className="form-label">Serving Gateway</label>
+              <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
               <Withheld field="active_gateway_id" />
-              <select className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : editing?.shadow_of ? 'A replay lane stays on the Playback gateway' : "Select the gateway serving this device"}>
+              <select id="device-gateway" className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
                 <option value="">— Unassigned Gateway —</option>
                 {/* A replay lane is listed but disabled rather than filtered out, so a device that
                     is a lane still opens with its own gateway shown. The database refuses the write
@@ -1164,13 +1166,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     cells={cells}
                     areas={areas}
                     disabled={!acceptsCell}
-                    title={acceptsCell
-                      ? undefined
-                      : 'Its gateway generates or replays this telemetry, so the device resolves to a lane rather than to a cell'}
                     // Named after what it resolves to, not "None": the empty value is a deliberate
                     // "follow the gateway", not an absence.
                     cellEmptyLabel={inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
-                    cellTitle="Where this device physically sits. Leave on Inherit to follow its gateway."
                   />
 
                   <div className="form-hint">
@@ -1205,7 +1203,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               <label className="form-label">Device Type / Classification <span className="form-hint-inline">(derived)</span></label>
               {/* flexWrap is load-bearing: a tri-standard schema derives six tags, and the count
                   grows with the schema. */}
-              <div className="form-control derived-tags" title="Derived from the metric groups the ticked schemas model — not typed in by hand">
+              <div className="form-control derived-tags">
                 {(() => {
                   const preview = deviceTagList(editing, formSchemas)
                   if (preview.length === 0) {
@@ -1225,10 +1223,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               <Withheld field="schema_ids" />
               {/* Archived versions are not offered; assignableSchemas() keeps the ones this device
                   already carries, labelled with their status. The database refuses the write as well. */}
-              <div
-                className="form-control schema-checklist"
-                title={proposeMode ? withheldFields.schema_ids : 'The metric contracts this device is judged against, from the Schemas registry. Archived versions are not offered — publish a version instead of reattaching the one it replaced.'}
-              >
+              <div className="form-control schema-checklist">
                 {(() => {
                   const offered = assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : [])
                   if (offered.length === 0) {
@@ -1271,13 +1266,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 to 'audit' server-side. */}
             {editing && (
               <div className="form-group">
-                <label className="form-label">Schema Conformance</label>
+                <label className="form-label" htmlFor="device-conformance">Schema Conformance</label>
                 <select
+                  id="device-conformance"
                   className="form-control"
                   disabled={proposeMode}
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
-                  title="What happens when a metric contradicts this device's bound schema"
                 >
                   <option value="audit">Audit — record the violation, keep the reading</option>
                   <option value="enforce">Enforce — record it and DROP the reading</option>
@@ -1417,7 +1412,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               const badge = deviceStatusBadge(selectedDevice)
               return <Badge tone={badge.tone} size="sm" title={badge.title}>{badge.label}</Badge>
             })()}
-            {selectedDevice.is_archived && <ArchivedBadge size="sm" title="Archived: out of commission" />}
+            {selectedDevice.is_archived && <ArchivedBadge size="sm" />}
           </>
         )}
         fields={selectedDevice ? [

@@ -1,4 +1,5 @@
 import React from 'react'
+import { Tooltip } from './Tooltip'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, normaliseScope } from '../../utils/cellResolution'
 
 /**
@@ -34,18 +35,18 @@ function locationFieldsFor(scope, form, areas = []) {
  *
  * `disabled` withholds the whole control and shows it as In a cell with nothing chosen, which is
  * how a synthetic gateway's stored scope reads everywhere else (`device_locations` resolves
- * `simulated` ahead of it).
+ * `simulated` ahead of it). The caller's hint beneath says why.
  */
 export function LocationPicker({
-  idPrefix, form, onChange, cells = [], areas = [], disabled = false, title,
-  cellEmptyLabel = '— No cell assigned —', cellTitle
+  idPrefix, form, onChange, cells = [], areas = [], disabled = false,
+  cellEmptyLabel = '— No cell assigned —'
 }) {
   const scope = disabled ? SCOPE_CELL : normaliseScope(form.location_scope)
   const chosenCell = cells.find(c => c.cell_id === form.cell_id)
   const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
 
   const choices = [
-    { scope: SCOPE_CELL, label: 'In a cell', title: 'Sits in one cell.' },
+    { scope: SCOPE_CELL, label: 'In a cell' },
     {
       scope: SCOPE_AREA_WIDE, label: 'Area-Wide', off: areas.length === 0,
       title: areas.length === 0
@@ -56,20 +57,24 @@ export function LocationPicker({
   ]
 
   return (
-    <div className="location-picker" title={title}>
+    <div className="location-picker">
       <div className="location-picker-choices" role="radiogroup" aria-label="Location">
+        {/* The tooltip is on the label, so it shows for the pointer on the words and for the
+            keyboard's focus on the radio inside. */}
         {choices.map(c => (
-          <label key={c.scope} className={`location-choice${disabled || c.off ? ' is-disabled' : ''}`} title={c.title}>
-            <input
-              type="radio"
-              name={`${idPrefix}-location-scope`}
-              value={c.scope}
-              checked={scope === c.scope}
-              disabled={disabled || c.off}
-              onChange={() => choose(c.scope)}
-            />
-            {c.label}
-          </label>
+          <Tooltip key={c.scope} text={c.title}>
+            <label className={`location-choice${disabled || c.off ? ' is-disabled' : ''}`}>
+              <input
+                type="radio"
+                name={`${idPrefix}-location-scope`}
+                value={c.scope}
+                checked={scope === c.scope}
+                disabled={disabled || c.off}
+                onChange={() => choose(c.scope)}
+              />
+              {c.label}
+            </label>
+          </Tooltip>
         ))}
       </div>
 
@@ -80,7 +85,7 @@ export function LocationPicker({
           value={disabled ? '' : (form.cell_id || '')}
           disabled={disabled}
           onChange={e => onChange({ location_scope: SCOPE_CELL, cell_id: e.target.value, area_id: '' })}
-          title={cellTitle}
+          aria-label="Cell"
         >
           <option value="">{cellEmptyLabel}</option>
           {cells.filter(c => !c.is_archived).map(c => (
@@ -101,16 +106,16 @@ export function LocationPicker({
             className="form-control"
             value={form.area_id || ''}
             onChange={e => onChange({ location_scope: SCOPE_AREA_WIDE, cell_id: '', area_id: e.target.value })}
-            title="Which area this asset serves"
+            aria-label="Area"
           >
             <option value="">— Choose an area —</option>
             {areas.map(ar => <option key={ar.area_id} value={ar.area_id}>{ar.area_name}</option>)}
           </select>
         ) : (
           /* One area on the plant: named, not asked. */
-          <div className="location-picker-fixed" title="The only area on the plant, so it is chosen for you">
-            {areas[0]?.area_name}
-          </div>
+          <Tooltip text="The only area on the plant, so it is chosen for you">
+            <div className="location-picker-fixed">{areas[0]?.area_name}</div>
+          </Tooltip>
         )
       )}
     </div>

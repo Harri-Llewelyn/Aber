@@ -43,7 +43,7 @@ const show = async (rows, hasPermission = () => true) => {
   // Filters popover.
   if (rows.some(r => r.is_archived)) {
     fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
   }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 }
