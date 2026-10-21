@@ -1693,9 +1693,9 @@ tbody tr:hover { background: var(--bg-glass); }
 .backup-run-holds { max-width: 28ch; }
 .backup-run-short { white-space: nowrap; }
 
-/* The Backups state callouts above the list. On a healthy stack with no database backups of its
-   own every one renders nothing, and the empty body would be a ruled-off blank band. */
-.backup-callouts:empty { display: none; }
+/* The load error above the summary cards and a backup in flight below them, each across the card:
+   the body's padding is the gap, so the callout's own top margin goes. */
+.backup-banner > .callout { margin-top: 0; }
 
 /* The files a backup holds, in its run's panel: each file's name, then its size. */
 .backup-files {
@@ -1713,40 +1713,6 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 8px;
 }
 .backup-files .mono { min-width: 0; overflow-wrap: anywhere; }
-
-/* The historian's own backup on the Backups page: one line of facts that opens its panel and wraps
-   on a narrow screen. A button, so it is reached and opened from the keyboard. */
-.backup-historian {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.backup-historian:hover { border-color: var(--border-hover); }
-.backup-historian:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.backup-historian-selected {
-  background: var(--accent-dim);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-.backup-historian-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-}
-.backup-historian-state { min-width: 0; }
-/* The chevron sits at the line's right end, where a table row's does. */
-.backup-historian-chevron { margin-left: auto; }
 
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
@@ -2441,27 +2407,131 @@ main:focus { outline: none; }
    centred text, so the button needs to become a block to sit in the middle of it. */
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
 
-/* ===== Stat strip ===== */
-/* A row of figures above a table, centred on the card and ruled between, so each figure has a
-   visible boundary and a short run does not sit off to one side of a wide card. */
-.stat-strip {
+/* ===== Summary cards ===== */
+/* The row of cards above the list on Backups and Cold Storage (common/SummaryCard.jsx), drawn like
+   the Site Map's lanes. Every card takes an equal share of one row; two by two below 1100px, one
+   column on a phone. Measured against the window, not the card, so a drawer opening beside the
+   page does not move a card from under the pointer that opened it. */
+.summary-row { padding-block: 10px; }
+
+.summary-cards {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 1099px) {
+  .summary-cards { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .summary-cards { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Every line is one line high and cut short with an ellipsis, so a card is as tall in every state
+   and the row does not jump when a warning appears. The 4px cap is the state's colour, grey while
+   nothing is wrong; the tints are measured in themeContrast.test.js. */
+.summary-card {
   display: flex;
-  justify-content: center;
-  align-items: stretch;
-  flex-wrap: wrap;
-  gap: 0;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px 12px 6px;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--text-dim);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+  text-align: left;
+  transition: var(--transition);
 }
 
-.stat-strip > * {
-  padding: 0 20px;
-  text-align: center;
+.summary-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 16px;
 }
 
-/* The separator belongs to the item on its right, so the first has none and a run of any length
-   stays ruled between and clear at both ends. */
-.stat-strip > * + * {
-  border-left: 1px solid var(--border);
+.summary-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
+
+/* A badge in a card sits on the card's own ground, not on its tint as well: a badge's ink has
+   little headroom over its own tint, and a warning badge on the danger tint measured 4.41:1. */
+.summary-card-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+}
+
+.summary-card-badge .badge { padding-block: 0; line-height: 16px; }
+.summary-card-chevron { margin-left: auto; }
+
+.summary-card-value,
+.summary-card-detail,
+.summary-card-state {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-card-value {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.summary-card-unit { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.summary-card-detail svg,
+.summary-card-state svg { margin-right: 5px; vertical-align: -2px; }
+.summary-card-flagged { color: var(--warning-text); }
+.summary-card-state { font-weight: 600; }
+
+.summary-card-warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-top-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+
+.summary-card-warning .summary-card-state { color: var(--warning-text); }
+
+.summary-card-danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  border-top-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.summary-card-danger .summary-card-state { color: var(--danger-text); }
+
+.summary-card-opens { cursor: pointer; }
+.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--text-muted) 18%, transparent); }
+.summary-card-warning.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--warning) 20%, transparent); }
+.summary-card-danger.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 20%, transparent); }
+
+/* The open card is the one the panel shows: the outline a selected lane gets. */
+.summary-card.is-selected,
+.summary-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A card's tooltip is several facts: one paragraph each, so it reads as a list, not a wall. */
+.summary-card-tip { display: block; }
+.summary-card-tip + .summary-card-tip { margin-top: 6px; }
 
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
@@ -2762,21 +2832,21 @@ main:focus { outline: none; }
 .site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: inherit; letter-spacing: -0.2px; }
 
 /* Everything that opens the panel and is not a table row ends in the row chevron's glyph and
-   colours: a lane, an area card, the Backups page's Historian line and an Audit Trail change
+   colours: a lane, an area card, a summary card on Backups and an Audit Trail change
    listed in the drawer. */
 .site-lane-chevron,
 .area-card-chevron,
-.backup-historian-chevron,
+.summary-card-chevron,
 .trail-causation-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
 
 .site-lane:hover .site-lane-chevron,
 .area-card:hover .area-card-chevron,
-.backup-historian:hover .backup-historian-chevron,
+.summary-card-opens:hover .summary-card-chevron,
 .trail-causation-item:hover .trail-causation-chevron { color: var(--text-primary); }
 
 .site-lane.is-open .site-lane-chevron,
 .area-card.is-selected .area-card-chevron,
-.backup-historian-selected .backup-historian-chevron { color: var(--accent); }
+.summary-card.is-selected .summary-card-chevron { color: var(--accent); }
 
 /* A lane that holds something is filled with its hue, so a full lane and an empty one cannot be
    mistaken. Each fill names its colour rather than --lane-hue so that themeContrast.test.js can
@@ -6129,27 +6199,10 @@ ol.gateway-steps {
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
-/* STAT: one figure in a .stat-strip (common/Stat.jsx), on Cold Storage and Backups. */
-.stat { min-width: 120px; }
-.stat-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.stat-value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.stat-warning .stat-value { color: var(--warning-text); }
-.stat-value svg { margin-right: 6px; vertical-align: -1px; }
-.stat-detail { font-size: 11px; color: var(--text-muted); }
-/* Alone above the empty state it is centred, with no column width to pad it off its label. */
-.stat-center { min-width: 0; text-align: center; }
-.stat-center .stat-value { font-size: 26px; }
 /* COLD STORAGE: the catalogue rows and the destination dialog. */
-.cold-backlog-lead { margin-bottom: var(--stack); }
+/* Alone above the empty state, the backlog card is centred at about the width it has in the row. */
+.cold-backlog-lead { display: flex; justify-content: center; margin-bottom: var(--stack); }
+.cold-backlog-lead > .summary-card { width: min(100%, 320px); }
 /* The two commands sit on their own lines so a wrapped command is one a reader can select. */
 .cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }
 .cold-empty-commands > div:nth-of-type(2) { margin-top: 8px; }

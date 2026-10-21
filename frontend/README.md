@@ -208,6 +208,27 @@ So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the p
 **Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
 slowness, so the list names every value the predicate reads, in the order it reads them.
 
+### A page's summary is one row of cards
+
+Backups and Cold Storage sum up their list in one row of `common/SummaryCard.jsx` cards between the
+toolbar and the table, drawn like the Site Map's lanes: a 4px cap in the state's colour (grey while
+nothing is wrong) and a chevron on a card that opens a panel. A card that opens something is a
+`<button>`; one that opens nothing is a focusable group, so its tooltip still shows from the
+keyboard. The state is in words on a `role="status"` line, and the whole card in sentences is the
+shared Tooltip and, after the title, the accessible name.
+
+**Every line is one line high, cut short with an ellipsis**, so a warning changes a card's colour
+and words but never its height, and the list does not move. That is the point of the design: the
+stat strip and the full-width callouts it replaced grew a row per warning, and at 1366×768 the
+Backups list showed one run under two warnings. What a card holds is chosen for what someone acts
+on; the rest (a duration, the oldest restorable backup) is in its tooltip. Anything with a button
+of its own, such as a backup in flight with Cancel, stays full width outside the row, since a
+button cannot sit inside a card that is one. The row is four across, two by two below 1100px and
+one column on a phone, by the window rather than the card, so a drawer opening beside the page
+does not move a card from under the pointer. The tints are measured in `themeContrast.test.js`; a
+badge in a card sits on `.summary-card-badge`, the card's own ground, because a badge's ink has
+too little headroom over its own tint to survive a second one.
+
 ### A dialog keeps its buttons in view
 
 `Modal` is a flex column capped at the window height. The header row, the error slot and the footer

@@ -9,10 +9,10 @@ import { tabIsVisible, TABS, groupedNav } from '../navigation'
 /**
  * The Backups page. What has to hold: the page never takes a backup itself, only queues one and
  * shows what the service did; every finished run is listed, a failed one with its reason and a
- * pruned one saying so; the one line about the current state appears only while backups are not
- * working now, and says nothing on a stack that has never run the service; a queued request that
- * nobody claims says so; a pinned backup is released through a confirmation that says nothing is
- * deleted at that moment; and the page is an Administrator's alone.
+ * pruned one saying so; the row of cards above the list says in words whether backups are working
+ * now, and is not drawn on a stack that has never run the service; a queued request that nobody
+ * claims says so; a pinned backup is released through a confirmation that says nothing is deleted
+ * at that moment; and the page is an Administrator's alone.
  */
 
 vi.mock('../api', async () => {
@@ -232,6 +232,12 @@ describe('the list of runs', () => {
 
 /** The run panel, while open. */
 const panel = () => document.querySelector('.context-panel-open')
+
+/** A card in the row above the list, by its name (runs, platform, historian, storage), and its state line. */
+const card = (name) => screen.queryByTestId(`card-${name}`)
+const cardState = (name) => screen.queryByTestId(`card-${name}-state`)
+/** The card's accessible name: its title and its whole sentence, which is also its tooltip. */
+const cardName = (name) => card(name).getAttribute('aria-label')
 
 describe('a run\'s panel', () => {
   it('opens from anywhere on the row, with the times and the files', async () => {
@@ -496,7 +502,7 @@ describe('the off-site copy', () => {
   })
 })
 
-describe('the trend', () => {
+describe('the row of cards', () => {
   const GiB = 1024 ** 3
   /** A stack with a month of nightly backups, one failure among them, and a report from the service. */
   const TREND = {
@@ -514,57 +520,119 @@ describe('the trend', () => {
     newestOffsite: { stamp: '20260911T023000Z', taken_at: hoursAgo(26), copied_at: hoursAgo(25) },
     service: { reportedAt: hoursAgo(2), volumeFreeBytes: 80 * GiB, volumeTotalBytes: 100 * GiB, schedule: '30 2 * * *' }
   }
-  const stat = (label) => screen.getByText(label, { selector: '.stat-label' }).closest('.stat')
 
-  it('shows the figures in a strip above the list, and no warning while they are fine', async () => {
-    api.backupRunSummary.mockResolvedValue(TREND)
+  it('sums the runs and the volume in two cards between the toolbar and the list, saying nothing is wrong', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, succeeded30d: 30 })
     renderTab()
-    const strip = await screen.findByTestId('backup-stats')
-    expect(strip).toHaveClass('stat-strip')
-    expect(stat('Last good backup')).toHaveTextContent('2h ago')
-    expect(stat('Succeeded, 30 days')).toHaveTextContent('29 of 30')
-    expect(stat('Last run')).toHaveTextContent('14m')
-    expect(stat('Last run')).toHaveTextContent('median 12m')
-    expect(stat('Oldest restorable')).toHaveTextContent('2026')
-    expect(stat('Space held')).toHaveTextContent('48.0 GiB')
-    expect(stat('Space held')).toHaveTextContent('16 backups')
-    expect(stat('Free on the volume')).toHaveTextContent('80.0 GiB')
-    expect(stat('Free on the volume')).toHaveTextContent('of 100.0 GiB')
-    expect(stat('Free on the volume')).toHaveAttribute('title', expect.stringMatching(/local-path.*node's whole disk, shared with the databases/))
-    expect(stat('Newest off site')).toHaveTextContent('1d ago')
-    expect(screen.queryByTestId('backup-slow')).toBeNull()
-    expect(screen.queryByTestId('backup-space')).toBeNull()
-    expect(stat('Last run')).not.toHaveClass('stat-warning')
-    expect(stat('Free on the volume')).not.toHaveClass('stat-warning')
+    const row = await screen.findByTestId('backup-summary')
+    expect(row).toHaveAttribute('role', 'group')
+    expect(row).toHaveAccessibleName('Backup summary')
+    expect([...row.children].map(c => c.dataset.testid)).toEqual(['card-runs', 'card-storage'])
+    expect(pageToolbar().compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(row.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    expect(card('runs')).toHaveTextContent('2h ago last good backup')
+    expect(card('runs')).toHaveTextContent('30 of 30 succeeded in 30 days')
+    expect(cardState('runs')).toHaveTextContent('Up to date')
+    expect(card('storage')).toHaveTextContent('80.0 GiB free of 100.0 GiB')
+    expect(card('storage')).toHaveTextContent('48.0 GiB in 16 backups · newest off site 1d ago')
+    expect(cardState('storage')).toHaveTextContent('Room for the next backup')
+    for (const name of ['runs', 'storage']) {
+      expect(card(name).className).not.toMatch(/summary-card-(warning|danger)/)
+      expect(cardState(name)).toHaveAttribute('role', 'status')
+    }
+    // Not a figure a person acts on: no longer on the card.
+    expect(card('runs')).not.toHaveTextContent('14m')
   })
 
-  it('marks a failure in the last 30 days, which the current-state line no longer shows', async () => {
+  it('moves the duration, the median and the oldest restorable backup into the tooltips', async () => {
     api.backupRunSummary.mockResolvedValue(TREND)
     renderTab()
-    await screen.findByTestId('backup-stats')
-    expect(screen.queryByTestId('backup-state')).toBeNull()
-    expect(stat('Succeeded, 30 days')).toHaveClass('stat-warning')
-    expect(stat('Succeeded, 30 days').querySelector('svg')).not.toBeNull()
+    await screen.findByTestId('backup-summary')
+    expect(cardName('runs')).toMatch(/^Backup runs\. /)
+    expect(cardName('runs')).toContain('The last good backup took 14m. The median of the last 14 is 12m.')
+    expect(cardName('runs')).toContain('29 of the 30 runs that ended in the last 30 days completed. A cancelled run is not counted.')
+    expect(cardName('storage')).toMatch(/^Storage\. /)
+    expect(cardName('storage')).toMatch(/The oldest restorable backup was taken .*2026/)
+    expect(cardName('storage')).toMatch(/local-path this is the node's whole disk, shared with the databases/)
+    expect(cardName('storage')).toMatch(/The newest backup with a copy off site was taken .* and copied /)
   })
 
-  it('shows no strip on a stack that has never run the service', async () => {
+  it('marks a failure in the last 30 days, which the card\'s state no longer shows', async () => {
+    api.backupRunSummary.mockResolvedValue(TREND)
+    renderTab()
+    await screen.findByTestId('backup-summary')
+    expect(cardState('runs')).toHaveTextContent('Up to date')
+    const succeeded = within(card('runs')).getByText('29 of 30 succeeded in 30 days')
+    expect(succeeded).toHaveClass('summary-card-flagged')
+    expect(succeeded.querySelector('svg')).not.toBeNull()
+  })
+
+  it('opens the newest run from the Backup runs card, a button, and closes it on a second press', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, latestOutcome: { id: 'j-1', status: 'COMPLETED', started_at: hoursAgo(2) } })
+    renderTab()
+    await screen.findByTestId('run-j-1')
+    const runs = screen.getByRole('button', { name: /^Backup runs\./ })
+    expect(runs).toBe(card('runs'))
+    expect(cardName('runs')).toContain('The card opens the newest run.')
+    fireEvent.click(runs)
+    expect(runs).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('run-j-1')).toHaveClass('row-selected')
+    expect(panel()).toHaveTextContent('before the areas migration')
+    fireEvent.click(runs)
+    expect(panel()).toBeNull()
+  })
+
+  it('opens the failed run when the last run failed, clearing a filter that hides it', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, latestOutcome: { id: 'j-3', status: 'FAILED', started_at: hoursAgo(1), finished_at: hoursAgo(1) } })
+    renderTab()
+    await screen.findByTestId('run-j-3')
+    fireEvent.change(screen.getByLabelText('Run status filter'), { target: { value: 'completed' } })
+    await waitFor(() => expect(screen.queryByTestId('run-j-3')).toBeNull())
+
+    fireEvent.click(card('runs'))
+    await waitFor(() => expect(panel()).toHaveTextContent('pg_dump timescaledb failed: connection refused'))
+    expect(screen.getByLabelText('Run status filter')).toHaveValue('all')
+    expect(screen.getByTestId('run-j-3')).toHaveClass('row-selected')
+  })
+
+  it('is no button while there is no run to open', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, latestOutcome: null })
+    renderTab()
+    await screen.findByTestId('backup-summary')
+    expect(card('runs').tagName).toBe('DIV')
+    expect(screen.queryByRole('button', { name: /^Backup runs/ })).toBeNull()
+  })
+
+  it('opens nothing from the Storage card, which is no button', async () => {
+    api.backupRunSummary.mockResolvedValue(TREND)
+    renderTab()
+    await screen.findByTestId('backup-summary')
+    expect(card('storage').tagName).toBe('DIV')
+    expect(card('storage').querySelector('.summary-card-chevron')).toBeNull()
+    fireEvent.click(card('storage'))
+    expect(panel()).toBeNull()
+  })
+
+  it('draws no row on a stack that has never run the service', async () => {
     api.backupRunSummary.mockResolvedValue({ ...TREND, firstRecordedAt: null })
     renderTab()
     await screen.findByText('No backups yet.')
-    expect(screen.queryByTestId('backup-stats')).toBeNull()
+    expect(screen.queryByTestId('backup-summary')).toBeNull()
   })
 
-  it('warns when the last run took more than half the time between scheduled backups', async () => {
+  it('warns on the Backup runs card when the last run took more than half the time between scheduled backups', async () => {
     api.backupRunSummary.mockResolvedValue({
       ...TREND,
       lastSuccess: { ...TREND.lastSuccess, duration_seconds: 4 * 3600 },
       service: { ...TREND.service, schedule: '0 */6 * * *' }
     })
     renderTab()
-    const warning = await screen.findByTestId('backup-slow')
-    expect(warning).toHaveTextContent('The last backup took 4h 0m')
-    expect(warning).toHaveTextContent('more than half the 6h 0m between scheduled backups')
-    expect(stat('Last run')).toHaveClass('stat-warning')
+    await screen.findByTestId('backup-summary')
+    // The duration comes back onto the card, beside the median.
+    expect(cardState('runs')).toHaveTextContent('Slow: 4h 0m, median 12m')
+    expect(card('runs')).toHaveClass('summary-card-warning')
+    expect(cardName('runs')).toContain('The last backup took 4h 0m, more than half the 6h 0m between scheduled backups.')
   })
 
   it('does not warn about a run under half the interval, or with no schedule to compare it with', async () => {
@@ -574,8 +642,8 @@ describe('the trend', () => {
       service: { ...TREND.service, schedule: '0 */6 * * *' }
     })
     const { unmount } = renderTab()
-    await screen.findByTestId('backup-stats')
-    expect(screen.queryByTestId('backup-slow')).toBeNull()
+    await screen.findByTestId('backup-summary')
+    expect(cardState('runs')).toHaveTextContent('Up to date')
     unmount()
 
     api.backupRunSummary.mockResolvedValue({
@@ -584,19 +652,18 @@ describe('the trend', () => {
       service: { ...TREND.service, schedule: '' }
     })
     renderTab()
-    await screen.findByTestId('backup-stats')
-    expect(screen.queryByTestId('backup-slow')).toBeNull()
+    await screen.findByTestId('backup-summary')
+    expect(cardState('runs')).toHaveTextContent('Up to date')
   })
 
-  it('warns when free space is below the last backup plus a margin', async () => {
+  it('warns on the Storage card when free space is below the last backup plus a margin', async () => {
     // 3 GiB backups need 3 GiB and a margin of 1 GiB; 3.5 GiB free will not do.
     api.backupRunSummary.mockResolvedValue({ ...TREND, service: { ...TREND.service, volumeFreeBytes: 3.5 * GiB } })
     renderTab()
-    const warning = await screen.findByTestId('backup-space')
-    expect(warning).toHaveTextContent('The next backup may not fit')
-    expect(warning).toHaveTextContent('3.5 GiB free')
-    expect(warning).toHaveTextContent('the last backup was 3.0 GiB')
-    expect(stat('Free on the volume')).toHaveClass('stat-warning')
+    await screen.findByTestId('backup-summary')
+    expect(cardState('storage')).toHaveTextContent('May not fit')
+    expect(card('storage')).toHaveClass('summary-card-warning')
+    expect(cardName('storage')).toContain('The next backup may not fit. The backup volume has 3.5 GiB free, and the last backup was 3.0 GiB.')
   })
 
   it('keeps a margin of a fifth of a large backup', () => {
@@ -608,11 +675,12 @@ describe('the trend', () => {
   it('says the service has not reported yet, and warns about nothing it cannot see', async () => {
     api.backupRunSummary.mockResolvedValue({ ...TREND, service: null })
     renderTab()
-    await screen.findByTestId('backup-stats')
-    expect(stat('Free on the volume')).toHaveTextContent('—')
-    expect(stat('Free on the volume')).toHaveAttribute('title', expect.stringMatching(/has not reported/))
-    expect(screen.queryByTestId('backup-space')).toBeNull()
-    expect(screen.queryByTestId('backup-slow')).toBeNull()
+    await screen.findByTestId('backup-summary')
+    expect(card('storage')).toHaveTextContent('— free')
+    expect(cardState('storage')).toHaveTextContent('Not reported yet')
+    expect(cardName('storage')).toMatch(/has not reported/)
+    expect(card('storage').className).not.toMatch(/summary-card-warning/)
+    expect(cardState('runs')).toHaveTextContent('Up to date')
   })
 })
 
@@ -679,14 +747,15 @@ describe('the filter and the pages', () => {
   })
 })
 
-describe('the current-state line', () => {
-  const line = () => screen.queryByTestId('backup-state')
+describe('whether backups are working now', () => {
+  const line = () => cardState('runs')
 
-  it('says nothing while the last run succeeded recently, whatever failed before it', async () => {
+  it('says they are while the last run succeeded recently, whatever failed before it', async () => {
     renderTab()
     // The list still holds the failed run: history, not the current state.
     await screen.findByTestId('run-j-3')
-    expect(line()).toBeNull()
+    expect(line()).toHaveTextContent('Up to date')
+    expect(card('runs').className).not.toMatch(/summary-card-(warning|danger)/)
   })
 
   it('reports a failure nothing has succeeded since, naming the last good backup', async () => {
@@ -697,8 +766,12 @@ describe('the current-state line', () => {
     })
     renderTab()
     await screen.findByTestId('run-j-3')
-    expect(line()).toHaveTextContent('The last backup failed, and none has succeeded since.')
-    expect(line()).toHaveTextContent(/The last good backup was taken .*2026/)
+    expect(line()).toHaveTextContent('Last run failed')
+    expect(line()).toHaveAttribute('role', 'status')
+    expect(card('runs')).toHaveClass('summary-card-danger')
+    expect(cardName('runs')).toContain('The last backup failed, and none has succeeded since.')
+    expect(cardName('runs')).toMatch(/The last good backup was taken .*2026/)
+    expect(cardName('runs')).toContain('The card opens the failed run, with its reason.')
   })
 
   it('says no backup has succeeded yet when every run so far has failed', async () => {
@@ -709,8 +782,9 @@ describe('the current-state line', () => {
     })
     renderTab()
     await screen.findByTestId('run-j-3')
-    expect(line()).toHaveTextContent('The last backup failed')
-    expect(line()).toHaveTextContent('No backup has succeeded yet.')
+    expect(line()).toHaveTextContent('Last run failed')
+    expect(card('runs')).toHaveTextContent('No good backup yet')
+    expect(cardName('runs')).toContain('No backup has succeeded yet.')
   })
 
   it(`reports a last success older than ${BACKUP_STALE_HOURS} hours, which is how a stopped service shows`, async () => {
@@ -722,12 +796,14 @@ describe('the current-state line', () => {
     })
     renderTab()
     await screen.findByTestId('run-j-1')
-    expect(line()).toHaveTextContent(`No backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
-    expect(line()).toHaveTextContent('The last good backup was taken')
-    expect(line()).toHaveTextContent('the backup service is probably not running')
+    expect(line()).toHaveTextContent(`None in ${BACKUP_STALE_HOURS} hours`)
+    expect(card('runs')).toHaveClass('summary-card-warning')
+    expect(cardName('runs')).toContain(`No backup has succeeded in ${BACKUP_STALE_HOURS} hours.`)
+    expect(cardName('runs')).toContain('The last good backup was taken')
+    expect(cardName('runs')).toContain('the backup service is probably not running')
   })
 
-  it(`says nothing at ${BACKUP_STALE_HOURS - 1} hours: the nightly schedule has half a day in hand`, async () => {
+  it(`says nothing is wrong at ${BACKUP_STALE_HOURS - 1} hours: the nightly schedule has half a day in hand`, async () => {
     const lastGood = hoursAgo(BACKUP_STALE_HOURS - 1)
     api.backupRunSummary.mockResolvedValue({
       ...HEALTHY,
@@ -736,7 +812,7 @@ describe('the current-state line', () => {
     })
     renderTab()
     await screen.findByTestId('run-j-1')
-    expect(line()).toBeNull()
+    expect(line()).toHaveTextContent('Up to date')
   })
 
   it('counts from the first job recorded until one succeeds', async () => {
@@ -745,18 +821,38 @@ describe('the current-state line', () => {
     api.activeBackupJob.mockResolvedValue({ id: 'j-6', status: 'PENDING', origin: 'scheduled', created_at: hoursAgo(48) })
     serveRuns([])
     renderTab()
-    expect(await screen.findByTestId('backup-state')).toHaveTextContent(`No backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
-    expect(line()).toHaveTextContent('None has succeeded since the first was queued')
+    expect(await screen.findByTestId('card-runs-state')).toHaveTextContent(`None in ${BACKUP_STALE_HOURS} hours`)
+    expect(cardName('runs')).toContain('None has succeeded since the first was queued')
     expect(screen.getByText('No backups yet.')).toBeInTheDocument()
   })
 
-  it('says nothing about a first job queued recently', async () => {
+  it('says it is waiting for the first backup while the first job is recent', async () => {
     api.backupRunSummary.mockResolvedValue({ firstRecordedAt: hoursAgo(1), lastSuccess: null, latestOutcome: null })
     api.activeBackupJob.mockResolvedValue({ id: 'j-6', status: 'RUNNING', origin: 'scheduled', created_at: hoursAgo(1), started_at: hoursAgo(1) })
     serveRuns([])
     renderTab()
     expect(await screen.findByText('Running')).toBeInTheDocument()
-    expect(line()).toBeNull()
+    expect(line()).toHaveTextContent('Waiting for the first backup')
+    expect(card('runs').className).not.toMatch(/summary-card-(warning|danger)/)
+  })
+
+  it('keeps a backup in flight full width, outside the row, because it holds a Cancel button', async () => {
+    api.activeBackupJob.mockResolvedValue({ id: 'j-2', status: 'PENDING', origin: 'requested', note: 'now', created_at: new Date().toISOString() })
+    renderTab()
+    const cancel = await screen.findByRole('button', { name: /^Cancel$/ })
+    expect(screen.getByTestId('backup-summary')).not.toContainElement(cancel)
+    expect(cancel.closest('.callout')).not.toBeNull()
+  })
+
+  it('keeps the page\'s load error full width, above the row', async () => {
+    renderTab()
+    await screen.findByTestId('backup-summary')
+    api.backupRunSummary.mockRejectedValue(new Error('backup_summary: permission denied'))
+    // The next load fails; the cards keep the last answer, and the error above them says so.
+    fireEvent.change(screen.getByLabelText('Run status filter'), { target: { value: 'failed' } })
+    const error = await screen.findByText('backup_summary: permission denied')
+    expect(screen.getByTestId('backup-summary')).not.toContainElement(error)
+    expect(error.compareDocumentPosition(screen.getByTestId('backup-summary')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows the empty state and no warning on a stack whose backup service has never run', async () => {
@@ -764,7 +860,7 @@ describe('the current-state line', () => {
     serveRuns([])
     renderTab()
     expect(await screen.findByText('No backups yet.')).toBeInTheDocument()
-    expect(line()).toBeNull()
+    expect(card('runs')).toBeNull()
     expect(screen.queryByLabelText('Run status filter')).toBeNull()
   })
 })
@@ -838,10 +934,10 @@ describe('asking', () => {
   })
 })
 
-describe('the historian row', () => {
+describe('the historian card', () => {
   const physical = () => { globalThis.__ABER_CONFIG__ = { VITE_HISTORIAN_PHYSICAL_BACKUP: 'true' } }
-  const row = () => screen.queryByTestId('historian-row')
-  const line = () => screen.queryByTestId('historian-state')
+  const row = () => card('historian')
+  const line = () => cardState('historian')
   /** A historian backing itself up daily at 01:00 UTC, full on Sundays, last good two hours ago. */
   const CURRENT = {
     hour_utc: 1, full_on: 0, first_recorded_at: hoursAgo(24 * 20),
@@ -856,23 +952,25 @@ describe('the historian row', () => {
     renderTab()
     await screen.findByTestId('run-j-1')
     expect(row()).toBeNull()
-    expect(line()).toBeNull()
     expect(api.historianBackupState).not.toHaveBeenCalled()
+    // The row then holds three cards or fewer.
+    expect(screen.getByTestId('backup-summary').children.length).toBeLessThanOrEqual(3)
   })
 
-  it('shows a current backup with its age, type, label, the next one and the repository, and no line', async () => {
+  it('shows a current backup with its age, type, the next one and the repository, and its label in the tooltip', async () => {
     physical()
     serveHistorian(CURRENT)
     renderTab()
-    const strip = await screen.findByTestId('historian-row')
-    expect(strip).toHaveTextContent('Last backup 2h ago, differential')
-    expect(strip).toHaveTextContent('20261003-010002F_20261003-010004D')
-    expect(strip).toHaveTextContent(/Next .*(differential|full)/)
-    expect(strip).toHaveTextContent('3.0 GiB in the repository')
-    expect(line()).toBeNull()
-    // The line opens the panel, so it ends in a chevron, hidden from readers.
-    expect(strip.lastElementChild).toHaveClass('backup-historian-chevron')
-    expect(strip.querySelector('.backup-historian-chevron[aria-hidden="true"] svg')).not.toBeNull()
+    const strip = await screen.findByTestId('card-historian')
+    expect(strip).toHaveTextContent('2h ago last backup, differential')
+    expect(strip).toHaveTextContent(/Next \d\d:\d\d, (differential|full) · 3\.0 GiB held/)
+    expect(line()).toHaveTextContent('Up to date')
+    expect(strip.className).not.toMatch(/summary-card-(warning|danger)/)
+    expect(cardName('historian')).toContain('Its label is 20261003-010002F_20261003-010004D.')
+    expect(cardName('historian')).toContain('The repository holds 3.0 GiB: every backup it keeps, WAL excluded.')
+    // The card opens the panel, so it ends in a chevron, hidden from readers.
+    expect(strip.querySelector('.summary-card-chevron[aria-hidden="true"] svg')).not.toBeNull()
+    expect(strip.tagName).toBe('BUTTON')
   })
 
   it('says a historian never backed up has no backup yet, and stays quiet while that is recent', async () => {
@@ -880,48 +978,57 @@ describe('the historian row', () => {
     serveHistorian({ ...CURRENT, first_recorded_at: hoursAgo(1), last_attempt_at: null, last_success_at: null,
       last_success_kind: null, last_success_label: null, last_full_at: null, repo_bytes: 0 })
     renderTab()
-    expect(await screen.findByTestId('historian-row')).toHaveTextContent('No backup yet')
+    expect(await screen.findByTestId('card-historian')).toHaveTextContent('No backup yet')
     expect(row()).toHaveTextContent('Next: due now')
-    expect(line()).toBeNull()
+    expect(line()).toHaveTextContent('Waiting for its first backup')
+    expect(row().className).not.toMatch(/summary-card-(warning|danger)/)
   })
 
   it(`reports a last success older than ${BACKUP_STALE_HOURS} hours`, async () => {
     physical()
     serveHistorian({ ...CURRENT, last_success_at: hoursAgo(BACKUP_STALE_HOURS + 6), last_attempt_at: hoursAgo(BACKUP_STALE_HOURS + 6) })
     renderTab()
-    expect(await screen.findByTestId('historian-state')).toHaveTextContent(`No historian backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
-    expect(line()).toHaveClass('callout-warning')
-    expect(line()).toHaveTextContent('The last good one finished')
-    expect(row()).not.toBeNull()
+    await screen.findByTestId('card-historian')
+    expect(line()).toHaveTextContent(`None in ${BACKUP_STALE_HOURS} hours`)
+    expect(row()).toHaveClass('summary-card-warning')
+    expect(cardName('historian')).toContain(`No historian backup has succeeded in ${BACKUP_STALE_HOURS} hours.`)
+    expect(cardName('historian')).toContain('The last good one finished')
   })
 
-  it('reports a failure newer than the last success with pgBackRest\'s reason, whole in the panel', async () => {
+  it('reports a failure newer than the last success with the start of pgBackRest\'s reason, whole in the tooltip and the panel', async () => {
     physical()
     const reason = `ERROR: [082]: WAL segment 000000010000000000000042 was not archived before the 60000ms timeout ${'x'.repeat(200)}`
     serveHistorian({ ...CURRENT, last_failure_at: hoursAgo(1), last_failure_kind: 'diff', last_failure_detail: reason })
     renderTab()
-    const state = await screen.findByTestId('historian-state')
-    expect(state).toHaveClass('callout-danger')
-    expect(state).toHaveTextContent("The historian's last backup failed")
-    expect(within(state).getByTitle(reason)).toHaveClass('truncate')
+    await screen.findByTestId('card-historian')
+    expect(row()).toHaveClass('summary-card-danger')
+    expect(line()).toHaveTextContent(`Failed 1h ago: ${reason}`)
+    expect(line()).toHaveClass('summary-card-state')
+    expect(cardName('historian')).toContain("The historian's last backup failed 1h ago, and none has succeeded since.")
+    expect(cardName('historian')).toContain(reason)
 
-    fireEvent.click(screen.getByTestId('historian-row'))
+    fireEvent.click(row())
     const open = panel()
     expect(open).toHaveAttribute('aria-label', expect.stringMatching(/historian backup/))
     expect(within(open).getByText(reason)).toBeInTheDocument()
     expect(open).toHaveTextContent('Failed')
   })
 
-  it('says the historian is unreachable, never a blank, when the read returns no row or fails', async () => {
+  it('says the historian cannot be read, never a blank, when the read returns no row or fails, and opens nothing', async () => {
     physical()
     serveHistorian(null)
     renderTab()
-    expect(await screen.findByTestId('historian-state')).toHaveTextContent('The historian cannot be read')
-    expect(row()).toBeNull()
+    await screen.findByTestId('card-historian')
+    expect(line()).toHaveTextContent('Cannot be read')
+    expect(row()).toHaveClass('summary-card-warning')
+    expect(cardName('historian')).toContain('The historian cannot be read, so this page cannot say whether its own backup is working.')
+    expect(row().tagName).toBe('DIV')
+    expect(screen.queryByRole('button', { name: /^Historian\./ })).toBeNull()
 
     api.historianBackupState.mockRejectedValue(new Error('boom'))
     const { unmount } = renderTab()
-    await waitFor(() => expect(screen.getAllByTestId('historian-state')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByTestId('card-historian-state')).toHaveLength(2))
+    expect(screen.getAllByTestId('card-historian-state')[1]).toHaveTextContent('Cannot be read')
     expect(screen.queryByText('boom')).toBeNull()
     unmount()
   })
@@ -930,31 +1037,33 @@ describe('the historian row', () => {
     physical()
     serveHistorian({ ...CURRENT, request_at: new Date().toISOString() })
     const first = renderTab()
-    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: queued')
+    expect(await screen.findByTestId('card-historian')).toHaveTextContent('Requested: queued')
+    expect(cardName('historian')).toContain('Requested: queued. Asked for')
     first.unmount()
 
     serveHistorian({ ...CURRENT, request_at: hoursAgo(0.1), request_claimed_at: hoursAgo(0.05) })
     const second = renderTab()
-    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: being taken')
+    expect(await screen.findByTestId('card-historian')).toHaveTextContent('Requested: being taken')
     second.unmount()
 
     serveHistorian({ ...CURRENT, request_at: hoursAgo(1), request_claimed_at: hoursAgo(1), request_finished_at: hoursAgo(0.9), request_succeeded: true })
     renderTab()
-    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: taken')
+    expect(await screen.findByTestId('card-historian')).toHaveTextContent('Requested: taken')
   })
 
   it('says a request waiting past a few minutes was not picked up', async () => {
     physical()
     serveHistorian({ ...CURRENT, request_at: hoursAgo(0.5) })
     renderTab()
-    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: not picked up')
+    expect(await screen.findByTestId('card-historian')).toHaveTextContent('Requested: not picked up')
+    expect(cardName('historian')).toContain('its container is not running')
   })
 
   it('opens its panel with the schedule and the repository, and closes it on a second click', async () => {
     physical()
     serveHistorian(CURRENT)
     renderTab()
-    const strip = await screen.findByTestId('historian-row')
+    const strip = await screen.findByTestId('card-historian')
     fireEvent.click(strip)
     expect(strip).toHaveAttribute('aria-pressed', 'true')
     const open = panel()
@@ -969,19 +1078,19 @@ describe('the historian row', () => {
     physical()
     serveHistorian(CURRENT)
     renderTab()
-    await screen.findByTestId('historian-row')
+    await screen.findByTestId('card-historian')
     const modal = openDialog()
     expect(modal).toHaveTextContent("The historian's own backup takes a differential at the same time")
     expect(modal).not.toHaveTextContent('the historian,')
   })
 })
 
-describe('the platform database row', () => {
+describe('the platform database card', () => {
   const physical = (flags = {}) => {
     globalThis.__ABER_CONFIG__ = { VITE_PLATFORM_PHYSICAL_BACKUP: 'true', ...flags }
   }
-  const row = () => screen.queryByTestId('platform-row')
-  const line = () => screen.queryByTestId('platform-state')
+  const row = () => card('platform')
+  const line = () => cardState('platform')
   /** The platform database backing itself up daily at 01:00 UTC, full on Sundays, last good an hour ago. */
   const CURRENT = {
     hour_utc: 1, full_on: 0, first_recorded_at: hoursAgo(24 * 20),
@@ -994,21 +1103,21 @@ describe('the platform database row', () => {
     renderTab()
     await screen.findByTestId('run-j-1')
     expect(row()).toBeNull()
-    expect(line()).toBeNull()
     expect(api.platformBackupState).not.toHaveBeenCalled()
   })
 
-  it('shows a current backup with its type, label and repository, without a request, and no line', async () => {
+  it('shows a current backup with its type and repository, its label in the tooltip, and no request', async () => {
     physical()
     api.platformBackupState.mockResolvedValue(CURRENT)
     renderTab()
-    const strip = await screen.findByTestId('platform-row')
+    const strip = await screen.findByTestId('card-platform')
     expect(strip).toHaveTextContent('Platform database')
-    expect(strip).toHaveTextContent('Last backup 1h ago, full')
-    expect(strip).toHaveTextContent('20261004-010002F')
-    expect(strip).toHaveTextContent('40.0 MiB in the repository')
+    expect(strip).toHaveTextContent('1h ago last backup, full')
+    expect(strip).toHaveTextContent('40.0 MiB held')
+    expect(cardName('platform')).toContain('Its label is 20261004-010002F.')
     expect(strip).not.toHaveTextContent('Requested')
-    expect(line()).toBeNull()
+    expect(strip.querySelector('.badge')).toBeNull()
+    expect(line()).toHaveTextContent('Up to date')
     expect(api.historianBackupState).not.toHaveBeenCalled()
   })
 
@@ -1016,9 +1125,9 @@ describe('the platform database row', () => {
     physical()
     api.platformBackupState.mockResolvedValue(Object.fromEntries(Object.keys(CURRENT).map(k => [k, null])))
     renderTab()
-    expect(await screen.findByTestId('platform-row')).toHaveTextContent('No backup yet')
+    expect(await screen.findByTestId('card-platform')).toHaveTextContent('No backup yet')
     expect(row()).toHaveTextContent('Next: not known yet')
-    expect(line()).toBeNull()
+    expect(line()).toHaveTextContent('Waiting for its first backup')
   })
 
   it('reports a failure with pgBackRest\'s reason under its own name, and whole in its panel', async () => {
@@ -1026,11 +1135,12 @@ describe('the platform database row', () => {
     const reason = 'ERROR: [039]: HTTP request failed with 403 (Forbidden)'
     api.platformBackupState.mockResolvedValue({ ...CURRENT, last_failure_at: hoursAgo(0.5), last_failure_kind: 'diff', last_failure_detail: reason })
     renderTab()
-    const state = await screen.findByTestId('platform-state')
-    expect(state).toHaveClass('callout-danger')
-    expect(state).toHaveTextContent("The platform database's last backup failed")
+    await screen.findByTestId('card-platform')
+    expect(row()).toHaveClass('summary-card-danger')
+    expect(line()).toHaveTextContent(`Failed 30m ago: ${reason}`)
+    expect(cardName('platform')).toContain("The platform database's last backup failed")
 
-    fireEvent.click(screen.getByTestId('platform-row'))
+    fireEvent.click(row())
     const open = panel()
     expect(open).toHaveAttribute('aria-label', expect.stringMatching(/platform database backup details/))
     expect(within(open).getByText(reason)).toBeInTheDocument()
@@ -1041,19 +1151,21 @@ describe('the platform database row', () => {
     physical()
     api.platformBackupState.mockResolvedValue({ ...CURRENT, last_success_at: hoursAgo(BACKUP_STALE_HOURS + 2), last_attempt_at: hoursAgo(BACKUP_STALE_HOURS + 2) })
     renderTab()
-    const state = await screen.findByTestId('platform-state')
-    expect(state).toHaveTextContent(`No platform database backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
-    expect(state).toHaveTextContent('kubectl -n aber logs supabase-db-0 -c pgbackrest')
+    await screen.findByTestId('card-platform')
+    expect(line()).toHaveTextContent(`None in ${BACKUP_STALE_HOURS} hours`)
+    expect(cardName('platform')).toContain(`No platform database backup has succeeded in ${BACKUP_STALE_HOURS} hours.`)
+    expect(cardName('platform')).toContain('kubectl -n aber logs supabase-db-0 -c pgbackrest')
   })
 
-  it('stands beside the historian, each opening its own panel, and keeps the platform backup whole', async () => {
+  it('stands between the runs and the historian, each opening its own panel, and keeps the platform backup whole', async () => {
     physical({ VITE_HISTORIAN_PHYSICAL_BACKUP: 'true' })
     api.platformBackupState.mockResolvedValue(CURRENT)
     api.historianBackupState.mockResolvedValue({ ...CURRENT, last_success_label: 'H1', request_at: null })
     renderTab()
-    const platform = await screen.findByTestId('platform-row')
-    const historian = await screen.findByTestId('historian-row')
-    expect(platform.compareDocumentPosition(historian) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const platform = await screen.findByTestId('card-platform')
+    const historian = await screen.findByTestId('card-historian')
+    expect([...screen.getByTestId('backup-summary').children].map(c => c.dataset.testid))
+      .toEqual(['card-runs', 'card-platform', 'card-historian', 'card-storage'])
 
     fireEvent.click(historian)
     expect(panel()).toHaveAttribute('aria-label', expect.stringMatching(/historian backup details/))

@@ -1353,7 +1353,7 @@ const apiMethods = {
   },
 
   /**
-   * What the Backups page's current-state line and stat strip need, whatever the list's filter and
+   * What the Backups page's Backup runs and Storage cards need, whatever the list's filter and
    * page, in one call (`backup_summary()`, 0179): the first job ever recorded, the latest completed
    * one and the latest that completed or failed; successes out of the runs that ended in the last 30
    * days; the median duration of the last 14 completed runs; the backups held, their bytes, the

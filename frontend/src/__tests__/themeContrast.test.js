@@ -218,6 +218,21 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // An alert row that links somewhere names the alert in the accent, and the row hovers --bg-glass.
     ['alert row link',                 tokenIn(paint('.alert-pill-item-link .alert-pill-item-name', 'color')), card, AA_TEXT],
     ['alert row link on hover',        tokenIn(paint('.alert-pill-item-link .alert-pill-item-name', 'color')), glass(card), AA_TEXT],
+    // A summary card on Backups or Cold Storage tints its ground when it warns: its figure, its
+    // muted lines and its state in the state's ink on that tint. A request badge sits on the
+    // card's own ground instead (`.summary-card-badge`), since its ink failed AA on the tint.
+    ['figure on a warning summary card',      '--text-primary', on(paint('.summary-card-warning'), card), AA_TEXT],
+    ['--text-muted on a warning summary card', '--text-muted',  on(paint('.summary-card-warning'), card), AA_TEXT],
+    ['state on a warning summary card',       tokenIn(paint('.summary-card-warning .summary-card-state', 'color')), on(paint('.summary-card-warning'), card), AA_TEXT],
+    ['figure on a danger summary card',       '--text-primary', on(paint('.summary-card-danger'), card),  AA_TEXT],
+    ['--text-muted on a danger summary card', '--text-muted',   on(paint('.summary-card-danger'), card),  AA_TEXT],
+    ['state on a danger summary card',        tokenIn(paint('.summary-card-danger .summary-card-state', 'color')), on(paint('.summary-card-danger'), card), AA_TEXT],
+    ['flagged line on a summary card',        tokenIn(paint('.summary-card-flagged', 'color')), card, AA_TEXT],
+    ['flagged line on a warning summary card', tokenIn(paint('.summary-card-flagged', 'color')), on(paint('.summary-card-warning'), card), AA_TEXT],
+    ['warning badge on a summary card',       '--warning-text', on(paint('.badge-warning'), on(paint('.summary-card-badge'), card)),  AA_TEXT],
+    ['danger badge on a summary card',        '--danger-text',  on(paint('.badge-critical'), on(paint('.summary-card-badge'), card)), AA_TEXT],
+    ['success badge on a summary card',       '--success-text', on(paint('.badge-online'), on(paint('.summary-card-badge'), card)),   AA_TEXT],
+    ['info badge on a summary card',          '--accent-text',  accentDim(on(paint('.summary-card-badge'), card)),                    AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {

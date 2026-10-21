@@ -14,14 +14,18 @@ The line under the page's description says how long the historian keeps raw tele
 - **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the nightly export fails to sign in.
 - The site key is fixed when Aber is installed, and is shown for reference.
 - The switch cannot be turned on until every part of the destination is set. The dialog says beside it what is still missing. Saving writes only the values you changed. Each one is an ordinary setting, recorded in the Audit Trail.
-- **The summary strip** above the catalogue reads **On cold storage** (chunks whose raw rows are gone), **Rows archived**, **Object storage used** and **Oldest span held**. Then comes **Unexported since**. **Awaiting drop** and **Failed** appear when either is above zero.
+- **The cards** above the catalogue sum it up. Point at a card, or move to it with Tab, for the whole of it in a tooltip. The cards open nothing.
+- **Archive** counts the chunks on cold storage, whose raw rows are gone. It also gives the rows they hold and the object storage they use.
+- **Oldest span held** is the date the history goes back to.
+- **Unexported since** comes third, while archiving is on. It also counts the chunks **awaiting drop** and the **failed** exports, when either is above zero. A failed export turns the card amber, and its last line says how many failed.
 - **Object** is the file on object storage, shown by its key. A long key is cut in the middle so its end stays visible. Click it to copy the whole key.
 - **Range** is the window of time an object covers, and **Chunk** is the historian chunk it came from.
 - **Rows** and **Size** are what an object holds. Use them to judge whether a range is worth retrieving before you retrieve it.
 - **State** says how far a range has got on its way to cold storage. Each state is explained below.
 - **A column's heading sorts the table** by that column. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Unexported since** is the date from which data has **not** reached the endpoint. No object is yet known to hold the telemetry after that date. Up to a week behind is normal, because a chunk is not exported until its whole span has passed the archive threshold (set on the Settings page). The tooltip gives the exact figure.
-- Once **Unexported since** is two weeks past the threshold, it turns amber with a warning icon, and the Archive Backlog alert fires. That usually means the endpoint cannot be reached.
+- Once **Unexported since** is two weeks past the threshold, its card turns amber and says **Behind by** that many days, with a warning icon. The Archive Backlog alert fires at the same time. That usually means the endpoint cannot be reached.
+- **With nothing archived yet**, there are no cards. While archiving is on, the **Unexported since** card stands alone above the explanation instead.
 
 ## What the states mean
 

@@ -249,7 +249,7 @@ class BackupServiceTests(unittest.TestCase):
         ), "service true")
 
     def test_03b_the_service_reports_its_volume_and_schedule_after_the_backup(self):
-        """What the Backups page's stat strip reads: df's figures for /backups, and the schedule."""
+        """What the Backups page's Storage card reads: df's figures for /backups, and the schedule."""
         finished = psql("SELECT max(finished_at) FROM public.backup_jobs WHERE status = 'COMPLETED'")
         self.assertTrue(finished, "test_03 took no backup")
         row = ""
