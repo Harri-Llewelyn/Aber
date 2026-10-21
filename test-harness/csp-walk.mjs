@@ -175,9 +175,20 @@ function chromePath () {
   return candidates.find((p) => existsSync(p))
 }
 
-async function launch () {
-  const binary = chromePath()
-  if (!binary) die('no Chrome found; pass --chrome=PATH or set CHROME')
+// A cold Chrome on a loaded CI runner can take over a minute to open its endpoint.
+const CHROME_START_MS = 90000
+
+async function stopChrome (chrome, profile) {
+  const exited = chrome.exitCode !== null || chrome.signalCode !== null
+    ? Promise.resolve()
+    : new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000) })
+  chrome.kill()
+  await exited
+  // Chrome's child processes hold the profile for a moment after it exits on Windows.
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }) } catch { /* left in tmp */ }
+}
+
+async function startChrome (binary) {
   const profile = mkdtempSync(join(tmpdir(), 'csp-walk-'))
   const args = [
     '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
@@ -190,27 +201,44 @@ async function launch () {
   // A CI runner is a throwaway machine opening one site, and its kernel may refuse the sandbox's
   // user namespaces.
   if (process.platform === 'linux' && process.env.CI) args.unshift('--no-sandbox')
-  const chrome = spawn(binary, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  // A runner has no session bus; without this, Chrome's dbus errors fill the stderr a failure quotes.
+  const env = { ...process.env, DBUS_SESSION_BUS_ADDRESS: '/dev/null' }
+  const chrome = spawn(binary, args, { stdio: ['ignore', 'ignore', 'pipe'], env })
   let stderr = ''
-  const endpoint = await new Promise((resolveEndpoint, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Chrome did not open its DevTools endpoint:\n${stderr.slice(-1500)}`)), 30000)
-    chrome.stderr.on('data', (d) => {
-      stderr += d
-      const m = stderr.match(/DevTools listening on (ws:\/\/\S+)/)
-      if (m) { clearTimeout(timer); resolveEndpoint(m[1]) }
+  try {
+    const endpoint = await new Promise((resolveEndpoint, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Chrome did not open its DevTools endpoint in ${CHROME_START_MS / 1000}s`)), CHROME_START_MS)
+      chrome.stderr.on('data', (d) => {
+        stderr += d
+        const m = stderr.match(/DevTools listening on (ws:\/\/\S+)/)
+        if (m) { clearTimeout(timer); resolveEndpoint(m[1]) }
+      })
+      chrome.on('exit', (code) => { clearTimeout(timer); reject(new Error(`Chrome exited (${code})`)) })
     })
-    chrome.on('exit', (code) => reject(new Error(`Chrome exited (${code}):\n${stderr.slice(-1500)}`)))
-  }).catch((e) => { chrome.kill(); die(e.message) })
+    return { chrome, profile, endpoint }
+  } catch (e) {
+    await stopChrome(chrome, profile)
+    throw new Error(`${e.message}:\n${stderr.slice(-1500)}`)
+  }
+}
+
+async function launch () {
+  const binary = chromePath()
+  if (!binary) die('no Chrome found; pass --chrome=PATH or set CHROME')
+  let started
+  try {
+    started = await startChrome(binary)
+  } catch (first) {
+    console.error(`csp-walk: ${first.message}\ncsp-walk: starting Chrome a second time`)
+    started = await startChrome(binary).catch((e) => die(`second attempt: ${e.message}`))
+  }
+  const { chrome, profile, endpoint } = started
   const ws = new WebSocket(endpoint)
   await new Promise((r, reject) => { ws.onopen = r; ws.onerror = () => reject(new Error(`could not connect to ${endpoint}`)) })
     .catch((e) => { chrome.kill(); die(e.message) })
   const close = async () => {
     try { ws.close() } catch { /* already closed */ }
-    const exited = new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000) })
-    chrome.kill()
-    await exited
-    // Chrome's child processes hold the profile for a moment after it exits on Windows.
-    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }) } catch { /* left in tmp */ }
+    await stopChrome(chrome, profile)
   }
   return { ws, close }
 }
