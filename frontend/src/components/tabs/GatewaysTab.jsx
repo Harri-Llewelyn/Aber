@@ -31,6 +31,7 @@ import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { RepoLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
@@ -409,7 +410,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             <strong>Remote gateways cannot be enrolled on this deployment:</strong>{' '}
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
             the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
-            in the chart&rsquo;s values and restart the functions service (docs/remote-gateways.md,
+            in the chart&rsquo;s values and restart the functions service (<RepoLink path="docs/remote-gateways.md" anchor="7-the-two-addresses-that-must-be-right">docs/remote-gateways.md</RepoLink>,
             section 7). Host and Simulated gateways are unaffected.
           </span>
         </div>

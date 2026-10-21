@@ -137,6 +137,11 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
+      # Checks 108 and 109 read help/ with the Markdown parser the dashboard's build uses, a
+      # devDependency of frontend/.
+      - name: Install The Dashboard's Dependencies
+        run: npm ci --prefix frontend --no-audit --no-fund
+
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 

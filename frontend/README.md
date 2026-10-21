@@ -38,7 +38,7 @@ src/
 │   ├── tabs/                one file per tab, lazy-loaded
 │   ├── modals/              detail and edit dialogs
 │   └── common/              TagList, Model3DUploader, VocabularyPanel
-├── help/index.js            bundles the repository's help/pages/ -- see Contextual help
+├── help/                    the repository's help/, parsed at build time, and its search -- see Contextual help
 ├── hooks/                   usePermissions, usePolling, useRealtimeTable, useToast, …
 ├── utils/                   pure, unit-tested derivations
 └── __tests__/               Vitest suites
@@ -849,44 +849,135 @@ A help page uses the words in [Words and rules](#words-and-rules), as the page i
 
 ### One file per page, resolved by filename
 
-[`help/pages/<tab id>.md`](../help/pages) at the top of the repository, bundled by an eager
-`import.meta.glob` in `src/help/index.js`, which keys each file by its name. There is no
-manifest: a second list is the one that goes stale. `scripts/check-docs-drift.mjs` asserts the
-correspondence **in both directions** — every page in `navigation.jsx` has a file, and every file
-names a page that exists. The second direction is the one that rots silently: a help file left
-behind by a renamed page is never resolved again, and the renamed page quietly has none.
+[`help/pages/<tab id>.md`](../help/pages) at the top of the repository. `src/help/index.js`
+bundles every Markdown file in `help/` with one eager `import.meta.glob` of `**/*.md` there,
+and keys each by its path under `help/` without `.md`: `pages/devices`, `guides/tutorial`,
+`site/install`, and `README` for the contents. The page for a tab is `pages/<tab id>`. There is no
+manifest: a second list is the one that goes stale. `scripts/check-docs-drift.mjs` (check 16)
+asserts the correspondence **in both directions** — every page in `navigation.jsx` has a file, and
+every file names a page that exists. The second direction is the one that rots silently: a help
+file left behind by a renamed page is never resolved again, and the renamed page quietly has none.
 
 **The folder is the list.** [`help/`](../help/README.md) holds every page written for newcomers:
 the install guide, the tutorial, the glossary and the page files. What the dashboard bundles comes
 from that folder and from nowhere else, so a contributor document under `docs/` cannot reach the
-bundle by accident. Today the glob reads `help/pages/` only.
+bundle by accident. Everything in it ships, and `help/README.md` lists all of it (check 109).
 
 **How the image build sees it.** `frontend/Dockerfile`'s build context is `./frontend`, which
 holds neither `help/` nor `.git`. The build is handed `help/` as a BuildKit named context,
 `--build-context help=./help`: `release.yml` passes it in the image matrix's `build-contexts`,
 `scripts/dev-cluster.mjs` in its `docker build`, and the runbook's build command spells it out. The
 Dockerfile copies the context to `/app/help` and builds from `/app/frontend`, so `index.js`'s
-`../../../help/pages` resolves the same in the image as in a checkout. A build not handed the
+`../../../help` resolves the same in the image as in a checkout. A build not handed the
 context stops at `COPY --from=help` with `pull access denied`: BuildKit reads `help` as an image
 name. In a checkout, `vite.config.js` adds `../help` to `server.fs.allow`, without which the dev
 server and vitest refuse to read a file outside this package. Drift check 105 holds the glob to
-`help/pages/`, and check 106 holds every build of the image to passing the context.
+every file in `help/` and to nothing outside it, and check 106 holds every build of the image to
+passing the context.
 
 The pages are still free in CI: `ci.yml` classifies a diff with `*.md|docs/*`, and a `case` glob's
 `*` spans directory separators, so a `.md` file anywhere skips the end-to-end stack
 (`k8s-validation`).
 
-### A restricted renderer, on purpose
+### Parsed when the bundle is built, drawn by a walker
 
-`HelpMarkdown.jsx` renders headings, lists, paragraphs, bold, inline code and **absolute** links.
-That is the whole subset. It exists rather than a markdown dependency because the corpus is seventeen
-files this repository writes and ships in its own bundle — it is not untrusted input and does not
-need CommonMark — and because every branch of it builds React elements, so there is no
-`dangerouslySetInnerHTML` anywhere in the app for the next thing to be piped into.
+The glob imports each file with the `?help` query, and a small Vite plugin, `helpCorpus.js` beside
+`vite.config.js`, answers it. The plugin parses the file with [marked](https://marked.js.org/), a
+devDependency with no dependencies of its own, and hands the app the result as plain data:
+`{ title, titleId, tokens }`. `title` is the text of a leading `# ` heading (the guides have one,
+the page files do not), and the tree leaves that heading out because the drawer's title shows it.
+At runtime `HelpMarkdown.jsx` walks `tokens` into React elements. The parser never reaches the
+bundle (after `npm run build`, `dist/assets/*.js` has no `markedjs`), and nothing in the app uses
+`dangerouslySetInnerHTML`, so there is no HTML sink for the next thing to be piped into. Vitest
+runs the same plugin, so the suites see what the bundle sees.
 
-An unsupported construct does not fail at runtime; it **renders as its own source text** — a table
-arrives as a row of pipes, a repository-relative link as a dead anchor. That is a defect the reader
-sees and the author never does, so the drift check rejects it at build time instead.
+**What the walker draws** is the list in `src/help/syntax.js`, which the plugin, the walker and the
+drift check share. The tree's shapes:
+
+| Node | Shape |
+| :--- | :--- |
+| Text | a plain string; a line break inside a paragraph is a space |
+| Heading | `{ type: 'heading', depth, id, children }`: `##` is an h3, one level under the drawer's title |
+| Paragraph; a tight list item's text | `{ type: 'paragraph' \| 'text', children }` |
+| List | `{ type: 'list', ordered, start, items }`, each item an array of blocks, so lists nest |
+| Code block | `{ type: 'code', lang, text }`, drawn with a Copy button (`copyText` from `CopyableId.jsx`) |
+| Quote | `{ type: 'blockquote', children }` |
+| Table | `{ type: 'table', align, header, rows }`, each cell an array of inline nodes |
+| Rule | `{ type: 'hr' }` |
+| Inline | `{ type: 'strong' \| 'em', children }`, `{ type: 'codespan', text }`, `{ type: 'br' }` |
+| Link | `{ type: 'link', children }` with `help` and `anchor`, `repo` and `anchor`, or `href` |
+
+A table and a code block scroll sideways inside the panel rather than widen it, and each is
+focusable so a keyboard can scroll it. **Anything else stops the build**, `npm run dev` and the
+suites, with the file and line: raw HTML, an image, a task list, strikethrough, an HTML entity
+(GitHub draws `&amp;` as `&`, the walker would draw it as typed), or a link the panel cannot follow.
+Drift check 108 finds the same without a build. Before the walker, an unsupported construct
+rendered as its own source text, a defect the reader saw and the author never did.
+
+**Heading ids are GitHub's.** A heading's id is GitHub's slug of its text, with `-1`, `-2` for a
+repeat, as check 1 computes it, so a `#anchor` that works on GitHub works in the panel. The element
+carries `id="help-<slug>"`, prefixed so it cannot meet an id of the page's, and `data-heading="<slug>"`,
+which the panel scrolls to.
+
+**Links.** Each is resolved against its file's folder, as GitHub resolves it (`resolveLink()` in
+`syntax.js`):
+
+- **To another file of `help/`**, or to `#heading` in the same one: it opens in the panel, at that
+  heading. It is a `HelpLink`, an `<a data-help>` (below).
+- **To anything else in the repository** (a component README, a chart file, a workflow, `docs/`): it
+  opens on GitHub at the release this bundle was built from, in a new tab. A relative link would
+  resolve against the dashboard's routes and 404. `src/help/links.js` names the ref: the tag `v<x.y.z>`
+  when `VITE_APP_VERSION` is a release's version, and `main` for anything else (`git describe` output
+  with commits after a tag, a dirty tree, no version). The repository is `GITHUB_REPO_URL`.
+- **To another site**: a new tab.
+
+The last two need the internet, which a shopfloor network often does not have, so `OnlineLink` marks
+them: a globe and the word *online*, and an `aria-label` that says it opens a new tab and needs the
+internet. Never a `title`. A local address, such as the laptop's `http://app.localhost` that the
+install guide names, needs no internet and is not marked. Drift check 109 holds every link in `help/` to a file and heading that
+exist, and `help/README.md` to listing every page exactly once.
+
+### Contents, Back and search
+
+The panel opens on the page's help, which follows the page as the person moves between tabs. Over
+it, a search box, **Back** and **Contents**. A view is the page's help, a file at a heading, the
+contents, or the search results (`HelpBrowser.jsx`). Back steps through the panel's own history,
+not the browser's: the panel is not a route. A view Back returns to gets its scroll position back.
+Closing the panel forgets the history, so the top bar's **?** always starts on the page's help.
+
+**Contents** draws `help/README.md`'s own tree, after a link to this page's help. A page added to
+that file is in the panel in the same section and order, with nothing else to edit. Help for
+another language (#446) would be another set of files, and the contents and the search follow
+whichever set is loaded.
+
+**Search** covers every heading of every file in `help/`, and every block of prose under one: a
+paragraph, a list item, a table row. `src/help/searchIndex.js` builds the index from the bundled
+trees the first time it is asked for, so the corpus's text ships once. The matcher is written by
+hand: lower case, split on anything that is not a letter or a digit, every term must start a word
+of the entry (prose is read with its heading's words). It gives one result per heading, ranked
+heading matches first, then prose; within each, the current page's first; then reading order. The
+panel shows the first 20, as *heading · page* with the prose that matched. Choosing one opens the
+file at that heading. The index and the matcher are exported for the top bar's search:
+
+| Export | What it is |
+| :--- | :--- |
+| `helpIndex()` | every entry, `{ file, page, id, heading, kind, text }`: `file` a key of `HELP_FILES`, `id` the heading it sits under (`''` before the first), `page` the file's title, `kind` `'heading'` or `'text'` |
+| `searchHelp(query, { currentFile, limit, index })` | ranked results, `{ file, id, heading, page, kind, snippet }`; `limit` defaults to `HELP_RESULT_LIMIT` (20) |
+| `helpTerms(text)` | the matcher's split, for highlighting |
+
+### Opening help from anywhere
+
+- **From code:** `openHelpAt(file, headingId?)` in `src/help/openHelp.js` opens the panel at a file
+  (`'guides/tutorial'`) and heading. While the panel is open it is a step Back returns from. It
+  returns false, and does nothing, for a file the bundle does not carry.
+- **From markup:** a plain click on any `<a data-help="site/install">` or
+  `data-help="guides/glossary#quarantine"`, anywhere in the app, opens the panel there instead of
+  following the link. `HelpPanel.jsx` takes it at the document. Give the link a real `href` as the
+  fallback; `HelpLink` (`components/common/HelpLink.jsx`) renders one, the file on GitHub at this
+  release. A Ctrl, Shift or middle click, and a file the bundle does not carry, follow the href.
+- **From inside a dialog**, by either route: a modal dialog makes the rest of the page inert, so the
+  panel could be neither read nor reached. The help opens in a dialog of its own over that one,
+  with the same search, Back and Contents, and closing it returns to the dialog beneath.
 
 ### The drawer is `ContextPanel`
 
