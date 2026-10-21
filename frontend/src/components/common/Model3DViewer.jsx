@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { model3dPublicUrl } from '../../api'
-import { IconAlertTriangle } from './Icons'
+import { IconAlertTriangle, IconScan } from './Icons'
 
 /**
  * An interactive preview of a device's attached 3D model. `<model-viewer>` is bundled rather than
@@ -38,13 +38,24 @@ export function __resetModelViewerLoader() {
   modelViewerModule = null
 }
 
+/** Where the expanded viewer's camera starts, and where Reset view takes it: the viewer's defaults. */
+export const START_VIEW = { orbit: '0deg 75deg 105%', target: 'auto auto auto', fov: 'auto' }
+const START_VIEW_ATTRIBUTES = {
+  'camera-orbit': START_VIEW.orbit,
+  'camera-target': START_VIEW.target,
+  'field-of-view': START_VIEW.fov,
+}
+
 /**
  * @param {string} path  Object key in the `asset-3d-models` bucket, as stored in
  *                       `devices.model_3d_path`. The public URL is composed here rather than
  *                       stored -- see archived migration 20260101000035_asset_3d_models.sql.
  * @param {string} name  Device name, used for the accessible description.
+ * @param {boolean} [expanded]  The window-sized dialog's viewer: it fills the height it is given,
+ *                       keeps still until turned, and has a Reset view button and a line on how
+ *                       to move it. Without it, the drawer's 200px preview, turning on its own.
  */
-export function Model3DViewer({ path, name }) {
+export function Model3DViewer({ path, name, expanded = false }) {
   // 'loading' covers fetching the viewer module; 'ready' means the element is defined;
   // 'unavailable' means it could not be loaded; 'broken' means the model failed. The last two have
   // different causes and different advice.
@@ -83,9 +94,11 @@ export function Model3DViewer({ path, name }) {
 
   if (!url) return null
 
+  const frame = `model-viewer-frame${expanded ? ' model-viewer-frame-full' : ''}`
+
   if (state === 'loading') {
     return (
-      <div className="model-viewer-frame model-viewer-message" data-testid="model-3d-viewer-loading">
+      <div className={`${frame} model-viewer-message`} data-testid="model-3d-viewer-loading">
         <span className="spinner spinner-sm" /> Loading viewer…
       </div>
     )
@@ -93,7 +106,7 @@ export function Model3DViewer({ path, name }) {
 
   if (state === 'unavailable' || state === 'broken') {
     return (
-      <div className="model-viewer-frame model-viewer-message" data-testid="model-3d-viewer-error">
+      <div className={`${frame} model-viewer-message`} data-testid="model-3d-viewer-error">
         <IconAlertTriangle size={14} />
         <span>
           {state === 'broken'
@@ -107,18 +120,41 @@ export function Model3DViewer({ path, name }) {
   /* A wrapper div, because React 18 passes `className` through verbatim on a custom element, and
      the three states share one box. Boolean attributes are empty strings, read by presence.
      `loading="eager"` because this renders inside an already-open drawer. */
-  return (
-    <div className="model-viewer-frame">
+  const viewer = (
+    <div className={frame}>
       <model-viewer
         ref={elementRef}
         src={url}
         alt={name ? `Interactive 3D model of ${name}` : 'Interactive 3D model'}
         camera-controls=""
-        auto-rotate=""
+        auto-rotate={expanded ? undefined : ''}
+        {...(expanded ? START_VIEW_ATTRIBUTES : {})}
         shadow-intensity="1"
         loading="eager"
         data-testid="model-3d-viewer"
       />
     </div>
+  )
+  if (!expanded) return viewer
+
+  // Each camera property animates to whatever it is set to, even its own value again.
+  const resetView = () => {
+    const element = elementRef.current
+    if (!element) return
+    element.cameraOrbit = START_VIEW.orbit
+    element.cameraTarget = START_VIEW.target
+    element.fieldOfView = START_VIEW.fov
+  }
+
+  return (
+    <>
+      {viewer}
+      <div className="expanded-view-foot">
+        <p className="expanded-view-hint">Drag to turn · scroll to zoom · right-drag to pan</p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={resetView}>
+          <IconScan size={13} /> Reset view
+        </button>
+      </div>
+    </>
   )
 }

@@ -273,6 +273,40 @@ on the backdrop.
 - jsdom has no `showModal()`. `src/test/setup.js` stubs it to set `open`, so the tests assert what
   `Modal` does itself; the inert page and the top layer are checked in a real browser.
 
+### A plan and a 3D model open expanded
+
+An area's plan (Site Map card, Areas panel heading, beside the Cells panel's preview) and a device's
+3D model (the drawer viewer's corner) each have an Expand button (`common/ExpandButton.jsx`). It
+opens `Modal` at size `full`, the window less a 24px margin, with `fill`. The button's hover text is
+the shared tooltip (`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+
+- **The plan viewer** (`common/PlanViewer.jsx`) zooms by laying the drawing out wider, never by a
+  CSS scale: the SVG is redrawn sharp at every size, and the pins over it (`AreaPlanPin`, 40px) keep
+  their size on screen and spread apart. It holds the view as the zoom and the drawing's fraction
+  at the viewport's centre, so a resize keeps the same place in view. A plan smaller than the
+  viewport is centred, a larger one always covers it, so it cannot be panned out of view.
+- **Input.** Wheel and trackpad pinch zoom about the pointer (a native, non-passive listener, so the
+  page neither scrolls nor zooms); two fingers pinch; one pointer pans once it has moved 4px, and
+  the click that ends a pan is swallowed so a pin under it is not opened. The keys (+, = and −, 0,
+  the arrows) are bound on the `<dialog>`, so they act wherever focus is in it and nowhere else;
+  App's single-key shortcuts already stand down while a dialog is open (`shortcuts.js`).
+- **The cap is 4 times the fitted size,** measured on the plan of an office floor with about a
+  hundred room labels (3 units high in a 387-unit-wide drawing). Fitted, the labels are 7.7px on
+  screen in a 1280×720 window, 10.1px at 1440×900 and 13.4px at 1920×1080; they pass 12px by 1.6×,
+  and are 31 to 54px at 4×. Memory did not grow with the zoom: zoomed and panned up to 8× (a drawing
+  13,865px wide), the JS heap stayed at 12 to 15 MiB and Chrome's private memory showed no trend, at
+  a device pixel ratio of 1 and of 2. Chrome draws an SVG image by tiles, so the cap is about use,
+  not memory.
+- **The Site Map's dialog** draws the card's own pins (`React.cloneElement` of `cellPin`, at the
+  one-column icon size), so their state comes from the same data. A click opens the cell's panel
+  and closes the dialog; it opens rather than toggles, as the panel behind cannot be seen. The
+  page's legend is repeated in the dialog's header. The dialog is rendered outside the grid and the
+  cards, whose click and `--pin-size` are not its own. The Areas and Cells dialogs draw the
+  preview's marks (`previewPins` in `AreaPlanPreview.jsx`) at full size.
+- **The 3D model** is the same `<model-viewer>` in `Model3DViewer`'s `expanded` mode: no
+  auto-rotate, and the camera's start (`START_VIEW`, the element's defaults) set as attributes so
+  Reset view can set them again. The element animates to a camera property set to its own value.
+
 ---
 
 ## Migrated design notes

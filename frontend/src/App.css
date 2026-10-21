@@ -2197,6 +2197,20 @@ main:focus { outline: none; }
   padding: 20px 22px;
 }
 
+/* The window less a margin, in height as well: for a view that is the dialog's whole point, an
+   area's plan or a device's 3D model. Used with `fill`, so the viewer takes what the header leaves. */
+.modal-full {
+  max-width: none;
+  width: calc(100% - 48px);
+  height: calc(100% - 48px);
+  max-height: none;
+  padding: 16px 20px;
+}
+
+@media (max-width: 600px) {
+  .modal-full { width: calc(100% - 16px); height: calc(100% - 16px); padding: 12px; }
+}
+
 .modal-header-row {
   flex: none;
   display: flex;
@@ -3949,6 +3963,69 @@ a.chip { text-decoration: none; }
   line-height: 1.4;
   color: var(--text-muted);
 }
+
+/* The expanded views (PlanViewer.jsx, Model3DViewer's `expanded`) and the Expand button that opens
+   them. The button sits in the drawer's viewer's top-right corner, over the model. */
+.expand-button { flex-shrink: 0; }
+.model-viewer-holder { position: relative; }
+.model-viewer-holder > .model-viewer-expand {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+/* In the Cells panel, beside the preview: the preview is a link, which a button cannot sit inside. */
+.plan-preview-row { display: flex; align-items: flex-start; gap: 6px; }
+.plan-preview-row > .area-plan-preview { flex: 1 1 auto; min-width: 0; }
+
+/* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
+   placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
+.plan-viewer { display: flex; flex-direction: column; gap: 8px; }
+.plan-viewer-viewport {
+  --pin-size: 40px;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.plan-viewer-viewport.is-pannable { cursor: grab; }
+.plan-viewer-viewport.is-dragging { cursor: grabbing; }
+.plan-viewer-stage { position: absolute; }
+.plan-viewer-stage > .area-plan { border: 0; border-radius: 0; background: none; }
+/* The ringed pin's label is drawn over a neighbour's, which the zoom may not yet have moved apart. */
+.plan-viewer-stage .area-plan-pin-selected { z-index: 3; }
+
+/* + − and Fit, in the corner, over the plan. */
+.plan-viewer-controls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-pin);
+}
+.plan-viewer-controls .btn-icon { width: 32px; height: 32px; }
+.plan-viewer-controls .btn-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The 3D model, expanded: the viewer takes the height, the line under it says how to move it. */
+.model-viewer-expanded { display: flex; flex-direction: column; gap: 8px; }
+.model-viewer-expanded > .model-viewer-frame-full { flex: 1 1 auto; min-height: 0; height: auto; }
+
+.expanded-view-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.expanded-view-hint { margin: 0; font-size: 12px; color: var(--text-muted); }
+
+/* The Site Map's legend, repeated in the expanded plan's header: it wraps towards the close button. */
+.modal-header-controls > .shopfloor-legend { justify-content: flex-end; }
 
 /* The cell and area icon picker: a grid of labelled buttons rather than a <select>, because the
    operator is choosing what the pin will look like on the plan. `auto-fit` so the grid reflows at

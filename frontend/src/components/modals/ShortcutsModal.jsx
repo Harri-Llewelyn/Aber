@@ -60,6 +60,16 @@ export function shortcutGroups({ mac = false } = {}) {
         { keys: ['Enter'], description: 'Activate the focused control' },
         { keys: ['Space'], description: 'Activate a focused drop zone or chip' }
       ]
+    },
+    {
+      title: 'Expanded plan',
+      items: [
+        // Bound by PlanViewer on its own dialog, so they act only while it is open.
+        { keys: ['+'], description: 'Zoom in on the plan' },
+        { keys: ['−'], description: 'Zoom out, as far as the whole plan' },
+        { keys: ['0'], description: 'Fit the whole plan in view' },
+        { keys: ['←', '↑', '→', '↓'], join: 'or', description: 'Move the plan' }
+      ]
     }
   ]
 }
