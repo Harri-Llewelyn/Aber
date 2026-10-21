@@ -16,6 +16,7 @@ import {
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 import { queryTabLink, tabLink, tabLinks } from '../test/tabBar'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: {
@@ -360,7 +361,7 @@ describe('DirectoryTab service groups', () => {
     ])
     await renderTab()
 
-    expect(screen.getByText(/not observed/i)).toBeInTheDocument()
+    expect(screen.getByText(/^not observed$/i)).toBeInTheDocument()
     expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument()
     expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
@@ -387,7 +388,7 @@ describe('DirectoryTab service groups', () => {
     ])
     await renderTab()
 
-    expect(screen.getByTitle(/no exporter reports on it/i)).toBeInTheDocument()
+    expect(getByTooltip(/no exporter reports on it/i)).toBeInTheDocument()
   })
 
   it('does not show a heartbeat beside a service that is not up', async () => {
@@ -400,7 +401,7 @@ describe('DirectoryTab service groups', () => {
     await renderTab()
 
     const badge = screen.getByText('DOWN')
-    expect(badge.getAttribute('title')).not.toMatch(/\d{2}:\d{2}/)
+    expect(tooltipOf(badge)).not.toMatch(/\d{2}:\d{2}/)
   })
 
   it('distinguishes unobserved from failing by more than colour', async () => {
@@ -413,7 +414,7 @@ describe('DirectoryTab service groups', () => {
     await renderTab()
 
     expect(screen.getByText('DOWN')).toHaveClass('badge')
-    expect(screen.getByText(/not observed/i)).not.toHaveClass('badge')
+    expect(screen.getByText(/^not observed$/i)).not.toHaveClass('badge')
   })
 
   it('still lists what is deployed and how to reach it', async () => {
@@ -432,7 +433,7 @@ describe('DirectoryTab service groups', () => {
     const node = screen.getByText('Node-RED (Host-Run Gateways)').closest('tr').children[1]
     expect(node).toHaveTextContent(/^Edge node$/)
     expect(node.querySelector('.badge')).toBeNull()
-    expect(node).toHaveAttribute('title', 'Registered as EDGE_NODE')
+    expect(node).toHaveAccessibleDescription('Registered as EDGE_NODE')
     expect(screen.queryByText('GRAPHICAL_UI')).not.toBeInTheDocument()
   })
 
@@ -659,7 +660,7 @@ describe('Directory reachability', () => {
       openTab('Data & Backend Infrastructure')
       expect(screen.getByText('internal')).toBeInTheDocument()
       // A ClusterIP Service: its tooltip names the way in.
-      expect(screen.getByText('internal').getAttribute('title')).toMatch(/kubectl port-forward/)
+      expect(tooltipOf(screen.getByText('internal'))).toMatch(/kubectl port-forward/)
     })
 
     it('keeps the loopback links clickable for a reader who is on the host', async () => {
@@ -713,9 +714,9 @@ describe('the Version column', () => {
   it('shows the tag, with the full reference in its tooltip', async () => {
     await renderTab()
     const version = screen.getByText('13.2.0')
-    expect(version.getAttribute('title')).toMatch(/^grafana\/grafana:13\.2\.0 /)
+    expect(tooltipOf(version)).toMatch(/^grafana\/grafana:13\.2\.0 /)
     // Stated as what the release deploys, not as something observed in the container.
-    expect(version.getAttribute('title')).toMatch(/this release deploys/)
+    expect(tooltipOf(version)).toMatch(/this release deploys/)
   })
 
   // "v3.14.0" beside "13.2.0" reads as two formats; the tooltip keeps the tag as published.
@@ -726,7 +727,7 @@ describe('the Version column', () => {
     ])
     await renderTab()
     const version = screen.getByText('3.14.0')
-    expect(version.getAttribute('title')).toMatch(/^prom\/prometheus:v3\.14\.0 /)
+    expect(tooltipOf(version)).toMatch(/^prom\/prometheus:v3\.14\.0 /)
     expect(screen.getByText('vendor-2')).toBeInTheDocument()
   })
 
@@ -734,7 +735,7 @@ describe('the Version column', () => {
     await renderTab()
     const missing = screen.getByText('not recorded')
     expect(missing.closest('td').className).toContain('cell-version')
-    expect(missing.getAttribute('title')).toMatch(/disabled in this deployment/)
+    expect(tooltipOf(missing)).toMatch(/disabled in this deployment/)
   })
 
   it('sits between what the service is and where to reach it', async () => {
@@ -752,8 +753,8 @@ describe('the Version column', () => {
     ])
     await renderTab()
     const nodeRed = screen.getByText('5.0.7')
-    expect(nodeRed.getAttribute('title')).toMatch(/^ghcr\.io\/harri-llewelyn\/aber\/node-red:1\.4\.0 /)
-    expect(nodeRed.getAttribute('title')).toMatch(/built from 5\.0\.7/)
+    expect(tooltipOf(nodeRed)).toMatch(/^ghcr\.io\/harri-llewelyn\/aber\/node-red:1\.4\.0 /)
+    expect(tooltipOf(nodeRed)).toMatch(/built from 5\.0\.7/)
     expect(screen.getByText('5.33.0')).toBeInTheDocument()
     expect(screen.queryByText('1.4.0')).toBeNull()
   })
@@ -814,8 +815,8 @@ describe('the known-CVE badge', () => {
     await renderTab()
     const badge = screen.getByText('3 CVEs')
     expect(badge.closest('td').className).toContain('cell-version')
-    expect(badge.getAttribute('title')).toMatch(/^3 fixable HIGH, as of 2026-10-02\./)
-    expect(badge.getAttribute('title')).toMatch(/vulnerability database of 2026-10-01/)
+    expect(tooltipOf(badge)).toMatch(/^3 fixable HIGH, as of 2026-10-02\./)
+    expect(tooltipOf(badge)).toMatch(/vulnerability database of 2026-10-01/)
     expect(badge.className).toContain('badge-warning')
   })
 
@@ -823,14 +824,14 @@ describe('the known-CVE badge', () => {
     await renderTab()
     const badge = screen.getByText('7 CVEs')
     expect(badge.className).toContain('badge-danger')
-    expect(badge.getAttribute('title')).toMatch(/^2 fixable CRITICAL and 5 fixable HIGH, as of 2026-10-02/)
+    expect(tooltipOf(badge)).toMatch(/^2 fixable CRITICAL and 5 fixable HIGH, as of 2026-10-02/)
   })
 
   it('shows a clean scan as zero with its date, quietly', async () => {
     await renderTab()
     const badge = screen.getByText('0 CVEs')
     expect(badge.className).toContain('badge-neutral')
-    expect(badge.getAttribute('title')).toMatch(/^No fixable HIGH or CRITICAL, as of 2026-10-02/)
+    expect(tooltipOf(badge)).toMatch(/^No fixable HIGH or CRITICAL, as of 2026-10-02/)
   })
 
   it('says "not scanned" in words for an image the release did not scan, and no count', async () => {
@@ -838,7 +839,7 @@ describe('the known-CVE badge', () => {
     const row = screen.getByText('Prometheus Metrics Store').closest('tr')
     const words = within(row).getByText('not scanned')
     expect(words.className).not.toContain('badge')
-    expect(words.getAttribute('title')).toMatch(/did not scan this exact image/)
+    expect(tooltipOf(words)).toMatch(/did not scan this exact image/)
     expect(within(row).queryByText(/CVE/)).toBeNull()
   })
 

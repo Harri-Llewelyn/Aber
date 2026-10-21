@@ -7,6 +7,7 @@ import { VocabularyTab } from '../components/tabs/VocabularyTab'
 import { HELP_SOURCES as HELP_CORPUS } from './helpSources'
 import { api } from '../api'
 import { tabBar, tabLink } from '../test/tabBar'
+import { getByTooltip, queryByTooltip } from '../test/tooltips'
 
 /**
  * The Vocabulary page. Clicking an entry hands the selection to the Metrics page rather than
@@ -94,6 +95,7 @@ const renderTab = (props = {}) =>
 
 /* The page's one card: its heading, the tab per standard, and the selected standard's entries. */
 const card = () => within(document.querySelector('.card'))
+const cardEl = () => document.querySelector('.card')
 
 /** The standard tabs, inside the card under its heading. */
 const standardTab = (name) => tabLink(name)
@@ -145,7 +147,7 @@ describe('Vocabulary page', () => {
 
     fireEvent.click(standardTab(/ISO 22400/))
     expect(card().getByRole('button', { name: /^OEE/ })).toBeTruthy()
-    expect(card().queryByTitle(/^AVAILABILITY \(A\)/)).toBeNull()
+    expect(queryByTooltip(/^AVAILABILITY \(A\)/, cardEl())).toBeNull()
   })
 
   it('keeps the search text across a tab switch', async () => {
@@ -157,7 +159,7 @@ describe('Vocabulary page', () => {
     fireEvent.click(standardTab(/ISO 22400/))
 
     expect(screen.getByPlaceholderText(/Search/).value).toBe('availability')
-    expect(card().getByTitle(/^AVAILABILITY \(A\)/)).toBeTruthy()
+    expect(getByTooltip(/^AVAILABILITY \(A\)/, cardEl())).toBeTruthy()
   })
 })
 
@@ -169,7 +171,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 
     fireEvent.click(standardTab(/ISO 22400/))
     fireEvent.click(card().getByRole('button', { name: /^OEE/ }))
-    fireEvent.click(card().getByTitle(/^AVAILABILITY \(A\)/))
+    fireEvent.click(getByTooltip(/^AVAILABILITY \(A\)/, cardEl()))
 
     expect(onUseEntry).toHaveBeenCalledWith({ standard: 'ISO 22400', name: 'AVAILABILITY' })
   })
@@ -181,7 +183,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 
     fireEvent.click(standardTab(/OPC UA/))
     fireEvent.click(card().getByRole('button', { name: /^OPC 40010 Robotics/ }))
-    fireEvent.click(card().getByTitle(/^ActualPosition —/))
+    fireEvent.click(getByTooltip(/^ActualPosition —/, cardEl()))
 
     // Both parts are required: opcua_vocabulary is keyed on (companion_spec, name) because two
     // specifications can define the same browse name.
@@ -199,7 +201,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 
     fireEvent.click(standardTab(/ISO 22400/))
     fireEvent.click(card().getByRole('button', { name: /^OEE/ }))
-    const chip = card().getByTitle(/^AVAILABILITY \(A\)/)
+    const chip = getByTooltip(/^AVAILABILITY \(A\)/, cardEl())
     expect(chip.getAttribute('role')).toBeNull()
     fireEvent.click(chip)
     expect(onUseEntry).not.toHaveBeenCalled()
@@ -215,12 +217,12 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 
     fireEvent.click(standardTab(/ASHRAE 223P/))
     fireEvent.click(card().getByRole('button', { name: /^Sensor/ }))
-    fireEvent.click(card().getByTitle(/^Temperature sensor —/))
+    fireEvent.click(getByTooltip(/^Temperature sensor —/, cardEl()))
     expect(onUseEntry).toHaveBeenCalledWith({ standard: 'ASHRAE 223P', name: 'TemperatureSensor' })
 
     onUseEntry.mockClear()
     fireEvent.click(card().getByRole('button', { name: /^Root/ }))
-    const relation = card().getByTitle(/^has property —/)
+    const relation = getByTooltip(/^has property —/, cardEl())
     expect(relation.getAttribute('role')).toBeNull()
     fireEvent.click(relation)
     expect(onUseEntry).not.toHaveBeenCalled()
@@ -463,12 +465,12 @@ describe('Vocabulary page — Expand all / Collapse all', () => {
 
     fireEvent.click(allButton())
     expect(openCount()).toBe(0)
-    expect(card().queryByTitle(/^ANGLE/)).toBeNull()
+    expect(queryByTooltip(/^ANGLE/, cardEl())).toBeNull()
     expect(screen.getByLabelText('Search the MTConnect vocabulary').value).toBe('a')
     expect(allButton().textContent).toBe('Expand all')
 
     fireEvent.click(allButton())
-    expect(card().getByTitle(/^ANGLE/)).toBeTruthy()
+    expect(getByTooltip(/^ANGLE/, cardEl())).toBeTruthy()
   })
 
   it('acts on the selected standard only', async () => {
@@ -497,12 +499,12 @@ describe('Vocabulary page — a chip that starts a metric', () => {
     fireEvent.click(card().getByRole('button', { name: /^Data Item Types — SAMPLE/ }))
     fireEvent.click(card().getByRole('button', { name: /^Components/ }))
 
-    const angle = card().getByTitle(/^ANGLE/)
+    const angle = getByTooltip(/^ANGLE/, cardEl())
     expect(angle.getAttribute('aria-label')).toBe('Start a catalog metric from ANGLE')
     expect(angle.querySelector('.vocab-chip-plus')).toBeTruthy()
 
     // A component is not a metric on its own, so it starts nothing.
-    const axes = card().getByTitle(/^Axes/)
+    const axes = getByTooltip(/^Axes/, cardEl())
     expect(axes.getAttribute('role')).toBeNull()
     expect(axes.getAttribute('aria-label')).toBeNull()
     expect(axes.querySelector('.vocab-chip-plus')).toBeNull()

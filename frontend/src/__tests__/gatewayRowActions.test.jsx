@@ -40,7 +40,7 @@ const show = async (rows, hasPermission = () => true) => {
   /* The list opens on Active, so a fixture holding an archived row has to reveal it first. The
      lifecycle filter has its own test. */
   if (rows.some(r => r.is_archived)) {
-    fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
   }
   await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
 }
@@ -73,7 +73,7 @@ describe('the gateways card header', () => {
   it('starts the toolbar with the search box, then the lifecycle', async () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
     const lifecycle = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
-    expect(lifecycle).toHaveAttribute('title', 'Filter by lifecycle state')
+    expect(lifecycle).toHaveAccessibleName('Lifecycle')
   })
 })
 
@@ -372,9 +372,9 @@ describe('the playback gateway is listed', () => {
     await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
   }
   const listed = () => [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
-  const lifecycle = () => screen.getByTitle('Filter by lifecycle state')
+  const lifecycle = () => screen.getByRole('combobox', { name: 'Lifecycle' })
   const lifecycleOption = (value) => lifecycle().querySelector(`option[value="${value}"]`).textContent
-  const typeFilter = () => screen.getByTitle(/filter by the type column/i)
+  const typeFilter = () => screen.getByRole('combobox', { name: 'Type' })
 
   it('lists it by default, with no toggle to show it', async () => {
     await open([gateway(), playbackRow()])
@@ -417,7 +417,7 @@ describe('the playback gateway is listed', () => {
 
   it('is not listed under the Offline status filter while idle', async () => {
     await open([gateway(), playbackRow()])
-    fireEvent.change(screen.getByTitle(/filter by status/i), { target: { value: 'OFFLINE' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'OFFLINE' } })
     expect(listed()).not.toContain('Playback')
   })
 
@@ -451,7 +451,7 @@ describe('the Gateways list', () => {
     expect(screen.queryByText('Retired_Gateway')).toBeNull()
     expect(screen.queryByText(/Clear filters/)).toBeNull()
 
-    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
     expect(screen.getByText('Retired_Gateway')).toBeInTheDocument()
     expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
 
@@ -489,7 +489,7 @@ describe('the Gateways list', () => {
     await open([live()], () => false)
     const button = screen.getByRole('button', { name: /New Gateway/ })
     expect(button.disabled).toBe(true)
-    expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
+    expect(button).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
   })
 
   it('opens the drawer from the keyboard: the row takes focus, and Enter opens and closes it', async () => {

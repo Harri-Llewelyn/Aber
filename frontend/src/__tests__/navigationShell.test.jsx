@@ -121,12 +121,10 @@ describe('Merged navigation shell', () => {
     for (const tab of tabs) {
       const label = tab.querySelector('.sidebar-item-label')?.textContent?.trim()
       expect(label).toBeTruthy()
-      // The title must contain the label rather than merely exist: a generic "Navigate" on every
-      // item would satisfy a presence check.
-      expect(tab.getAttribute('title')).toContain(label)
-      // And an aria-label: a title is a weak accessible name that some screen readers drop when
-      // another source exists, and this button's other source is invisible text.
+      // The name is the label, in an aria-label: its other source is invisible text. The pointer
+      // gets the same word in the shared tooltip, never the browser's.
       expect(tab.getAttribute('aria-label')).toBe(label)
+      expect(tab).not.toHaveAttribute('title')
     }
   })
 
@@ -247,10 +245,10 @@ describe('Merged navigation shell', () => {
 
       // The rail label is transparent while the rail is collapsed, so the name is stated outright.
       expect(trigger().getAttribute('aria-label')).toContain('admin@aber.local')
-      expect(trigger().getAttribute('title')).toContain('admin@aber.local')
+      expect(trigger()).not.toHaveAttribute('title')
       // usePermissions resolves the role from the database before falling back to the built-in map,
       // so it arrives a tick after the bar does.
-      await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
+      await waitFor(() => expect(trigger().getAttribute('aria-label')).toContain('Administrator'))
 
       // The address is the label: clipped with the others in the collapsed rail, read when it opens.
       expect(trigger().querySelector('.sidebar-item-label')).toHaveTextContent('admin@aber.local')
@@ -314,8 +312,9 @@ describe('Merged navigation shell', () => {
       const segment = (name) => within(theme).getByRole('menuitemradio', { name })
       expect(segment('Dark')).toHaveAttribute('aria-checked', 'true')
       expect(segment('Light')).toHaveAttribute('aria-checked', 'false')
-      // Each segment names its own theme: the sun is Light, the moon is Dark.
-      expect(segment('Light')).toHaveAttribute('title', 'Light')
+      // Each segment names its own theme in words beside the icon, so it needs no tooltip.
+      expect(segment('Light')).toHaveTextContent('Light')
+      expect(segment('Light')).not.toHaveAttribute('title')
 
       fireEvent.click(segment('Light'))
       // STILL OPEN. The theme is the one choice here whose result is visible behind the menu, so

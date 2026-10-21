@@ -16,6 +16,7 @@ import { useUrlTab } from '../../hooks/useUrlState'
 import { ARCHIVES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
@@ -150,28 +151,25 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
     if (r.entity_type === 'gateway' && r.old_data?.forge_repository_at && r.sparkplug_id) {
       // Derived from the id as it is everywhere else.
       items.push(
-        <a
-          key="forge"
-          className="btn btn-sm btn-ghost"
-          href={gatewayRepositoryUrl({ sparkplug_id: r.sparkplug_id })}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Its repository in the forge: archived, read-only, every branch and wiki page kept"
-        >
-          <IconExternalLink size={12} /> Forge repository
-        </a>
+        <Tooltip key="forge" text="Its repository in the forge: archived, read-only, every branch and wiki page kept">
+          <a
+            className="btn btn-sm btn-ghost"
+            href={gatewayRepositoryUrl({ sparkplug_id: r.sparkplug_id })}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <IconExternalLink size={12} /> Forge repository
+          </a>
+        </Tooltip>
       )
     }
     for (const x of r.exports || []) {
       items.push(
-        <button
-          key={x.id}
-          className="btn btn-sm btn-ghost"
-          onClick={() => downloadExport(x)}
-          title={`The bundle taken ${formatDateTime(x.taken_at)}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}
-        >
-          <IconDownload size={12} /> Bundle {formatDate(x.taken_at)}
-        </button>
+        <Tooltip key={x.id} text={`The bundle taken ${formatDateTime(x.taken_at)}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}>
+          <button className="btn btn-sm btn-ghost" onClick={() => downloadExport(x)}>
+            <IconDownload size={12} /> Bundle {formatDate(x.taken_at)}
+          </button>
+        </Tooltip>
       )
     }
     return items
@@ -203,11 +201,11 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
              <table>
                <thead>
                  <tr>
-                   <SortHeader sort={archivedSort} column="name" title="Entity Name">Name</SortHeader>
-                   <SortHeader sort={archivedSort} column="type" title="Entity classification">Type</SortHeader>
-                   <SortHeader sort={archivedSort} column="entity_id" title="Entity ID">Entity ID</SortHeader>
-                   <SortHeader sort={archivedSort} column="archived_at" title="When it was archived">Archived At</SortHeader>
-                   <SortHeader sort={archivedSort} column="auto_purge" title="When the auto-purge timer deletes the archived record for good">Auto-Purge</SortHeader>
+                   <SortHeader sort={archivedSort} column="name">Name</SortHeader>
+                   <SortHeader sort={archivedSort} column="type">Type</SortHeader>
+                   <SortHeader sort={archivedSort} column="entity_id">Entity ID</SortHeader>
+                   <SortHeader sort={archivedSort} column="archived_at">Archived At</SortHeader>
+                   <SortHeader sort={archivedSort} column="auto_purge" title="When the auto-purge timer deletes the record for good. Never: no timer runs, so it stays until someone deletes it.">Auto-Purge</SortHeader>
                    <th className="row-actions">Actions</th>
                  </tr>
                </thead>
@@ -219,9 +217,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
                      <td>
                        <strong>{a.name}</strong>
                        {latestExport && (
-                         <div className="cell-meta" title={`A bundle of this device was taken ${formatDateTime(latestExport.taken_at)} and is kept beside the cold tier`}>
-                           Exported {formatDate(latestExport.taken_at)}
-                         </div>
+                         <Tooltip text={`A bundle of this device was taken ${formatDateTime(latestExport.taken_at)} and is kept beside the cold tier`}>
+                           <div className="cell-meta">Exported {formatDate(latestExport.taken_at)}</div>
+                         </Tooltip>
                        )}
                      </td>
                      <td><Badge size="sm">{a.entity_type.toUpperCase()}</Badge></td>
@@ -231,39 +229,42 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
                        {a.auto_delete_at ? (
                          <PurgeDate at={a.auto_delete_at} />
                        ) : (
-                         <Badge size="sm" title="No auto-purge timer is running; it stays archived until someone deletes it">Never auto-purged</Badge>
+                         <Badge size="sm">Never auto-purged</Badge>
                        )}
                      </td>
                      {/* Restore is the ordinary move and Permanent Delete the irreversible one, so
                          they are not peers: delete only takes its danger colour when pointed at.
                          Export Bundle, for a device, is what to do before the delete. */}
                      <td className="row-actions">
-                       <button
-                         className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
-                         disabled={!canArchive}
-                         onClick={() => canArchive && setConfirmRestore(a)}
-                         title={!canArchive ? deniedTitle : 'Restore entity back to active service'}
-                       >
-                         <IconRefreshCw size={12} /> Restore
-                       </button>
-                       {a.entity_type === 'device' && (
+                       <Tooltip text={!canArchive ? deniedTitle : null}>
                          <button
                            className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                            disabled={!canArchive}
-                           onClick={() => canArchive && setExportFor(a)}
-                           title={!canArchive ? deniedTitle : 'Download an AASX bundle of this device — its shell, audit trail, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
+                           onClick={() => canArchive && setConfirmRestore(a)}
                          >
-                           <IconDownload size={12} /> Export Bundle…
+                           <IconRefreshCw size={12} /> Restore
                          </button>
+                       </Tooltip>
+                       {a.entity_type === 'device' && (
+                         <Tooltip text={!canArchive ? deniedTitle : 'An AASX bundle of its shell, audit trail and live telemetry, with a copy kept beside the cold tier'}>
+                           <button
+                             className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
+                             disabled={!canArchive}
+                             onClick={() => canArchive && setExportFor(a)}
+                           >
+                             <IconDownload size={12} /> Export Bundle…
+                           </button>
+                         </Tooltip>
                        )}
-                       <button
-                         className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
-                         disabled={!canArchive}
-                         onClick={() => canArchive && setConfirmPurge(a)}
-                         title={!canArchive ? deniedTitle : 'Delete this entity permanently — it cannot be restored'}
-                       >
-                         <IconTrash size={12} /> Permanent Delete
-                       </button>
+                       <Tooltip text={!canArchive ? deniedTitle : null}>
+                         <button
+                           className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
+                           disabled={!canArchive}
+                           onClick={() => canArchive && setConfirmPurge(a)}
+                         >
+                           <IconTrash size={12} /> Permanent Delete
+                         </button>
+                       </Tooltip>
                      </td>
                    </tr>
                    )
@@ -284,13 +285,13 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
              <table>
                <thead>
                  <tr>
-                   <SortHeader sort={retiredSort} column="name" title="The name the entity had">Name</SortHeader>
-                   <SortHeader sort={retiredSort} column="type" title="Entity classification">Type</SortHeader>
-                   <SortHeader sort={retiredSort} column="entity_id" title="Entity ID, as it was">Entity ID</SortHeader>
+                   <SortHeader sort={retiredSort} column="name">Name</SortHeader>
+                   <SortHeader sort={retiredSort} column="type">Type</SortHeader>
+                   <SortHeader sort={retiredSort} column="entity_id">Entity ID</SortHeader>
                    <SortHeader sort={retiredSort} column="retired_at" title="When the row was deleted">Retired At</SortHeader>
                    <SortHeader sort={retiredSort} column="by" title="Who deleted it, or the retention job">By</SortHeader>
                    <SortHeader sort={retiredSort} column="historian_id" title="The historian keys this entity's readings by this id">Historian ID</SortHeader>
-                   <th className="row-actions" title="What survives the row">What Survives</th>
+                   <th className="row-actions">What Survives</th>
                  </tr>
                </thead>
                <tbody>
@@ -299,9 +300,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
                      <td><strong>{r.name || '—'}</strong></td>
                      <td><Badge size="sm">{String(r.entity_type).toUpperCase()}</Badge></td>
                      <td><CopyableId value={r.entity_id} label="entity id" onNotify={showToast} /></td>
-                     <td className="cell-meta" title={r.archived_at ? `Archived ${formatDateTime(r.archived_at)}` : undefined}>
-                       {formatDateTime(r.retired_at)}
-                     </td>
+                     <Tooltip text={r.archived_at ? `Archived ${formatDateTime(r.archived_at)}` : null}>
+                       <td className="cell-meta">{formatDateTime(r.retired_at)}</td>
+                     </Tooltip>
                      <td className="cell-meta">{r.retired_by_email || (r.retired_by ? <span className="mono">{String(r.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
                      <td>{r.sparkplug_id ? <CopyableId value={r.sparkplug_id} label="historian id" onNotify={showToast} /> : <span className="cell-meta">—</span>}</td>
                      <td className="row-actions">{survivors(r)}</td>
@@ -402,13 +403,12 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
 function PurgeDate({ at }) {
   const soon = purgeIsSoon(at)
   return (
-    <span
-      className={soon ? 'cell-purge-date cell-purge-date-soon' : 'cell-purge-date'}
-      title={`Deleted for good ${formatDateTime(at)}, unless restored first`}
-    >
-      {soon && <IconAlertTriangle size={12} />}
-      {soon && <span className="sr-only">Within a week: </span>}
-      {formatDate(at)}
-    </span>
+    <Tooltip text={`Deleted for good ${formatDateTime(at)}, unless restored first`}>
+      <span className={soon ? 'cell-purge-date cell-purge-date-soon' : 'cell-purge-date'}>
+        {soon && <IconAlertTriangle size={12} />}
+        {soon && <span className="sr-only">Within a week: </span>}
+        {formatDate(at)}
+      </span>
+    </Tooltip>
   )
 }

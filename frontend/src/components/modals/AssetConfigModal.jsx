@@ -87,12 +87,12 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
 
   const statusBadge = (status) => {
     if (status === 'present') {
-      return <Badge tone={STATUS_TONE.present} size="sm" icon={<IconCheck size={10} />} title="Required by the schema and reported by the device">Present</Badge>
+      return <Badge tone={STATUS_TONE.present} size="sm" icon={<IconCheck size={10} />}>Present</Badge>
     }
     if (status === 'missing') {
-      return <Badge tone={STATUS_TONE.missing} size="sm" icon={<IconAlertTriangle size={10} />} title="Required by the schema but not reported yet">Missing</Badge>
+      return <Badge tone={STATUS_TONE.missing} size="sm" icon={<IconAlertTriangle size={10} />}>Missing</Badge>
     }
-    return <Badge tone={STATUS_TONE.extra} size="sm" title="Declared by the device but not part of its assigned schema">Unmodelled</Badge>
+    return <Badge tone={STATUS_TONE.extra} size="sm">Unmodelled</Badge>
   }
 
   return (
@@ -103,7 +103,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
       icon={<IconFileText size={18} />}
       size="wide"
       onClose={onClose}
-      footer={<button className="btn btn-ghost" onClick={onClose} title="Close modal">Close</button>}
+      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
     >
       {attachedSchemas.length > 0 && (
         <div className="callout callout-info">
@@ -145,21 +145,20 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
               </colgroup>
               <thead>
                 <tr>
-                  <SortHeader sort={comparisonSort} column="metric" title="Metric parameter key">Metric Parameter</SortHeader>
-                  <SortHeader sort={comparisonSort} column="status" title="Conformance to the assigned schema">Status</SortHeader>
-                  <th title="Reported value">Reported Value</th>
+                  <SortHeader sort={comparisonSort} column="metric">Metric Parameter</SortHeader>
+                  <SortHeader sort={comparisonSort} column="status" title="Present: required and reported. Missing: required, not reported yet. Unmodelled: reported, outside the schema.">Status</SortHeader>
+                  <th>Reported Value</th>
                   <SortHeader sort={comparisonSort} column="datatype" title="Sparkplug B datatype">Datatype</SortHeader>
-                  <SortHeader sort={comparisonSort} column="last_updated" title="Last updated timestamp">Last Updated</SortHeader>
+                  <SortHeader sort={comparisonSort} column="last_updated">Last Updated</SortHeader>
                 </tr>
               </thead>
               <tbody>
                 {comparisonSorted.map(row => (
                   <tr key={row.metric_name}>
-                    {/* Wraps at the path separators rather than truncating, and carries the full
-                        name in `title` for a squeezed column. */}
-                    <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
+                    {/* Wraps at the path separators rather than truncating, so the whole name shows. */}
+                    <td className="config-metric-name"><strong>{row.metric_name}</strong></td>
                     <td>{statusBadge(row.status)}</td>
-                    <td className="telemetry-value" title={String(fmtVal(row.reported))}>{fmtVal(row.reported)}</td>
+                    <td className="telemetry-value">{fmtVal(row.reported)}</td>
                     <td>{row.reported ? <Badge size="sm">{SPARKPLUG_TYPES[row.reported.datatype] || row.reported.datatype || '—'}</Badge> : '—'}</td>
                     <td className="cell-meta">
                       {row.reported ? formatDateTime(row.reported.updated_at) : '—'}
@@ -184,17 +183,17 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
             </colgroup>
             <thead>
               <tr>
-                <SortHeader sort={configSort} column="metric" title="Metric parameter key">Metric Parameter</SortHeader>
-                <th title="Reported value">Value</th>
+                <SortHeader sort={configSort} column="metric">Metric Parameter</SortHeader>
+                <th>Value</th>
                 <SortHeader sort={configSort} column="datatype" title="Sparkplug B datatype">Datatype</SortHeader>
-                <SortHeader sort={configSort} column="last_updated" title="Last updated timestamp">Last Updated</SortHeader>
+                <SortHeader sort={configSort} column="last_updated">Last Updated</SortHeader>
               </tr>
             </thead>
             <tbody>
               {configSorted.map(row => (
                 <tr key={row.metric_name}>
-                  <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
-                  <td className="telemetry-value" title={String(fmtVal(row))}>{fmtVal(row)}</td>
+                  <td className="config-metric-name"><strong>{row.metric_name}</strong></td>
+                  <td className="telemetry-value">{fmtVal(row)}</td>
                   <td><Badge size="sm">{SPARKPLUG_TYPES[row.datatype] || row.datatype || '—'}</Badge></td>
                   <td className="cell-meta">
                     {formatDateTime(row.updated_at)}

@@ -158,6 +158,52 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   no group claims.
 - **Profile** is not in the rail, so its tabs are on its tab bar only.
 
+### Tooltips
+
+Every tooltip in the dashboard is its own bubble (`common/Tooltip.jsx`), never the browser's
+`title`. A `title` shows after about a second, never to a keyboard and never on a touch screen,
+screen readers read it unevenly, and on an icon-only button it was often the only name.
+
+- **Three outcomes for a `title`.** *Drop* it where the control already says the same in visible
+  text. *Convert* it where it says something a keyboard or touch user needs: wrap the control in
+  `<Tooltip text="…">`, and give an icon-only button an `aria-label`, so its name never depends on
+  the tooltip. *Move* it where it is a hint repeated on every row: say it once, on the column
+  header. `SortHeader`'s `title` is its button's tooltip, and `ColumnHeader` is a header that
+  cannot be sorted with one.
+- **Converting a control** is one wrapper:
+
+  ```jsx
+  <Tooltip text="Send the bundle to the gateway again">
+    <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
+  </Tooltip>
+  ```
+
+  It adds `useTooltip`'s handlers and `aria-describedby` to the control, keeps the control's own,
+  and draws the bubble beside it. With no `text` it draws the control alone, in the same place, so
+  a tooltip that comes and goes never remounts it. Text that is the control's name (its
+  `aria-label`, or its own text shown whole where it is cut short) is not read again as its
+  description. A tooltip shows on hover and focus, so it goes on something that takes focus; a
+  sentence about anything else belongs in visible text or a `HelpTip`, or on the column header.
+  A control that gets focus back, as a dialog's opener does, shows its tooltip, and the first
+  Escape closes that. A component
+  that draws a control takes the text as a prop and wraps its own element: `ActionButton`'s
+  `title` and `deniedTitle`, `RouteLink`'s and `CopyableId`'s `title`. `Badge`'s `title` is the one
+  on something that takes no focus, so a pointer alone sees it.
+- **In a test**, `src/test/tooltips.js` finds a control by its tooltip (`getByTooltip`) and reads
+  one (`tooltipOf`). A closed bubble is in the document, hidden, so a `getByText` that would also
+  match a tooltip's words passes `{ ignore: '[role=tooltip]' }`.
+- **The words.** About 20 words, plain sentences, no code, and never the visible label again.
+- **The guard.** `npm run lint:js` fails on a `title` on an HTML element in `frontend/src`, a
+  `no-restricted-syntax` rule in `scripts/lint/eslint.config.mjs`. A component's prop named
+  `title`, such as a dialog's heading, is not matched. `title` stays where it is what the element
+  means: `<abbr>` and `<iframe>`, which the rule lets through, and an SVG's `<title>` element,
+  which is not an attribute. A link whose text is its own address, cut short, wants
+  `<Tooltip text={url}>`, which shows it whole; a `title` there takes an
+  `eslint-disable-next-line no-restricted-syntax -- the text is the address`. The files other work
+  is rewriting are listed beside the rule until they are swept, and
+  `scripts/lint/browser-tooltip.test.mjs` fails on one that no longer carries a `title`, so the
+  list only shrinks.
+
 ### Tooltips on a tab
 
 A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
@@ -1251,9 +1297,10 @@ passes `{ record: false }`, as a Grafana alert does.
   choosing. Every segment draws its icon and its `label`; an option's `count` is said after the label
   in the tooltip and the accessible name. The chosen segment takes a sunken fill (`--bg-base`) and a
   border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes the option's
-  `tone`. A segment's tooltip is its name, the browser's own, unless the option has a
-  `description`: then it is that sentence in the shared bubble (`common/Tooltip.jsx`), tied by
-  `aria-describedby` and with no `title`, as the Sidebar layout switch's segments are.
+  `tone`. Tooltips are the shared bubble (`common/Tooltip.jsx`): an option's `description`, tied by
+  `aria-describedby`, as the Sidebar layout switch's segments are; otherwise the name with its
+  count, which the label does not show; and none where the label says it all, as on the theme
+  switch.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
@@ -1384,6 +1431,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
 - **A table can be sorted by its columns** (#801). The rows go through
   `useSortableRows(rows, columns)` (`hooks/useTableSort.js`) and each sortable header is a
   `<SortHeader sort={sort} column="name" title="…">Name</SortHeader>` (`common/SortHeader.jsx`).
+  Its `title` is the column's hint, said once in the shared tooltip ([Tooltips](#tooltips)); a
+  header that cannot be sorted takes one as a `ColumnHeader`.
   A click sorts ascending, a second descending, and a third returns the table to the order it had,
   which is left as it was: a table nobody sorts reads as before, and no header claims that order.
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural

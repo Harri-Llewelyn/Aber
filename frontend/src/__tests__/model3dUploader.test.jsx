@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { deviceUrl } from '../routes'
 import { Model3DUploader } from '../components/common/Model3DUploader'
 import { api } from '../api'
+import { getByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -124,7 +125,7 @@ describe('Model3DUploader', () => {
     api.removeDeviceModel.mockResolvedValue(undefined)
 
     render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} onChange={onChange} />)
-    fireEvent.click(screen.getByTitle(/Detach this model/i))
+    fireEvent.click(getByTooltip(/Detach this model/i))
 
     await waitFor(() => expect(api.removeDeviceModel).toHaveBeenCalledWith(DEVICE_ID, `${DEVICE_ID}/cnc.glb`))
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(null))
@@ -186,7 +187,7 @@ describe('Model3DUploader', () => {
       expect(row.firstElementChild).toBe(download)
       expect(download).toHaveClass('btn-primary')
       expect(screen.getByTitle(/Upload a different model/i)).toHaveClass('btn-ghost')
-      expect(screen.getByTitle(/Detach this model/i)).toHaveClass('btn-ghost')
+      expect(getByTooltip(/Detach this model/i)).toHaveClass('btn-ghost')
     })
 
     it('stays available to a role that cannot manage devices', async () => {

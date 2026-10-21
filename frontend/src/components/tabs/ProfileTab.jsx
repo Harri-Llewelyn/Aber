@@ -6,6 +6,7 @@ import { useUrlTab } from '../../hooks/useUrlState'
 import { PROFILE_TABS } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
+import { Tooltip } from '../common/Tooltip'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = PROFILE_TABS
@@ -138,15 +139,16 @@ export function ProfileTab({
                 value={passwordBlocked ? 'None' : 'Never shown'}
                 actions={(
                   <div className="setting-actions">
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={onChangePassword}
-                      disabled={!!passwordBlocked}
-                      title={passwordBlocked || 'Change the password you sign in with'}
-                    >
-                      <IconLock size={13} /> Change Password
-                    </button>
+                    <Tooltip text={passwordBlocked || null}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={onChangePassword}
+                        disabled={!!passwordBlocked}
+                      >
+                        <IconLock size={13} /> Change Password
+                      </button>
+                    </Tooltip>
                   </div>
                 )}
               />

@@ -6,6 +6,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { REALTIME_ENABLED, GRAFANA_ALERT_HISTORY_URL, grafanaAlertUrl } from '../../constants'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
+import { Tooltip } from './Tooltip'
 
 /**
  * The top bar's alert counter, and the list behind it.
@@ -60,37 +61,31 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
 
   return (
     <div className="alert-pill-wrap" ref={wrapRef}>
-      <button
-        className={`alert-pill ${tone}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label={spoken}
-        title={
-          healthy
-            ? 'No firing alerts — Grafana is evaluating and has nothing to report. Click for detail.'
-            : spoken
-              + (critical ? ` (${critical} critical)` : '')
-              + ' — raised by Grafana. Click for detail.'
-        }
-      >
-        <Glyph size={15} />
-        {/* NOT RENDERED AT ZERO, which is the whole of what makes the resting bar quiet. See the
-            header for why the digit is kept at all rather than left to the colour. */}
-        {!healthy && <span className="alert-pill-count">{count}</span>}
-      </button>
+      <Tooltip text={healthy
+        ? 'Grafana is evaluating and has nothing to report.'
+        : `Raised by Grafana${critical ? `, ${critical} critical` : ''}. Open the list for detail.`}>
+        <button
+          className={`alert-pill ${tone}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={spoken}
+        >
+          <Glyph size={15} />
+          {/* NOT RENDERED AT ZERO, which is the whole of what makes the resting bar quiet. See the
+              header for why the digit is kept at all rather than left to the colour. */}
+          {!healthy && <span className="alert-pill-count">{count}</span>}
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="alert-pill-panel" role="dialog" aria-label="Firing alerts">
           <div className="alert-pill-panel-head">
             <span>Firing alerts</span>
-            <button
-              className="alert-pill-close"
-              onClick={() => setOpen(false)}
-              aria-label="Close alert list"
-              title="Close (Esc)"
-            >
-              <IconX size={13} />
-            </button>
+            <Tooltip text="Close (Esc)">
+              <button className="alert-pill-close" onClick={() => setOpen(false)} aria-label="Close alert list">
+                <IconX size={13} />
+              </button>
+            </Tooltip>
           </div>
 
           {healthy ? (
@@ -146,16 +141,17 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                         {body}
                       </RouteLink>
                     ) : external ? (
-                      <a
-                        className="alert-pill-item-link"
-                        href={grafanaAlertUrl(a.alert_name)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => setOpen(false)}
-                        title="Open this rule in Grafana Alerting — this alert is about the platform, not about one asset"
-                      >
-                        {body}
-                      </a>
+                      <Tooltip text="Open this rule in Grafana Alerting. The alert is about the platform, not about one asset.">
+                        <a
+                          className="alert-pill-item-link"
+                          href={grafanaAlertUrl(a.alert_name)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setOpen(false)}
+                        >
+                          {body}
+                        </a>
+                      </Tooltip>
                     ) : body}
                   </li>
                 )
@@ -173,18 +169,19 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
               : `Polled every ${POLL_INTERVAL_MS / 1000}s (Realtime disabled).`}
             {/* The record of what has fired and cleared is Grafana's, so the list links to it
                 rather than keeping a second one. */}
-            <a
-              className="alert-pill-history"
-              href={GRAFANA_ALERT_HISTORY_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              title="Open Grafana's alert history, in a new tab: every alert that fired or resolved in the last 24 hours"
-            >
-              Alert history in Grafana
-              <span className="sr-only"> (opens Grafana in a new tab)</span>
-              <IconExternalLink size={10} aria-hidden="true" />
-            </a>
+            <Tooltip text="Every alert that fired or resolved in the last 24 hours">
+              <a
+                className="alert-pill-history"
+                href={GRAFANA_ALERT_HISTORY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+              >
+                Alert history in Grafana
+                <span className="sr-only"> (opens Grafana in a new tab)</span>
+                <IconExternalLink size={10} aria-hidden="true" />
+              </a>
+            </Tooltip>
           </div>
         </div>
       )}

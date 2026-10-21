@@ -1,6 +1,7 @@
 import React, { useId, useLayoutEffect, useRef } from 'react'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconAlertTriangle, IconX } from './Icons'
+import { Tooltip } from './Tooltip'
 
 const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', wide: 'modal-wide', full: 'modal-full' }
 
@@ -220,15 +221,11 @@ export function Modal({
           </h2>
           <div className="modal-header-controls">
             {headerActions}
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon"
-              onClick={onClose}
-              aria-label="Close"
-              title="Close (Esc)"
-            >
-              <IconX size={15} />
-            </button>
+            <Tooltip text="Close (Esc)">
+              <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">
+                <IconX size={15} />
+              </button>
+            </Tooltip>
           </div>
         </div>
 

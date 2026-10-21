@@ -76,9 +76,9 @@ describe('App Component', () => {
     })
 
     expect(screen.getByText('The shopfloor data platform')).toBeInTheDocument()
-    // The account control at the rail's foot names the address in its hover text.
-    expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
-      'title', expect.stringContaining('admin@aber.local')
+    // The account control at the rail's foot names the address, which its tooltip repeats.
+    expect(screen.getByRole('button', { name: /account menu/i })).toHaveAccessibleName(
+      expect.stringContaining('admin@aber.local')
     )
   })
 
@@ -189,7 +189,8 @@ describe('App Component', () => {
       expect(screen.getAllByText('Site Map').length).toBeGreaterThan(0)
     })
 
-    const devicesTab = screen.getByText('Devices')
+    // The page's link, not the Capture page's Devices tab, once permissions list that page too.
+    const devicesTab = screen.getByRole('link', { name: 'Devices' })
     fireEvent.click(devicesTab)
 
     await waitFor(() => {

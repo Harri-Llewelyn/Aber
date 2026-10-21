@@ -5,6 +5,7 @@ import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
+import { getByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -115,7 +116,7 @@ describe('Registry — read-only protections and status badges', () => {
 
     const row = rowFor('Robot_Arm_Schema')
     expect(within(row).getByText('v1 · Active')).toBeTruthy()
-    expect(within(row).getByTitle('Read-only — this version is Active')).toBeTruthy()
+    expect(within(row).getByRole('img', { name: 'Read-only' })).toBeTruthy()
   })
 
   it('badges an archived schema as v1 · Archived', async () => {
@@ -129,7 +130,7 @@ describe('Registry — read-only protections and status badges', () => {
 
     const archived = rowFor('Robot_Arm_Schema')
     expect(within(archived).getByText('v1 · Archived')).toBeTruthy()
-    expect(within(archived).getByTitle('Read-only — this version is Archived')).toBeTruthy()
+    expect(within(archived).getByRole('img', { name: 'Read-only' })).toBeTruthy()
   })
 
   it('offers no edit affordance on a published version — only View and Create Version', async () => {
@@ -355,8 +356,8 @@ describe('Downloading a version definition', () => {
     const modal = document.querySelector('.modal')
     fireEvent.click(within(modal).getByLabelText('Systems/SPINDLE_TEMPERATURE'))
 
-    expect(within(modal).getByTitle(
-      'Downloads the last saved draft — unsaved changes are not included'
+    expect(getByTooltip(
+      'Downloads the last saved draft — unsaved changes are not included', modal
     )).toBeTruthy()
   })
 })

@@ -4,7 +4,7 @@
  * pages' own banners and queues.
  */
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { navSignalsFrom } from '../hooks/useNavSignals'
 import { Sidebar } from '../components/common/Sidebar'
@@ -81,12 +81,14 @@ describe('navSignalsFrom', () => {
 describe('Sidebar shows a signal', () => {
   const item = (label) => screen.getAllByRole('link').find(b => b.getAttribute('aria-label')?.startsWith(label))
 
-  it('colours the flagged page and carries the reason on its title and label', () => {
+  it('colours the flagged page and carries the reason in its tooltip and label', () => {
     render(<Sidebar tabs={TABS} currentTab="site-map" onNavigate={vi.fn()}
       signals={{ devices: { tone: 'warning', count: 2, note: '2 devices awaiting zero-touch onboarding approval' } }} />)
     const devices = item('Devices')
     expect(devices.className).toMatch(/sidebar-item-warning/)
-    expect(devices).toHaveAttribute('title', 'Devices — 2 devices awaiting zero-touch onboarding approval')
+    expect(devices).not.toHaveAttribute('title')
+    fireEvent.focus(devices, { relatedTarget: document.body })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Devices — 2 devices awaiting zero-touch onboarding approval')
     expect(devices).toHaveAttribute('aria-label', 'Devices — 2 devices awaiting zero-touch onboarding approval')
     // An unflagged page reads as it always did, with no number.
     expect(item('Gateways').className).not.toMatch(/sidebar-item-warning/)

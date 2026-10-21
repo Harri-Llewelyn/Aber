@@ -290,7 +290,8 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # backup cannot use stops it before the first dump, a run leaves a manifest naming every file or
 # leaves nothing, and the restore replays each file that manifest names into its own database.
 # And the half of `npm run try` that needs no cluster: the tools it checks for, what holds a port,
-# and the published chart and values it installs.
+# and the published chart and values it installs. And the ESLint rule that fails on a `title` on an
+# HTML element in the dashboard, the browser's tooltip, against a fixture and its allow-list.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second

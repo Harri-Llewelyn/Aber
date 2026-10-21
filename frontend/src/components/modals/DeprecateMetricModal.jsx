@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
+import { Tooltip } from '../common/Tooltip'
 
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
   const [supersededBy, setSupersededBy] = useState('')
@@ -29,18 +30,19 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
     >
       <div className="form-group">
         <label className="form-label" htmlFor="deprecate-superseded-by">Superseded By (optional)</label>
-        <select
-          id="deprecate-superseded-by"
-          className="form-control"
-          value={supersededBy}
-          onChange={e => setSupersededBy(e.target.value)}
-          title="Point future schema authors at a replacement metric"
-        >
-          <option value="">— No replacement —</option>
-          {replacementCandidates.map(m => (
-            <option key={m.metric_uuid} value={m.metric_uuid}>{m.name}</option>
-          ))}
-        </select>
+        <Tooltip text="Point future schema authors at a replacement metric">
+          <select
+            id="deprecate-superseded-by"
+            className="form-control"
+            value={supersededBy}
+            onChange={e => setSupersededBy(e.target.value)}
+          >
+            <option value="">— No replacement —</option>
+            {replacementCandidates.map(m => (
+              <option key={m.metric_uuid} value={m.metric_uuid}>{m.name}</option>
+            ))}
+          </select>
+        </Tooltip>
       </div>
     </ConfirmModal>
   )

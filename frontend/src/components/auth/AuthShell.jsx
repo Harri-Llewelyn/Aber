@@ -2,6 +2,7 @@ import React from 'react'
 import AmbientPipeline from '../common/AmbientPipeline'
 import { IconSun, IconMoon } from '../common/Icons'
 import { AberMark } from '../common/AberMark'
+import { Tooltip } from '../common/Tooltip'
 
 /**
  * The chrome every pre-authentication screen shares: the animated ground, the theme toggle and
@@ -14,15 +15,16 @@ export function AuthShell({ theme, onToggleTheme, title, subtitle, children }) {
     <div style={{ position: 'relative', display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '20px', overflow: 'hidden' }}>
       <AmbientPipeline theme={theme} />
 
-      <button
-        type="button"
-        onClick={onToggleTheme}
-        className="auth-theme-toggle"
-        title={`Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme`}
-        aria-label={`Theme: ${theme === 'dark' ? 'dark' : 'light'}. Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme.`}
-      >
-        {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
-      </button>
+      <Tooltip text={`Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme`}>
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          className="auth-theme-toggle"
+          aria-label={`Theme: ${theme === 'dark' ? 'dark' : 'light'}. Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme.`}
+        >
+          {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
+        </button>
+      </Tooltip>
 
       <div className="card" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>

@@ -190,6 +190,6 @@ describe('the Profile page', () => {
     signIn({ id: 'machine-1', email: null, app_metadata: {} })
     const button = await openProfile()
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', expect.stringMatching(/no password/))
+    expect(button).toHaveAccessibleDescription(expect.stringMatching(/no password/))
   })
 })

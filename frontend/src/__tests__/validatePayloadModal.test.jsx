@@ -14,7 +14,7 @@ const SCHEMAS = [
 
 beforeEach(() => vi.clearAllMocks())
 
-const target = () => screen.getByTitle('Choose schema to test against')
+const target = () => screen.getByLabelText('Select Target Schema Definition')
 
 describe('ValidatePayloadModal', () => {
   /**

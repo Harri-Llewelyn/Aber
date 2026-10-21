@@ -29,6 +29,7 @@ import { StatusBadge, gatewayStatusTone } from '../common/StatusBadge'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { RepoLink } from '../common/HelpLink'
@@ -436,7 +437,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           className="form-control control-sm"
           value={filterMode}
           onChange={e => setFilterMode(e.target.value)}
-          title="Filter by lifecycle state"
+          aria-label="Lifecycle"
         >
           <option value="active">Active ({gateways.filter(g => !g.is_archived).length})</option>
           <option value="archived">Archived ({gateways.filter(g => g.is_archived).length})</option>
@@ -444,28 +445,33 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         </select>
 
         {/* Derived from heartbeat age as well as the stored status: STALE is never stored. */}
-        <select className="form-control control-sm" value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} title="Filter by status; Stale is a heartbeat older than 90 seconds">
-          <option value="">Any status</option>
-          <option value="ONLINE">Online</option>
-          <option value="STALE">Stale</option>
-          <option value="OFFLINE">Offline</option>
-        </select>
+        <Tooltip text="Stale is a gateway whose last heartbeat is older than 90 seconds.">
+          <select className="form-control control-sm" value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} aria-label="Status">
+            <option value="">Any status</option>
+            <option value="ONLINE">Online</option>
+            <option value="STALE">Stale</option>
+            <option value="OFFLINE">Offline</option>
+          </select>
+        </Tooltip>
 
         {/* The same value the Type column prints, through the same helper. */}
-        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (a connector inside this stack), Simulated (host-run, readings generated), or Playback (republishes recorded captures)">
-          <option value="">Any type</option>
-          {LISTED_TYPES.map(t => (
-            <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
-          ))}
-        </select>
+        <Tooltip text={kindFilter ? gatewayTypeDescription(kindFilter) : null}>
+          <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label="Type">
+            <option value="">Any type</option>
+            {LISTED_TYPES.map(t => (
+              <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+            ))}
+          </select>
+        </Tooltip>
 
-        <button
-          className={`btn btn-sm ${quarantineOnly ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setQuarantineOnly(v => !v)}
-          title="Show only gateways currently reporting devices held in quarantine — points at the misconfigured edge node when several devices fail at once"
-        >
-          <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
-        </button>
+        <Tooltip text="Gateways reporting devices held in quarantine. Several failing at once points at a misconfigured edge node.">
+          <button
+            className={`btn btn-sm ${quarantineOnly ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setQuarantineOnly(v => !v)}
+          >
+            <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
+          </button>
+        </Tooltip>
 
         <div className="filter-bar-actions">
           <ClearFilters count={activeFilterCount} onClear={resetFilters} />
@@ -474,7 +480,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             permitted={canManage}
             deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
             onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
-            title="Register new gateway"
           >
             <IconPlus size={14} /> New Gateway
           </ActionButton>
@@ -495,13 +500,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
              <table>
                <thead>
                  <tr>
-                   <SortHeader sort={sort} column="name" title="Human-readable gateway name">Gateway Name</SortHeader>
-                   {!compact && <SortHeader sort={sort} column="uuid" title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</SortHeader>}
-                   <SortHeader sort={sort} column="type" title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</SortHeader>
-                   <SortHeader sort={sort} column="location" title="Where this gateway serves: a cell, a whole area, or the whole site">Location</SortHeader>
+                   <SortHeader sort={sort} column="name">Gateway Name</SortHeader>
+                   {!compact && <SortHeader sort={sort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug edge node id is derived from it.">Gateway UUID</SortHeader>}
+                   <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
+                   <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices inherit only a cell.">Location</SortHeader>
                    <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
-                   <SortHeader sort={sort} column="last_heartbeat" title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</SortHeader>
-                   {!compact && <SortHeader sort={sort} column="devices" title="Devices assigned to this gateway">Connected Devices</SortHeader>}
+                   <SortHeader sort={sort} column="last_heartbeat" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
+                   {!compact && <SortHeader sort={sort} column="devices">Connected Devices</SortHeader>}
                  </tr>
                </thead>
                <tbody>
@@ -527,7 +532,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                            e.preventDefault()
                            setSelectedId(id => id === g.gateway_id ? null : g.gateway_id)
                          }}
-                         title="Click to inspect this gateway in the details panel"
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
@@ -536,17 +540,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                              <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />
                            )}
                            {groupMismatch && (
-                             <div
-                               className="cell-meta gateway-cell-warning"
-                               title="Subscribers to the registered group miss this gateway's messages. Open it for what to change."
-                             >
-                               Publishes under group {groupMismatch.observed}; registered under {groupMismatch.registered}
-                             </div>
+                             <Tooltip text="Subscribers to the registered group miss this gateway's messages. Open it for what to change.">
+                               <div className="cell-meta gateway-cell-warning">
+                                 Publishes under group {groupMismatch.observed}; registered under {groupMismatch.registered}
+                               </div>
+                             </Tooltip>
                            )}
                          </td>
                          {!compact && <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>}
                          <td>
-                           <Badge tone={gatewayTypeTone(type)} size="sm" title={gatewayTypeDescription(type)}>
+                           <Badge tone={gatewayTypeTone(type)} size="sm">
                              {gatewayTypeLabel(type)}
                            </Badge>
                          </td>
@@ -556,26 +559,25 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                                not printed. Site-Wide is an answer for every other gateway and must
                                not read as the unanswered case. */}
                            {!gatewayAcceptsCell(g)
-                             ? <span className="cell-meta" title={`${gatewayTypeLabel(type)} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(type)} lane, which takes precedence over cell membership.`}>—</span>
+                             ? <span className="cell-meta">—</span>
                              : g.location_scope === SCOPE_SITE_WIDE
-                               ? <Badge tone="neutral" size="sm" title="Serves the whole campus rather than one cell. Its devices need their own cell.">Site-Wide</Badge>
+                               ? <Badge tone="neutral" size="sm">Site-Wide</Badge>
                                : g.location_scope === SCOPE_AREA_WIDE
-                                 ? <Badge tone="neutral" size="sm" title={`Serves the whole of ${areas.find(ar => ar.area_id === g.area_id)?.area_name || 'its area'} rather than one cell. Its devices need their own cell.`}>Area-Wide</Badge>
+                                 ? <Badge tone="neutral" size="sm" title={`Serves the whole of ${areas.find(ar => ar.area_id === g.area_id)?.area_name || 'its area'}`}>Area-Wide</Badge>
                                : g.cell_id
                                  ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                                 : <span className="cell-meta gateway-cell-warning" title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
+                                 : <span className="cell-meta gateway-cell-warning">No cell</span>}
                          </td>
                          <td>
                            {g.is_archived
                              ? <span className="cell-meta">—</span>
                              : <StatusBadge status={liveStatus} />}
                          </td>
-                         <td
-                           className={`cell-meta${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}
-                           title={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : 'No Sparkplug B node message has ever been received from this edge node'}
-                         >
-                           {formatHeartbeat(g.last_heartbeat)}
-                         </td>
+                         <Tooltip text={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : null}>
+                           <td className={`cell-meta${liveStatus === 'STALE' ? ' gateway-cell-warning' : ''}`}>
+                             {formatHeartbeat(g.last_heartbeat)}
+                           </td>
+                         </Tooltip>
                          {!compact && <td>
                            {g.is_archived ? (
                              <span className="cell-meta">—</span>
@@ -593,7 +595,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                                    key: '__summary__',
                                    priority: true,
                                    className: 'badge badge-sm badge-neutral',
-                                   title: 'Connected devices breakdown',
                                    content: `${onlineCount} Online / ${offlineCount} Offline`
                                  },
                                  ...gwAssets.map(a => ({
@@ -630,7 +631,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving} title="Cancel">Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
@@ -645,7 +646,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   ? 'Choose which area the gateway serves'
                   : proposeMode
                     ? 'Ask for these changes — an approver applies them, or says why not'
-                    : 'Save gateway configuration'}
+                    : undefined}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -653,20 +654,20 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           }
         >
         <div className="form-group">
-          <label className="form-label">Gateway Name</label>
-          <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
+          <label className="form-label" htmlFor="gateway-name">Gateway Name</label>
+          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" />
           <div className="form-hint">
             A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
           </div>
         </div>
         <div className="form-group">
-          <label className="form-label">Description</label>
+          <label className="form-label" htmlFor="gateway-description">Description</label>
           <textarea
+            id="gateway-description"
             className="form-control"
             rows={2}
             value={form.description || ''}
             onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            title="Optional free-text note about this gateway"
             placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
           />
           <div className="form-hint">
@@ -691,7 +692,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
                 : {})
             }))}
-            title={proposeMode ? withheldFields.deployment : "Where this gateway's connector runs, and whether its readings are real"}
           >
             {SELECTABLE_TYPES.map(t => (
               <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
@@ -720,11 +720,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             cells={cells}
             areas={areas}
             disabled={!formAcceptsCell}
-            title={formAcceptsCell
-              ? undefined
-              : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
             cellEmptyLabel="— No cell assigned —"
-            cellTitle="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
           />
 
           <div className="form-hint">
@@ -749,18 +745,18 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               value={form.sparkplug_group ?? ''}
               onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
               aria-invalid={groupProblem ? true : undefined}
-              title={proposeMode ? withheldFields.sparkplug_group : 'The second level of every topic this gateway publishes'}
             />
             {groupProblem && <div className="form-hint hint-danger" role="alert">{groupProblem}</div>}
             {offeredGroup && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm gateway-group-offer"
-                onClick={() => setForm(f => ({ ...f, sparkplug_group: offeredGroup }))}
-                title="The group this gateway was last seen publishing under"
-              >
-                Use {offeredGroup}
-              </button>
+              <Tooltip text="The group this gateway was last seen publishing under">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm gateway-group-offer"
+                  onClick={() => setForm(f => ({ ...f, sparkplug_group: offeredGroup }))}
+                >
+                  Use {offeredGroup}
+                </button>
+              </Tooltip>
             )}
             {/* What a change does, said before it is saved. The broker grants a gateway every group
                 under its own node id, so only the edge node and the Directory are concerned. */}
@@ -788,8 +784,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         )}
         <div className="form-group">
-          <label className="form-label">Gateway Access URL (Optional UI Console)</label>
-          <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
+          <label className="form-label" htmlFor="gateway-access-url">Gateway Access URL (Optional UI Console)</label>
+          <input id="gateway-access-url" className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" />
         </div>
         {proposeMode && (
           <div className="form-group">

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { IconCheck, IconCopy, IconDownload, IconExternalLink } from '../common/Icons'
+import { Tooltip } from '../common/Tooltip'
 import {
   BRING_YOUR_OWN_EDGE_NODE, ROOT_CERTIFICATE_PATH, brokerAddress, brokerRow, helpSourceUrl,
   primaryHostId,
@@ -13,16 +14,17 @@ function Setting({ id, label, value, copyLabel, copy, copied, hint, warning }) {
       <label className="form-label" htmlFor={id}>{label}</label>
       <div className="gateway-copy-row">
         <input id={id} className="form-control mono" readOnly value={value || ''} />
-        <button
-          type="button"
-          className="btn btn-ghost btn-icon"
-          onClick={() => copy(id, value)}
-          disabled={!value}
-          title={`Copy ${copyLabel}`}
-          aria-label={`Copy ${copyLabel}`}
-        >
-          {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
-        </button>
+        <Tooltip text={`Copy ${copyLabel}`}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            onClick={() => copy(id, value)}
+            disabled={!value}
+            aria-label={`Copy ${copyLabel}`}
+          >
+            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
+          </button>
+        </Tooltip>
       </div>
       {warning && <div className="form-hint hint-warning">{warning}</div>}
       {hint && <div className="form-hint">{hint}</div>}
@@ -129,24 +131,26 @@ export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
           <label className="form-label" htmlFor="edge-root">Root certificate</label>
           <div className="gateway-copy-row">
             <input id="edge-root" className="form-control mono" readOnly value={rootUrl} />
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon"
-              onClick={() => copy('edge-root', rootUrl)}
-              title="Copy the root certificate’s address"
-              aria-label="Copy the root certificate’s address"
-            >
-              {copied === 'edge-root' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-            </button>
-            <a
-              className="btn btn-ghost btn-icon"
-              href={ROOT_CERTIFICATE_PATH}
-              download="aber-root-ca.pem"
-              title="Download the root certificate"
-              aria-label="Download the root certificate"
-            >
-              <IconDownload size={13} />
-            </a>
+            <Tooltip text="Copy the root certificate’s address">
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => copy('edge-root', rootUrl)}
+                aria-label="Copy the root certificate’s address"
+              >
+                {copied === 'edge-root' ? <IconCheck size={13} /> : <IconCopy size={13} />}
+              </button>
+            </Tooltip>
+            <Tooltip text="Download the root certificate">
+              <a
+                className="btn btn-ghost btn-icon"
+                href={ROOT_CERTIFICATE_PATH}
+                download="aber-root-ca.pem"
+                aria-label="Download the root certificate"
+              >
+                <IconDownload size={13} />
+              </a>
+            </Tooltip>
           </div>
           <div className="form-hint">
             The node trusts this root to check the broker’s certificate. It is public. It is the

@@ -160,7 +160,7 @@ describe('the cell column', () => {
 })
 
 describe('the cell filter', () => {
-  const cellSelect = () => { openFilters(); return screen.getByTitle(/Filter by the cell a device resolves to/i) }
+  const cellSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Cell' }) }
 
   it('matches an inherited device when filtering by its resolved cell', async () => {
     // The regression this guards: filtering on cell_id would match only explicitly filed
@@ -203,7 +203,7 @@ describe('the cell filter', () => {
 })
 
 describe('the edit form', () => {
-  const cellPicker = () => screen.getByTitle(/Where this device physically sits/i)
+  const cellPicker = () => document.getElementById('device-cell')
 
   it('names the inherited cell in the placeholder instead of calling it "None"', async () => {
     // Empty means INHERIT, not unassigned. A "None" label would misdescribe the default.
@@ -335,7 +335,7 @@ describe('the edit form', () => {
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
     expect(document.querySelector('#device-cell').disabled).toBe(true)
-    expect(screen.getByText(/belong to the Simulated lane/i)).toBeInTheDocument()
+    expect(screen.getByText(/belong to the Simulated lane/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   it('keeps a cell already stored on a device whose gateway went simulated', async () => {
@@ -367,7 +367,7 @@ describe('the Sparkplug topic in the context panel', () => {
     await show([device()])
     openPanel()
     expect(topicButton()).toBeInTheDocument()
-    expect(screen.queryByText(/Click to copy/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Click to copy/i, { ignore: '[role=tooltip]' })).not.toBeInTheDocument()
   })
 
   it('fills the edge node segment in from the serving gateway', async () => {
@@ -432,8 +432,8 @@ describe('the Location row in the context panel', () => {
   it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
     const value = await location()
     expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
-    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAttribute('title', 'Open this area on the Areas page')
-    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAttribute('title', 'Open this cell on the Cells page')
+    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open this area on the Areas page')
+    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open this cell on the Cells page')
     const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
     expect(labels).not.toContain('Area (resolved)')
     expect(labels).not.toContain('Location Source')
@@ -514,7 +514,7 @@ describe('approving a quarantined device', () => {
 
   it('offers a cell picker again, defaulting to inherit', async () => {
     await openApproval()
-    const picker = screen.getByTitle(/Where this device sits/i)
+    const picker = document.getElementById('approve-cell')
     expect(picker.value).toBe('')
   })
 
@@ -526,7 +526,7 @@ describe('approving a quarantined device', () => {
   it('forwards the chosen cell to the edge function', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     await openApproval()
-    fireEvent.change(screen.getByTitle(/Where this device sits/i), { target: { value: CELL_2 } })
+    fireEvent.change(document.getElementById('approve-cell'), { target: { value: CELL_2 } })
     fireEvent.click(approveButton())
 
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
@@ -630,7 +630,7 @@ describe('replay lanes', () => {
     await show([device(), shadow({ is_archived: true })])
     openFilters()
     fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
-    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     expect(screen.getAllByText('ARCHIVED').length).toBeGreaterThan(0)
   })

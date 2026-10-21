@@ -4,13 +4,14 @@
  * lists every other page reads.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cellUrl, siteMapAreaUrl } from '../routes'
 import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton, pageToolbar } from '../test/cardHeading'
+import { getByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -325,7 +326,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).getByRole('link', { name: /Open Gateways page/ })).not.toHaveClass('btn-primary')
     // The panel's title carries the lane's own icon.
     expect(panel().querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
-    expect(within(panel()).getByTitle('File these 1 device(s) on the Devices page')).toBeInTheDocument()
+    expect(getByTooltip('File these 1 device(s) on the Devices page', panel())).toBeInTheDocument()
   })
 
   it('offers the Devices page alone to a lane holding only devices', async () => {
@@ -618,7 +619,7 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     // Every list opens on Active.
     expect(screen.queryByText('Press Hall')).toBeNull()
-    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
     const row = rowFor('Press Hall')
     expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Press Hall'))
@@ -765,7 +766,7 @@ describe('AreasTab is the house list card', () => {
     await renderAreas({ areas: [] })
     expect(screen.getByText('No areas yet. Add one, then file the cells into it.')).toBeInTheDocument()
 
-    document.body.innerHTML = ''
+    cleanup()
     await renderAreas()
     fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'nothing-like-this' } })
     expect(screen.getByText('No areas match these filters.')).toBeInTheDocument()
@@ -778,11 +779,11 @@ describe('AreasTab is the house list card', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
 
-    document.body.innerHTML = ''
+    cleanup()
     render(<AreasTab showToast={vi.fn()} hasPermission={() => false} onSelectCell={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('button', { name: /New Area/ })).toBeDisabled())
-    expect(screen.getByRole('button', { name: /New Area/ })).toHaveAttribute('title', expect.stringMatching(/^Requires /))
-    expect(screen.getByRole('button', { name: /New Area/ }).title).not.toMatch(/Admin permissions/)
+    expect(screen.getByRole('button', { name: /New Area/ })).toHaveAccessibleDescription(expect.stringMatching(/^Requires /))
+    expect(screen.getByRole('button', { name: /New Area/ })).not.toHaveAccessibleDescription(/Admin permissions/)
   })
 })
 
@@ -839,7 +840,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(planPanel().querySelector('.area-plan-preview')).toBeNull()
     expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
 
-    document.body.innerHTML = ''
+    cleanup()
     await openArea('North Shop')
     expect(within(planPanel()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
     expect(within(planPanel()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
@@ -931,7 +932,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('counts the lifecycle select and resets it to Active', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
-    const lifecycle = screen.getByTitle('Filter by lifecycle state')
+    const lifecycle = screen.getByRole('combobox', { name: 'Lifecycle' })
     expect(lifecycle).toHaveValue('active')
 
     fireEvent.change(lifecycle, { target: { value: 'archived' } })

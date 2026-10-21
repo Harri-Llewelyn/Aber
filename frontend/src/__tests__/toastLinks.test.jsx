@@ -122,7 +122,7 @@ describe('a toast with a destination', () => {
     act(() => { hook.showToast('2 metrics carried no semantic id', 'warning', { to: unmappedMetricsUrl() }) })
     const link = within(toastFor('2 metrics carried no semantic id')).getByRole('link', { name: /2 metrics carried no semantic id/ })
     expect(link).toHaveAttribute('href', '/metrics?unmapped=1')
-    expect(link).toHaveAttribute('title', 'Go to Metrics')
+    expect(link).toHaveAccessibleDescription('Go to Metrics')
     expect(link).not.toHaveAttribute('target')
 
     fireEvent.click(link)

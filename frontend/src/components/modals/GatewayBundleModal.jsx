@@ -6,6 +6,7 @@ import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { formatCountdown, tokenTimeRemaining } from '../../utils/gatewayStatus'
 import { typedNameMatches } from '../../utils/gatewayType'
+import { Tooltip } from '../common/Tooltip'
 import {
   IconCheck, IconCopy, IconDownload, IconRefreshCw, IconShieldAlert
 } from '../common/Icons'
@@ -169,32 +170,35 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
         <button className="btn btn-ghost" onClick={onClose}>Done</button>
         {isCommand
           ? (
-            <button
-              className="btn btn-ghost"
-              onClick={() => switchTo('bundle')}
-              title="For a machine that already has Docker, or one you set up by hand: mint a new token and download the bundle instead. This invalidates the command above."
-            >
-              <IconDownload size={14} /> Download the bundle instead
-            </button>
+            <Tooltip text="For a machine that already has Docker, or one you set up by hand: mint a new token and download the bundle instead. This invalidates the command above.">
+              <button
+                className="btn btn-ghost"
+                onClick={() => switchTo('bundle')}
+              >
+                <IconDownload size={14} /> Download the bundle instead
+              </button>
+            </Tooltip>
           )
           : installer?.available && (
-            <button
-              className="btn btn-ghost"
-              onClick={() => switchTo('command')}
-              title="Mint a new token and show the one-line install command instead. This invalidates the bundle you already have."
-            >
-              <IconCopy size={14} /> Use the install command instead
-            </button>
+            <Tooltip text="Mint a new token and show the one-line install command instead. This invalidates the bundle you already have.">
+              <button
+                className="btn btn-ghost"
+                onClick={() => switchTo('command')}
+              >
+                <IconCopy size={14} /> Use the install command instead
+              </button>
+            </Tooltip>
           )}
-        <button
-          className="btn btn-primary"
-          onClick={askToReissue}
-          title={isCommand
-            ? 'Mint a new token and show a fresh command. This invalidates the one you already have.'
-            : 'Mint a new token and download a fresh bundle. This invalidates the one you already have.'}
-        >
-          <IconRefreshCw size={14} /> {isCommand ? 'Re-issue Command' : 'Re-issue Bundle'}
-        </button>
+        <Tooltip text={isCommand
+          ? 'Mint a new token and show a fresh command. This invalidates the one you already have.'
+          : 'Mint a new token and download a fresh bundle. This invalidates the one you already have.'}>
+          <button
+            className="btn btn-primary"
+            onClick={askToReissue}
+          >
+            <IconRefreshCw size={14} /> {isCommand ? 'Re-issue Command' : 'Re-issue Bundle'}
+          </button>
+        </Tooltip>
       </>
     )
   }
@@ -293,17 +297,18 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                   <div className="form-label">
                     {isCommand ? 'Paste on the appliance, as a user with sudo' : 'On the appliance'}
                   </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={copyCommands}
-                    title={isCommand ? 'Copy the command' : 'Copy all three commands'}
-                  >
-                    {copied === 'copied'
-                      ? <><IconCheck size={12} /> Copied</>
-                      : copied === 'failed'
-                        ? <><IconShieldAlert size={12} /> Copy failed</>
-                        : <><IconCopy size={12} /> {isCommand ? 'Copy Command' : 'Copy Commands'}</>}
-                  </button>
+                  <Tooltip text={isCommand ? null : 'Copy all three commands'}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={copyCommands}
+                    >
+                      {copied === 'copied'
+                        ? <><IconCheck size={12} /> Copied</>
+                        : copied === 'failed'
+                          ? <><IconShieldAlert size={12} /> Copy failed</>
+                          : <><IconCopy size={12} /> {isCommand ? 'Copy Command' : 'Copy Commands'}</>}
+                    </button>
+                  </Tooltip>
                 </div>
                 <pre className={`mono gateway-code${isCommand ? ' gateway-code-wrap' : ''}`}>{commands}</pre>
                 <div className="form-hint">

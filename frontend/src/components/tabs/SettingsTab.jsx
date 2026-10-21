@@ -11,6 +11,7 @@ import { navigate, pageUrl, useUrlState, useUrlTab, pathSlug } from '../../hooks
 import { SETTINGS_TABS } from '../../navigation'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
+import { Tooltip } from '../common/Tooltip'
 
 // Settings another page's destination dialog edits, so each value has one editor.
 const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
@@ -163,13 +164,13 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             setting appears to do nothing. A read-only row's source is not a fallback -- it is
             where the value came from and the only place it can be changed. */}
         {setting.fallback_source && (
-          <p
-            className="setting-fallback"
-            title={setting.read_only
-              ? 'Where this value is set. Changing it here is not possible'
-              : 'What applies if this setting is never changed'}
-          >
-            {setting.read_only ? 'Set by ' : 'Falls back to '}
+          <p className="setting-fallback">
+            {/* On the words alone: the copy chip after them has a tooltip of its own. */}
+            <Tooltip text={setting.read_only
+              ? 'Where this value is set. Changing it here is not possible.'
+              : 'What applies if this setting is never changed.'}>
+              <span>{setting.read_only ? 'Set by ' : 'Falls back to '}</span>
+            </Tooltip>
             {copy ? (
               <>{copy.lead}<CopyableId value={copy.value} label={copy.label} onNotify={showToast} /></>
             ) : (

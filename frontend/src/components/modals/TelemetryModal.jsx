@@ -103,7 +103,6 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
         <button
           className="btn btn-primary btn-sm"
           onClick={() => onExport?.(device, [...selected])}
-          title={`Export ${selected.size} selected metric${selected.size === 1 ? '' : 's'} as CSV`}
         >
           <IconDownload size={12} /> Export CSV ({selected.size})
         </button>
@@ -135,12 +134,11 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
                     checked={allSelected}
                     onChange={toggleAll}
                     aria-label="Select all metrics"
-                    title="Select every metric"
                   />
                 </th>
                 <SortHeader sort={sort} column="metric" title="Metric name as published on the wire">Metric</SortHeader>
-                <SortHeader sort={sort} column="last_updated" title="When this metric last reported">Last Updated</SortHeader>
-                <th title="Most recent value">Latest Value</th>
+                <SortHeader sort={sort} column="last_updated">Last Updated</SortHeader>
+                <th>Latest Value</th>
               </tr>
             </thead>
             <tbody>

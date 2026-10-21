@@ -4,7 +4,7 @@ import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
-import { TooltipBubble, useTooltip } from '../common/Tooltip'
+import { Tooltip, TooltipBubble, useTooltip } from '../common/Tooltip'
 import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
@@ -784,16 +784,15 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
       <p className="trail-causation-hint">{hint}</p>
 
       {offerControl && (
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm trail-causation-all"
-          onClick={() => onShowTransaction(event.causation_id)}
-          title={`Search for transaction ${event.causation_id}, so every row it wrote is loaded `
-               + 'whatever kind of entity it touched. Clears the entity and action filters and '
-               + 'shows deleted entities, each of which would hide part of one act.'}
-        >
-          Show whole transaction
-        </button>
+        <Tooltip text="Loads every row the transaction wrote, whatever it touched. It clears the entity and action filters and shows deleted entities.">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm trail-causation-all"
+            onClick={() => onShowTransaction(event.causation_id)}
+          >
+            Show whole transaction
+          </button>
+        </Tooltip>
       )}
 
       <ul className="trail-causation-list">
@@ -806,7 +805,6 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
                 type="button"
                 className="trail-causation-item"
                 onClick={() => onSelect(s.event_id)}
-                title={`Open this change to ${name || s.entity_id}`}
                 /* Explicit, because the computed name would read the spans in order without saying
                    that activating it opens the row. */
                 aria-label={`Open this change to ${name || s.entity_id}`}
@@ -908,13 +906,13 @@ function EventDiff({ event, diff }) {
               const after  = formatValue(d.after)
               return (
                 <tr key={d.field}>
-                  <th scope="row" title={d.field}>{d.field}</th>
+                  <th scope="row">{d.field}</th>
                   {!oneSided && (
-                    <td className="trail-diff-before" title={before || undefined}>
+                    <td className="trail-diff-before">
                       {before === null ? <EmptyValue label="Not set" /> : before}
                     </td>
                   )}
-                  <td className="trail-diff-after" title={(action === 'DELETE' ? before : after) || undefined}>
+                  <td className="trail-diff-after">
                     {action === 'DELETE'
                       ? (before === null ? <EmptyValue label="Not set" /> : before)
                       : (after === null ? <EmptyValue label="Cleared" /> : after)}
@@ -1603,7 +1601,7 @@ export function AuditTrailTab({ userRole, showToast }) {
             className="form-control control-sm"
             value={rangePreset}
             onChange={e => setRangePreset(e.target.value)}
-            title="Limit the timeline to a time range"
+            aria-label="Time range"
           >
             {TIME_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             <option value="custom">Custom range…</option>
@@ -1614,24 +1612,26 @@ export function AuditTrailTab({ userRole, showToast }) {
             <>
               {/* `datetime-local`, not `date`: a date pair cannot express a window narrower than a
                   day. `timeWindow()` widens the end bound to :59.999. */}
-              <input
-                type="datetime-local"
-                className="form-control"
-                style={{ width: '210px' }}
-                value={customStart}
-                onChange={e => setCustomStart(e.target.value)}
-                title="Range start, in local time"
-                aria-label="Range start"
-              />
-              <input
-                type="datetime-local"
-                className="form-control"
-                style={{ width: '210px' }}
-                value={customEnd}
-                onChange={e => setCustomEnd(e.target.value)}
-                title="Range end, in local time (inclusive of that minute)"
-                aria-label="Range end"
-              />
+              <Tooltip text="In local time.">
+                <input
+                  type="datetime-local"
+                  className="form-control"
+                  style={{ width: '210px' }}
+                  value={customStart}
+                  onChange={e => setCustomStart(e.target.value)}
+                  aria-label="Range start"
+                />
+              </Tooltip>
+              <Tooltip text="In local time, and including that minute.">
+                <input
+                  type="datetime-local"
+                  className="form-control"
+                  style={{ width: '210px' }}
+                  value={customEnd}
+                  onChange={e => setCustomEnd(e.target.value)}
+                  aria-label="Range end"
+                />
+              </Tooltip>
             </>
           )}
 
@@ -1642,7 +1642,7 @@ export function AuditTrailTab({ userRole, showToast }) {
               className="form-control"
               value={entityTypeFilter}
               onChange={e => setEntityTypeFilter(e.target.value)}
-              title="Show only events against one kind of entity"
+              aria-label="Entity"
             >
               <option value="">All entities</option>
               {/* Every kind this role may ask for, from the same table the sections are built from,
@@ -1652,46 +1652,49 @@ export function AuditTrailTab({ userRole, showToast }) {
               ))}
             </select>
 
-            <select
-              className="form-control"
-              value={actionFilter}
-              onChange={e => setActionFilter(e.target.value)}
-              title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The markers below are a separate classification; see the key above the timeline."
-            >
-              <option value="">Any action</option>
-              {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
+            <Tooltip text="The database action on the audit row, as the drawer's badge shows it. The key's markers are a separate classification.">
+              <select
+                className="form-control"
+                value={actionFilter}
+                onChange={e => setActionFilter(e.target.value)}
+                aria-label="Action"
+              >
+                <option value="">Any action</option>
+                {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </Tooltip>
           </FiltersPopover>
 
           {/* Shown only when something is deleted. The tooltip says no longer in the database,
               because absence from the lookups is all the test sees. */}
           {purgedEntityCount > 0 && (
-            <button
-              className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
-              aria-pressed={showPurged}
-              onClick={() => setShowPurged(v => !v)}
-              title="Include events for entities that are no longer in the database. The records are kept either way -- this only changes what is listed."
-            >
-              <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
-            </button>
+            <Tooltip text="Include events for entities no longer in the database. The records are kept either way; this changes only the list.">
+              <button
+                className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
+                aria-pressed={showPurged}
+                onClick={() => setShowPurged(v => !v)}
+              >
+                <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
+              </button>
+            </Tooltip>
           )}
 
           <div className="filter-bar-actions">
             <ClearFilters count={activeFilterCount} onClear={resetFilters} />
             {/* Export writes the events the page is holding, not everything that matches, and the
                 tooltip says so. */}
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
-              title={hasMoreToLoad
-                ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
-                  + 'the current filters -- load the rest first to export them all.'
-                : 'Download the events matching the current filters as CSV'}
-            >
-              <IconDownload size={13} /> Export CSV ({eventRatio})
-            </button>
+            <Tooltip text={hasMoreToLoad
+              ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match the current filters: load the rest first to export them all.`
+              : 'Download the events matching the current filters as CSV'}>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
+              >
+                <IconDownload size={13} /> Export CSV ({eventRatio})
+              </button>
+            </Tooltip>
           </div>
         </div>
 
@@ -1702,27 +1705,27 @@ export function AuditTrailTab({ userRole, showToast }) {
               much of the trail is loaded is stated at the foot, beside Show more. */}
           <div className="trail-header">
             {/* The legend for a derived classification: nothing else on the page says what a
-                triangle means. The same marker the track draws. */}
+                triangle means. The same marker the track draws. Each entry takes focus, so its
+                tooltip is the keyboard's as well. */}
             <div className="trail-legend">
               {Object.entries(MARKERS).map(([kind, m]) => (
-                <span key={kind} className="trail-legend-item" title={m.hint}>
-                  <TrailMarker kind={kind} />
-                  {m.label}
-                </span>
+                <Tooltip key={kind} text={m.hint}>
+                  <span className="trail-legend-item" tabIndex={0}>
+                    <TrailMarker kind={kind} />
+                    {m.label}
+                  </span>
+                </Tooltip>
               ))}
 
               {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
                   reading `n` as a placeholder for each badge's count. */}
               {clusterCount > 0 && (
-                <span
-                  className="trail-legend-item"
-                  title={`Events too close together to draw separately are ONE badge carrying the count — `
-                       + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
-                       + `time range and they separate back into individual markers.`}
-                >
-                  <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
-                  Grouped ({clusterCount})
-                </span>
+                <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the range.">
+                  <span className="trail-legend-item" tabIndex={0}>
+                    <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
+                    Grouped ({clusterCount})
+                  </span>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -1748,7 +1751,6 @@ export function AuditTrailTab({ userRole, showToast }) {
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={() => setShowPurged(true)}
-                  title="Include events for entities that are no longer in the database"
                 >
                   <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
                 </button>
@@ -1764,14 +1766,11 @@ export function AuditTrailTab({ userRole, showToast }) {
                     <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
                     <div className="trail-track trail-axis-track" ref={axisTrackRef}>
                       {ticks.map(t => (
-                        <span
-                          key={t.f}
-                          className="trail-tick"
-                          style={{ left: offsetForFraction(t.f) }}
-                          title={t.title}
-                        >
-                          {t.label}
-                        </span>
+                        <Tooltip key={t.f} text={t.title}>
+                          <span className="trail-tick" style={{ left: offsetForFraction(t.f) }}>
+                            {t.label}
+                          </span>
+                        </Tooltip>
                       ))}
                     </div>
                   </div>
@@ -1796,39 +1795,35 @@ export function AuditTrailTab({ userRole, showToast }) {
                             {/* No type badge and no icon: the section heading carries the kind and
                                 is pinned in view, so the width goes to the name. The UUID is
                                 copyable in the drawer's Entity ID field. */}
-                            <div
-                              className="trail-lane-label"
-                              title={[
-                                lane.name
-                                  ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
-                                  : null,
-                                lane.entityId,
-                              ].filter(Boolean).join(' — ')}
-                            >
-                              {lane.name
-                                ? <strong className="trail-lane-name">{lane.name}</strong>
-                                /* Neither the join nor a snapshot could name it: the shortened id,
-                                   monospaced. */
-                                : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                              {/* Must survive truncation: a schema lineage shares its name and differs only
-                                  here. */}
-                              {lane.qualifier && (
-                                <span className="trail-lane-qualifier">{lane.qualifier}</span>
-                              )}
-                              {/* `gone`, not `fromSnapshot`: a name from a snapshot says where the
-                                  label came from, and a settings or backup lane is named that way
-                                  while existing perfectly well. */}
-                              {lane.gone && (
-                                <span
-                                  className="trail-lane-gone"
-                                  title={lane.fromSnapshot
-                                    ? 'This entity no longer exists — the name is the one recorded in its final audit snapshot'
-                                    : 'This entity no longer exists, and its audit rows carry no name to recover'}
-                                >
-                                  deleted
-                                </span>
-                              )}
-                            </div>
+                            {/* The full name and id, which the label may truncate, and for a deleted
+                                entity where its name came from: one tooltip, so the "deleted" mark
+                                inside it does not open a second. */}
+                            <Tooltip text={[
+                              lane.name
+                                ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
+                                : null,
+                              lane.entityId,
+                            ].filter(Boolean).join(' — ') + (!lane.gone ? ''
+                              : lane.fromSnapshot
+                                ? '\nDeleted: the name is the one recorded in its final audit snapshot.'
+                                : '\nDeleted: its audit rows carry no name to recover.')}>
+                              <div className="trail-lane-label">
+                                {lane.name
+                                  ? <strong className="trail-lane-name">{lane.name}</strong>
+                                  /* Neither the join nor a snapshot could name it: the shortened id,
+                                     monospaced. */
+                                  : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                                {/* Must survive truncation: a schema lineage shares its name and differs only
+                                    here. */}
+                                {lane.qualifier && (
+                                  <span className="trail-lane-qualifier">{lane.qualifier}</span>
+                                )}
+                                {/* `gone`, not `fromSnapshot`: a name from a snapshot says where the
+                                    label came from, and a settings or backup lane is named that way
+                                    while existing perfectly well. */}
+                                {lane.gone && <span className="trail-lane-gone">deleted</span>}
+                              </div>
+                            </Tooltip>
 
                             <div className="trail-track">
                               {(laneClusters.get(lane.key) || []).map(item => {
@@ -1840,45 +1835,47 @@ export function AuditTrailTab({ userRole, showToast }) {
 
                                 if (item.isCluster) {
                                   return (
-                                    <button
+                                    <Tooltip
                                       key={`cluster-${item.event.event_id}`}
-                                      type="button"
-                                      className={`trail-cluster${isSelected ? ' trail-node-selected' : ''}`}
-                                      style={{ left: offsetForFraction(item.xOffset) }}
-                                      /* The oldest member (see clusterEvents on the tiebreak), so
-                                         Next means and then what. */
-                                      onClick={() => setSelectedEventId(item.event.event_id)}
-                                      title={clusterSummary(
-                                        item.events,
-                                        (e) => analysis.get(e.event_id)?.kind || 'operational'
-                                      )}
-                                      aria-label={`${item.events.length} events on `
-                                        + `${lane.name || lane.entityId} from `
-                                        + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
-                                      aria-pressed={isSelected}
+                                      text={clusterSummary(item.events, (e) => analysis.get(e.event_id)?.kind || 'operational')}
                                     >
-                                      {item.events.length}
-                                    </button>
+                                      <button
+                                        type="button"
+                                        className={`trail-cluster${isSelected ? ' trail-node-selected' : ''}`}
+                                        style={{ left: offsetForFraction(item.xOffset) }}
+                                        /* The oldest member (see clusterEvents on the tiebreak), so
+                                           Next means and then what. */
+                                        onClick={() => setSelectedEventId(item.event.event_id)}
+                                        aria-label={`${item.events.length} events on `
+                                          + `${lane.name || lane.entityId} from `
+                                          + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                        aria-pressed={isSelected}
+                                      >
+                                        {item.events.length}
+                                      </button>
+                                    </Tooltip>
                                   )
                                 }
 
                                 const e = item.event
                                 const kind = analysis.get(e.event_id)?.kind || 'operational'
                                 return (
-                                  <button
+                                  /* What, who, when, a line each; the rest is in the drawer. */
+                                  <Tooltip
                                     key={e.event_id}
-                                    type="button"
-                                    className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
-                                    style={{ left: offsetForFraction(item.xOffset) }}
-                                    onClick={() => setSelectedEventId(e.event_id)}
-                                    /* A plain `title`, as elsewhere: what, who, when. The rest is in
-                                       the drawer. */
-                                    title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
-                                    aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
-                                    aria-pressed={isSelected}
+                                    text={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
                                   >
-                                    <TrailMarker kind={kind} selected={isSelected} />
-                                  </button>
+                                    <button
+                                      type="button"
+                                      className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
+                                      style={{ left: offsetForFraction(item.xOffset) }}
+                                      onClick={() => setSelectedEventId(e.event_id)}
+                                      aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
+                                      aria-pressed={isSelected}
+                                    >
+                                      <TrailMarker kind={kind} selected={isSelected} />
+                                    </button>
+                                  </Tooltip>
                                 )
                               })}
                             </div>
@@ -1944,10 +1941,12 @@ export function AuditTrailTab({ userRole, showToast }) {
           <div className="trail-drawer-nav">
             {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
                 above the metadata. */}
-            <div className="trail-drawer-nav-pos" title="Position in this entity's history, oldest first, and among the entities on the trail">
-              Event {selectedIndex + 1} of {selectedLaneEvents.length}
-              {selectedLaneIndex >= 0 && ` · Entity ${selectedLaneIndex + 1} of ${drawnLanes.length}`}
-            </div>
+            <Tooltip text="Its place in this entity's history, oldest first, and among the entities on the trail">
+              <div className="trail-drawer-nav-pos">
+                Event {selectedIndex + 1} of {selectedLaneEvents.length}
+                {selectedLaneIndex >= 0 && ` · Entity ${selectedLaneIndex + 1} of ${drawnLanes.length}`}
+              </div>
+            </Tooltip>
 
             {/* Along the lane on the first row, Previous being older; between lanes on the second.
                 Marked disabled rather than hidden at the ends, so the rows do not reflow under the
@@ -2006,10 +2005,14 @@ export function AuditTrailTab({ userRole, showToast }) {
             </div>
 
             <div className="trail-drawer-nav-badges">
-              <span className="badge badge-warning" title="Audit event type">{selected.event_type}</span>
-              <span className={`badge trail-badge-${selectedAnalysis?.kind}`} title={MARKERS[selectedAnalysis?.kind]?.hint}>
-                {MARKERS[selectedAnalysis?.kind]?.label}
-              </span>
+              <Tooltip text="The audit event type">
+                <span className="badge badge-warning">{selected.event_type}</span>
+              </Tooltip>
+              <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
+                <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>
+                  {MARKERS[selectedAnalysis?.kind]?.label}
+                </span>
+              </Tooltip>
             </div>
           </div>
         )}

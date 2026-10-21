@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, MARKERS } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS } from '../constants'
 import { api } from '../api'
+import { getAllByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -48,7 +49,7 @@ const openFilters = () => {
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
   }
 }
-const filter = () => { openFilters(); return screen.getByTitle(/Filter by the database action/) }
+const filter = () => { openFilters(); return screen.getByRole('combobox', { name: 'Action' }) }
 const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/audit-trail'))
 
 
@@ -111,7 +112,7 @@ describe('the two vocabularies are kept apart', () => {
     // Both vocabularies remain on screen; the fix is that they no longer share words.
     await show()
     for (const marker of Object.values(MARKERS)) {
-      expect(screen.getAllByTitle(marker.hint).length).toBeGreaterThan(0)
+      expect(getAllByTooltip(marker.hint).length).toBeGreaterThan(0)
     }
   })
 })

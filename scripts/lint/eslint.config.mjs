@@ -9,6 +9,13 @@
  */
 export default function config ({ js, react, hooks, globals }) {
   const unused = ['error', { varsIgnorePattern: '^React$', argsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }]
+  // A `title` on an HTML element is the browser's tooltip, which a keyboard and a touch screen never
+  // show. A component's `title` prop (Modal's heading, SortHeader's tooltip) is not one, so only a
+  // lowercase element is matched. `abbr` and `iframe` keep `title`: it is what the element means.
+  const browserTooltip = ['error', {
+    selector: 'JSXOpeningElement[name.name=/^[a-z]/]:not([name.name=/^(abbr|iframe)$/]) > JSXAttribute[name.name="title"]',
+    message: "A title is the browser's tooltip, never shown to a keyboard. Drop it, wrap the control in <Tooltip> (common/Tooltip.jsx), or give the column header the hint: frontend/README.md, Tooltips.",
+  }]
   return [
     { ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '.cache/**', '**/*.generated.*'] },
     { linterOptions: { reportUnusedDisableDirectives: 'error' } },
@@ -32,7 +39,24 @@ export default function config ({ js, react, hooks, globals }) {
         'react-hooks/exhaustive-deps': 'warn',
         'no-new-func': 'error',
         'no-unused-vars': unused,
+        'no-restricted-syntax': browserTooltip,
       },
+    },
+    {
+      // Still carrying a browser tooltip. Rewritten by other work now, so swept once that lands: the
+      // Site Map and area plans, Backups and Cold Storage, Cells, the 3D model, the search, the drawer.
+      files: [
+        'frontend/src/components/tabs/SiteMapTab.jsx',
+        'frontend/src/components/common/AreaPlan.jsx',
+        'frontend/src/components/common/AreaPlanPanel.jsx',
+        'frontend/src/components/tabs/BackupsTab.jsx',
+        'frontend/src/components/tabs/ColdStorageTab.jsx',
+        'frontend/src/components/tabs/CellsTab.jsx',
+        'frontend/src/components/common/Model3DUploader.jsx',
+        'frontend/src/components/common/GlobalSearch.jsx',
+        'frontend/src/components/common/ContextPanel.jsx',
+      ],
+      rules: { 'no-restricted-syntax': 'off' },
     },
     {
       files: ['scripts/**/*.mjs', 'forge/**/*.mjs', 'supabase/**/*.mjs', 'test-harness/**/*.mjs'],

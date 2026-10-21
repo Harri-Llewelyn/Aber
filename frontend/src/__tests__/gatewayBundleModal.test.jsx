@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { GatewayBundleModal } from '../components/modals/GatewayBundleModal'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: { downloadGatewayBundle: vi.fn(), installCommand: vi.fn() }
@@ -479,7 +480,7 @@ describe('GatewayBundleModal — the install command', () => {
     api.installCommand.mockResolvedValue(commandResponse())
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
-    fireEvent.click(screen.getByTitle(/copy the command/i))
+    fireEvent.click(screen.getByRole('button', { name: /Copy Command/ }))
     await waitFor(() => expect(written).toEqual([COMMAND]))
   })
 
@@ -503,7 +504,7 @@ describe('GatewayBundleModal — the install command', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
-    fireEvent.click(screen.getByText(/download the bundle instead/i))
+    fireEvent.click(screen.getByRole('button', { name: /download the bundle instead/i }))
     expect(screen.getByText(/issue a new bundle for this gateway\?/i)).toBeInTheDocument()
     expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/type .* to confirm/i), { target: { value: GATEWAY.gateway_name } })
@@ -546,10 +547,10 @@ describe('StatusBadge — the enrolment states', () => {
 
   it('explains each wait in its tooltip, since the two are acted on differently', () => {
     const { container: pending } = render(<StatusBadge status="PENDING_ENROLLMENT" />)
-    expect(pending.querySelector('.badge').getAttribute('title')).toMatch(/waiting for the appliance/i)
+    expect(tooltipOf(pending.querySelector('.badge'))).toMatch(/waiting for the appliance/i)
 
     const { container: awaiting } = render(<StatusBadge status="AWAITING_BIRTH" />)
-    expect(awaiting.querySelector('.badge').getAttribute('title')).toMatch(/has not published/i)
+    expect(tooltipOf(awaiting.querySelector('.badge'))).toMatch(/has not published/i)
   })
 
   it('still renders an unrecognised status legibly', () => {

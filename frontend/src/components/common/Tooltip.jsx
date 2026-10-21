@@ -121,9 +121,10 @@ export function TooltipBubble({ id, text, pos, container = null, keepMounted = f
  * control as its window is activated again: that one leaves the tooltip as it was when the window
  * lost focus.
  *
- * Spread `trigger` onto the control, and pass `bubble` to TooltipBubble.
+ * Spread `trigger` onto the control, and pass `bubble` to TooltipBubble. While `disabled` it never
+ * shows, whatever the pointer and focus do, so a control whose text has gone holds no Escape.
  */
-export function useTooltip({ delay = TOOLTIP_DELAY_MS } = {}) {
+export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false } = {}) {
   const id = useId()
   const ref = useRef(null)
   const hover = useHoverIntent(delay)
@@ -131,7 +132,7 @@ export function useTooltip({ delay = TOOLTIP_DELAY_MS } = {}) {
   const pressed = useRef(false)
   // What `focused` was when the window lost focus from this control; null otherwise.
   const focusedAsWindowLeft = useRef(null)
-  const visible = hover.open || focused
+  const visible = !disabled && (hover.open || focused)
 
   const { hide: hideHover } = hover
   const hide = useCallback(() => { hideHover(); setFocused(false) }, [hideHover])
@@ -161,4 +162,52 @@ export function useTooltip({ delay = TOOLTIP_DELAY_MS } = {}) {
   }
 
   return { trigger, bubble: { id, pos, container }, visible, hide }
+}
+
+/** A ref that sets each of `refs`: an object ref's `current`, or a callback ref. */
+const setRefs = (...refs) => (el) => {
+  for (const r of refs) {
+    if (typeof r === 'function') r(el)
+    else if (r) r.current = el
+  }
+}
+
+/**
+ * The shared tooltip on one control: wrap the control, and `text` shows in the bubble, as useTooltip
+ * shows it. The control's own ref and handlers still run. With no `text` nothing shows and the
+ * control is drawn in the same place, so a tooltip that comes and goes never remounts it. The bubble
+ * describes the control (`aria-describedby`) unless its text is the control's name: its
+ * `aria-label`, which an icon-only button carries so its name never depends on the tooltip, or its
+ * own text, which a tooltip shows whole where the text is cut short. A name is not read twice.
+ *
+ *   <Tooltip text="Send the bundle to the gateway again">
+ *     <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
+ *   </Tooltip>
+ *
+ * The child is one element, or a component that passes the ref and the handlers to one. On
+ * something that takes no focus the tooltip shows to a pointer only, so keep it to controls.
+ */
+export function Tooltip({ text, delay, children }) {
+  const tip = useTooltip({ delay, disabled: !text })
+  const child = React.Children.only(children)
+  const own = child.props
+  const { trigger } = tip
+  const both = (ours, theirs) => (e) => { ours(e); theirs?.(e) }
+  const describes = Boolean(text) && own['aria-label'] !== text && own.children !== text
+  const describedBy = [own['aria-describedby'], describes && trigger['aria-describedby']].filter(Boolean).join(' ')
+  return (
+    <>
+      {React.cloneElement(child, {
+        ref: setRefs(trigger.ref, child.ref),
+        'aria-describedby': describedBy || undefined,
+        onMouseEnter: both(trigger.onMouseEnter, own.onMouseEnter),
+        onMouseLeave: both(trigger.onMouseLeave, own.onMouseLeave),
+        onMouseDown: both(trigger.onMouseDown, own.onMouseDown),
+        onClick: both(trigger.onClick, own.onClick),
+        onFocus: both(trigger.onFocus, own.onFocus),
+        onBlur: both(trigger.onBlur, own.onBlur),
+      })}
+      {text ? <TooltipBubble {...tip.bubble} text={text} keepMounted={describes} /> : null}
+    </>
+  )
 }

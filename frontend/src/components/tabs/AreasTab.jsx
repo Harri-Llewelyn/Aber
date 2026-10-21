@@ -279,14 +279,15 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           className="callout callout-warning callout-page"
           onDragOver={handleDragOver}
           onDrop={e => handleDrop(e, null)}
-          title={canManage ? 'Drop a cell here to take it out of its area' : undefined}
         >
           <IconShieldAlert size={18} className="callout-icon" />
           <div>
             <strong>{plural(unfiled.length, 'unfiled cell')}:</strong>{' '}
             {unfiled.map(cellChip)}{' '}
             <span className="cell-meta">
-              {canManage ? 'Drag each onto an area below.' : 'File them from the Cells page.'}
+              {canManage
+                ? 'Drag each onto an area below. A cell dropped here is taken out of its area.'
+                : 'File them from the Cells page.'}
             </span>
           </div>
         </div>
@@ -312,7 +313,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               className="form-control control-sm"
               value={filterMode}
               onChange={e => setFilterMode(e.target.value)}
-              title="Filter by lifecycle state"
               aria-label="Lifecycle"
             >
               <option value="all">All ({areas.length})</option>
@@ -325,7 +325,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 className="btn btn-primary btn-sm"
                 permitted={canManage}
                 deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-                title="Add an area"
                 onClick={() => openForm(null, blank)}
               >
                 <IconPlus size={14} /> New Area
@@ -348,10 +347,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               <thead>
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
-                  <SortHeader sort={sort} column="name" title="The area's name — also the <area> segment of its uns/ topics">Area</SortHeader>
-                  <SortHeader sort={sort} column="plan" title="Whether the area carries an area plan for the Site Map to draw">Plan</SortHeader>
-                  <SortHeader sort={sort} column="cells" title="Cells filed in this area">Cells</SortHeader>
-                  <SortHeader sort={sort} column="devices" title="Devices resolving to a cell in this area, plus its Area-Wide assets">Devices</SortHeader>
+                  <SortHeader sort={sort} column="name" title="Also the area's segment of every topic beneath it in the Unified Namespace.">Area</SortHeader>
+                  <SortHeader sort={sort} column="plan" title="Whether the area has an SVG plan for the Site Map to draw. Without one it draws a default outline.">Plan</SortHeader>
+                  <SortHeader sort={sort} column="cells">Cells</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices resolving to a cell in this area. Area-Wide counts the assets filed in the area but in no cell.">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -368,7 +367,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                       onKeyDown={onOwnKey(() => toggleArea(a.area_id))}
                       onDragOver={handleDragOver}
                       onDrop={e => handleDrop(e, a.area_id)}
-                      title={canManage ? 'Drop a cell here to file it in this area; click to inspect' : 'Click to inspect this area'}
                     >
                       <td className="cell-icon-col"><AreaIcon area={a} size={16} /></td>
                       <td>
@@ -379,7 +377,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                         {a.description && <div className="cell-meta">{a.description}</div>}
                       </td>
                       <td>
-                        <Badge size="sm" title={a.plan_path ? 'An SVG plan is uploaded for this area' : 'No plan uploaded; the Site Map draws the default outline'}>
+                        <Badge size="sm">
                           {a.plan_path ? 'Plan' : 'Default outline'}
                         </Badge>
                         <div className="cell-meta">
@@ -396,9 +394,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                         )}
                       </td>
                       <td>
-                        <span title="Devices resolving to a cell in this area">{deviceCountOf(areaCells)}</span>
+                        <span>{deviceCountOf(areaCells)}</span>
                         {wide > 0 && (
-                          <Badge size="sm" className="badge-follow" title="Area-Wide assets: filed in the area rather than in any one cell">+{wide} Area-Wide</Badge>
+                          <Badge size="sm" className="badge-follow">+{wide} Area-Wide</Badge>
                         )}
                       </td>
                     </tr>
@@ -427,7 +425,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                   ? 'The name cannot contain / + or #'
                   : proposeMode
                     ? 'File this as a proposal for an approver to decide'
-                    : 'Save area'}
+                    : undefined}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -436,7 +434,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         >
           <div className="form-group">
             <label className="form-label" htmlFor="area-name">Area Name</label>
-            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" title="The area's name. It becomes a topic segment, so no / + or #" />
+            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" />
             <div className="form-hint">
               Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">uns/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
             </div>
@@ -453,7 +451,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                   aria-checked={(formVal.icon || DEFAULT_AREA_ICON) === key}
                   className={`icon-picker-option ${(formVal.icon || DEFAULT_AREA_ICON) === key ? 'is-selected' : ''}`}
                   onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                  title={label}
                 >
                   <Icon size={20} />
                   <span>{label}</span>

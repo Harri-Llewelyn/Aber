@@ -7,6 +7,7 @@ import { SearchInput } from './SearchInput'
 import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
 import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
+import { Tooltip } from './Tooltip'
 
 /**
  * The standard vocabularies as the page's one card: its heading, a tab per standard whose tooltip
@@ -123,16 +124,15 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
                   className="table-group-button"
                   onClick={() => toggle(section.key)}
                   aria-expanded={open}
-                  title={open ? 'Collapse this section' : 'Expand this section'}
                 >
                   {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
                   <span className="table-group-label">{section.title}</span>
                 </button>
                 {section.hint && <HelpTip label={`About ${section.title}`} text={section.hint} />}
                 {used > 0 && (
-                  <span className="vocab-in-use" title={`${used} already used by a catalog metric`}>
-                    {used} in use
-                  </span>
+                  <Tooltip text={`${used} already used by a catalog metric`}>
+                    <span className="vocab-in-use">{used} in use</span>
+                  </Tooltip>
                 )}
               </div>
 
@@ -146,28 +146,29 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
                       const meta = active.metaFor?.(item)
                       const tooltip = active.tooltipFor?.(item) || item.name
                       return (
-                        <span
+                        <Tooltip
                           key={item.id || item.name}
-                          role={actionable ? 'button' : undefined}
-                          tabIndex={actionable ? 0 : undefined}
-                          onClick={actionable ? () => active.onUse(item) : undefined}
-                          onKeyDown={actionable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); active.onUse(item) } } : undefined}
-                          aria-label={actionable
-                            ? `Start a catalog metric from ${item.name}${inUse ? ', already used by one' : ''}`
-                            : undefined}
-                          className={`mono vocab-chip${inUse ? ' vocab-chip-used' : ''}${actionable ? ' vocab-chip-action' : ''}`}
-                          title={
-                            inUse ? `${tooltip} — already used by a catalog metric`
-                              : actionable ? `${tooltip} — click to start a new catalog metric from this`
-                                : tooltip
-                          }
+                          text={inUse ? `${tooltip} — already used by a catalog metric`
+                            : actionable ? `${tooltip} — press it to start a new catalog metric from this`
+                              : tooltip}
                         >
-                          {inUse && <IconCheck size={10} />}{item.name}
-                          {meta && <span className="vocab-chip-meta">{meta}</span>}
-                          {/* Shown on hover and keyboard focus only (App.css); its space is kept at
-                              rest so a chip does not grow and re-wrap the row under the pointer. */}
-                          {actionable && <IconPlus size={10} className="vocab-chip-plus" />}
-                        </span>
+                          <span
+                            role={actionable ? 'button' : undefined}
+                            tabIndex={actionable ? 0 : undefined}
+                            onClick={actionable ? () => active.onUse(item) : undefined}
+                            onKeyDown={actionable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); active.onUse(item) } } : undefined}
+                            aria-label={actionable
+                              ? `Start a catalog metric from ${item.name}${inUse ? ', already used by one' : ''}`
+                              : undefined}
+                            className={`mono vocab-chip${inUse ? ' vocab-chip-used' : ''}${actionable ? ' vocab-chip-action' : ''}`}
+                          >
+                            {inUse && <IconCheck size={10} />}{item.name}
+                            {meta && <span className="vocab-chip-meta">{meta}</span>}
+                            {/* Shown on hover and keyboard focus only (App.css); its space is kept at
+                                rest so a chip does not grow and re-wrap the row under the pointer. */}
+                            {actionable && <IconPlus size={10} className="vocab-chip-plus" />}
+                          </span>
+                        </Tooltip>
                       )
                     })}
                   </div>

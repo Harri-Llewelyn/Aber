@@ -7,6 +7,7 @@ import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
 import { describePrincipal } from '../../utils/serviceIdentities'
 import { formatDate } from '../../utils/format'
 import { identityUrl } from '../../routes'
+import { Tooltip } from '../common/Tooltip'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -157,13 +158,15 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
             <label className="form-label">Token</label>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <input className="form-control mono" readOnly value={minted.token} />
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => copy('token', minted.token)}
-                title="Copy token"
-              >
-                {copied === 'token' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-              </button>
+              <Tooltip text="Copy token">
+                <button
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => copy('token', minted.token)}
+                  aria-label="Copy token"
+                >
+                  {copied === 'token' ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                </button>
+              </Tooltip>
             </div>
             <div className="form-hint">
               Expires {expiresOn}.{' '}
@@ -179,13 +182,15 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
             <label className="form-label">Token ID (jti)</label>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <input className="form-control mono" readOnly value={minted.jti} />
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => copy('jti', minted.jti)}
-                title="Copy token ID"
-              >
-                {copied === 'jti' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-              </button>
+              <Tooltip text="Copy token ID">
+                <button
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => copy('jti', minted.jti)}
+                  aria-label="Copy token ID"
+                >
+                  {copied === 'jti' ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                </button>
+              </Tooltip>
             </div>
             <div className="form-hint">
               Keep this. It is what identifies this token for revocation, and it is recorded in

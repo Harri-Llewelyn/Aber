@@ -142,7 +142,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     expect(screen.getByText('1 Online / 0 Offline')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
     expect(screen.getByText('20s ago')).toBeInTheDocument()
-    expect(screen.getByTitle('Operational Status: ONLINE')).toBeInTheDocument()
+    expect(screen.getByText('ONLINE', { selector: '.badge' })).toBeInTheDocument()
     // Cell membership is visible, so an unlinked gateway is diagnosable from here.
     expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
   })
@@ -218,7 +218,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     await waitFor(() => expect(screen.getByText('Quiet_Gateway')).toBeInTheDocument())
 
-    expect(screen.getByTitle('Operational Status: STALE')).toBeInTheDocument()
+    expect(screen.getByText('STALE', { selector: '.badge' })).toBeInTheDocument()
     expect(screen.getByText('No devices assigned')).toBeInTheDocument()
   })
 })

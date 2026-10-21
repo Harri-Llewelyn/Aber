@@ -12,6 +12,7 @@ import { DIRECTORY_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 
@@ -99,15 +100,11 @@ function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
 
   if (reach.open) {
     return (
-      <a
-        className="endpoint-action endpoint-open"
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        title={reach.note}
-      >
-        {url} <IconExternalLink size={12} className="copyable-id-icon" />
-      </a>
+      <Tooltip text={reach.note}>
+        <a className="endpoint-action endpoint-open" href={url} target="_blank" rel="noreferrer">
+          {url} <IconExternalLink size={12} className="copyable-id-icon" />
+        </a>
+      </Tooltip>
     )
   }
 
@@ -219,27 +216,24 @@ export function serviceTypeLabel(type) {
 function LivenessCell({ status, lastHeartbeat }) {
   if (status === 'ACTIVE') {
     return (
-      <span className="badge badge-success" title={lastHeartbeat
+      <Tooltip text={lastHeartbeat
         ? `Prometheus scraped this successfully at ${new Date(lastHeartbeat).toLocaleTimeString()}`
         : 'Prometheus reports this target as up'}>
-        ACTIVE
-      </span>
+        <span className="badge badge-success">ACTIVE</span>
+      </Tooltip>
     )
   }
   if (status === 'DOWN') {
     return (
-      <span className="badge badge-danger" title="Prometheus scraped this target and it did not answer">
-        DOWN
-      </span>
+      <Tooltip text="Prometheus scraped this target and it did not answer">
+        <span className="badge badge-danger">DOWN</span>
+      </Tooltip>
     )
   }
   return (
-    <span
-      className="directory-unobserved"
-      title="Nothing in Aber observes this service. Its status comes only from Prometheus, and no exporter reports on it. The Directory does not probe addresses itself."
-    >
-      not observed
-    </span>
+    <Tooltip text="Nothing in Aber observes this service: no exporter reports on it, and the Directory probes no address itself.">
+      <span className="directory-unobserved">not observed</span>
+    </Tooltip>
   )
 }
 
@@ -251,29 +245,29 @@ function LivenessCell({ status, lastHeartbeat }) {
 function ExposureCell({ exposure }) {
   if (exposure === 'NETWORK') {
     return (
-      <span className="badge badge-neutral" title="Published outside the cluster, through the Ingress or a LoadBalancer port. Reachable from another machine, subject to the firewall and DNS -- neither of which this stack controls.">
-        network
-      </span>
+      <Tooltip text="Published through the Ingress or a LoadBalancer port. Another machine can reach it, if the firewall and DNS allow.">
+        <span className="badge badge-neutral">network</span>
+      </Tooltip>
     )
   }
   if (exposure === 'HOST') {
     return (
-      <span className="badge badge-warning" title="Bound to 127.0.0.1 on the deployment host. Reachable from the host itself, or through an SSH tunnel from anywhere else.">
-        host only
-      </span>
+      <Tooltip text="Bound to 127.0.0.1 on the deployment host. Reach it there, or through an SSH tunnel from anywhere else.">
+        <span className="badge badge-warning">host only</span>
+      </Tooltip>
     )
   }
   if (exposure === 'INTERNAL') {
     return (
-      <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Not published outside the cluster. Reachable by service name from inside it, or from a workstation through kubectl port-forward.">
-        internal
-      </span>
+      <Tooltip text="Not published outside the cluster. Reach it by service name inside it, or from a workstation through kubectl port-forward.">
+        <span className="badge badge-neutral" style={{ opacity: 0.75 }}>internal</span>
+      </Tooltip>
     )
   }
   return (
-    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Nothing recorded where this service can be reached from. It was registered by something that does not set it.">
-      not recorded
-    </span>
+    <Tooltip text="Nothing records where this service can be reached from: what registered it does not set it.">
+      <span className="badge badge-neutral" style={{ opacity: 0.75 }}>not recorded</span>
+    </Tooltip>
   )
 }
 
@@ -326,24 +320,20 @@ function ScanBadge({ scan }) {
   if (!scan) return null
   if (!scan.scanned) {
     return (
-      <span
-        className="directory-unobserved directory-scan"
-        title="The release did not scan this exact image, so its known vulnerabilities are not counted here. A tag set in this deployment's values, or a build that is not a release, has no scan."
-      >
-        not scanned
-      </span>
+      <Tooltip text="The release did not scan this exact image, so its vulnerabilities are not counted. An overridden tag or an unreleased build has no scan.">
+        <span className="directory-unobserved directory-scan">not scanned</span>
+      </Tooltip>
     )
   }
   const count = scan.critical + scan.high
   const tone = scan.critical ? 'badge-danger' : scan.high ? 'badge-warning' : 'badge-neutral'
   const db = scan.dbDate ? ` against the vulnerability database of ${scan.dbDate}` : ''
   return (
-    <span
-      className={`badge badge-sm ${tone} directory-scan`}
-      title={`${imageScanSummary(scan)}. Counted when the release was scanned${db}; a vulnerability published since is not counted.`}
-    >
-      {count} {count === 1 ? 'CVE' : 'CVEs'}
-    </span>
+    <Tooltip text={`${imageScanSummary(scan)}. Counted when the release was scanned${db}; a vulnerability published since is not counted.`}>
+      <span className={`badge badge-sm ${tone} directory-scan`}>
+        {count} {count === 1 ? 'CVE' : 'CVEs'}
+      </span>
+    </Tooltip>
   )
 }
 
@@ -362,20 +352,17 @@ function VersionCell({ service }) {
     const built = upstream ? ` It is built from ${upstream} of the upstream product, the version shown.` : ''
     return (
       <>
-        <span
-          className="mono"
-          title={`${image} -- the image this release deploys, recorded from the chart at the last install or upgrade.${built}`}
-        >
-          {version.replace(/^[vV](?=\d)/, '')}
-        </span>
+        <Tooltip text={`${image} — the image this release deploys, recorded from the chart at the last install or upgrade.${built}`}>
+          <span className="mono">{version.replace(/^[vV](?=\d)/, '')}</span>
+        </Tooltip>
         <ScanBadge scan={imageScan(service)} />
       </>
     )
   }
   return (
-    <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="No image recorded. The chart records one for each service it deploys; this one is disabled in this deployment or was registered by something other than the chart.">
-      not recorded
-    </span>
+    <Tooltip text="No image recorded. The chart records one for each service it deploys; this one is disabled in this deployment, or the chart did not register it.">
+      <span className="badge badge-neutral" style={{ opacity: 0.75 }}>not recorded</span>
+    </Tooltip>
   )
 }
 
@@ -410,19 +397,19 @@ function ServiceTable({ rows, onNotify }) {
       <table className="table-directory">
         <thead>
           <tr>
-            <SortHeader sort={sort} column="name" title="Service name">Service Name</SortHeader>
-            <SortHeader sort={sort} column="type" title="Architecture category">Service Type</SortHeader>
-            <SortHeader sort={sort} column="version" title="The version this release deploys for the service; hover it for the full image reference. The badge counts the fixable HIGH and CRITICAL vulnerabilities the release found in that image, dated">Version</SortHeader>
+            <SortHeader sort={sort} column="name">Service Name</SortHeader>
+            <SortHeader sort={sort} column="type">Service Type</SortHeader>
+            <SortHeader sort={sort} column="version" title="The version this release deploys; point at it for the image. The badge counts fixable HIGH and CRITICAL vulnerabilities, dated.">Version</SortHeader>
             <SortHeader sort={sort} column="endpoint" title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</SortHeader>
-            <SortHeader sort={sort} column="reach" title="Where the service can be reached from, as a property of how it is published. Recorded from the chart by db-init on every install and upgrade">Reach</SortHeader>
-            <SortHeader sort={sort} column="liveness" title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</SortHeader>
+            <SortHeader sort={sort} column="reach" title="Where the service can be reached from, as the chart publishes it, recorded at every install and upgrade.">Reach</SortHeader>
+            <SortHeader sort={sort} column="liveness" title="Written every minute from Prometheus's up series. A service nothing scrapes reads as not observed.">Liveness</SortHeader>
           </tr>
         </thead>
         <tbody>
           {sorted.map(s => (
             <tr key={s.service_uuid}>
               <td><strong>{s.service_name}</strong></td>
-              <td title={`Registered as ${s.service_type}`}>{serviceTypeLabel(s.service_type)}</td>
+              <Tooltip text={`Registered as ${s.service_type}`}><td>{serviceTypeLabel(s.service_type)}</td></Tooltip>
               <td className="cell-version">
                 <VersionCell service={s} />
               </td>

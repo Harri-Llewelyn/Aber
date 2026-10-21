@@ -151,7 +151,7 @@ describe('a recording the daemon stopped reporting on', () => {
     renderTab()
     expect(await screen.findByText(/has not reported on this recording for 4m/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stop' }))
-      .toHaveAttribute('title', expect.stringMatching(/nothing from it is stored/))
+      .toHaveAccessibleDescription(expect.stringMatching(/nothing from it is stored/))
   })
 
   it('says nothing while the daemon reports', async () => {
@@ -182,7 +182,7 @@ describe('a file from another site', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     dropOnCard(fileOf(FOREIGN))
-    expect(await screen.findByText(/this site does not have/)).toBeInTheDocument()
+    expect(await screen.findByText(/this site does not have/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByText('dev999999999999999999999')).toBeInTheDocument()
     expect(screen.queryByLabelText('File it against')).toBeNull()
     expect(screen.getByRole('button', { name: /^Upload$/ })).toBeDisabled()
@@ -203,7 +203,7 @@ describe('a file from another site', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     expect(screen.getByRole('button', { name: /Play a file…/ }))
-      .toHaveAttribute('title', expect.stringMatching(/Every device the file recorded must exist on this site/))
+      .toHaveAccessibleDescription(expect.stringMatching(/Every device the file recorded must exist on this site/))
   })
 })
 
