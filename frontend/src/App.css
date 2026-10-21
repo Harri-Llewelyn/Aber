@@ -2317,28 +2317,6 @@ main:focus { outline: none; }
    centred text, so the button needs to become a block to sit in the middle of it. */
 .empty-state .btn { display: inline-flex; margin-top: 12px; }
 
-/* ===== Stat strip ===== */
-/* A row of figures above a table, centred on the card and ruled between, so each figure has a
-   visible boundary and a short run does not sit off to one side of a wide card. */
-.stat-strip {
-  display: flex;
-  justify-content: center;
-  align-items: stretch;
-  flex-wrap: wrap;
-  gap: 0;
-}
-
-.stat-strip > * {
-  padding: 0 20px;
-  text-align: center;
-}
-
-/* The separator belongs to the item on its right, so the first has none and a run of any length
-   stays ruled between and clear at both ends. */
-.stat-strip > * + * {
-  border-left: 1px solid var(--border);
-}
-
 /* ===== Summary cards ===== */
 /* The row of cards above the list on Backups and Cold Storage (common/SummaryCard.jsx), drawn like
    the Site Map's lanes. Every card takes an equal share of one row; two by two below 1100px, one
@@ -6129,25 +6107,6 @@ ol.gateway-steps {
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
-/* STAT: one figure in a .stat-strip (common/Stat.jsx), on Cold Storage and Backups. */
-.stat { min-width: 120px; }
-.stat-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.stat-value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.stat-warning .stat-value { color: var(--warning-text); }
-.stat-value svg { margin-right: 6px; vertical-align: -1px; }
-.stat-detail { font-size: 11px; color: var(--text-muted); }
-/* Alone above the empty state it is centred, with no column width to pad it off its label. */
-.stat-center { min-width: 0; text-align: center; }
-.stat-center .stat-value { font-size: 26px; }
 /* COLD STORAGE: the catalogue rows and the destination dialog. */
 /* Alone above the empty state, the backlog card is centred at about the width it has in the row. */
 .cold-backlog-lead { display: flex; justify-content: center; margin-bottom: var(--stack); }
