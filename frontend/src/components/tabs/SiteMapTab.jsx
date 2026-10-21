@@ -504,7 +504,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     return {
       type: 'LANE',
       title: lane.title,
-      icon: <LaneIcon size={16} />,
+      // In the lane's hue, not the accent every other panel's icon takes.
+      icon: <LaneIcon size={16} className={`${lane.className}-icon`} />,
       subtitle: (
         <>
           {stateBadge(stateOf(laneAssets), laneAssets)}

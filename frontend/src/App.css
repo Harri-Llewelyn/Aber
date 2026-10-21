@@ -2724,10 +2724,17 @@ main:focus { outline: none; }
   margin-bottom: 12px;
 }
 
-/* Each lane keeps its own hue: blue is the infrastructure signal, grey is what not to trust, amber
-   is needs-a-decision. A 4px coloured cap along the top does most of the work: the fills are at the
-   strongest alpha that keeps --text-muted clear of WCAG AA over them (themeContrast.test.js
-   measures both tints), so a darker tint is not available. */
+/* Each lane keeps its own hue, and its panel's icon wears it too: blue is the infrastructure
+   signal, grey is what not to trust, amber is needs-a-decision. */
+.site-lane-site,
+.site-lane-site-icon { --lane-hue: var(--accent); }
+
+.site-lane-simulated,
+.site-lane-simulated-icon { --lane-hue: var(--text-dim); }
+
+.site-lane-queue,
+.site-lane-queue-icon { --lane-hue: var(--warning); }
+
 .site-lane {
   display: flex;
   align-items: center;
@@ -2737,6 +2744,7 @@ main:focus { outline: none; }
   border-style: solid;
   border-width: 1px;
   border-top-width: 4px;
+  border-color: var(--lane-hue);
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: 13px;
@@ -2749,7 +2757,9 @@ main:focus { outline: none; }
 
 .site-lane-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+/* In the lane's own text colour: --text-primary on a full lane, --text-muted on an empty one.
+   Inherited, over the colour .mono gives the counts. */
+.site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: inherit; letter-spacing: -0.2px; }
 
 /* Everything that opens the panel and is not a table row ends in the row chevron's glyph and
    colours: a lane, an area card, the Backups page's Historian line and an Audit Trail change
@@ -2768,33 +2778,34 @@ main:focus { outline: none; }
 .area-card.is-selected .area-card-chevron,
 .backup-historian-selected .backup-historian-chevron { color: var(--accent); }
 
+/* A lane that holds something is filled with its hue, so a full lane and an empty one cannot be
+   mistaken. Each fill names its colour rather than --lane-hue so that themeContrast.test.js can
+   measure the counts (--text-primary) and the chevron (--text-muted) on it. */
 .site-lane-site {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
-
-.site-lane-site:hover,
-.site-lane-site.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 20%, transparent); }
 
 .site-lane-simulated {
-  border-color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+  background: color-mix(in srgb, var(--text-dim) 18%, transparent);
 }
-
-.site-lane-simulated:hover,
-.site-lane-simulated.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--text-muted) 18%, transparent); }
 
 .site-lane-queue {
-  border-color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
-.site-lane-queue:hover,
-.site-lane-queue.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--warning) 20%, transparent); }
+.site-lane:hover,
+.site-lane.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--lane-hue) 20%, transparent); }
 
-/* A lane wears its hue only while it holds something: an empty lane keeps its outline and drops
-   the fill. The 4px cap stays, in grey, so empty lanes are as tall as full ones. Compounded, so it
-   outranks each lane's own hue. */
+/* On a fill the chevron steps up to --text-muted. Kept at the base rule's weight, so the hover and
+   open rules above still win. */
+:where(.site-lane:not(.is-empty)) .site-lane-chevron { color: var(--text-muted); }
+
+/* Ringed in the card's colour, so the status dot stands apart from a fill of its own hue. */
+.site-lane .tile-dot { outline: 2px solid var(--bg-card); }
+
+/* An empty lane stays grey at rest, so an empty Unassigned queue does not draw the eye: a grey
+   outline and cap, no fill, muted text. Pointed at or open, its border, cap, glow and icon take its
+   hue. Compounded, so it outranks each lane's fill. */
 .site-lane.is-empty {
   border-color: var(--border);
   background: transparent;
@@ -2802,7 +2813,16 @@ main:focus { outline: none; }
 }
 
 .site-lane.is-empty:hover,
-.site-lane.is-empty.is-open { border-color: var(--border-hover); box-shadow: none; }
+.site-lane.is-empty.is-open { border-color: var(--lane-hue); }
+
+/* The lane's icon is the button's one bare svg; the chevron's sits in a span. */
+.site-lane.is-empty:hover > svg,
+.site-lane.is-empty.is-open > svg { color: var(--lane-hue); }
+
+/* The lane's icon in its panel, whether or not the lane holds anything. */
+.site-lane-site-icon,
+.site-lane-simulated-icon,
+.site-lane-queue-icon { color: var(--lane-hue); }
 
 /* The open lane is the one the panel shows: the same outline the selected pin gets. */
 .site-lane.is-open { outline: 2px solid var(--accent); outline-offset: 1px; }

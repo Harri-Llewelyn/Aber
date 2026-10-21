@@ -718,31 +718,45 @@ describe('the retired KPI ribbon', () => {
 })
 
 /**
- * Each lane variant must repaint what `.site-lane` sets (its background and border), or the hue is
- * lost while every rendering assertion still passes.
+ * Each lane variant must name its hue and paint its fill, or the hue is lost while every rendering
+ * assertion still passes.
  */
 describe('Site Map lane hues', () => {
   // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for
-  // Unassigned. The hue is a border colour plus a tint of a theme colour, so it follows the theme;
-  // themeContrast.test.js measures --text-muted over each tint.
+  // Unassigned. `.site-lane` paints its border in --lane-hue, and a lane that holds something is
+  // filled with the same theme colour; themeContrast.test.js measures the text on each fill.
   const HUES = [
-    ['site-lane-site', 'var(--accent)', 'color-mix(in srgb, var(--accent) 5%, transparent)'],
-    ['site-lane-simulated', 'var(--text-dim)', 'color-mix(in srgb, var(--text-muted) 7%, transparent)'],
-    ['site-lane-queue', 'var(--warning)', 'color-mix(in srgb, var(--warning) 6%, transparent)']
+    ['site-lane-site', 'var(--accent)', 'color-mix(in srgb, var(--accent) 18%, transparent)'],
+    ['site-lane-simulated', 'var(--text-dim)', 'color-mix(in srgb, var(--text-dim) 18%, transparent)'],
+    ['site-lane-queue', 'var(--warning)', 'color-mix(in srgb, var(--warning) 18%, transparent)']
   ]
 
-  it.each(HUES)('.%s sets its border colour and tint', (variant, border, tint) => {
+  /** The bodies of every rule whose selector list names `selector` exactly, @container rules too. */
+  const rulesFor = (selector) => [...APP_CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(m => m[1].split(',').map(s => s.trim()).includes(selector))
+    .map(m => m[2])
+
+  it.each(HUES)('.%s names its hue, which its panel icon shares, and fills with it', (variant, hue, fill) => {
     const rule = APP_CSS.match(new RegExp(`\\.${variant}\\s*\\{([\\s\\S]*?)\\n\\}`))
     expect(rule, `.${variant} has no rule`).toBeTruthy()
-    expect(rule[1]).toContain(`border-color: ${border}`)
-    expect(rule[1]).toContain(`background: ${tint}`)
+    expect(rule[1]).toContain(`background: ${fill}`)
+    expect(rulesFor(`.${variant}`).join(';')).toContain(`--lane-hue: ${hue}`)
+    expect(rulesFor(`.${variant}-icon`).join(';')).toContain(`--lane-hue: ${hue}`)
   })
 
-  it('keeps the hues through hover and while open', () => {
+  it('keeps the hues through hover and while open, and gives an empty lane its hue only then', () => {
+    expect(rulesFor('.site-lane').join(';')).toContain('border-color: var(--lane-hue)')
     // No generic `.site-lane:hover` or `.site-lane.is-open` rule repaints border-color: the hue
     // rules are the only ones that set it, so pointing at a lane does not drop its identity.
-    const generic = APP_CSS.match(/\.site-lane(:hover|\.is-open)\s*\{([\s\S]*?)\n\}/g) || []
-    for (const block of generic) expect(block).not.toMatch(/border-color/)
+    for (const selector of ['.site-lane:hover', '.site-lane.is-open']) {
+      expect(rulesFor(selector).length, selector).toBeGreaterThan(0)
+      for (const body of rulesFor(selector)) expect(body).not.toMatch(/border-color/)
+    }
+    // An empty lane is grey at rest, and takes its own hue when pointed at or open.
+    expect(rulesFor('.site-lane.is-empty').join(';')).toContain('border-color: var(--border)')
+    for (const selector of ['.site-lane.is-empty:hover', '.site-lane.is-empty.is-open']) {
+      expect(rulesFor(selector).join(';'), selector).toContain('border-color: var(--lane-hue)')
+    }
     expect(APP_CSS).toMatch(/\.site-lane\.is-open\s*\{[\s\S]*?outline/)
   })
 
