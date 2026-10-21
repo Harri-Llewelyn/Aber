@@ -1171,6 +1171,30 @@ the commonest laptop width does today, where help replaces the page's drawer, fo
 `ONE_DRAWER_QUERY` stays `(max-width: 1439px)`. The expanded rail (232px) takes 180px more at
 every width; the threshold does not move with it.
 
+**Expand widens help to half the window**, for the guides' tables and commands. The toggle sits in
+help's header before the X, in ContextPanel's `headerActions` slot. No page's drawer has one.
+
+- **Half the window, with the page beside it.** Expanded, help is `--context-panel-width-expanded`
+  (`50vw`), and the page narrows beside it as it does when help opens. With the rail collapsed that
+  is 720px of help and a 668px page at 1440px wide, and 683px and 631px at 1366px. Help's own
+  `<aside>` redefines `--context-panel-width` (`.context-panel-app.context-panel-expanded`), so a
+  page's drawer keeps its width. Below 800px the expanded overlay takes the whole width.
+- **Expanded help replaces a page's drawer at every width**, as docked help does below 1440px. A
+  rule beside that media query hides the drawer without closing it, and a page's drawer that opens
+  or changes subject closes help: `HelpDrawerContext` carries `{ close, expanded }` for that.
+  Pressing Expand is not such a change. It hides the details and leaves help open, and shrinking
+  help shows them again.
+- **One name for the toggle.** It is "Expand the help panel" with `aria-pressed`, as a toggle's
+  name should not change with its state. Its tooltip (the shared `useTooltip`) says "Shrink the
+  help panel" while pressed, and is not also its description.
+- **The choice is this browser's**, in localStorage under `aber_help_expanded` (`on` or `off`,
+  `hooks/useHelpExpanded.js`). It is not in the `user_settings` row: the width that suits depends
+  on the screen.
+- **Wide content still scrolls inside its own box.** A table or command wider than the panel
+  scrolls sideways in `.help-table-wrap` or `.help-code pre`, expanded or not. The inner shell holds
+  the drawer's width, so nothing on a help page can widen the drawer.
+- **Help opened over a dialog has no Expand.** It is a `Modal` of size `lg`, and keeps that size.
+
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
 The panel stays in the DOM so its width can transition, but a page of prose whose first line is the
 page name put a second *"Devices"* into the document on every page — a duplicate for find-in-page
