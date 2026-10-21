@@ -64,7 +64,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
             className="btn btn-primary"
             disabled={!canSubmit}
             onClick={submit}
-            title={unchanged ? 'Nothing has changed' : 'Save the name and purpose'}
+            title={unchanged ? 'Nothing has changed' : undefined}
           >
             Save
           </ActionButton>

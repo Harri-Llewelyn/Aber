@@ -40,7 +40,6 @@ export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }
           value={changeDescription}
           onChange={e => setChangeDescription(e.target.value)}
           placeholder="e.g. Added spindle temperature threshold"
-          title="Why this version exists. Recorded against the version permanently — it cannot be edited once the version is published."
         />
         <div className="form-hint">
           Recorded against v{next} permanently. Editable while the version is a draft, frozen once it is published.

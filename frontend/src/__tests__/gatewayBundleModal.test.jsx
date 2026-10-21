@@ -480,7 +480,7 @@ describe('GatewayBundleModal — the install command', () => {
     api.installCommand.mockResolvedValue(commandResponse())
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
-    fireEvent.click(screen.getByTitle(/copy the command/i))
+    fireEvent.click(screen.getByRole('button', { name: /Copy Command/ }))
     await waitFor(() => expect(written).toEqual([COMMAND]))
   })
 
@@ -504,7 +504,7 @@ describe('GatewayBundleModal — the install command', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal({ installer: { available: true, reason: null } })
     await waitFor(() => expect(screen.getByText(COMMAND)).toBeInTheDocument())
-    fireEvent.click(screen.getByText(/download the bundle instead/i))
+    fireEvent.click(screen.getByRole('button', { name: /download the bundle instead/i }))
     expect(screen.getByText(/issue a new bundle for this gateway\?/i)).toBeInTheDocument()
     expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText(/type .* to confirm/i), { target: { value: GATEWAY.gateway_name } })

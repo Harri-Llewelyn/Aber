@@ -9,6 +9,7 @@ import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../../constants'
 import { patchFromForm, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { deviceUrl } from '../../routes'
+import { Tooltip } from '../common/Tooltip'
 
 /**
  * Edit a device's IDTA 02006 Digital Nameplate. On the device rather than the Schemas page, because
@@ -191,7 +192,6 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
               pendingLabel="Saving…"
               onClick={save}
               disabled={!canSave || loading}
-              title="Save this nameplate"
             >
               Save
             </ActionButton>
@@ -253,38 +253,39 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                         the field's name. The row carries the label's bottom margin so the spacing
                         is the same as a field without a tip. */}
                     <div style={{ display: 'flex', alignItems: 'center', marginBottom: '7px' }}>
+                      {/* The template's wording on the label, for a pointer; the field's HelpTip,
+                          where it has one, is the keyboard's way to what tells it apart. */}
+                      <Tooltip text={element
+                        ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}\n\n${element.description || ''}`
+                        : null}>
                       <label
                         className="form-label"
                         htmlFor={inputId}
                         style={{ marginBottom: 0 }}
-                        title={element
-                          ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}\n\n${element.description || ''}`
-                          : field.label}
                       >
                         {field.label}
                         {element?.is_mandatory && (
-                          <span
-                            style={{ color: 'var(--text-muted)', marginLeft: '4px' }}
-                            title="Mandatory in the IDTA template. This platform does not require it — the exported submodel deliberately does not claim conformance to the template."
-                          >
-                            *
-                          </span>
+                          <Tooltip text="Mandatory in the IDTA template. Aber does not require it: the exported submodel does not claim conformance to the template.">
+                            <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>*</span>
+                          </Tooltip>
                         )}
                       </label>
+                      </Tooltip>
                       {/* Only on the fields whose label does not define them. The label's own hover
                           text carries the template's wording; this carries how to tell the field
                           from its neighbours, which is what the three identifiers actually need. */}
                       {field.help && <HelpTip text={field.help} label={`What ${field.label} means`} />}
                     </div>
                     {isPublished ? (
-                      <input
-                        id={inputId}
-                        className="form-control"
-                        value={String(deviceValue)}
-                        readOnly
-                        disabled
-                        title="Published by the device at DBIRTH. The export uses this value, so it cannot be overridden here."
-                      />
+                      <Tooltip text="Published by the device at DBIRTH. The export uses this value, so it cannot be overridden here.">
+                        <input
+                          id={inputId}
+                          className="form-control"
+                          value={String(deviceValue)}
+                          readOnly
+                          disabled
+                        />
+                      </Tooltip>
                     ) : (
                       <input
                         id={inputId}

@@ -126,15 +126,16 @@ describe('Configuration Parameters table proportions', () => {
 })
 
 describe('Configuration Parameters long metric names', () => {
-  it('carries the full name in a tooltip on every row', async () => {
+  it('shows the full name on every row, so no tooltip repeats it', async () => {
     await show()
 
     for (const name of LONG_METRICS) {
-      expect(screen.getByText(name).getAttribute('title')).toBe(name)
+      expect(screen.getByText(name)).toHaveTextContent(name)
+      expect(screen.getByText(name)).not.toHaveAttribute('title')
     }
   })
 
-  it('tooltips the reported value too, which is unbounded', async () => {
+  it('shows the reported value whole too, which is unbounded', async () => {
     api.get.mockResolvedValue([{
       metric_name: 'Controller/PROGRAM_COMMENT',
       val_string: 'a value long enough that nobody sized a column for it',
@@ -143,7 +144,8 @@ describe('Configuration Parameters long metric names', () => {
     render(<AssetConfigModal asset={asset({ last_birth_metrics: [] })} schemas={[]} onClose={vi.fn()} />)
 
     const cell = await screen.findByText(/nobody sized a column for it/)
-    expect(cell.getAttribute('title')).toContain('nobody sized a column for it')
+    expect(cell).toHaveTextContent('a value long enough that nobody sized a column for it')
+    expect(cell).not.toHaveAttribute('title')
   })
 
   /**

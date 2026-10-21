@@ -46,7 +46,7 @@ export function EditMetricSemanticIdModal({
               semantic_id: next.semanticId,
               semantic_id_type: next.semanticIdType
             }))}
-            title={changed ? 'Save the semantic id and reference type' : 'No changes to save'}
+            title={changed ? undefined : 'No changes to save'}
           >
             Save Semantic ID
           </ActionButton>

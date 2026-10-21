@@ -55,14 +55,14 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       onClose={busy ? () => {} : onCancel}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={!!busy} title="Close without approving">Cancel</button>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
           <ActionButton
             pending={busy === 'approve'}
             pendingLabel="Approving…"
             // Area-Wide with no area named would be refused by the database; held here.
             disabled={busy === 'merge' || (!isGateway && locationIncomplete(location))}
             onClick={handleSave}
-            title={!isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : 'Admit this device with these settings'}
+            title={!isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : undefined}
           >
             Approve &amp; Onboard
           </ActionButton>
@@ -106,8 +106,8 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       )}
 
       <div className="form-group">
-        <label className="form-label">{isGateway ? 'Gateway Name' : 'Device Name'}</label>
-        <input className="form-control" value={assetName} onChange={e => setAssetName(e.target.value)} title={`Enter human-readable ${isGateway ? 'gateway' : 'device'} name`} />
+        <label className="form-label" htmlFor="approve-name">{isGateway ? 'Gateway Name' : 'Device Name'}</label>
+        <input id="approve-name" className="form-control" value={assetName} onChange={e => setAssetName(e.target.value)} />
       </div>
 
       {/* A gateway needs nothing further here. A device still needs its serving gateway and its
@@ -115,8 +115,8 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       {!isGateway && (
         <>
           <div className="form-group">
-            <label className="form-label">Serving Gateway</label>
-            <select className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)} title="Select the gateway that will serve this device">
+            <label className="form-label" htmlFor="approve-gateway">Serving Gateway</label>
+            <select id="approve-gateway" className="form-control" value={gatewayId} onChange={e => setGatewayId(e.target.value)}>
               <option value="">— Unassigned Gateway —</option>
               {/* Disabled rather than absent, as at the Devices form's picker: a replay lane is
                   minted by a playback, never approved onto. */}

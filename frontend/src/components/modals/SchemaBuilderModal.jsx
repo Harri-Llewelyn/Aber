@@ -7,6 +7,7 @@ import { groupCatalog } from '../../utils/metricGroup'
 import { STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL } from '../../utils/standards'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { Tooltip } from '../common/Tooltip'
 
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
@@ -17,7 +18,9 @@ const INVALID_FIELD = { borderColor: 'var(--danger)' }
 /** The asterisk beside a label that must be filled in, with the convention spelled out on hover. */
 function RequiredMark() {
   return (
-    <span style={{ color: 'var(--danger)', marginLeft: '3px' }} title="Required — the schema cannot be saved without it" aria-hidden="true">*</span>
+    <Tooltip text="Required: the schema cannot be saved without it">
+      <span style={{ color: 'var(--danger)', marginLeft: '3px' }} aria-hidden="true">*</span>
+    </Tooltip>
   )
 }
 
@@ -36,12 +39,14 @@ function FieldError({ children }) {
  */
 export function MetricGroupHeading({ group, picked, title }) {
   return (
-    <div className="metric-picker-group" title={title}>
-      <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
-        {group.label}
-      </span>
-      {picked > 0 && <span className="metric-picker-group-selected">{picked} selected</span>}
-    </div>
+    <Tooltip text={title}>
+      <div className="metric-picker-group">
+        <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
+          {group.label}
+        </span>
+        {picked > 0 && <span className="metric-picker-group-selected">{picked} selected</span>}
+      </div>
+    </Tooltip>
   )
 }
 
@@ -137,7 +142,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
       onClose={onCancel}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={submitting} title="Discard and close">Cancel</button>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
           {/* Never disabled while the form is incomplete: the click is what tells a reader what is
               missing, and a disabled button cannot be clicked. */}
           <ActionButton
@@ -145,7 +150,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
             pending={submitting}
             pendingLabel="Saving…"
             onClick={handleSave}
-            title={canSave ? "Save this schema" : `Still needed: ${missing.join(" and ")}`}
+            title={canSave ? undefined : `Still needed: ${missing.join(" and ")}`}
           >
             Save Schema
           </ActionButton>
@@ -164,7 +169,6 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
           value={schemaName}
           onChange={e => setSchemaName(e.target.value)}
           placeholder="e.g. Six-Axis-Robot-Arm-Standard"
-          title="Unique schema name"
         />
         {nameMissing && <FieldError>Give the schema a name before saving it.</FieldError>}
       </div>
@@ -200,20 +204,22 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
             placeholder="Search catalog metrics…"
           />
           {/* Filters the list only; selections survive a change here. */}
-          <select
-            className="form-control"
-            style={{ flex: '0 0 165px' }}
-            value={standard}
-            onChange={e => setStandard(e.target.value)}
-            title="Show only metrics named from one standard. Metrics already selected stay selected."
-          >
-            <option value={ANY_STANDARD}>All standards</option>
-            {STANDARD_OPTIONS.map(o => (
-              <option key={o.label} value={o.value}>
-                {o.value === '' ? LOCAL_EXTENSION_LABEL : o.label}
-              </option>
-            ))}
-          </select>
+          <Tooltip text="Metrics already selected stay selected.">
+            <select
+              className="form-control"
+              style={{ flex: '0 0 165px' }}
+              value={standard}
+              onChange={e => setStandard(e.target.value)}
+              aria-label="Standard"
+            >
+              <option value={ANY_STANDARD}>All standards</option>
+              {STANDARD_OPTIONS.map(o => (
+                <option key={o.label} value={o.value}>
+                  {o.value === '' ? LOCAL_EXTENSION_LABEL : o.label}
+                </option>
+              ))}
+            </select>
+          </Tooltip>
         </div>
         {/* Takes the height the fields above leave, and scrolls inside itself. */}
         <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
@@ -236,12 +242,11 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
                     {/* Which standard a metric came from is what makes a mixed-standard schema
                         legible; the tick marks the ones carrying an AAS semantic id. */}
-                    <span
-                      style={{ fontSize: '11px', color: 'var(--text-dim)' }}
-                      title={m.semantic_id ? `${m.standard || LOCAL_EXTENSION_LABEL} — semantic id ${m.semantic_id}` : (m.standard || LOCAL_EXTENSION_LABEL)}
-                    >
-                      {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
-                    </span>
+                    <Tooltip text={m.semantic_id ? `Semantic id ${m.semantic_id}` : null}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+                        {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
+                      </span>
+                    </Tooltip>
                     {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
                   </label>
                 ))}
