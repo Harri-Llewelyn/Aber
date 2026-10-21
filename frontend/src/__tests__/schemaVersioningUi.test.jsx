@@ -5,6 +5,7 @@ import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
+import { getByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -355,8 +356,8 @@ describe('Downloading a version definition', () => {
     const modal = document.querySelector('.modal')
     fireEvent.click(within(modal).getByLabelText('Systems/SPINDLE_TEMPERATURE'))
 
-    expect(within(modal).getByTitle(
-      'Downloads the last saved draft — unsaved changes are not included'
+    expect(getByTooltip(
+      'Downloads the last saved draft — unsaved changes are not included', modal
     )).toBeTruthy()
   })
 })

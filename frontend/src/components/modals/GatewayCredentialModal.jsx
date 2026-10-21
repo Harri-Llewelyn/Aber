@@ -8,6 +8,7 @@ import { typedNameMatches } from '../../utils/gatewayType'
 import { IconCheck, IconCopy, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { gatewayUrl } from '../../routes'
+import { Tooltip } from '../common/Tooltip'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -242,13 +243,15 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
             <label className="form-label">MQTT username</label>
             <div className="gateway-copy-row">
               <input className="form-control mono" readOnly value={credential.mqtt_username} />
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => copy('user', credential.mqtt_username)}
-                title="Copy username"
-              >
-                {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-              </button>
+              <Tooltip text="Copy username">
+                <button
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => copy('user', credential.mqtt_username)}
+                  aria-label="Copy username"
+                >
+                  {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                </button>
+              </Tooltip>
             </div>
             {/* Looks like a coincidence and is a constraint: the gateway's broker role confines it
                 to its own edge-node segment. */}
@@ -262,13 +265,15 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
             <label className="form-label">Password</label>
             <div className="gateway-copy-row">
               <input className="form-control mono" readOnly value={credential.password} />
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => copy('password', credential.password)}
-                title="Copy password"
-              >
-                {copied === 'password' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-              </button>
+              <Tooltip text="Copy password">
+                <button
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => copy('password', credential.password)}
+                  aria-label="Copy password"
+                >
+                  {copied === 'password' ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                </button>
+              </Tooltip>
             </div>
           </div>
 

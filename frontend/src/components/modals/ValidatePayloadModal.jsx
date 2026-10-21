@@ -46,27 +46,27 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onClose} title="Close validator modal">Close</button>
-          <button className="btn btn-primary" onClick={handleValidate} disabled={loading} title="Run backend validation test">
+          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" onClick={handleValidate} disabled={loading}>
             {loading ? 'Validating…' : 'Validate Payload'}
           </button>
         </>
       }
     >
       <div className="form-group">
-        <label className="form-label">Select Target Schema Definition</label>
-        <select className="form-control" value={selectedSchemaUuid} onChange={e => setSelectedSchemaUuid(e.target.value)} title="Choose schema to test against">
+        <label className="form-label" htmlFor="validate-schema">Select Target Schema Definition</label>
+        <select id="validate-schema" className="form-control" value={selectedSchemaUuid} onChange={e => setSelectedSchemaUuid(e.target.value)}>
           {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
         </select>
       </div>
 
       <div className="form-group">
-        <label className="form-label">Candidate Telemetry JSON Payload</label>
+        <label className="form-label" htmlFor="validate-payload">Candidate Telemetry JSON Payload</label>
         <textarea
+          id="validate-payload"
           className="form-control mono validate-payload-input"
           value={payloadText}
           onChange={e => setPayloadText(e.target.value)}
-          title="Paste sample telemetry payload JSON here"
         />
       </div>
 

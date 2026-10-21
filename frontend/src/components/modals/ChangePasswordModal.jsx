@@ -58,7 +58,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
             pendingLabel="Changing…"
             className="btn btn-primary"
             disabled={!!problem}
-            title={problem || 'Change your password'}
+            title={problem || undefined}
           >
             Change Password
           </ActionButton>

@@ -10,6 +10,7 @@ import { entityUrl } from '../../routes'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
+import { Tooltip } from '../common/Tooltip'
 import {
   IconBookOpen,
   IconPlus,
@@ -213,7 +214,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                   selectable in the form that wrote it. */}
               <select className="form-control" value={form.link_tag} onChange={e => setForm(f => ({ ...f, link_tag: e.target.value }))}>
                 {Object.entries(TAG_LABELS).map(([value, label]) => (
-                  <option key={value} value={value} title={TAG_HINTS[value]}>{label}</option>
+                  <option key={value} value={value}>{label}</option>
                 ))}
               </select>
               {/* The chosen tag's meaning, under the control. File Repository especially needs it:
@@ -259,18 +260,24 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                    </div>
 
                    <div className="btn-group" style={{ flexShrink: 0 }}>
-                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px' }} title="Open this link in a new tab">
-                       <IconExternalLink size={12} /> Open ↗
-                     </a>
+                     <Tooltip text="Open this link in a new tab">
+                       <a href={d.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px' }}>
+                         <IconExternalLink size={12} /> Open ↗
+                       </a>
+                     </Tooltip>
                      {canManage && (
-                       <button className="btn btn-ghost btn-sm" onClick={() => openEdit(d)} title="Edit link metadata">
-                         <IconPencil size={12} />
-                       </button>
+                       <Tooltip text="Edit link metadata">
+                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(d)} aria-label={`Edit ${d.display_name}`}>
+                           <IconPencil size={12} />
+                         </button>
+                       </Tooltip>
                      )}
                      {canManage && (
-                       <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(d)} title="Remove this link">
-                         <IconTrash size={12} />
-                       </button>
+                       <Tooltip text="Remove this link">
+                         <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(d)} aria-label={`Remove ${d.display_name}`}>
+                           <IconTrash size={12} />
+                         </button>
+                       </Tooltip>
                      )}
                    </div>
                  </div>

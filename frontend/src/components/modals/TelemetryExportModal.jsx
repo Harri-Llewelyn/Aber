@@ -8,6 +8,7 @@ import {
 } from '../../utils/telemetryExport'
 import { IconDownload, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
+import { Tooltip } from '../common/Tooltip'
 
 /**
  * CSV export for a selection of one device's metrics over a chosen time range. It pages each metric
@@ -218,7 +219,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       error={error}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy} title="Cancel export">Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn btn-primary" onClick={runExport} disabled={busy} style={{ gap: '6px' }}>
             <IconDownload size={13} /> {busy ? 'Exporting…' : 'Export CSV'}
           </button>
@@ -243,7 +244,6 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
               className={`btn btn-sm ${mode === 'preset' && preset === p.key ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => { setMode('preset'); setPreset(p.key); setError(null) }}
               disabled={busy}
-              title={`Export the last ${p.label}`}
             >
               {p.label}
             </button>
@@ -252,7 +252,6 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
             className={`btn btn-sm ${mode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => { setMode('custom'); setError(null) }}
             disabled={busy}
-            title="Choose an exact start and end"
           >
             Custom range
           </button>
@@ -294,18 +293,18 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
             // relation is empty. Both read as something other than a date, deliberately.
             const oldest = horizons ? horizons[r.relation] : undefined
             return (
-              <button
-                key={r.key}
-                className={`btn btn-sm ${resolution === r.key ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => { setResolution(r.key); setError(null) }}
-                disabled={busy}
-                aria-pressed={resolution === r.key}
-                title={`${r.note} ${horizonLabel(oldest)}.`}
-                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '1px', padding: '5px 9px', lineHeight: 1.25 }}
-              >
-                <span>{r.label}</span>
-                <span style={{ fontSize: '11px', opacity: 0.75 }}>{horizonLabel(oldest)}</span>
-              </button>
+              <Tooltip key={r.key} text={`${r.note} ${horizonLabel(oldest)}.`}>
+                <button
+                  className={`btn btn-sm ${resolution === r.key ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => { setResolution(r.key); setError(null) }}
+                  disabled={busy}
+                  aria-pressed={resolution === r.key}
+                  style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '1px', padding: '5px 9px', lineHeight: 1.25 }}
+                >
+                  <span>{r.label}</span>
+                  <span style={{ fontSize: '11px', opacity: 0.75 }}>{horizonLabel(oldest)}</span>
+                </button>
+              </Tooltip>
             )
           })}
         </div>

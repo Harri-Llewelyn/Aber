@@ -17,6 +17,7 @@ import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
 import { MetricGroupHeading } from './SchemaBuilderModal'
+import { Tooltip } from '../common/Tooltip'
 
 /**
  * One modal, two modes, decided by the schema's status. Read-only is the default and is the same
@@ -153,18 +154,19 @@ export function SchemaDetailModal({
       {/* Visible here rather than behind an overflow menu: this is the screen someone is on
           when they want the file in an editor. It downloads what is stored, so on a dirty draft
           that is the last saved state. */}
-      <button
-        className={`btn btn-ghost ${!schema?.schema_definition ? 'btn-disabled' : ''}`}
-        disabled={!schema?.schema_definition || busy}
-        onClick={() => onDownload?.()}
-        title={!schema?.schema_definition
-          ? 'This version has no definition to download'
-          : editable && dirty
-            ? 'Downloads the last saved draft — unsaved changes are not included'
-            : `Save ${schema?.schema_name}.schema.json to open in an editor or JSON Schema tool`}
-      >
-        <IconDownload size={13} /> Download JSON
-      </button>
+      <Tooltip text={!schema?.schema_definition
+        ? 'This version has no definition to download'
+        : editable && dirty
+          ? 'Downloads the last saved draft — unsaved changes are not included'
+          : `Save ${schema?.schema_name}.schema.json to open in an editor or JSON Schema tool`}>
+        <button
+          className={`btn btn-ghost ${!schema?.schema_definition ? 'btn-disabled' : ''}`}
+          disabled={!schema?.schema_definition || busy}
+          onClick={() => onDownload?.()}
+        >
+          <IconDownload size={13} /> Download JSON
+        </button>
+      </Tooltip>
 
       {/* Both write buttons are locked by `busy`, but only the one clicked spins. */}
       {editable && (
@@ -202,17 +204,18 @@ export function SchemaDetailModal({
       {/* The other way out of a draft: without it the only exit was to publish. Danger, not
           primary, and rightmost. */}
       {editable && onDiscard && (
-        <button
-          type="button"
-          className="btn btn-danger"
-          disabled={!canManage || busy}
-          onClick={onDiscard}
-          title={!canManage
-            ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-            : `Delete draft v${schemaVersion(schema)} and leave its predecessor exactly as it is`}
-        >
-          <IconTrash size={13} /> Discard Draft
-        </button>
+        <Tooltip text={!canManage
+          ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
+          : `Delete draft v${schemaVersion(schema)} and leave its predecessor exactly as it is`}>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={!canManage || busy}
+            onClick={onDiscard}
+          >
+            <IconTrash size={13} /> Discard Draft
+          </button>
+        </Tooltip>
       )}
 
       {/* The single primary action on a read-only version; disabled with the reason rather than
@@ -234,14 +237,13 @@ export function SchemaDetailModal({
       title={
         <>
           {schema?.schema_name}{' '}
-          <span
-            className={`badge ${statusBadgeClass(status)}`}
-            title={editable
-              ? 'A draft is the only editable state. Publishing it activates it and archives its predecessor.'
-              : `This version is ${statusLabel(status)} and immutable — create a new version to change it.`}
-          >
-            {schemaVersionLabel(schema)}
-          </span>
+          <Tooltip text={editable
+            ? 'A draft is the only editable state. Publishing it activates it and archives its predecessor.'
+            : `This version is ${statusLabel(status)} and immutable — create a new version to change it.`}>
+            <span className={`badge ${statusBadgeClass(status)}`}>
+              {schemaVersionLabel(schema)}
+            </span>
+          </Tooltip>
         </>
       }
       icon={editable ? <IconGitBranch size={18} /> : <IconLock size={18} />}
@@ -261,14 +263,16 @@ export function SchemaDetailModal({
           Change Description
         </div>
         {editable ? (
-          <textarea
-            className="form-control"
-            rows={2}
-            value={changeDescription}
-            onChange={e => setChangeDescription(e.target.value)}
-            placeholder="e.g. Added spindle temperature threshold"
-            title="Why this version exists. Frozen once the version is published."
-          />
+          <Tooltip text="Why this version exists. Frozen once the version is published.">
+            <textarea
+              className="form-control"
+              aria-label="Change Description"
+              rows={2}
+              value={changeDescription}
+              onChange={e => setChangeDescription(e.target.value)}
+              placeholder="e.g. Added spindle temperature threshold"
+            />
+          </Tooltip>
         ) : (
           <div style={{ fontSize: '13px', color: schema?.change_description ? 'var(--text-primary)' : 'var(--text-dim)' }}>
             {schema?.change_description || 'No change description was recorded for this version.'}
@@ -454,17 +458,18 @@ function ForkAction({ schema, schemas, canManage, busy, onFork }) {
   const next = nextVersion(schema)
 
   return (
-    <button
-      className={`btn btn-primary ${blocked ? 'btn-disabled' : ''}`}
-      disabled={blocked || busy}
-      onClick={() => !blocked && onFork?.()}
-      title={!canManage
-        ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-        : existingDraft
-          ? `A draft (${existingDraft.schema_name}) already exists for this schema — publish or discard it first`
-          : `Create Version v${next}: an editable Draft v${next}, carrying every metric this version models`}
-    >
-      <IconGitBranch size={13} /> Create Version v{next}
-    </button>
+    <Tooltip text={!canManage
+      ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
+      : existingDraft
+        ? `A draft (${existingDraft.schema_name}) already exists for this schema — publish or discard it first`
+        : `Create Version v${next}: an editable Draft v${next}, carrying every metric this version models`}>
+      <button
+        className={`btn btn-primary ${blocked ? 'btn-disabled' : ''}`}
+        disabled={blocked || busy}
+        onClick={() => !blocked && onFork?.()}
+      >
+        <IconGitBranch size={13} /> Create Version v{next}
+      </button>
+    </Tooltip>
   )
 }
