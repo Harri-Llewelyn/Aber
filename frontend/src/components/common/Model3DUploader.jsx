@@ -9,6 +9,8 @@ import {
 import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle } from './Icons'
 import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
+import { ExpandButton } from './ExpandButton'
+import { Modal } from './Modal'
 import { deviceUrl } from '../../routes'
 
 /**
@@ -22,11 +24,13 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState(null)
   const [size, setSize] = useState(null)
+  const [expanded, setExpanded] = useState(false)
   const inputRef = useRef(null)
 
   const path = device?.model_3d_path || null
   const deviceId = device?.asset_id || device?.id
   const deviceName = device?.asset_name
+  const modelName = device?.asset_name || device?.name
 
   // The bucket's own limit, mirrored. Kept as a constant rather than read from the bucket because
   // fetching it would be a round trip per render for a value that changes once a deployment.
@@ -129,8 +133,21 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
        the dropzone's title and the public-read banner. */
     <div>
       {/* The model itself, above the controls. Only rendered when something is attached; the
-          dropzone is the empty state. */}
-      {path && <Model3DViewer path={path} name={device?.asset_name || device?.name} />}
+          dropzone is the empty state. Expand sits in its top-right corner, as the section has no
+          heading row of its own. */}
+      {path && (
+        <div className="model-viewer-holder">
+          <Model3DViewer path={path} name={modelName} />
+          <ExpandButton kind="model" name={modelName} className="model-viewer-expand" onClick={() => setExpanded(true)} />
+        </div>
+      )}
+      {path && expanded && (
+        <Modal title={modelName || '3D model'} icon={<IconCube size={18} />} size="full" fill onClose={() => setExpanded(false)}>
+          <div className="model-viewer-expanded modal-fill">
+            <Model3DViewer path={path} name={modelName} expanded />
+          </div>
+        </Modal>
+      )}
 
       {path ? (
         <div
