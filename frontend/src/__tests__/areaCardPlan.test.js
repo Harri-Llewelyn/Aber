@@ -110,6 +110,11 @@ describe('An area card on the Site Map', () => {
     expect(prop('.area-card', 'display')).toBe('flex')
     expect(prop('.area-card', 'flex-direction')).toBe('column')
     expect(prop('.area-card .area-plan', 'margin')).toBe('auto')
+    // The plan sits in the space its Expand button shares, which takes the card's spare height and
+    // centres it there in turn.
+    expect(prop('.expand-frame-fill', 'flex')).toBe('1 1 auto')
+    expect(prop('.expand-frame-fill', 'display')).toBe('flex')
+    expect(prop('.expand-frame-fill', 'flex-direction')).toBe('column')
   })
 
   it('keeps the plan\'s height caps', () => {

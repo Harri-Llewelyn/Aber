@@ -136,9 +136,9 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
           dropzone is the empty state. Expand sits in its top-right corner, as the section has no
           heading row of its own. */}
       {path && (
-        <div className="model-viewer-holder">
+        <div className="expand-frame">
           <Model3DViewer path={path} name={modelName} />
-          <ExpandButton kind="model" name={modelName} className="model-viewer-expand" onClick={() => setExpanded(true)} />
+          <ExpandButton kind="model" name={modelName} onClick={() => setExpanded(true)} />
         </div>
       )}
       {path && expanded && (

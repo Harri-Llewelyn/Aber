@@ -3111,10 +3111,9 @@ main:focus { outline: none; }
 .area-plan-interactive { cursor: crosshair; }
 
 /* A read-only plan in the Areas and Cells panels, capped as a Site Map card's plan is. As a link it
-   opens the Site Map on its area. */
+   opens the Site Map on its area. It sits on a `.plan-card`, which draws its frame. */
 .area-plan-preview { --plan-max-height: 260px; border-radius: var(--radius-sm); }
 a.area-plan-preview { display: block; cursor: pointer; color: inherit; text-decoration: none; }
-a.area-plan-preview:hover .area-plan { border-color: var(--border-hover); }
 .area-plan-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .area-plan-image,
@@ -3977,20 +3976,33 @@ a.chip { text-decoration: none; }
 }
 
 /* The expanded views (PlanViewer.jsx, Model3DViewer's `expanded`) and the Expand button that opens
-   them. The button sits in the drawer's viewer's top-right corner, over the model. */
-.expand-button { flex-shrink: 0; }
-.model-viewer-holder { position: relative; }
-.model-viewer-holder > .model-viewer-expand {
+   them (ExpandButton.jsx). The button sits in the top-right corner of what it enlarges: an
+   `.expand-frame` holds the view and the button side by side, so the button is never inside the
+   preview's link. Above the pins (z-index 2). Compounded with .btn-icon, so its ground and border
+   hold under .btn-icon:hover. */
+.expand-frame { position: relative; }
+.btn-icon.expand-corner {
   position: absolute;
   top: 6px;
   right: 6px;
+  z-index: 3;
   background: var(--bg-surface);
   border: 1px solid var(--border);
 }
 
-/* In the Cells panel, beside the preview: the preview is a link, which a button cannot sit inside. */
-.plan-preview-row { display: flex; align-items: flex-start; gap: 6px; }
-.plan-preview-row > .area-plan-preview { flex: 1 1 auto; min-width: 0; }
+/* On the Site Map card, the space under the header: it takes the card's spare height, and the
+   plan's auto margins centre the plan in it, as they did in the card. */
+.expand-frame-fill { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* In the Areas and Cells panels, the card the preview and its button share. The card draws the
+   frame the plan drew, across the panel's width, and the plan is centred on it. */
+.plan-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+}
+.plan-card .area-plan { border: 0; border-radius: 0; background: none; }
+.plan-card:has(> a.area-plan-preview:hover) { border-color: var(--border-hover); }
 
 /* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
    placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
