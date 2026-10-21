@@ -1056,14 +1056,28 @@ passes `{ record: false }`, as a Grafana alert does.
   message comes in and again as the history is read back: one leading `/` (never `//`), or the
   configured `GRAFANA_URL` followed by `/`, `?` or `#`, and no space, control character or
   backslash, which browsers strip or read as a slash. Anything else is dropped and the entry stays
-  plain text, so nothing stored can become a `javascript:` or off-site link. The links today: a
-  Grafana alert, firing or resolved, goes to its rule (`grafanaAlertUrl`); a device new to the
-  Quarantine queue goes to `tabUrl('devices', 'quarantine')` (the tab's address carries no search,
-  so not to the device itself); and an AAS export's warning about metrics with no semantic id goes
-  to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. The rest
-  of the messages report something just done on the page in view, so they carry none. This replaced
+  plain text, so nothing stored can become a `javascript:` or off-site link. This replaced
   `onOpen`/`openTitle`, a function the history could not store; a firing alert's toast used to open
   the pill's list, and the pill no longer takes `open`/`onOpenChange` from `App`.
+- **Every message about a record links to it** (#1019), because the list is read later, from any
+  page: "Cell 'Bay 3' created" is a link to the cell however long after the save it is read. So a
+  message names its record ("Cell created" would be no help in the list), and passes `to` from
+  `routes.js`: the record's page with its drawer open (`cellUrl`, `areaUrl`, `deviceUrl`,
+  `gatewayUrl`, `schemaUrl`, or `entityUrl(type, id)`), a proposal on Approvals (`proposalUrl`,
+  which `proposalNotice` in `utils/proposeFromForm.js` builds with the message), a metric
+  (`metricUrl`), a setting (`settingUrl`), a capture's subject (`captureSubjectUrl`), a backup run
+  (`backupUrl`), a person or a machine identity on Access Control (`personUrl`, `identityUrl`). A
+  plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A Grafana
+  alert goes to its rule (`grafanaAlertUrl`), a device new to the Quarantine queue to
+  `tabUrl('devices', 'quarantine')`, and an AAS export's warning about metrics with no semantic id
+  to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. An
+  arrival at an archived device or gateway turns the list's lifecycle filter to All, as Cells and
+  Areas already did, so the record is in the list as well as the drawer. What links nowhere: a
+  record that is gone (a permanent delete, a discarded draft, a rejected quarantined device, a
+  deleted capture), a file (downloads and exports), the clipboard, the person's own password, and
+  a failure of what was just tried, since the person is still on the form; a failure whose fix is
+  elsewhere still links there. `__tests__/notificationLinks.test.js` reads every `showToast` call:
+  one that is not an error passes `to`, or is in its `NO_LINK` list with the reason.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
   it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
   count drops when the list is opened. One badge cannot follow both: if opening the list cleared

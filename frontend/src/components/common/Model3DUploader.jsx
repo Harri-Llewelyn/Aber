@@ -9,6 +9,7 @@ import {
 import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle } from './Icons'
 import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
+import { deviceUrl } from '../../routes'
 
 /**
  * Attach one 3D visual model to a device. The model becomes an AAS `File` element in a
@@ -25,6 +26,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
 
   const path = device?.model_3d_path || null
   const deviceId = device?.asset_id || device?.id
+  const deviceName = device?.asset_name
 
   // The bucket's own limit, mirrored. Kept as a constant rather than read from the bucket because
   // fetching it would be a round trip per render for a value that changes once a deployment.
@@ -75,7 +77,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     try {
       const { path: uploaded } = await api.uploadDeviceModel(deviceId, file)
       setSize(file.size)
-      showToast?.(`3D model attached: ${modelFileName(uploaded)}`, 'success')
+      showToast?.(`3D model attached${deviceName ? ` to '${deviceName}'` : ''}: ${modelFileName(uploaded)}`, 'success', { to: deviceUrl(deviceId) })
       onChange?.(uploaded)
     } catch (err) {
       setError(err.message)
@@ -86,7 +88,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
       // upload cannot be retried from the picker without choosing something else first.
       if (inputRef.current) inputRef.current.value = ''
     }
-  }, [deviceId, onChange, showToast])
+  }, [deviceId, deviceName, onChange, showToast])
 
   const handleRemove = useCallback(async () => {
     setBusy(true)
@@ -94,7 +96,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     try {
       await api.removeDeviceModel(deviceId, path)
       setSize(null)
-      showToast?.('3D model removed', 'success')
+      showToast?.(`3D model removed${deviceName ? ` from '${deviceName}'` : ''}`, 'success', { to: deviceUrl(deviceId) })
       onChange?.(null)
     } catch (err) {
       setError(err.message)
@@ -102,7 +104,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     } finally {
       setBusy(false)
     }
-  }, [deviceId, path, onChange, showToast])
+  }, [deviceId, deviceName, path, onChange, showToast])
 
   const onDrop = (event) => {
     event.preventDefault()

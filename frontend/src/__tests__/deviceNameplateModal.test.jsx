@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { deviceUrl } from '../routes'
 import { DeviceNameplateModal } from '../components/modals/DeviceNameplateModal';
 import { api } from '../api';
 
@@ -104,7 +105,7 @@ describe('DeviceNameplateModal', () => {
 
     // api.js deletes the row when every field is empty, because "no nameplate" is modelled as no
     // row. Saying "saved" would misdescribe what happened to the device's shell.
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Nameplate cleared', 'success'));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Nameplate of 'Simulated_CNC_01' cleared", 'success', { to: deviceUrl('dev-123') }));
   });
 
   it('is read-only without the manage permission', async () => {

@@ -8,6 +8,7 @@ import { SortHeader } from '../common/SortHeader'
 import { useLocalSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { NO_VALUE, formatDate } from '../../utils/format'
+import { identityUrl } from '../../routes'
 
 /**
  * One machine identity's tokens, and the only place a token can be revoked. An identity has N
@@ -42,7 +43,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     try {
       await api.revokeServiceToken(jti)
       setJustRevoked(prev => new Set(prev).add(jti))
-      showToast?.('Token revoked — the API will refuse it from now on', 'success')
+      showToast?.(`A token for ${principalName} revoked — the API will refuse it from now on`, 'success', { to: identityUrl(principalName) })
     } catch (err) {
       // Per-row, not a dialog-level banner: several tokens can be revoked in one visit.
       setErrors(prev => new Map(prev).set(jti, err.message))
@@ -50,7 +51,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     } finally {
       setBusyJti(null)
     }
-  }, [showToast])
+  }, [principalName, showToast])
 
   // Newest first, the reverse of tokenStatus(), which sorts by earliest expiry. A person looking
   // for the token they just issued wants it at the top.

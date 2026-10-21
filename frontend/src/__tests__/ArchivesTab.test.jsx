@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { cellUrl } from '../routes'
 import { ArchivesTab, purgeIsSoon } from '../components/tabs/ArchivesTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
@@ -299,7 +300,7 @@ describe('ArchivesTab restore asks first', () => {
     fireEvent.click(await confirmRestoreButton())
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/cells/Cell_1/restore', {}))
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('restored'), 'success')
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('restored'), 'success', { to: cellUrl('Cell_1') })
   })
 
   it('reloads the list after a restore, so the row does not linger', async () => {

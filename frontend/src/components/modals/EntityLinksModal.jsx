@@ -6,6 +6,7 @@ import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
+import { entityUrl } from '../../routes'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
@@ -134,10 +135,10 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
     try {
       if (editingLink) {
         await api.put(`/api/v1/links/${editingLink.id}`, form)
-        showToast(`Link '${form.display_name}' updated`, 'success')
+        showToast(`Link '${form.display_name}' updated`, 'success', { to: entityUrl(entityType, entityId) })
       } else {
         await api.post('/api/v1/links', { ...form, entity_type: entityType, entity_id: entityId })
-        showToast(`Link '${form.display_name}' attached`, 'success')
+        showToast(`Link '${form.display_name}' attached${entityName ? ` to '${entityName}'` : ''}`, 'success', { to: entityUrl(entityType, entityId) })
       }
       setShowForm(false)
       loadLinks()
@@ -153,7 +154,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       await api.delete(`/api/v1/links/${id}`)
       setConfirmDelete(null)
       loadLinks()
-      showToast(`Link '${name}' removed`, 'success')
+      showToast(`Link '${name}' removed${entityName ? ` from '${entityName}'` : ''}`, 'success', { to: entityUrl(entityType, entityId) })
     } catch (e) {
       // Said in this dialog, beneath the confirmation, which closes so it can be read.
       setConfirmDelete(null)

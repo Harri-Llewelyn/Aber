@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, devicesForSchemaUrl } from '../../routes'
+import { deviceUrl, devicesForSchemaUrl, schemaUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -91,8 +91,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   /** Save a schema the builder composed. A device is given its schema on the Devices page. */
   const handleBuilderSubmit = async (schemaPayload) => {
     try {
-      await api.post('/api/v1/schemas', schemaPayload)
-      showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success')
+      const created = await api.post('/api/v1/schemas', schemaPayload)
+      showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
       setShowBuilderModal(false)
       load()
     } catch (e) {
@@ -115,7 +115,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       const refreshed = await api.get('/api/v1/schemas')
       setSchemas(refreshed)
       setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
-      showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success')
+      showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success', { to: schemaUrl(draft.schema_uuid) })
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -128,7 +128,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       const refreshed = await api.get('/api/v1/schemas')
       setSchemas(refreshed)
       setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
-      showToast(`Draft '${detailSchema.schema_name}' saved`, 'success')
+      showToast(`Draft '${detailSchema.schema_name}' saved`, 'success', { to: schemaUrl(detailSchema.schema_uuid) })
     } catch (e) {
       showToast(e.message, 'error')
       // Rethrown so the modal's publish path does not activate a version whose edits were rejected.
@@ -138,16 +138,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const handlePublish = async () => {
     if (!detailSchema) return
+    // The draft becomes the active version, under the same id.
+    const published = detailSchema
     try {
-      const result = await api.post(`/api/v1/schemas/${detailSchema.schema_uuid}/publish`, {})
+      const result = await api.post(`/api/v1/schemas/${published.schema_uuid}/publish`, {})
       setDetailSchema(null)
       // Devices carry the schema binding, so both lists are stale after a publish.
       load()
       const moved = result.devices_rebound || 0
       showToast(
-        `v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
+        `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
         (moved > 0 ? ` — ${moved} device binding${moved === 1 ? '' : 's'} moved across` : ''),
-        'success'
+        'success',
+        { to: schemaUrl(published.schema_uuid) }
       )
     } catch (e) {
       showToast(e.message, 'error')
@@ -165,7 +168,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       load()
       const detached = result.devices_detached || 0
       showToast(
-        `Draft v${result.version} discarded` +
+        `Draft v${result.version} of '${discardTarget.schema_name}' discarded` +
         (detached > 0
           // Said out loud rather than left to be discovered: a draft can be attached to a machine
           // to try it out, and those attachments go with it.

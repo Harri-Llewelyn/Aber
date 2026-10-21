@@ -5,8 +5,10 @@ import {
   formFromPatch,
   nonProposableFields,
   submitProposal,
+  proposalNotice,
 } from '../utils/proposeFromForm'
 import { api } from '../api'
+import { proposalUrl } from '../routes'
 
 vi.mock('../api', () => ({ api: { post: vi.fn(), put: vi.fn() } }))
 
@@ -177,4 +179,25 @@ describe('filing it', () => {
   /* No test files a link proposal: the database admits none (archived migration
      0108_a_link_is_attached_never_proposed.sql). A link is attached through EntityLinksModal,
      whose suite is entityLinks.test.jsx. */
+})
+
+/** The notification filing reports (#1019): it names the record, and links to the proposal. */
+describe('what filing reports', () => {
+  it('names the record and links to the new proposal', () => {
+    expect(proposalNotice('Press Hall', 'p-1')).toEqual({
+      msg: "Change to 'Press Hall' proposed. An approver applies it, or says why not.",
+      to: proposalUrl('p-1')
+    })
+    expect(proposalUrl('p-1')).toBe('/approvals?proposal=p-1')
+  })
+
+  it('says an update is an update, and links to the proposal it updated', () => {
+    const { msg, to } = proposalNotice('Press Hall', 'p-1', true)
+    expect(msg).toBe("Your proposal for 'Press Hall' was updated. An approver decides from here.")
+    expect(to).toBe('/approvals?proposal=p-1')
+  })
+
+  it('falls back to Approvals when the id did not come back', () => {
+    expect(proposalNotice('Press Hall', undefined).to).toBe('/approvals')
+  })
 })

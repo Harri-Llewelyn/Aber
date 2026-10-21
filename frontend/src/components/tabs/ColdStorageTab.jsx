@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { tabUrl } from '../../routes'
 import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
@@ -118,7 +119,7 @@ export function ColdStorageTab({ showToast, userRole }) {
 
   const onSaved = () => {
     setEditing(false)
-    showToast?.('Cold storage destination saved', 'success')
+    showToast?.('Cold storage destination saved', 'success', { to: tabUrl('cold-storage') })
     load()
   }
 

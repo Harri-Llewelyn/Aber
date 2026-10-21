@@ -4,6 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { Modal } from '../common/Modal'
 import { GRANTABLE_PERMISSIONS, permissionReach } from '../../utils/serviceIdentities'
+import { identityUrl } from '../../routes'
 
 const NAME_MAX = 80
 const PURPOSE_MAX = 500
@@ -49,7 +50,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
       // In menu order, not click order, so two identities given the same set list it the same way.
       const chosen = GRANTABLE_PERMISSIONS.filter(p => permissions.has(p))
       const created = await api.createServicePrincipal(trimmedName, chosen, purpose.trim())
-      showToast?.(`${trimmedName} created — it holds no token yet`, 'success')
+      showToast?.(`${trimmedName} created — it holds no token yet`, 'success', { to: identityUrl(trimmedName) })
       // The name is carried from here: the RPC does not return it, and the caller is the one who
       // typed it.
       onCreated?.({ ...created, name: trimmedName })
