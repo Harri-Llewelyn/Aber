@@ -180,9 +180,12 @@ screen readers read it unevenly, and on an icon-only button it was often the onl
 
   It adds `useTooltip`'s handlers and `aria-describedby` to the control, keeps the control's own,
   and draws the bubble beside it. With no `text` it draws the control alone, in the same place, so
-  a tooltip that comes and goes never remounts it. Text that is the control's `aria-label` is not
-  read again as its description. A tooltip shows on hover and focus, so it goes on something that
-  takes focus; a sentence about anything else belongs in visible text or a `HelpTip`. A component
+  a tooltip that comes and goes never remounts it. Text that is the control's name (its
+  `aria-label`, or its own text shown whole where it is cut short) is not read again as its
+  description. A tooltip shows on hover and focus, so it goes on something that takes focus; a
+  sentence about anything else belongs in visible text or a `HelpTip`, or on the column header.
+  A control that gets focus back, as a dialog's opener does, shows its tooltip, and the first
+  Escape closes that. A component
   that draws a control takes the text as a prop and wraps its own element: `ActionButton`'s
   `title` and `deniedTitle`, `RouteLink`'s and `CopyableId`'s `title`. `Badge`'s `title` is the one
   on something that takes no focus, so a pointer alone sees it.
@@ -194,7 +197,10 @@ screen readers read it unevenly, and on an icon-only button it was often the onl
   `no-restricted-syntax` rule in `scripts/lint/eslint.config.mjs`. A component's prop named
   `title`, such as a dialog's heading, is not matched. `title` stays where it is what the element
   means: `<abbr>` and `<iframe>`, which the rule lets through, and an SVG's `<title>` element,
-  which is not an attribute. The files not yet swept are listed beside the rule, and
+  which is not an attribute. A link whose text is its own address, cut short, wants
+  `<Tooltip text={url}>`, which shows it whole; a `title` there takes an
+  `eslint-disable-next-line no-restricted-syntax -- the text is the address`. The files other work
+  is rewriting are listed beside the rule until they are swept, and
   `scripts/lint/browser-tooltip.test.mjs` fails on one that no longer carries a `title`, so the
   list only shrinks.
 
@@ -1415,6 +1421,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
 - **A table can be sorted by its columns** (#801). The rows go through
   `useSortableRows(rows, columns)` (`hooks/useTableSort.js`) and each sortable header is a
   `<SortHeader sort={sort} column="name" title="…">Name</SortHeader>` (`common/SortHeader.jsx`).
+  Its `title` is the column's hint, said once in the shared tooltip ([Tooltips](#tooltips)); a
+  header that cannot be sorted takes one as a `ColumnHeader`.
   A click sorts ascending, a second descending, and a third returns the table to the order it had,
   which is left as it was: a table nobody sorts reads as before, and no header claims that order.
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
