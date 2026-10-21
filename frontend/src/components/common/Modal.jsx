@@ -2,7 +2,7 @@ import React, { useId, useLayoutEffect, useRef } from 'react'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconAlertTriangle, IconX } from './Icons'
 
-const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', wide: 'modal-wide' }
+const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', wide: 'modal-wide', full: 'modal-full' }
 
 /** The open dialogs, oldest first. The last is on top, and everything outside it is inert. */
 const openDialogs = []
@@ -105,9 +105,11 @@ function returnFocus(dialog) {
  *
  * @param {React.ReactNode} [icon] Shown before the title; pass a sized icon element.
  *
- * @param {'sm'|'md'|'lg'|'xl'|'wide'} [size] A step of the width scale in App.css: sm 400px,
+ * @param {'sm'|'md'|'lg'|'xl'|'wide'|'full'} [size] A step of the width scale in App.css: sm 400px,
  * default 480px, md 560px, lg 640px, xl 720px, wide 900px. Pick by content: sm for a yes/no
  * question, md for a form with a list, lg for a document, xl for two columns, wide for a table.
+ * `full` is the window less a margin, in height as well, for a view that is the dialog's whole
+ * point (an area's plan, a device's 3D model); pass `fill` with it.
  *
  * @param {Function} onClose Called by Escape, the close button, a close request from the browser
  * (Android's back gesture) and (when enabled) the backdrop. A dialog that must not close while work

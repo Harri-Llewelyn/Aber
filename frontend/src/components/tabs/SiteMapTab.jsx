@@ -20,6 +20,8 @@ import { EmptyState } from '../common/EmptyState'
 import { plural } from '../../utils/format'
 import { ContextPanel } from '../common/ContextPanel'
 import { AreaPlan, AreaPlanPin } from '../common/AreaPlan'
+import { ExpandButton } from '../common/ExpandButton'
+import { ExpandedPlanModal } from '../common/PlanViewer'
 import {
   SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
   SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
@@ -146,6 +148,16 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
     if (e.key === ' ') e.preventDefault()
     act()
+  }
+
+  // The area whose plan is open window-sized, resolved against what is drawn. A pin clicked there
+  // closes the dialog and opens its cell's panel; it opens rather than toggles, as the panel behind
+  // the dialog cannot be seen.
+  const [expandedAreaId, setExpandedAreaId] = useState(null)
+  const expandedArea = visibleAreas.find(a => a.area_id === expandedAreaId) || null
+  const openCellFromDialog = (cellId) => {
+    setExpandedAreaId(null)
+    setOpenLane(null); setSelectedAreaId(null); setSelectedCellId(cellId)
   }
 
   // Arriving from a plan on the Areas or Cells page names one area: open its panel, draw it even
@@ -463,6 +475,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
             {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
           </span>
+          {/* Offered while there is something to enlarge: a plan, or the outline with a pin on it.
+              Stopped, or the card behind it opens the area's panel too. */}
+          {(ar.plan_path || areaCells.some(isPlaced)) && (
+            <ExpandButton name={ar.area_name} className="plan-expand" onClick={e => { e.stopPropagation(); setExpandedAreaId(ar.area_id) }} />
+          )}
           <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
         </div>
         <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
@@ -665,6 +682,25 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   const panel = openLaneView ? lanePanel : selectedArea ? areaPanel : cellPanel
 
+  // The legend decodes the pin colours and the tile dots: in the toolbar, and again in the expanded
+  // plan's header.
+  const legend = (
+    <div className="shopfloor-legend">
+      <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
+      <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
+      <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+      {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
+          for it while the dots roll up a whole tile. */}
+      <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
+    </div>
+  )
+
+  /** The card's pin at the one-column size; a click opens the cell from the dialog. */
+  const expandedPin = (c) => {
+    const pin = cellPin(c)
+    return pin && React.cloneElement(pin, { iconSize: PIN_ICON[1], onClick: () => openCellFromDialog(c.cell_id) })
+  }
+
   return (
     <div className="page-layout">
       <div className="page-main">
@@ -693,14 +729,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             )}
             {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
             <div className="filter-bar-actions">
-              <div className="shopfloor-legend">
-                <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-                <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
-                <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
-                {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
-                    for it while the dots roll up a whole tile. */}
-                <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
-              </div>
+              {legend}
             </div>
           </div>
 
@@ -802,6 +831,13 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         onCopy={showToast}
         {...panel}
       />
+
+      {/* Outside the grid and the cards: the card's click and the grid's pin size are not the dialog's. */}
+      {expandedArea && (
+        <ExpandedPlanModal area={expandedArea} onClose={() => setExpandedAreaId(null)} headerActions={legend}>
+          {cellsOf(expandedArea).map(expandedPin)}
+        </ExpandedPlanModal>
+      )}
     </div>
   )
 }

@@ -19,7 +19,7 @@ import { AreaIcon } from '../../utils/areaIcon'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
 import { CellPlacementPicker } from '../common/CellPlacementPicker'
-import { AreaPlanPreview } from '../common/AreaPlanPreview'
+import { ExpandablePlanPreview } from '../common/AreaPlanPreview'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
@@ -627,14 +627,15 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
           {
-            // The plan itself, with this cell's pin ringed and the area's other cells dimmed.
+            // The plan itself, with this cell's pin ringed and the area's other cells dimmed, and
+            // Expand beside it.
             label: 'Place on plan',
             value: !selectedCell.area_id
               ? null
               : !isPlaced(selectedCell)
                 ? 'Not placed — set a place in Edit Details'
                 : selectedCellArea
-                  ? <AreaPlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} onOpen={onShowOnSiteMap} />
+                  ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} onOpen={onShowOnSiteMap} />
                   : "Placed on its area's plan",
             full: true
           },

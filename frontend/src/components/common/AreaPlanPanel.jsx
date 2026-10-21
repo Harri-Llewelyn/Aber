@@ -4,27 +4,35 @@ import { AREA_PLAN_MAX_BYTES, isSvgFile } from '../../utils/areaPlans'
 import { HelpTip } from './HelpTip'
 import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
-import { AreaPlanPreview } from './AreaPlanPreview'
+import { AreaPlanPreview, planIsExpandable, previewPins } from './AreaPlanPreview'
+import { ExpandButton } from './ExpandButton'
+import { ExpandedPlanModal } from './PlanViewer'
 import { IconUpload, IconTrash } from './Icons'
 import { areaUrl, siteMapAreaUrl } from '../../routes'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
  * remove it. A plan is drawn as a preview with every cell on it, Replace and Remove beside its
- * heading. An area with no plan shows the drop zone rather than a button, the same gesture a
- * device's 3D model takes; a reader who may not upload sees the default outline instead. The
- * write is one call and the panel asks the page to reload rather than patching its own copy.
- * `onOpen` is handed to the preview: it opens the Site Map on the area.
+ * heading, and Expand there too, which opens it window-sized (PlanViewer). An area with no plan
+ * shows the drop zone rather than a button, the same gesture a device's 3D model takes; a reader
+ * who may not upload sees the default outline instead. The write is one call and the panel asks
+ * the page to reload rather than patching its own copy. `onOpen` is handed to the preview: it
+ * opens the Site Map on the area.
  */
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, onOpen }) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const fileInput = useRef(null)
 
   const placed = (cells || []).filter(c => c.plan_x !== null && c.plan_x !== undefined && !c.is_archived).length
   const placedLine = `${plural(placed, 'cell')} placed on it`
   const limitMiB = Math.round(AREA_PLAN_MAX_BYTES / 1048576)
+  // The preview is drawn for a plan, and for anyone who may not upload one; Expand goes with it,
+  // for everyone who sees it, once there is something to enlarge.
+  const previewShown = !!area.plan_path || !canManage
+  const expandable = previewShown && planIsExpandable(area, cells)
 
   const upload = async (file) => {
     if (!file) return
@@ -106,20 +114,31 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
             size={12}
           />
         </span>
-        {area.plan_path && canManage && (
+        {(expandable || (area.plan_path && canManage)) && (
           <span className="area-plan-panel-actions">
-            {picker}
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
-              <IconUpload size={12} /> Replace plan
-            </button>
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
-              <IconTrash size={12} /> Remove plan
-            </button>
+            {expandable && <ExpandButton name={area.area_name} onClick={() => setExpanded(true)} />}
+            {area.plan_path && canManage && (
+              <>
+                {picker}
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
+                  <IconUpload size={12} /> Replace plan
+                </button>
+                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
+                  <IconTrash size={12} /> Remove plan
+                </button>
+              </>
+            )}
           </span>
         )}
       </div>
 
-      {area.plan_path || !canManage ? (
+      {expanded && (
+        <ExpandedPlanModal area={area} onClose={() => setExpanded(false)}>
+          {previewPins(area, cells, null, true)}
+        </ExpandedPlanModal>
+      )}
+
+      {previewShown ? (
         <AreaPlanPreview area={area} cells={cells} onOpen={onOpen} />
       ) : (
         <div

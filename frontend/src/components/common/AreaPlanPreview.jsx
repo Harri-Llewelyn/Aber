@@ -1,9 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { isPlaced } from '../../utils/areaPlans'
 import { RouteLink } from './RouteLink'
 import { siteMapAreaUrl } from '../../routes'
+import { ExpandButton } from './ExpandButton'
+import { ExpandedPlanModal } from './PlanViewer'
 
 /**
  * An area's plan drawn read-only, with the area's placed cells pinned on it, for the Areas and
@@ -23,8 +25,6 @@ import { siteMapAreaUrl } from '../../routes'
  * area. With it the preview is a link to that address; without it the preview is not a control.
  */
 export function AreaPlanPreview({ area, cells, highlightCellId = null, onOpen }) {
-  const pinned = (cells || []).filter(c =>
-    c.area_id === area.area_id && isPlaced(c) && (!c.is_archived || c.cell_id === highlightCellId))
   const label = `Open ${area.area_name} on the Site Map`
   const Frame = onOpen ? RouteLink : 'div'
   const link = onOpen
@@ -34,23 +34,63 @@ export function AreaPlanPreview({ area, cells, highlightCellId = null, onOpen })
   return (
     <Frame className="area-plan-preview" {...link}>
       <AreaPlan area={area}>
-        {pinned.map(c => {
-          const subject = c.cell_id === highlightCellId
-          const dimmed = !!highlightCellId && !subject
-          return (
-            <AreaPlanPin
-              key={c.cell_id}
-              x={c.plan_x}
-              y={c.plan_y}
-              status={dimmed ? 'muted' : 'idle'}
-              small={!subject}
-              selected={subject}
-              Icon={cellIconComponent(c.icon)}
-              label={c.cell_name}
-            />
-          )
-        })}
+        {previewPins(area, cells, highlightCellId)}
       </AreaPlan>
     </Frame>
+  )
+}
+
+/** The cells a preview pins: this area's placed cells, less the archived ones but the subject. */
+export function previewCells(area, cells, highlightCellId = null) {
+  return (cells || []).filter(c =>
+    c.area_id === area.area_id && isPlaced(c) && (!c.is_archived || c.cell_id === highlightCellId))
+}
+
+/**
+ * A preview's pins, as marks: small, except the subject, which is ringed while the rest are dimmed.
+ * `expanded` draws every pin at full size with the Site Map's one-column icon, for the dialog.
+ */
+export function previewPins(area, cells, highlightCellId = null, expanded = false) {
+  return previewCells(area, cells, highlightCellId).map(c => {
+    const subject = c.cell_id === highlightCellId
+    const dimmed = !!highlightCellId && !subject
+    return (
+      <AreaPlanPin
+        key={c.cell_id}
+        x={c.plan_x}
+        y={c.plan_y}
+        status={dimmed ? 'muted' : 'idle'}
+        small={!subject && !expanded}
+        selected={subject}
+        Icon={cellIconComponent(c.icon)}
+        label={c.cell_name}
+        iconSize={expanded ? 20 : null}
+      />
+    )
+  })
+}
+
+/** Whether an area's plan has anything to enlarge: an uploaded plan, or the outline with a pin on it. */
+export const planIsExpandable = (area, cells, highlightCellId = null) =>
+  !!area?.plan_path || previewCells(area, cells, highlightCellId).length > 0
+
+/**
+ * The preview with an Expand button beside it, for the Cells panel. The button is outside the
+ * preview because the preview is a link, and a button cannot sit inside one.
+ */
+export function ExpandablePlanPreview({ area, cells, highlightCellId = null, onOpen }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="plan-preview-row">
+      <AreaPlanPreview area={area} cells={cells} highlightCellId={highlightCellId} onOpen={onOpen} />
+      {planIsExpandable(area, cells, highlightCellId) && (
+        <ExpandButton name={area.area_name} onClick={() => setExpanded(true)} />
+      )}
+      {expanded && (
+        <ExpandedPlanModal area={area} onClose={() => setExpanded(false)}>
+          {previewPins(area, cells, highlightCellId, true)}
+        </ExpandedPlanModal>
+      )}
+    </div>
   )
 }
