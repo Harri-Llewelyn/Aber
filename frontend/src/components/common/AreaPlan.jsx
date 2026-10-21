@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { loadAreaPlanUrl } from '../../api'
 import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
+import { Tooltip } from './Tooltip'
 
 /**
  * An area's plan, at the plan's own aspect ratio, with pins placed over it by fraction. The plan
@@ -29,7 +30,7 @@ function useAreaPlanUrl(area) {
   return state.path === path ? state : { path, url: null, error: null }
 }
 
-export function AreaPlan({ area, onPlaceClick, children, title }) {
+export function AreaPlan({ area, onPlaceClick, children }) {
   const aspect = planAspect(area)
   const { url, error } = useAreaPlanUrl(area)
   const hasPlan = !!area?.plan_path
@@ -53,7 +54,6 @@ export function AreaPlan({ area, onPlaceClick, children, title }) {
       className={`area-plan${onPlaceClick ? ' area-plan-interactive' : ''}`}
       style={{ '--plan-aspect': aspect }}
       onClick={handleClick}
-      title={title}
       role={onPlaceClick ? 'button' : undefined}
       data-plan={hasPlan ? (unavailable ? 'unavailable' : 'uploaded') : 'outline'}
     >
@@ -95,7 +95,8 @@ function DefaultOutline({ aspect, unavailable }) {
  * tile rollup (normal, attention, idle), `alert` when Grafana has raised one against a device
  * here, or `muted` for a pin that is context rather than the subject. Without `onClick` the pin
  * is a mark, not a control: a span, so a read-only plan puts no dead stops in the tab order.
- * `--pin-x` lets the label slide inward at the plan's side edges while the disc stays put.
+ * `--pin-x` lets the label slide inward at the plan's side edges while the disc stays put. `title`
+ * is its tooltip, the shared one, for what the label beneath it does not say.
  */
 export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
   const className = `area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`
@@ -107,20 +108,21 @@ export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selecte
     </>
   )
   if (!onClick) {
-    return <span className={className} style={style} title={title || label} data-status={status}>{content}</span>
+    return <Tooltip text={title}><span className={className} style={style} data-status={status}>{content}</span></Tooltip>
   }
   return (
-    <button
-      type="button"
-      className={className}
-      style={style}
-      onClick={(e) => { e.stopPropagation(); onClick(e) }}
-      title={title || label}
-      aria-label={label}
-      aria-pressed={selected}
-      data-status={status}
-    >
-      {content}
-    </button>
+    <Tooltip text={title}>
+      <button
+        type="button"
+        className={className}
+        style={style}
+        onClick={(e) => { e.stopPropagation(); onClick(e) }}
+        aria-label={label}
+        aria-pressed={selected}
+        data-status={status}
+      >
+        {content}
+      </button>
+    </Tooltip>
   )
 }

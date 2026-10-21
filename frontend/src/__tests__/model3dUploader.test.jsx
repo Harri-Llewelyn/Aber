@@ -162,7 +162,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Download/ })).toBeInTheDocument()
       expect(screen.queryByText(/^Open$/)).not.toBeInTheDocument()
     })
 
@@ -173,7 +173,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      const link = screen.getByTitle(/Download this model file/i)
+      const link = screen.getByRole('link', { name: /Download/ })
       expect(link).toHaveAttribute('href', expect.stringContaining('?download=cnc.glb'))
     })
 
@@ -182,11 +182,11 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      const download = screen.getByTitle(/Download this model file/i)
+      const download = screen.getByRole('link', { name: /Download/ })
       const row = download.parentElement
       expect(row.firstElementChild).toBe(download)
       expect(download).toHaveClass('btn-primary')
-      expect(screen.getByTitle(/Upload a different model/i)).toHaveClass('btn-ghost')
+      expect(getByTooltip(/Upload a different model/i)).toHaveClass('btn-ghost')
       expect(getByTooltip(/Detach this model/i)).toHaveClass('btn-ghost')
     })
 
@@ -196,7 +196,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Download/ })).toBeInTheDocument()
       expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()
       expect(screen.queryByTitle(/Detach this model/i)).not.toBeInTheDocument()
     })
