@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
+import { tabLink } from '../test/tabBar'
 
 /**
  * The Devices tab's location UI. The distinction under test is between the resolved cell and the
@@ -68,7 +69,7 @@ const routeGet = (rows, { quarantine = [], cells = CELLS, areas = [] } = {}) => 
 const show = async (rows, options = {}) => {
   api.get.mockImplementation(routeGet(rows, options))
   render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
-  if (options.tab) fireEvent.click(screen.getByRole('tab', { name: options.tab }))
+  if (options.tab) fireEvent.click(tabLink(options.tab))
   await waitFor(() => expect(screen.getByText(options.expect || 'CNC_01')).toBeTruthy())
 }
 
@@ -544,7 +545,7 @@ describe('approving a quarantined device', () => {
       ]
     }))
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
-    fireEvent.click(screen.getByRole('tab', { name: /^Quarantine/ }))
+    fireEvent.click(tabLink(/^Quarantine/))
     await waitFor(() => expect(screen.getByText('Unknown_Robot')).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())

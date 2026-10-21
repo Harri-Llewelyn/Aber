@@ -22,6 +22,7 @@ import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -92,23 +93,11 @@ const ROLE_ENTRIES = [
   },
 ]
 
-/** People comes first, and only for an Administrator; see AccessControlTab. */
-export const PEOPLE_SECTION = {
-  id: 'people',
-  label: 'People',
-  description: 'Everyone who signs in to the dashboard, with their role. Add people, change roles, or remove access here.',
-}
+/** People comes first, and only for an Administrator; see AccessControlTab. Both lists are navigation.jsx's. */
+export const PEOPLE_SECTION = ACCESS_CONTROL_PEOPLE_TAB
 
-/**
- * The page's lists, one per tab, in tab order. The id is the tab's path segment; the description
- * is the tab's tooltip, and the detail is on the page's help page.
- */
-export const SECTIONS = [
-  { id: 'credentials', label: 'Broker credentials', description: "Every gateway's broker credential: what Aber issued and recorded, beside what the broker holds now." },
-  { id: 'identities', label: 'Machine identities', description: "Aber's own processes on the database side. None can sign in: each holds a token and permissions of its own." },
-  { id: 'accounts', label: 'Broker accounts', description: "The broker's own accounts, read live, including any that look like a gateway's but that no gateway claims." },
-  { id: 'roles', label: 'Broker roles', description: 'What each broker role may publish, receive and subscribe to, read live. Open a role to read its rules.' },
-]
+/** The page's other tabs, in order. The id is the tab's path segment; the description is its tooltip. */
+export const SECTIONS = ACCESS_CONTROL_TABS
 
 /**
  * Access Control: people, broker credentials and machine identities, as tabs of one card.
@@ -129,7 +118,7 @@ export const SECTIONS = [
 export function AccessControlTab({ showToast, userRole = null, currentUserId = null }) {
   const showPeople = userRole === 'Administrator'
   const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
-  const [section, setSection] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
+  const [section, setSection, sectionHref] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
   // The role whose rules the drawer shows, by name, in the address as `?broker-role=`.
   const [openRole, setOpenRole] = useUrlState('broker-role', '', { allowed: ROLE_ENTRIES.map(e => e.rolename) })
   const [rows, setRows] = useState([])
@@ -396,9 +385,10 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           />
 
           <TabStrip
-            ariaLabel="Access Control list"
+            ariaLabel="Access Control"
             value={section}
             onChange={selectSection}
+            hrefFor={sectionHref}
             tabs={sections}
           />
 

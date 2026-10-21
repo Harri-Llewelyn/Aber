@@ -64,36 +64,20 @@ describe('the three behaviours', () => {
   })
 })
 
-describe('the control at the foot of the rail', () => {
-  it('names the current behaviour and offers the other two', () => {
-    const onChangeMode = renderRail({ mode: 'hover' })
-    const button = screen.getByRole('button', { name: /Sidebar behaviour: Expand on hover/ })
-    expect(screen.queryByRole('menu')).toBeNull()
-
-    fireEvent.click(button)
-    const options = screen.getAllByRole('menuitemradio')
-    expect(options.map(o => o.textContent)).toEqual(expect.arrayContaining(
-      SIDEBAR_MODES.map(m => expect.stringContaining(m.label))
-    ))
-    expect(options.find(o => o.getAttribute('aria-checked') === 'true')).toHaveTextContent('Expand on hover')
-
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Expanded/ }))
-    expect(onChangeMode).toHaveBeenCalledWith('expanded')
-    expect(screen.queryByRole('menu')).toBeNull()
+/* The layout is chosen in the account menu (navigationShell.test.jsx) and on Profile, not at the
+   rail's foot, whose second slot is Collapse all tabs (sidebarTabs.test.jsx). */
+describe('the foot of the rail', () => {
+  it('holds no layout control, and no menu of layouts', () => {
+    renderRail({ mode: 'hover' })
+    expect(screen.queryByRole('button', { name: /Sidebar behaviour|Sidebar layout/ })).toBeNull()
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+    for (const m of SIDEBAR_MODES) expect(screen.queryByText(m.description)).toBeNull()
   })
 
   it('is not a navigation item, so the page list stays the page list', () => {
     renderRail()
     const items = document.querySelectorAll('.sidebar-item')
     expect(items).toHaveLength(adminTabs().length)
-  })
-
-  it('closes on Escape', () => {
-    renderRail()
-    fireEvent.click(screen.getByRole('button', { name: /Sidebar behaviour/ }))
-    expect(screen.getByRole('menu')).toBeInTheDocument()
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('menu')).toBeNull()
   })
 })
 
@@ -130,12 +114,12 @@ describe('the stylesheet', () => {
     expect(panel).toMatch(/box-shadow:\s*none/)
   })
 
-  it('gives the account control the same ground as the behaviour control beside it', () => {
+  it('gives the account control the same ground as Collapse all tabs beside it', () => {
     const avatar = APP_CSS.match(/\n\.user-avatar \{([\s\S]*?)\n\}/)[1]
     const account = APP_CSS.match(/\n\.user-menu-button \{([\s\S]*?)\n\}/)[1]
-    const behaviour = APP_CSS.match(/\n\.sidebar-mode-button \{([\s\S]*?)\n\}/)[1]
+    const collapseAll = APP_CSS.match(/\n\.sidebar-collapse-all \{([\s\S]*?)\n\}/)[1]
     expect(avatar).toMatch(/background:\s*none/)
     expect(account).toMatch(/background:\s*none/)
-    expect(behaviour).toMatch(/background:\s*none/)
+    expect(collapseAll).toMatch(/background:\s*none/)
   })
 })

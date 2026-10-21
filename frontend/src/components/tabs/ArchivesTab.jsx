@@ -13,6 +13,7 @@ import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
+import { ARCHIVES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SortHeader } from '../common/SortHeader'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
@@ -32,11 +33,8 @@ export function purgeIsSoon(at, now = Date.now()) {
   return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
 }
 
-/** The two stages, in tab order. The description is the tab's tooltip; the help page has the rest. */
-export const STAGES = [
-  { id: 'archived', label: 'Archived', description: 'Out of commission but kept, with its history and identifiers. Restore returns one intact, until its auto-purge date.' },
-  { id: 'retired', label: 'Retired', description: 'Archived and then deleted. Only a tombstone remains, linking to what survives: the Audit Trail, a forge repository, a bundle.' },
-]
+/** The two stages, in tab order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
+export const STAGES = ARCHIVES_TABS
 
 /** The Archived table's sortable columns. An entity with no auto-purge timer goes last. */
 const ARCHIVED_SORT = {
@@ -73,7 +71,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
   const [exports, setExports]   = useState([])
   const [loading, setLoading]   = useState(true)
   // The tab, in the path: `/archives` or `/archives/retired`.
-  const [stage, setStage]       = useUrlTab('archives', STAGES.map(s => s.id), 'archived')
+  const [stage, setStage, stageHref] = useUrlTab('archives', STAGES.map(s => s.id), 'archived')
   const [archivedRows, archivedSort] = useSortableRows(archives, ARCHIVED_SORT, { active: stage === 'archived' })
   const [retiredRows, retiredSort] = useSortableRows(retired, RETIRED_SORT, { active: stage === 'retired' })
   const [confirmPurge, setConfirmPurge] = useState(null)
@@ -189,9 +187,10 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
           description="Areas, cells, gateways and devices out of commission. An archived one restores intact; a retired one was deleted, and links to what survives it."
         />
         <TabStrip
-          ariaLabel="Lifecycle stage"
+          ariaLabel="Archived Entities"
           value={stage}
           onChange={setStage}
+          hrefFor={stageHref}
           tabs={STAGES}
         />
 

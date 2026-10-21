@@ -144,7 +144,8 @@ programs subscribe to the ones they want.
 ### Sparkplug B
 
 An open standard for industrial data over MQTT. It fixes the topic names and the message format,
-so any gateway that follows it can send data to Aber.
+so any gateway that follows it can send data to Aber
+([bringing your own edge node](../site/bring-your-own-edge-node.md)).
 
 ### Factory+
 

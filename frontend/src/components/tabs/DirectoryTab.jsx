@@ -8,6 +8,7 @@ import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
+import { DIRECTORY_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -122,33 +123,23 @@ function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
 }
 
 /**
- * The stack, one tab per group, in the order an operator looks for it: something to open, the path
- * telemetry arrives on, then the stores behind it. Keyed on service_type, not the editable name.
- * The order of `types` within a group is the row order; names break ties. Each group's description
- * is its tab's tooltip; the help page has the rest.
+ * The service types each group lists. The order of a group's types is the row order; names break
+ * ties. Keyed on service_type, not the editable name.
  */
-export const SERVICE_GROUPS = [
-  {
-    id: 'applications',
-    title: 'Applications & User Interfaces',
-    description: 'The things with a front door: each link opens something the dashboard does not do itself.',
-    // SOURCE_CONTROL is the forge: a place to review a change, which is a front door in exactly
-    // this sense and a different kind of thing from a database console.
-    types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION']
-  },
-  {
-    id: 'ingestion',
-    title: 'Ingestion & Messaging',
-    description: 'The path a reading takes from a machine to the historian. If telemetry stops, look here first.',
-    types: ['MQTT_BROKER', 'INGESTION', 'API_GATEWAY']
-  },
-  {
-    id: 'infrastructure',
-    title: 'Data & Backend Infrastructure',
-    description: 'What the services on the other tabs are built on: the databases, APIs and sign-in behind them.',
-    types: ['REST_API', 'AUTHENTICATION', 'SERVERLESS', 'DATABASE', 'TIME_SERIES_DB', 'METRICS_EXPORTER']
-  }
-]
+const GROUP_TYPES = {
+  // SOURCE_CONTROL is the forge: a place to review a change, which is a front door in exactly
+  // this sense and a different kind of thing from a database console.
+  applications: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION'],
+  ingestion: ['MQTT_BROKER', 'INGESTION', 'API_GATEWAY'],
+  infrastructure: ['REST_API', 'AUTHENTICATION', 'SERVERLESS', 'DATABASE', 'TIME_SERIES_DB', 'METRICS_EXPORTER'],
+}
+
+/**
+ * The stack, one tab per group, in the order an operator looks for it: something to open, the path
+ * telemetry arrives on, then the stores behind it. The groups, their names and their descriptions
+ * are navigation.jsx's; each description is its tab's tooltip, and the help page has the rest.
+ */
+export const SERVICE_GROUPS = DIRECTORY_TABS.map(t => ({ id: t.id, title: t.label, description: t.description, types: GROUP_TYPES[t.id] }))
 
 /** The tooltip of the tab for services no group claims. */
 export const UNGROUPED_DESCRIPTION = 'Services registered with a type no other tab claims, listed here rather than dropped.'
@@ -491,7 +482,7 @@ export function DirectoryTab({ showToast }) {
   // The tab, in the path (`/directory/<group>`); the first group is the bare page. A group has a
   // tab only while it has rows, so one that empties between polls leaves the address and the first
   // tab takes over. Before the first read the path is held until the list arrives.
-  const [groupId, setGroupId] = useUrlTab('directory', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
+  const [groupId, setGroupId, groupHref] = useUrlTab('directory', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
   const active = groups.find(g => g.id === groupId) || groups[0]
 
   return (
@@ -526,9 +517,10 @@ export function DirectoryTab({ showToast }) {
             />
           ) : (<>
             <TabStrip
-              ariaLabel="Service group"
+              ariaLabel="Directory"
               value={active.id}
               onChange={setGroupId}
+              hrefFor={groupHref}
               tabs={groups.map(g => ({ id: g.id, label: g.title, description: g.description }))}
             />
             {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type

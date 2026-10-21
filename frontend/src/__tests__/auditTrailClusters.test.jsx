@@ -348,7 +348,7 @@ describe('the component draws the badges', () => {
 
     expect(badges()[0].className).toContain('trail-node-selected')
 
-    const next = () => screen.getByRole('button', { name: /Next/ })
+    const next = () => screen.getByRole('button', { name: 'Next' })
     fireEvent.click(next())
     await waitFor(() =>
       expect(screen.getByTitle(/Position in this entity's history/)).toHaveTextContent('Event 2 of 3'))

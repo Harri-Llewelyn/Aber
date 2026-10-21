@@ -4,6 +4,8 @@ import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
+import { TooltipBubble, useTooltip } from '../common/Tooltip'
+import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
@@ -404,6 +406,68 @@ export function clusterSummary(events, kindOf) {
        + 'Click to open the first — narrow the time range to separate them'
 }
 
+/** A lane's key: the stored kind and the entity, so a device, its nameplate and its schemas are three lanes. */
+export const laneKeyOf = (e) => `${String(e.entity_type).toLowerCase()}:${e.entity_id}`
+
+/**
+ * Oldest first, and the rows of one transaction, which share a time, in the order they were
+ * written: clusterEvents' order, so the drawer steps the way the timeline reads.
+ */
+export const byTimeThenId = (a, b) =>
+  (new Date(a.timestamp) - new Date(b.timestamp)) || (Number(a.event_id) - Number(b.event_id))
+
+/** The event in `laneEvents` (oldest first) nearest in time to `at`: the earlier of two as near. */
+export function nearestInTime(laneEvents, at) {
+  const t = new Date(at).getTime()
+  let best = laneEvents[0] ?? null
+  let bestGap = Infinity
+  for (const e of laneEvents) {
+    const gap = Math.abs(new Date(e.timestamp).getTime() - t)
+    if (gap < bestGap) { best = e; bestGap = gap }
+  }
+  return best
+}
+
+/** The keys that step the open drawer: along its lane, or to the lane above or below. */
+const STEP_KEYS = {
+  ArrowLeft: { along: -1 }, ArrowRight: { along: 1 }, ArrowUp: { across: -1 }, ArrowDown: { across: 1 },
+}
+
+/** The trigger's three actions as the status line says them; every other act by its filter label. */
+const SPOKEN_ACTIONS = { INSERT: 'Created', UPDATE: 'Updated', DELETE: 'Deleted' }
+
+/** What the status line says of an event: "Event 4 of 7: Updated, 14:02". */
+export function eventNews(index, count, event) {
+  const action = SPOKEN_ACTIONS[event.event_type] || AUDIT_TRAIL_ACTIONS[event.event_type] || event.event_type
+  const time = new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `Event ${index + 1} of ${count}: ${action}, ${time}`
+}
+
+/**
+ * One of the drawer's four step buttons, with the shared tooltip. At an end it is `aria-disabled`,
+ * not `disabled`: it stays in the Tab order with the disabled look, a press does nothing, and its
+ * tooltip, which shows on keyboard focus, says why. The glyph is hidden, so the name is the word.
+ */
+function StepButton({ label, glyph, glyphAfter = false, keyName, tip, atEnd, onStep }) {
+  const { trigger, bubble } = useTooltip()
+  const mark = <span aria-hidden="true">{glyph}</span>
+  return (
+    <>
+      <button
+        type="button"
+        className={`btn btn-ghost btn-sm trail-nav-btn${atEnd ? ' btn-disabled' : ''}`}
+        aria-disabled={atEnd ? 'true' : undefined}
+        aria-keyshortcuts={keyName}
+        {...trigger}
+        onClick={() => { trigger.onClick(); if (!atEnd) onStep() }}
+      >
+        {glyphAfter ? <>{label}{mark}</> : <>{mark}{label}</>}
+      </button>
+      <TooltipBubble {...bubble} text={tip} keepMounted />
+    </>
+  )
+}
+
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
 const FALLBACK_SECTION_ICON = IconHistory
 
@@ -454,6 +518,11 @@ export const shortId = (id) => {
   const s = String(id || '')
   return s.length > 13 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
+
+/** A lane's name as its label draws it: the name and its qualifier, or the shortened id. */
+const laneLabel = (lane) => (lane.name
+  ? [lane.name, lane.qualifier].filter(Boolean).join(' ')
+  : shortId(lane.entityId))
 
 /**
  * What the entity, mutation and transaction ids in the event drawer are for. Each one ends by
@@ -1230,7 +1299,7 @@ export function AuditTrailTab({ userRole, showToast }) {
   const lanes = useMemo(() => {
     const byEntity = new Map()
     for (const e of events) {
-      const key = `${String(e.entity_type).toLowerCase()}:${e.entity_id}`
+      const key = laneKeyOf(e)
       if (!byEntity.has(key)) {
         byEntity.set(key, { key, kind: entityKind(e.entity_type), entityId: e.entity_id, events: [] })
       }
@@ -1275,6 +1344,9 @@ export function AuditTrailTab({ userRole, showToast }) {
 
     return [...known, ...leftovers]
   }, [lanes, allowedKinds])
+
+  /** Every lane in the order it is drawn, across the sections: what ↑ and ↓ move through. */
+  const drawnLanes = useMemo(() => sections.flatMap(s => s.lanes), [sections])
 
   /**
    * The x-axis extent, from the events rather than the range control: the default range is
@@ -1362,53 +1434,97 @@ export function AuditTrailTab({ userRole, showToast }) {
   // out of the filter, the drawer closes.
   const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
   const selectedAnalysis = selected ? analysis.get(selected.event_id) : null
+  const drawerName = selected
+    ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)
+    : ''
   // The drawer's title icon: the selected entity's section glyph.
   const SelectedIcon = selected
     ? (SECTION_ICONS[entityKind(selected.entity_type)] || FALLBACK_SECTION_ICON)
     : null
 
   /**
-   * The selected entity's events, oldest first: Previous goes back in time and Next forward. Drawn
-   * from the filtered set so the drawer and the lane describe the same events.
+   * The open lane's events, oldest first and in write order inside a transaction (byTimeThenId):
+   * Previous goes back in time and Next forward. The lane rather than the entity, because a device,
+   * its nameplate and its schemas share an id. From the filtered set, so the drawer and the lane
+   * describe the same events.
    */
-  const selectedLaneEvents = useMemo(() => {
-    if (!selected) return []
-    return events
-      .filter(e => e.entity_id === selected.entity_id)
-      .slice()
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-  }, [events, selected?.entity_id])
-
+  const selectedLaneKey = selected ? laneKeyOf(selected) : null
+  const selectedLaneEvents = useMemo(
+    () => (selectedLaneKey ? events.filter(e => laneKeyOf(e) === selectedLaneKey).sort(byTimeThenId) : []),
+    [events, selectedLaneKey]
+  )
   const selectedIndex = selectedLaneEvents
     .findIndex(e => String(e.event_id) === String(selectedEventId))
+  // Where the open lane is drawn, in the order on screen now; -1 for a lane no section draws.
+  const selectedLaneIndex = drawnLanes.findIndex(l => l.key === selectedLaneKey)
+  const laneAbove = selectedLaneIndex > 0 ? drawnLanes[selectedLaneIndex - 1] : null
+  const laneBelow = selectedLaneIndex >= 0 ? (drawnLanes[selectedLaneIndex + 1] ?? null) : null
+
+  /* What the drawer's status line says after a step, by key or button, and the event it was said
+     for. Any other change of selection (a click, a transaction row, the address) leaves it silent,
+     so opening the drawer reads as it does on every other page. */
+  const [stepNews, setStepNews] = useState({ eventId: null, text: '' })
+  // Set by a step, so the marker it lands on is scrolled into view once it is drawn.
+  const scrollToSelected = useRef(false)
+  const trailBodyRef = useRef(null)
+
+  const goTo = (event, news) => {
+    scrollToSelected.current = true
+    setStepNews({ eventId: event.event_id, text: news })
+    setSelectedEventId(event.event_id)
+  }
+
+  /** Along the open lane, to its `i`th event. No wrap: an index past either end does nothing. */
   const stepTo = (i) => {
     const next = selectedLaneEvents[i]
-    if (next) setSelectedEventId(next.event_id)
+    if (!next) return
+    const lane = drawnLanes[selectedLaneIndex]
+    goTo(next, `${eventNews(i, selectedLaneEvents.length, next)}, ${lane ? laneLabel(lane) : drawerName}`)
   }
 
   /**
-   * ← and → step the drawer while it has a selected event. Bound here rather than in App.jsx: the
-   * keys mean nothing without a selection, and the index they move lives here. One listener per
-   * selection, reading the current position through a ref, so it is not re-installed every render.
-   *
-   * Stands down for an editable target and for a modified keystroke, the guard the `?` handler in
-   * App.jsx uses: the filter bar's selects and date inputs consume arrow keys natively, and a
-   * focused select must not both change its value and step the drawer. No wrap: stepTo() ignores
-   * an out-of-range index, matching the disabled buttons.
+   * To the lane above (-1) or below (+1), at its event nearest in time to the one open, so the
+   * drawer stays at the same moment. No wrap.
    */
-  const navRef = useRef({ selectedIndex, stepTo })
-  navRef.current = { selectedIndex, stepTo }
+  const stepLane = (by) => {
+    const lane = by < 0 ? laneAbove : laneBelow
+    if (!lane || !selected) return
+    const laneEvents = [...lane.events].sort(byTimeThenId)
+    const next = nearestInTime(laneEvents, selected.timestamp)
+    if (!next) return
+    goTo(next, `Entity ${selectedLaneIndex + by + 1} of ${drawnLanes.length}, ${laneLabel(lane)}. `
+      + eventNews(laneEvents.indexOf(next), laneEvents.length, next))
+  }
+
+  useEffect(() => {
+    if (!scrollToSelected.current) return
+    scrollToSelected.current = false
+    trailBodyRef.current?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [selectedEventId])
+
+  /**
+   * ← and → step along the open lane and ↑ and ↓ to the lane above or below, while the drawer is
+   * open. Bound here rather than in App.jsx: the keys mean nothing without a selection. One listener
+   * per selection, reading the position and the lane order on screen through a ref.
+   *
+   * Stands down where shortcutAllowed says (a field or select, which use the keys themselves, Ctrl,
+   * Cmd or Alt, an open dialog) and for a key a control has already taken. Arrow keys are not
+   * character keys, so the Single-key shortcuts setting leaves them alone. A key it takes is kept
+   * from the page, so ↑ and ↓ do not scroll the timeline while the drawer is open.
+   */
+  const navRef = useRef(null)
+  navRef.current = { selectedIndex, stepTo, stepLane }
   const hasSelection = !!selected
   useEffect(() => {
     if (!hasSelection) return
     const onKey = (e) => {
-      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.ctrlKey || e.metaKey || e.altKey) return
-      const el = e.target
-      const tag = el?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      const step = STEP_KEYS[e.key]
+      if (!step || e.defaultPrevented || !shortcutAllowed(e)) return
       e.preventDefault()
-      const { selectedIndex: i, stepTo: step } = navRef.current
-      step(e.key === 'ArrowLeft' ? i - 1 : i + 1)
+      const nav = navRef.current
+      if (step.along) nav.stepTo(nav.selectedIndex + step.along)
+      else nav.stepLane(step.across)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -1662,7 +1778,7 @@ export function AuditTrailTab({ userRole, showToast }) {
 
                   {/* Everything under the axis. Its own box, so the gridlines can span exactly the
                       rows and nothing above them. */}
-                  <div className="trail-body">
+                  <div className="trail-body" ref={trailBodyRef}>
                     {sections.map(section => (
                       <React.Fragment key={section.kind}>
                         <div className="trail-section" role="separator" aria-label={`${section.label} lanes`}>
@@ -1821,46 +1937,72 @@ export function AuditTrailTab({ userRole, showToast }) {
         type={selected ? entityKind(selected.entity_type) : ''}
         icon={SelectedIcon && <SelectedIcon size={15} />}
         onCopy={showToast}
-        title={selected
-          ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)
-          : ''}
+        title={drawerName}
         subtitle={selected && (
           /* One flex item laid out internally as rows; `.context-panel-subtitle` is a wrapping row
              shared with other pages. */
           <div className="trail-drawer-nav">
             {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
                 above the metadata. */}
-            <div className="trail-drawer-nav-pos" title="Position in this entity's history, oldest first">
+            <div className="trail-drawer-nav-pos" title="Position in this entity's history, oldest first, and among the entities on the trail">
               Event {selectedIndex + 1} of {selectedLaneEvents.length}
-              {' · '}
-              {entityNames.get(selected.entity_id)
-                || snapshotIdentity(selected)?.label
-                || shortId(selected.entity_id)}
+              {selectedLaneIndex >= 0 && ` · Entity ${selectedLaneIndex + 1} of ${drawnLanes.length}`}
             </div>
 
+            {/* Along the lane on the first row, Previous being older; between lanes on the second.
+                Marked disabled rather than hidden at the ends, so the rows do not reflow under the
+                cursor. */}
             <div className="trail-drawer-nav-btns">
-              {/* Previous is older. Disabled rather than hidden at the ends, so the row does not
-                  reflow under the cursor. */}
-              <button
-                className={`btn btn-ghost btn-sm trail-nav-btn${selectedIndex <= 0 ? ' btn-disabled' : ''}`}
-                onClick={() => stepTo(selectedIndex - 1)}
-                disabled={selectedIndex <= 0}
-                title={selectedIndex <= 0
-                  ? 'This is the oldest recorded change to this entity'
-                  : 'Step back to the previous change to this entity (←)'}
-              >
-                ◀ Previous
-              </button>
-              <button
-                className={`btn btn-ghost btn-sm trail-nav-btn${selectedIndex >= selectedLaneEvents.length - 1 ? ' btn-disabled' : ''}`}
-                onClick={() => stepTo(selectedIndex + 1)}
-                disabled={selectedIndex >= selectedLaneEvents.length - 1}
-                title={selectedIndex >= selectedLaneEvents.length - 1
-                  ? 'This is the most recent change to this entity'
-                  : 'Step forward to the next change to this entity (→)'}
-              >
-                Next ▶
-              </button>
+              <StepButton
+                label="Previous"
+                glyph="◀"
+                keyName="ArrowLeft"
+                atEnd={selectedIndex <= 0}
+                tip={selectedIndex > 0 ? 'Step back to the previous change to this entity (←)'
+                  : nextCursor ? 'This is the oldest change loaded. Show more, at the foot of the trail, loads older ones.'
+                    : truncated ? 'This is the oldest change loaded. There are older ones this view cannot reach.'
+                      : 'This is the oldest recorded change to this entity'}
+                onStep={() => stepTo(selectedIndex - 1)}
+              />
+              <StepButton
+                label="Next"
+                glyph="▶"
+                glyphAfter
+                keyName="ArrowRight"
+                atEnd={selectedIndex >= selectedLaneEvents.length - 1}
+                tip={selectedIndex < selectedLaneEvents.length - 1
+                  ? 'Step forward to the next change to this entity (→)'
+                  : 'This is the most recent change to this entity'}
+                onStep={() => stepTo(selectedIndex + 1)}
+              />
+              <StepButton
+                label="Previous Entity"
+                glyph="▲"
+                keyName="ArrowUp"
+                atEnd={!laneAbove}
+                tip={laneAbove ? `Move to ${laneLabel(laneAbove)}, the entity above, at the same point in time (↑)`
+                  : selectedLaneIndex < 0 ? 'This entity has no lane on the trail'
+                    : 'This is the first entity on the trail'}
+                onStep={() => stepLane(-1)}
+              />
+              <StepButton
+                label="Next Entity"
+                glyph="▼"
+                glyphAfter
+                keyName="ArrowDown"
+                atEnd={!laneBelow}
+                tip={laneBelow ? `Move to ${laneLabel(laneBelow)}, the entity below, at the same point in time (↓)`
+                  : selectedLaneIndex < 0 ? 'This entity has no lane on the trail'
+                    : 'This is the last entity on the trail'}
+                onStep={() => stepLane(1)}
+              />
+            </div>
+
+            {/* The drawer does not take focus, so a step would change it silently: this says what
+                a step opened. Drawn with the drawer and only its text changes, because a screen
+                reader announces a change to a live region it already knows. */}
+            <div className="sr-only" role="status" aria-live="polite">
+              {stepNews.eventId != null && String(stepNews.eventId) === String(selectedEventId) ? stepNews.text : ''}
             </div>
 
             <div className="trail-drawer-nav-badges">

@@ -16,6 +16,7 @@ import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
 import { formatDateTime } from '../utils/format'
 import { approvalsForUrl } from '../routes'
 import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
+import { tabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn() }
@@ -89,8 +90,8 @@ async function selectRow(index = 0) {
 }
 
 /** The decided proposals are the second tab; Awaiting a decision is the default. */
-const showDecided = () => fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
-const showAwaiting = () => fireEvent.click(screen.getByRole('tab', { name: /^Awaiting a decision/ }))
+const showDecided = () => fireEvent.click(tabLink('Decided'))
+const showAwaiting = () => fireEvent.click(tabLink(/^Awaiting a decision/))
 
 const renderTab = (props = {}) => render(
   <ApprovalsTab
@@ -302,7 +303,7 @@ describe('the queue is worked from the front', () => {
     ])
     renderTab()
     // Awaiting a decision is the tab the page opens on.
-    expect(screen.getByRole('tab', { name: /^Awaiting a decision/ })).toHaveAttribute('aria-selected', 'true')
+    expect(tabLink(/^Awaiting a decision/)).toHaveAttribute('aria-current', 'page')
     let rows = await screen.findAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText('Waiting')).toBeInTheDocument()
@@ -1021,10 +1022,10 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     const bar = strip.nextElementSibling
     expect(bar).toHaveClass('filter-bar')
     expect(card.querySelector('.tab-strip .help-tip, .filter-bar .help-tip')).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Awaiting a decision' })).toHaveAccessibleDescription(/nobody has decided yet, oldest first/)
-    expect(screen.getByRole('tab', { name: 'Decided' })).toHaveAccessibleDescription(/newest decision first/)
+    expect(tabLink('Awaiting a decision')).toHaveAccessibleDescription(/nobody has decided yet, oldest first/)
+    expect(tabLink('Decided')).toHaveAccessibleDescription(/newest decision first/)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
+    fireEvent.click(tabLink('Decided'))
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBeTruthy()
     expect(card.querySelector('.tab-strip .help-tip')).toBeNull()
   })
@@ -1038,7 +1039,7 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     fireEvent.change(within(search).getByRole('searchbox'), { target: { value: 'pump' } })
     expect(screen.getByRole('button', { name: /Clear filters \(1\)/ }).parentElement).toHaveClass('filter-bar-actions')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
+    fireEvent.click(tabLink('Decided'))
     expect(expectSearchFirst('Filter decided proposals by what they are about').nextElementSibling)
       .toBe(screen.getByLabelText('Filter decided proposals by kind'))
   })
@@ -1048,7 +1049,7 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     renderTab()
     await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
     expect(document.querySelector('.card-heading .section-count')).toBeNull()
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Awaiting a decision', 'Decided'])
+    expect(tabLinks().map(t => t.textContent)).toEqual(['Awaiting a decision', 'Decided'])
     expect(document.querySelector('.tab-strip-attention')).toBeNull()
   })
 
@@ -1061,18 +1062,18 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     ])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    const awaiting = screen.getByRole('tab', { name: 'Awaiting a decision, 2 waiting' })
+    const awaiting = tabLink('Awaiting a decision, 2 waiting')
     expect(awaiting.querySelector('.tab-strip-attention')).toHaveTextContent('2')
     // A filter narrows the list, not the work waiting.
     fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), { target: { value: 'cells' } })
-    expect(screen.getByRole('tab', { name: 'Awaiting a decision, 2 waiting' })).toBeInTheDocument()
+    expect(tabLink('Awaiting a decision, 2 waiting')).toBeInTheDocument()
   })
 
   it('flags nothing for a viewer who may decide none of it', async () => {
     mockLoad([deviceProposal({ id: 'o1', proposed_by: 'somebody-else' })])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
     await screen.findAllByTestId('proposal-row')
-    expect(screen.getByRole('tab', { name: 'Awaiting a decision' })).toBeInTheDocument()
+    expect(tabLink('Awaiting a decision')).toBeInTheDocument()
     expect(document.querySelector('.tab-strip-attention')).toBeNull()
   })
 

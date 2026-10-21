@@ -436,7 +436,8 @@ STATE and decides for itself whether to keep publishing, buffer, or re-birth whe
 Give it the id above wherever its vendor asks for a primary host, and it will do that. Give it
 nothing, and it watches a topic that is never written, then falls back to whatever its vendor
 chose. A gateway that buffers should replay with `is_historical` set on each metric, and can report
-what an outage cost in [the appliance's format](#the-outage-report).
+what an outage cost in [the appliance's format](#the-outage-report). What such a node must do is
+listed for its engineer in [Bringing your own edge node](../help/site/bring-your-own-edge-node.md).
 
 | Where | What it is |
 | :--- | :--- |
@@ -835,7 +836,8 @@ the gateway announces, Aber quarantines, a person approves.
 
 The broker confines this gateway to `spBv1.0/+/+/<sparkplug_id>/#`. A message published under any
 other edge node is dropped **silently, by design**. That is what stops one gateway forging another's
-telemetry.
+telemetry. An edge node of your own follows the same rules
+([Bringing your own edge node](../help/site/bring-your-own-edge-node.md)).
 
 ---
 

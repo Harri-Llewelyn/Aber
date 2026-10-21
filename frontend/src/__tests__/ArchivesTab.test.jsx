@@ -5,6 +5,7 @@ import { cellUrl } from '../routes'
 import { ArchivesTab, purgeIsSoon } from '../components/tabs/ArchivesTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
+import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', () => ({
   api: {
@@ -482,7 +483,7 @@ const showRetired = async (lists) => {
   api.get.mockImplementation(routed(lists))
   const onViewTrail = vi.fn()
   render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
-  fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+  fireEvent.click(tabLink('Retired'))
   await screen.findByText(lists.retired?.[0]?.name || /Nothing has been retired/)
   return { onViewTrail }
 }
@@ -658,7 +659,7 @@ describe('ArchivesTab shows what has been retired', () => {
       : Promise.resolve([ARCHIVED_CELL]))
     render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    fireEvent.click(tabLink('Retired'))
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
   })
 })
@@ -677,16 +678,16 @@ describe('ArchivesTab layout', () => {
 
     const strip = cards[0].querySelector('.tab-strip')
     expect(strip.parentElement).toBe(cards[0])
-    expect(within(strip).getAllByRole('tab').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
+    expect(within(strip).getAllByRole('link').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
     expect(document.querySelector('.section-count')).toBeNull()
     // Each stage explains itself in its tab's tooltip; the bar has no "?". Neither stage has
     // filters or actions, so no toolbar row is drawn and the table follows the bar.
-    expect(screen.getByRole('tab', { name: 'Archived' })).toHaveAccessibleDescription(/Restore returns one intact/)
-    expect(screen.getByRole('tab', { name: 'Retired' })).toHaveAccessibleDescription(/Only a tombstone remains/)
+    expect(tabLink('Archived')).toHaveAccessibleDescription(/Restore returns one intact/)
+    expect(tabLink('Retired')).toHaveAccessibleDescription(/Only a tombstone remains/)
     expect(strip.querySelector('.help-tip')).toBeNull()
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(strip.nextElementSibling).toHaveClass('table-wrap')
-    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    fireEvent.click(tabLink('Retired'))
     expect(strip.querySelector('.help-tip')).toBeNull()
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(strip.nextElementSibling).toHaveClass('table-wrap')
@@ -701,7 +702,7 @@ describe('ArchivesTab layout', () => {
     expect(typeBadge()).toHaveTextContent('DEVICE')
     expect(typeBadge()).toHaveClass('badge-neutral')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    fireEvent.click(tabLink('Retired'))
     expect(heads()).toEqual(['Name', 'Type', 'Entity ID'])
     expect(typeBadge()).toHaveTextContent('DEVICE')
     expect(typeBadge()).toHaveClass('badge-neutral')
@@ -710,7 +711,7 @@ describe('ArchivesTab layout', () => {
   it('right-aligns the What Survives header over its actions and names the timer Auto-Purge', async () => {
     await showLifecycle({ archives: [ARCHIVED_CELL], retired: [RETIRED_DEVICE] })
     expect(screen.getByText('Auto-Purge')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    fireEvent.click(tabLink('Retired'))
     expect(screen.getByText('What Survives')).toHaveClass('row-actions')
   })
 

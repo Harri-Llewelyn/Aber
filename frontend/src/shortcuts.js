@@ -2,8 +2,9 @@ import { createContext } from 'react'
 
 /*
  * When a keyboard shortcut bound on the whole document may act, in one place. App.jsx's `?`, `/`,
- * `[` and `]`, and Ctrl K's dialog check, read it. A shortcut is a character read from `e.key`,
- * never a key code, so a layout that types it with Shift or AltGr still works.
+ * `[` and `]`, Ctrl K's dialog check and the Audit Trail drawer's arrow keys read it. A shortcut
+ * that is a character reads it from `e.key`, never a key code, so a layout that types it with
+ * Shift or AltGr still works.
  */
 
 /**
@@ -54,21 +55,21 @@ export const isShown = (el) => (typeof el.checkVisibility === 'function'
   ? el.checkVisibility()
   : !el.closest('[hidden]'))
 
-/** The tab bar `[` and `]` step through: the open page's, inside `main`. */
-export const PAGE_TABLIST_SELECTOR = 'main [role="tablist"]'
+/** The tab bar `[` and `]` step through: the open page's TabStrip, inside `main`. */
+export const PAGE_TAB_BAR_SELECTOR = 'main nav.tab-strip'
 
 /**
  * Moves the open page's tab bar one tab back (-1) or on (+1) and says whether it moved. It clicks
  * the tab, so the URL, the history entry and whatever the page resets follow as they do for a
  * click, then focuses it, so a screen reader reads its name. Found by where it sits, like
- * focusPageSearch: the first shown tablist in `main`, its `role="tab"` children, the one with
- * `aria-selected="true"`. It stops at the first and last tab, and does nothing without a tab bar.
+ * focusPageSearch: the first shown tab bar in `main`, its links, the one with
+ * `aria-current="page"`. It stops at the first and last tab, and does nothing without a tab bar.
  */
 export function stepPageTab(step, doc = document) {
-  const list = [...doc.querySelectorAll(PAGE_TABLIST_SELECTOR)].find(isShown)
+  const list = [...doc.querySelectorAll(PAGE_TAB_BAR_SELECTOR)].find(isShown)
   if (!list) return false
-  const tabs = [...list.querySelectorAll('[role="tab"]')]
-  const at = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true')
+  const tabs = [...list.querySelectorAll('a[href]')]
+  const at = tabs.findIndex(t => t.getAttribute('aria-current') === 'page')
   const target = tabs[at + step]
   if (!target) return false
   target.click()

@@ -23,7 +23,7 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
   // The standard on show, in the path by its slug (`/vocabulary/opc-ua`); the first is the bare
   // page. The search is a query parameter that stays across a switch, so one query asks every
   // standard.
-  const [activeSlug, setActiveSlug] = useUrlTab('vocabulary', available.map(t => pathSlug(t.id)), pathSlug(available[0]?.id), { keep: ['search'] })
+  const [activeSlug, setActiveSlug, slugHref] = useUrlTab('vocabulary', available.map(t => pathSlug(t.id)), pathSlug(available[0]?.id), { keep: ['search'] })
   const activeId = available.find(t => pathSlug(t.id) === activeSlug)?.id
   const setActiveId = (id) => setActiveSlug(pathSlug(id))
   const [search, setSearch] = useUrlState('search')
@@ -71,9 +71,10 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
       {/* The tab names the standard on show, so nothing below repeats it. The search text survives
           a switch, so one query asks every standard. */}
       <TabStrip
-        ariaLabel="Standard"
+        ariaLabel={title}
         value={active.id}
         onChange={setActiveId}
+        hrefFor={id => slugHref(pathSlug(id))}
         tabs={available.map(tab => ({
           id: tab.id,
           label: tab.label,

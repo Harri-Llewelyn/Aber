@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
+import { tabLink } from '../test/tabBar'
 
 /**
  * Sorting the Devices page's two tables by a column (#801): the Registered roster and the Quarantine
@@ -212,7 +213,7 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
 })
 
 describe('Devices: sorting the Quarantine queue by a column (#801)', () => {
-  const openQueue = () => fireEvent.click(screen.getByRole('tab', { name: /^Quarantine/ }))
+  const openQueue = () => fireEvent.click(tabLink(/^Quarantine/))
 
   it('sorts Discovered At by instant, not by the text of the time, and reverses it on a second click', async () => {
     await show()
@@ -247,7 +248,7 @@ describe('Devices: sorting the Quarantine queue by a column (#801)', () => {
     window.history.replaceState(null, '', '/devices/quarantine?sort=-discovered_at')
     await show()
 
-    expect(screen.getByRole('tab', { name: /^Quarantine/ })).toHaveAttribute('aria-selected', 'true')
+    expect(tabLink(/^Quarantine/)).toHaveAttribute('aria-current', 'page')
     expect(listed()).toEqual(['Stray_Sensor', 'Unknown_Robot', 'Mystery_Pump'])
     expect(header('Discovered At')).toHaveAttribute('aria-sort', 'descending')
     expect(window.location.pathname + window.location.search).toBe('/devices/quarantine?sort=-discovered_at')

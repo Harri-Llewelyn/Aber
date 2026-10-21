@@ -11,6 +11,7 @@ import { SettingsTab, coerceValue, displayValue, fallbackCopy, groupByCategory }
 import { api } from '../api'
 import { settingUrl } from '../routes'
 import { COLD_STORAGE_DIALOG_KEYS } from '../utils/coldStorage'
+import { queryTabLink, tabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -122,7 +123,7 @@ describe('the page', () => {
      open its tab first -- the same click the operator makes. */
   const showCategory = async (category) => {
     await show()
-    fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${category}`) }))
+    fireEvent.click(tabLink(new RegExp(`^${category}`)))
   }
 
   it("prints each setting's description on the page, with no ? to click", async () => {
@@ -141,14 +142,14 @@ describe('the page', () => {
      list does not know shows no tooltip rather than an empty one. */
   it('describes each category it knows in its tab\'s tooltip, and leaves an unknown one plain', async () => {
     await show()
-    expect(screen.getByRole('tab', { name: 'Audit Trail' })).toHaveAccessibleDescription(/How often the Audit Trail page reads/)
-    expect(screen.getByRole('tab', { name: 'Retention' })).toHaveAccessibleDescription(/How long Aber keeps records/)
-    expect(screen.getByRole('tab', { name: 'Audit Trail' })).not.toHaveAccessibleDescription(/beside a setting/)
+    expect(tabLink('Audit Trail')).toHaveAccessibleDescription(/How often the Audit Trail page reads/)
+    expect(tabLink('Retention')).toHaveAccessibleDescription(/How long Aber keeps records/)
+    expect(tabLink('Audit Trail')).not.toHaveAccessibleDescription(/beside a setting/)
 
     api.get.mockResolvedValue([{ ...SETTINGS[0], key: 'z.one', category: 'Zulu' }])
     cleanup()
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
-    expect(screen.getByRole('tab', { name: 'Zulu' })).not.toHaveAttribute('aria-describedby')
+    expect(tabLink('Zulu')).not.toHaveAttribute('aria-describedby')
   })
 
   it('names what applies when a setting has never been changed', async () => {
@@ -279,13 +280,13 @@ describe('the page', () => {
     /* Category drives the page's sections, and a retention window is not an Audit Trail control.
        The tab is now the only place a category is named, so these queries are unambiguous. */
     await show()
-    expect(screen.getByRole('tab', { name: /^Audit Trail/ })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /^Retention/ })).toBeInTheDocument()
+    expect(tabLink(/^Audit Trail/)).toBeInTheDocument()
+    expect(tabLink(/^Retention/)).toBeInTheDocument()
 
     // The first category the API returned is selected, and the other category's rows are absent.
     expect(screen.queryByLabelText('Alert history kept for (days)')).toBeNull()
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
+    fireEvent.click(tabLink(/^Retention/))
     expect(screen.getByLabelText('Alert history kept for (days)')).toBeInTheDocument()
     expect(screen.queryByLabelText('Refresh interval (seconds)')).toBeNull()
   })
@@ -307,7 +308,7 @@ describe('the page', () => {
       await act(async () => {
         render(<SettingsTab showToast={vi.fn()} />)
       })
-      expect(screen.getByRole('tab', { name: /^Retention/ })).toHaveAttribute('aria-selected', 'true')
+      expect(tabLink(/^Retention/)).toHaveAttribute('aria-current', 'page')
       const row = document.querySelector('[data-setting="alerts.retention_days"]')
       // The table row carries the highlight, so the tint reaches every cell.
       expect(row.tagName).toBe('TR')
@@ -315,7 +316,7 @@ describe('the page', () => {
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
       expect(scrollIntoView.mock.contexts[0]).toBe(row)
       // Choosing a category by hand puts it in the path and drops the highlight with the query.
-      fireEvent.click(screen.getAllByRole('tab')[0])
+      fireEvent.click(tabLinks()[0])
       expect(window.location.search).toBe('')
       expect(document.querySelector('.setting-row-found')).toBeNull()
     } finally {
@@ -352,7 +353,7 @@ describe('the table', () => {
     expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
     for (const th of screen.getAllByRole('columnheader')) expect(th).toHaveAttribute('scope', 'col')
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Bravo/ }))
+    fireEvent.click(tabLink(/^Bravo/))
     expect(screen.getAllByRole('row')).toHaveLength(4) // header + three
     expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
   })
@@ -488,7 +489,7 @@ describe('the Cold Storage rows', () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
     const keys = [...document.querySelectorAll('[data-setting]')].map(el => el.dataset.setting)
     expect(keys).toEqual(['archive.tier_after_days'])
-    expect(screen.queryByRole('tab', { name: /Backups/ })).toBeNull()
+    expect(queryTabLink(/Backups/)).toBeNull()
   })
 })
 
@@ -512,7 +513,7 @@ describe('the page frame', () => {
   it('is one card headed Settings, with the category tabs inside it under the heading', async () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
     const heading = screen.getByRole('heading', { name: 'Settings' })
-    const tabs = screen.getByRole('tablist', { name: 'Settings category' })
+    const tabs = screen.getByRole('navigation', { name: 'Settings' })
     const card = heading.closest('.card')
     expect(heading.closest('.card-heading')).toBeTruthy()
     expect(tabs.closest('.tab-strip').parentElement).toBe(card)
@@ -531,9 +532,9 @@ describe('the page frame', () => {
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('table-wrap')
     expect(document.querySelector('.section-count')).toBeNull()
-    for (const tab of screen.getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
+    for (const tab of tabLinks()) expect(tab).not.toHaveAttribute('title')
 
-    fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
+    fireEvent.click(tabLink(/^Retention/))
     expect(document.querySelector('.card .tab-strip .help-tip')).toBeNull()
   })
 

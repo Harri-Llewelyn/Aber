@@ -121,6 +121,43 @@ Keyboard focus opens the rail at once, in every mode. Two kinds of focus are not
   focus (`relatedTarget` is null). The rail's blur notes whether the panel was open as the window
   lost focus (`document.hasFocus()` is already false then), and that return puts it back as it was.
 
+Tab moving from one of the rail's controls to another is not leaving it, so the blur in between
+does not shut the panel. Shutting it would hide a page's chevron and tabs, which show only on the
+wide rail, from under the focus arriving on them, and the browser would drop that focus.
+
+### The rail lists each page's tabs
+
+A page with tabs (`pageTabs` on its `TABS` entry) is a `SidebarPage`: its link, a chevron, and a
+list of its tabs' links beneath it. It is the WAI-ARIA disclosure navigation pattern, not a tree:
+the chevron is a `<button>` with `aria-expanded`, `aria-controls` and a name of its own ("Show the
+Devices tabs"), 28px square, and the list is a `<ul>` of `<a href>`s to each tab's address. Tab
+reaches the page's link, the chevron, then each tab; Enter or Space on the chevron toggles it.
+There are no arrow-key rules, which a tree would bring and nobody expects in a menu.
+
+- **Which pages are open.** Arriving on a page opens its tabs and marks the current one
+  `aria-current="page"` (its page's link then says `aria-current="true"`); a change of tab moves
+  the mark. Arriving also closes every other page's tabs, those opened by hand included: any change
+  of page does, from the rail, a link, `[` and `]` or the address bar. Until then, pages opened by
+  hand stay open together. Closing the current page lasts until the next arrival on it.
+- **Collapse all tabs**, the foot's item under the account control, closes every list, the current
+  page's included. While none is open it is `aria-disabled`, dimmed and inert but still a Tab stop,
+  rather than hidden, so the foot never changes height. It is 34px, the row the account menu's
+  arrow is measured from.
+- **Counts.** A signal from `useNavSignals` belongs to a page, and `signalTab` names the tab it is
+  about: Devices' Quarantine and Approvals' Awaiting a decision. While the page's tabs are on
+  screen the number moves to that tab, named as the tab bar names it ("Quarantine, 3 waiting"), and
+  the page's link reads plain. Otherwise the page's link carries it, so no number shows twice.
+- **No tooltips** on the tab entries. A tooltip on every row would flash as the pointer moves down
+  the rail, and the tab bar's tabs already carry each tab's sentence.
+- **The modes.** The list shows only on the wide rail: as it opens in Hover mode, always in Expanded
+  mode, and on keyboard focus. Collapsed mode has no room for it, and the page's own tab bar is one
+  click away, so a click on a tabbed page's icon opens the page, as any page's does.
+- **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
+  copy in the database's order, before the page has read them. A category missing from it still
+  shows on the page. Directory lists its three groups; the page adds a tab for any service type
+  no group claims.
+- **Profile** is not in the rail, so its tabs are on its tab bar only.
+
 ### Tooltips on a tab
 
 A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
@@ -131,6 +168,8 @@ screen, and screen readers read it unevenly.
 - **One bubble.** `common/Tooltip.jsx` draws the bubble for HelpTip and for every tab, so the two
   always look alike (`.tooltip-bubble`, beside `.help-tip` in `App.css`). Inside an open native
   dialog it goes into the dialog, which sits in the top layer above anything portalled to `<body>`.
+  The Audit Trail drawer's step buttons use `useTooltip` too, so a button at an end can say why on
+  keyboard focus.
 - **It points at its control.** The bubble carries an arrow on the border facing the control, drawn
   as the popovers' are (*Popover arrows* in `App.css`). `placeTooltip` puts the bubble below the
   control, or above a control low in the window, with the arrow hanging from the bottom border. It
@@ -284,6 +323,33 @@ members share a `causation_id` (one act) or merely a timestamp. Ordering inside 
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
 the rows of one transaction.
 
+### How the Audit Trail drawer steps
+
+The event drawer moves along a lane and between lanes, like a cursor in a grid:
+
+- **← and →, or ◀ Previous and Next ▶,** step through the open lane's events. A lane is a kind and
+  an id (`laneKeyOf`), so a device, its nameplate and its schemas are three lanes and "Event 3 of 7"
+  counts the one on screen. The order is `byTimeThenId`, the badge's order: oldest first, and the
+  rows of one transaction, which share a time, in the order they were written.
+- **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
+  section headings, and open its event nearest in time to the one open (`nearestInTime`; the
+  earlier of two as near). The order is the one on screen when the key is pressed, so a poll that
+  re-ranks the lanes moves the next press with it. Neither pair wraps. While the drawer is open the
+  page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and Page Down still do.
+- **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
+  a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
+  not character keys, so the Single-key shortcuts setting does not cover them.
+- **At an end** a button is `aria-disabled`, not `disabled`: it stays in the Tab order, a press does
+  nothing, and its tooltip (the shared one, which shows on focus) says why. Previous at the oldest
+  event says what is loaded: Show more may hold older ones.
+- **What a screen reader hears.** The drawer does not take focus, so a step would change it
+  silently. A visually hidden `role="status"` line says what each step opened ("Event 4 of 7:
+  Updated, 14:02, Press 4"). It is drawn with the drawer and speaks after a step only, by key or
+  button, so opening the drawer reads as it does on every page.
+- **The marker follows.** After every step the selected marker is scrolled into view (`nearest`).
+  Its `scroll-margin` keeps it clear of the pinned axis row, the section heading and the label
+  column.
+
 ### What the Access Control page claims, and how it says so
 
 `components/tabs/AccessControlTab.jsx` shows two sources side by side and never merges them. The
@@ -396,12 +462,15 @@ row and all, so the two read alike.
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
   in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
-  above the behaviour control: Profile first, then the Theme switch, Report Bug and Sign Out. The
-  switch is a `SegmentedControl` with `menu` across the whole row: a `role="group"` named Theme
-  holding a Light and a Dark `menuitemradio`, each its icon (a sun, a moon) and its name, the
-  current theme checked. The row has no visible "Theme" label: the segments' names say what they
-  are, and the group's name tells a screen reader what the row is for. Choosing applies at once and
-  the menu stays open, since the result shows behind it. A third theme would be a third segment.
+  above Collapse all tabs: the session's facts, then the Theme switch and the Sidebar layout switch,
+  each a section of its own, then Profile, Report Bug and Sign Out. Each switch is a
+  `SegmentedControl` with `menu` across the whole row: a `role="group"` of `menuitemradio`s, each
+  its icon and its name, the current one checked. Theme holds Light and Dark (a sun, a moon).
+  Sidebar layout holds Hover, Expanded and Collapsed, the three `SIDEBAR_MODES` in short words so
+  they fit the menu; each segment's tooltip is its layout's description, in the shared bubble. Neither
+  row has a visible label: the segments' names say what they are, and
+  the group's name tells a screen reader what the row is for. Choosing applies at once and the menu
+  stays open, since the result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
   rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
@@ -413,8 +482,8 @@ row and all, so the two read alike.
   (`aber_theme`, `aber_sidebar_mode`, `aber_single_key_shortcuts`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
   row is seeded from that copy's theme and layout (`utils/userSettings.js`, ON CONFLICT DO NOTHING,
-  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
-  the rail's control and Appearance all write through the one hook's setters. A choice made before the row
+  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's two switches
+  and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
@@ -613,14 +682,17 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
-- **A new tab needs only its id in the page's list.** Most pages take the list from their tab list,
-  the one that also holds each tab's tooltip (`VIEWS.map(v => v.id)`).
+- **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
+  rest), which holds its id, its name and its tooltip; the page, the rail and the search all read
+  it. `useUrlTab` returns `[tab, setTab, hrefFor]`: `hrefFor(id)` is the address `setTab(id)` goes
+  to, kept filters included, and it is what the tab bar's links carry.
 - **A rail click goes to the bare page**, so nothing a drill-down set comes along. A drill-down goes
   to an address built in `routes.js` (`deviceUrl(id)` is `/devices?search=<id>`); the page reads its
   filters from it, and `useArrivalSelection` opens the drawer on an exact id.
 - **The rail's entries and the drill-downs are real links**, `common/RouteLink.jsx`: an `<a href>`
   that navigates in place on a plain click and leaves Ctrl, Cmd, Shift and middle clicks to the
-  browser, which opens a new tab. A `ContextPanel` action takes `to` for the same.
+  browser, which opens a new tab. A `ContextPanel` action takes `to` for the same, and the tab
+  bar's tabs follow the same rule ([Tabs](#tabs)).
 - **A hand-over that carries an object stays state.** The Vocabulary page's Use
   (`pendingVocabularyEntry`) opens Add Metric prefilled: an act to perform once, not a view.
 - **Nothing goes in the address that should not be in a log**: nginx writes query strings to its
@@ -664,12 +736,23 @@ no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
 line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
 
+**The tabs are links, not the WAI-ARIA tabs pattern.** The bar is a `<nav>` named for the page,
+holding an `<a href>` per tab, the open one `aria-current="page"`. The tabs pattern is for panels
+within one page, and each tab here is an address of its own with a history entry
+([Routing](#routing)), so changing tab is navigation. As links, a tab opens in a
+new browser tab with Ctrl-click or middle-click, and "Copy link address" works; a plain click still
+changes tab in place, through the page's `onChange`, so any reset the page does still happens. Each
+tab is its own Tab-key stop and the arrow keys do nothing: `[` and `]` step between tabs from
+anywhere on the page ([The toolbar](#the-toolbar)). The tabs pattern was dropped because each tab
+gained an address; bringing `role="tab"` back would first need a case against the addresses.
+
 ```jsx
+const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.id), 'registered')
+
 <div className="card">
   <CardHeading title="Devices" description="…" />
-  <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster', description: 'Devices admitted to Aber.' },
-           { id: 'quarantine', label: 'Quarantine', description: '…', attention: waiting }]} />
+  <TabStrip ariaLabel="Devices" value={view} onChange={setView} hrefFor={viewHref}
+    tabs={DEVICES_TABS.map(t => (t.id === 'quarantine' ? { ...t, attention: waiting } : t))} />
   {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
     <SearchInput … />
@@ -728,11 +811,10 @@ draws it only where `/` reaches.
 
 `[` and `]` move to the open page's previous and next tab (`stepPageTab` in `src/shortcuts.js`,
 bound beside `?`). They find the tab bar the way `/` finds the search box, the first shown
-`role="tablist"` inside `main`, so a page with a `TabStrip` needs no wiring. They click the tab, so
-the address, the history entry and the page's own reset follow as they do for a click, then focus
-it, so a screen reader reads its name. They stop at the first and last tab and do nothing on a page
-without tabs. A tab bar made of links would change only what `stepPageTab` looks for: the bar, its
-tabs and the open one.
+`nav.tab-strip` inside `main`, its links and the one marked `aria-current="page"`, so a page with a
+`TabStrip` needs no wiring. They click the tab, so the address, the history entry and the page's
+own reset follow as they do for a click, then focus it, so a screen reader reads its name. They stop
+at the first and last tab and do nothing on a page without tabs.
 
 **One check decides when a shortcut may act** (`shortcutAllowed` in `src/shortcuts.js`). It stands
 down in a text field, a select or a contenteditable, with Ctrl, Cmd or Alt held, and while a dialog
@@ -1104,7 +1186,9 @@ passes `{ record: false }`, as a Grafana alert does.
   choosing. Every segment draws its icon and its `label`; an option's `count` is said after the label
   in the tooltip and the accessible name. The chosen segment takes a sunken fill (`--bg-base`) and a
   border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes the option's
-  `tone`.
+  `tone`. A segment's tooltip is its name, the browser's own, unless the option has a
+  `description`: then it is that sentence in the shared bubble (`common/Tooltip.jsx`), tied by
+  `aria-describedby` and with no `title`, as the Sidebar layout switch's segments are.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
@@ -1197,7 +1281,7 @@ Three rules that were each learned from a real bug:
   stylesheet defines.
 
 **A panel that opens from a button points at it.** The alert list, the notifications, the account
-menu, the sidebar behaviour menu and the Filters panel share one radius (`--radius-sm`), one shadow
+menu and the Filters panel share one radius (`--radius-sm`), one shadow
 (`--shadow-popover`) and one arrow rule (App.css, *Popover arrows*): a 10px square turned 45°,
 centred on the panel's border on the side that faces the button, so the outline runs on into the
 point. It is pure CSS, as each panel's position is already known: a placement library such as
@@ -1205,9 +1289,10 @@ Floating UI would add only what these panels have. The arrow is the wrapper's `:
 `:has(> panel)` while the panel is open, because the alert, notification and account panels clip or
 scroll their own overflow; the Filters panel clips nothing and draws its own `::before`. The top-bar
 arrows point up from `left: 50%` of the wrapper, so they follow the pill as its count widens it. The
-two rail menus are `position: fixed`, and so are their arrows: they point left from the panels' left
-border, 60px or 240px, at heights taken from the rail's foot (27px and 65px above the window's
-bottom). Change the foot's padding or its rows and those two numbers move with it. The Filters panel
+account menu is `position: fixed`, and so is its arrow: it points left from the panel's left border,
+60px or 240px, 65px above the window's bottom, the centre of the account row over the foot's
+padding and its 34px Collapse all tabs row. Change the foot's padding or its rows and that number
+moves with it. The Filters panel
 is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
 the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
 to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.

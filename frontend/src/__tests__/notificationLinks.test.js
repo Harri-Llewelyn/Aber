@@ -148,15 +148,22 @@ describe('where a notification links to', () => {
   })
 
   const source = (file) => fs.readFileSync(path.join(SRC, file), 'utf8')
+  // A page's tab ids live in navigation.jsx, which the sidebar and the tab bar both read (#900), so
+  // a tab file proves it reads the link's tab by importing its list from there.
+  const tabLists = source('navigation.jsx')
   it.each([
-    ['components/tabs/ApprovalsTab.jsx', "useUrlState('proposal'", "id: 'decided'"],
-    ['components/tabs/MetricsTab.jsx', "useUrlState('metric'", "id: 'deprecated'"],
-    ['components/tabs/CaptureTab.jsx', "useUrlState('subject'", "id: 'device'"],
-    ['components/tabs/BackupsTab.jsx', "useUrlState('run'", null],
-    ['components/tabs/PeopleSection.jsx', "useUrlState('removed'", "useUrlState('search'"],
-    ['components/tabs/AccessControlTab.jsx', "useUrlState('withdrawn'", "id: 'identities'"],
-  ])('%s reads what its link writes', (file, ...needles) => {
+    ['components/tabs/ApprovalsTab.jsx', ["useUrlState('proposal'"], 'decided'],
+    ['components/tabs/MetricsTab.jsx', ["useUrlState('metric'"], 'deprecated'],
+    ['components/tabs/CaptureTab.jsx', ["useUrlState('subject'"], 'device'],
+    ['components/tabs/BackupsTab.jsx', ["useUrlState('run'"], null],
+    ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'"], null],
+    ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
+  ])('%s reads what its link writes', (file, needles, tab) => {
     const text = source(file)
-    for (const needle of needles.filter(Boolean)) expect(text).toContain(needle)
+    for (const needle of needles) expect(text).toContain(needle)
+    if (tab) {
+      expect(text).toMatch(/\w+_TABS\b[^\n]*from '\.\.\/\.\.\/navigation'/)
+      expect(tabLists).toContain(`id: '${tab}'`)
+    }
   })
 })

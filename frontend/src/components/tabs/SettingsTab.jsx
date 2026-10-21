@@ -7,7 +7,8 @@ import { CardHeading } from '../common/CardHeading'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
-import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
+import { navigate, pageUrl, useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
+import { SETTINGS_TABS } from '../../navigation'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
 
@@ -15,17 +16,11 @@ import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
 const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
 
 /**
- * Each category's tab tooltip, by the category's name. The categories come from the database,
- * which holds no description for one, so the sentences live here; a category missing from this
- * list shows no tooltip.
+ * Each category's tab tooltip, by the category's name, from navigation.jsx's list of categories. The
+ * categories come from the database, which holds no description for one; a category missing from
+ * that list shows no tooltip.
  */
-export const CATEGORY_DESCRIPTIONS = {
-  'Audit Trail': 'How often the Audit Trail page reads the audit log again while it is open.',
-  'Retention': 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.',
-  'Approvals': 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.',
-  'Site': "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan.",
-  'Cold Storage': "When readings move out to the cold archive, and the key that names this site's archive.",
-}
+export const CATEGORY_DESCRIPTIONS = Object.fromEntries(SETTINGS_TABS.map(t => [t.label, t.description]))
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -281,12 +276,21 @@ export function SettingsTab({ showToast, readOnly = false }) {
      the API returned is the bare page. A category that disappears leaves the address, and the first
      takes over. */
   const slugs = groups.map(g => pathSlug(g.category))
-  const [categoryId, setCategoryId] = useUrlTab('settings', slugs, slugs[0], { ready: !loading })
+  const [categoryId, setCategoryId, categoryHref] = useUrlTab('settings', slugs, slugs[0], { ready: !loading })
   const setCategory = (category) => setCategoryId(pathSlug(category))
   /* A setting the search bar named, `?setting=<key>`: highlighted, and its category shown. Choosing
      a category by hand drops it, as any tab change drops the query. */
   const [foundKey, setFoundKey] = useUrlState('setting', '', { allowed: loading ? null : settings.map(s => s.key) })
   const found = settings.find(s => s.key === foundKey)
+  /* The path names the found setting's category, so the sidebar and the window title say the tab
+     on show. Replaced, with the highlight kept: arriving is not a change of tab. */
+  const foundSlug = found ? pathSlug(found.category) : null
+  const firstSlug = slugs[0]
+  useEffect(() => {
+    if (foundSlug && foundSlug !== categoryId) {
+      navigate(pageUrl('settings', { setting: foundKey }, foundSlug === firstSlug ? '' : foundSlug), { replace: true })
+    }
+  }, [foundSlug, categoryId, foundKey, firstSlug])
 
   const activeCategory = found
     ? found.category
@@ -325,8 +329,9 @@ export function SettingsTab({ showToast, readOnly = false }) {
           ) : groups.length > 0 && (<>
             {/* One category at a time; the card scrolls, the page does not. */}
             <TabStrip
-              ariaLabel="Settings category"
+              ariaLabel="Settings"
               value={activeCategory}
+              hrefFor={category => categoryHref(pathSlug(category))}
               // Choosing a category by hand ends the search's highlight: it has been seen.
               onChange={category => { setCategory(category); setFoundKey('') }}
               tabs={groups.map(group => ({ id: group.category, label: group.category, description: CATEGORY_DESCRIPTIONS[group.category] }))}
