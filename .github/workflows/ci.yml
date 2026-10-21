@@ -1602,9 +1602,10 @@ jobs:
       # converge script, the mosquitto credential merge, the orphan sweep's filter and the service
       # JWT; node-red-init's move of a volume's flow; and backup-databases.sh refusing a run it
       # could not finish, and restore-databases.sh finding a backup's files through its manifest,
-      # with the PostgreSQL clients stubbed. Explicit file paths, not the directory (see
-      # `npm run test:lib`). The converge suite needs `jq` on PATH and python3's yaml module
-      # (installed above), which a Windows development box lacks; it skips loudly rather than
+      # with the PostgreSQL clients stubbed; and the ESLint rule that fails on a browser tooltip (a
+      # `title`) in the dashboard, which installs the pinned ESLint. Explicit file paths, not the
+      # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH and python3's yaml
+      # module (installed above), which a Windows development box lacks; it skips loudly rather than
       # silently.
       - name: Run Node Library Suites
         run: npm run test:lib

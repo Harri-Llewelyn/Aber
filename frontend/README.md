@@ -158,6 +158,40 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   no group claims.
 - **Profile** is not in the rail, so its tabs are on its tab bar only.
 
+### Tooltips
+
+Every tooltip in the dashboard is its own bubble (`common/Tooltip.jsx`), never the browser's
+`title`. A `title` shows after about a second, never to a keyboard and never on a touch screen,
+screen readers read it unevenly, and on an icon-only button it was often the only name.
+
+- **Three outcomes for a `title`.** *Drop* it where the control already says the same in visible
+  text. *Convert* it where it says something a keyboard or touch user needs: wrap the control in
+  `<Tooltip text="…">`, and give an icon-only button an `aria-label`, so its name never depends on
+  the tooltip. *Move* it where it is a hint repeated on every row: say it once, on the column
+  header. `SortHeader`'s `title` is its button's tooltip, and `ColumnHeader` is a header that
+  cannot be sorted with one.
+- **Converting a control** is one wrapper:
+
+  ```jsx
+  <Tooltip text="Send the bundle to the gateway again">
+    <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
+  </Tooltip>
+  ```
+
+  It adds `useTooltip`'s handlers and `aria-describedby` to the control, keeps the control's own,
+  and draws the bubble beside it. With no `text` it draws the control alone, in the same place, so
+  a tooltip that comes and goes never remounts it. Text that is the control's `aria-label` is not
+  read again as its description. A tooltip shows on hover and focus, so it goes on something that
+  takes focus; a sentence about anything else belongs in visible text or a `HelpTip`.
+- **The words.** About 20 words, plain sentences, no code, and never the visible label again.
+- **The guard.** `npm run lint:js` fails on a `title` on an HTML element in `frontend/src`, a
+  `no-restricted-syntax` rule in `scripts/lint/eslint.config.mjs`. A component's prop named
+  `title`, such as a dialog's heading, is not matched. `title` stays where it is what the element
+  means: `<abbr>` and `<iframe>`, which the rule lets through, and an SVG's `<title>` element,
+  which is not an attribute. The files not yet swept are listed beside the rule, and
+  `scripts/lint/browser-tooltip.test.mjs` fails on one that no longer carries a `title`, so the
+  list only shrinks.
+
 ### Tooltips on a tab
 
 A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
