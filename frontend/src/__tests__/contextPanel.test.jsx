@@ -1025,7 +1025,7 @@ describe('Context panel layout invariants', () => {
     expect(p.queryByText('3D Visual Model')).toBeNull()
     expect(p.queryByText(/Exported as an AAS/)).toBeNull()
     // The AAS fact is not lost -- it moved onto the dropzone it describes.
-    expect(p.getByRole('button', { name: /Upload a 3D model/i }).getAttribute('title'))
+    expect(tooltipOf(p.getByRole('button', { name: /Upload a 3D model/i })))
       .toMatch(/VisualRepresentation submodel/)
   })
 })
