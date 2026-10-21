@@ -61,8 +61,6 @@ export default function config ({ js, react, hooks, globals }) {
     {
       // Not yet swept.
       files: [
-        'frontend/src/App.jsx',
-        'frontend/src/components/auth/AuthShell.jsx',
         'frontend/src/components/common/AlertPill.jsx',
         'frontend/src/components/common/CellPlacementPicker.jsx',
         'frontend/src/components/common/ExpandAllToggle.jsx',

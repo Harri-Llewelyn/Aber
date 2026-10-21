@@ -245,10 +245,10 @@ describe('Merged navigation shell', () => {
 
       // The rail label is transparent while the rail is collapsed, so the name is stated outright.
       expect(trigger().getAttribute('aria-label')).toContain('admin@aber.local')
-      expect(trigger().getAttribute('title')).toContain('admin@aber.local')
+      expect(trigger()).not.toHaveAttribute('title')
       // usePermissions resolves the role from the database before falling back to the built-in map,
       // so it arrives a tick after the bar does.
-      await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
+      await waitFor(() => expect(trigger().getAttribute('aria-label')).toContain('Administrator'))
 
       // The address is the label: clipped with the others in the collapsed rail, read when it opens.
       expect(trigger().querySelector('.sidebar-item-label')).toHaveTextContent('admin@aber.local')
