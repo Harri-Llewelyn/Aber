@@ -69,7 +69,7 @@ const SPECS = [
     namespaceUri: 'http://opcfoundation.org/UA/Machinery/',
     path: 'Machinery/Opc.Ua.Machinery.NodeSet2.xml',
     version: '1.04.2',
-    publicationDate: '2026-11-01T00:00:00Z',
+    publicationDate: '2026-11-02T00:00:00Z',
     groups: { Machine: null },
     // Not here: OperationalTime, which no Machinery NodeSet declares. A machine's identification
     // object is a MachineIdentificationType, which inherits all but ProductInstanceUri from
