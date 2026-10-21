@@ -93,6 +93,24 @@ describe('the cold storage catalogue', () => {
     expect(within(screen.getByRole('table')).getByText('1,000')).toBeInTheDocument()
   })
 
+  it('sums the catalogue in a row of cards that open nothing, each saying the whole of it in its name', async () => {
+    await show([row(), row({ chunk_name: 'older', range_start: '2026-01-05T00:00:00Z', row_count: 500, object_bytes: 2048 })])
+    const cards = await screen.findByTestId('cold-summary')
+    expect(cards).toHaveAccessibleName('Cold storage summary')
+    expect(cards.closest('.card-body').nextElementSibling).toHaveClass('table-wrap')
+    // Archiving is off, and nothing awaits a drop or failed, so the backlog card is not drawn.
+    expect([...cards.children].map(c => c.dataset.testid)).toEqual(['card-archive', 'card-oldest'])
+    expect(within(cards).queryByRole('button')).toBeNull()
+
+    const archive = screen.getByTestId('card-archive')
+    expect(archive).toHaveTextContent('2 chunks on cold storage')
+    expect(archive).toHaveTextContent('1,500 rows · 6.8 KiB used')
+    expect(archive).toHaveAccessibleName(/^Archive\. 2 chunks on cold storage: the raw rows are gone from the historian, and each object is the only copy\./)
+    const oldest = screen.getByTestId('card-oldest')
+    expect(oldest).toHaveTextContent('5 Jan 2026')
+    expect(oldest).toHaveAccessibleName(/only this page records it/)
+  })
+
   it('names the object key so it can be found on storage', async () => {
     await show([row()])
     // By its accessible name: the shown text is split in two so its end survives a narrow column.
@@ -126,7 +144,7 @@ describe('the cold storage catalogue', () => {
     // A chunk failing for a week is the one row on this page that needs a person.
     await show([row({ state: 'failed', on_cold_storage: false, dropped_at: null,
                       last_error: 'verification failed: object holds 998 rows, manifest says 1000' })])
-    // "Failed" is both a summary stat label and the row's badge, so this reads the row.
+    // "Failed" is both on the summary's backlog card and the row's badge, so this reads the row.
     await waitFor(() => expect(
       within(screen.getByRole('table')).getByText('Failed')
     ).toBeInTheDocument())
@@ -257,7 +275,7 @@ describe('the empty state distinguishes off from on-and-idle', () => {
 describe('how far behind the archive is', () => {
 
   it('names the date the unexported span begins once archiving is on', async () => {
-    // THE FIGURE THAT SAYS A LINK IS DOWN. Every other stat describes what reached the endpoint;
+    // THE FIGURE THAT SAYS A LINK IS DOWN. Every other card describes what reached the endpoint;
     // this is where the data that has not begins, which is the number an outage moves.
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 3 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
@@ -265,7 +283,7 @@ describe('how far behind the archive is', () => {
 
   it('shows the backlog even when nothing has ever been archived', async () => {
     // THE CASE THE FIGURE EXISTS FOR, and the one the live stack caught. An archiver that has never
-    // reached its endpoint has an EMPTY catalogue -- so a stats row gated on the catalogue hides
+    // reached its endpoint has an EMPTY catalogue -- so a summary row gated on the catalogue hides
     // the only figure that could say so, exactly when it is the whole story.
     await show([], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
@@ -274,9 +292,9 @@ describe('how far behind the archive is', () => {
   })
 
   it('leads the empty state with it rather than stranding it in a row of one', async () => {
-    /* WHERE it is, not just that it is. The stats strip is a left-aligned flex row, so a catalogue
-       with nothing in it put this figure alone at the far left above centred text -- reading as a
-       stray label rather than the headline it is. Inside `.empty-state` it inherits the centring.
+    /* WHERE it is, not just that it is. A catalogue with nothing in it once put this figure alone
+       at the far left above centred text -- reading as a stray label rather than the headline it
+       is. Inside `.empty-state` it is centred.
 
        Asserted through the DOM because that is the whole of the change: the figure renders from
        one definition either way, and a regression would move it, not reword it. */
@@ -287,12 +305,14 @@ describe('how far behind the archive is', () => {
     expect(catalogue().querySelector('.empty-icon')).toBeNull()
   })
 
-  it('keeps it in the strip once there is a catalogue to sit beside', async () => {
-    // The other half. Centring it there would break the column the other figures line up in.
+  it('keeps it in the row of cards once there is a catalogue to sit beside', async () => {
+    // The other half: there it is the third card, beside the archive and the oldest span.
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 30 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
     expect(screen.getByText('Unexported since').closest('.empty-state')).toBeNull()
     expect(screen.getByText('Oldest span held')).toBeInTheDocument()
+    expect([...screen.getByTestId('cold-summary').children].map(c => c.dataset.testid))
+      .toEqual(['card-archive', 'card-oldest', 'card-backlog'])
   })
 
   it('withholds it from a reader who cannot see the catalogue', async () => {
@@ -317,9 +337,9 @@ describe('how far behind the archive is', () => {
     expect(screen.queryByText('Unexported since')).toBeNull()
   })
 
-  /** Whether the figure carries the warning tone, which is a class on the stat. */
+  /** Whether the card carries the warning tone, which is a class on the card. */
   const backlogWarns = () =>
-    screen.getByText('Unexported since').closest('.stat').classList.contains('stat-warning')
+    screen.getByTestId('card-backlog').classList.contains('summary-card-warning')
 
   it('stays neutral inside one chunk interval', async () => {
     // A chunk is not eligible until its whole span (up to seven days) has passed the threshold,
@@ -328,6 +348,7 @@ describe('how far behind the archive is', () => {
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 5 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
     expect(backlogWarns()).toBe(false)
+    expect(screen.getByTestId('card-backlog-state')).toHaveTextContent('5 days past the threshold')
   })
 
   it('warns once the backlog passes the tolerance the alert fires on', async () => {
@@ -336,8 +357,35 @@ describe('how far behind the archive is', () => {
     await show([row()], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 20 * 86400 }))
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
     expect(backlogWarns()).toBe(true)
-    // An icon as well as the colour, which is never the only signal.
-    expect(screen.getByText('Unexported since').closest('.stat').querySelector('.stat-value svg')).not.toBeNull()
+    // Words and an icon as well as the colour, which is never the only signal.
+    const state = screen.getByTestId('card-backlog-state')
+    expect(state).toHaveAttribute('role', 'status')
+    expect(state).toHaveTextContent('Behind by 20 days')
+    expect(state.querySelector('svg')).not.toBeNull()
+    expect(screen.getByTestId('card-backlog')).toHaveAccessibleName(/20 days past the 90-day threshold.*Archive Backlog alert fires/)
+  })
+
+  it('puts chunks awaiting their drop and failed exports on the backlog card, a failure in amber', async () => {
+    await show([
+      row(),
+      row({ chunk_name: 'v', state: 'verified', on_cold_storage: false }),
+      row({ chunk_name: 'f', state: 'failed', on_cold_storage: false, last_error: 'timed out' }),
+    ], 'Administrator', backlogRow({ enabled: true, overdue_seconds: 2 * 86400 }))
+    await waitFor(() => expect(screen.getByTestId('card-backlog')).toBeInTheDocument())
+    expect(screen.getByTestId('card-backlog')).toHaveTextContent('1 awaiting drop · 1 failed')
+    expect(screen.getByTestId('card-backlog-state')).toHaveTextContent('1 export failed')
+    expect(backlogWarns()).toBe(true)
+    expect(screen.getByTestId('card-backlog')).toHaveAccessibleName(/1 export failed\. Nothing was dropped/)
+  })
+
+  it('keeps those counts while archiving is off, with no date', async () => {
+    await show([row(), row({ chunk_name: 'v', state: 'verified', on_cold_storage: false })],
+      'Administrator', backlogRow({ enabled: false }))
+    await waitFor(() => expect(screen.getByTestId('card-backlog')).toBeInTheDocument())
+    expect(screen.getByTestId('card-backlog')).toHaveTextContent('1 awaiting drop')
+    expect(screen.getByTestId('card-backlog')).toHaveTextContent('—')
+    expect(screen.getByTestId('card-backlog-state')).toHaveTextContent('Archiving is off')
+    expect(backlogWarns()).toBe(false)
   })
 
   it('renders the catalogue even when the backlog cannot be read', async () => {

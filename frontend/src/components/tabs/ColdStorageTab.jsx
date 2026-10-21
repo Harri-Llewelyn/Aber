@@ -4,13 +4,13 @@ import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
-import { Stat } from '../common/Stat'
+import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { Badge } from '../common/Badge'
 import { LoadingState } from '../common/LoadingState'
 import { SortHeader } from '../common/SortHeader'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
-import { formatBytes, formatDate } from '../../utils/format'
+import { formatBytes, formatDate, NO_VALUE, plural } from '../../utils/format'
 import { ColdStorageDestinationModal } from '../modals/ColdStorageDestinationModal'
 import {
   ARCHIVE_BACKLOG_TOLERANCE_DAYS,
@@ -166,27 +166,29 @@ export function ColdStorageTab({ showToast, userRole }) {
                   empty catalogue it is not rendered, since every figure describes what reached the
                   endpoint; the backlog moves into the empty state, where it is the whole story. */}
               {!error && summary.total > 0 && (
-                <div className="card-body stat-strip">
-                  <Stat label="On cold storage" value={summary.archived} />
-                  <Stat label="Rows archived" value={summary.rows.toLocaleString()} />
-                  <Stat label="Object storage used" value={formatBytes(summary.bytes)} />
-                  <Stat
-                    label="Oldest span held"
-                    value={formatDate(summary.oldest)}
+                <SummaryCards label="Cold storage summary" testId="cold-summary">
+                  <SummaryCard
+                    title="Archive"
+                    testId="card-archive"
+                    value={summary.archived.toLocaleString()}
+                    unit={`${summary.archived === 1 ? 'chunk' : 'chunks'} on cold storage`}
+                    detail={`${summary.rows.toLocaleString()} rows · ${formatBytes(summary.bytes)} used`}
+                    tip={`${plural(summary.archived, 'chunk')} on cold storage: the raw rows are gone from the historian, and each object is the only copy. Together they hold ${summary.rows.toLocaleString()} rows in ${formatBytes(summary.bytes)} of object storage.`}
                   />
-                  {/* The figure that says a link is down. Only while archiving is on: with it off
-                      every chunk is unexported and the number would be meaningless. */}
-                  {backlog?.enabled && <BacklogStat backlog={backlog} />}
-                  {/* Only when non-zero, so the row is read when the number changes. */}
-                  {summary.verified > 0 && (
-                    <Stat label="Awaiting drop" value={summary.verified}
-                          title="Exported and verified; the raw rows are still in the hypertable until cold_archive --drop runs." />
+                  <SummaryCard
+                    title="Oldest span held"
+                    testId="card-oldest"
+                    value={formatDate(summary.oldest)}
+                    detail="How far back the history goes"
+                    tip={`The oldest span in the catalogue starts ${formatDate(summary.oldest)}. That is how far back this site's telemetry goes, and only this page records it once the historian has dropped the rows.`}
+                  />
+                  {/* The figure that says a link is down, only while archiving is on: with it off
+                      every chunk is unexported and the date would be meaningless. The card still
+                      shows while a chunk awaits its drop or has failed. */}
+                  {(backlog?.enabled || summary.verified > 0 || summary.failed > 0) && (
+                    <BacklogCard backlog={backlog} summary={summary} />
                   )}
-                  {summary.failed > 0 && (
-                    <Stat label="Failed" value={summary.failed} tone="warning"
-                          title="An export attempt failed. Nothing was dropped — a chunk cannot be removed unless its export verified." />
-                  )}
-                </div>
+                </SummaryCards>
               )}
 
               {!error && rows.length === 0 ? (
@@ -196,7 +198,7 @@ export function ColdStorageTab({ showToast, userRole }) {
                       cold_archive_backlog() is gated on the same roles. */}
                   {privileged && backlog?.enabled ? (
                     <div className="cold-backlog-lead">
-                      <BacklogStat backlog={backlog} align="center" />
+                      <BacklogCard backlog={backlog} summary={summary} />
                     </div>
                   ) : (
                     <div className="empty-icon"><IconDatabase size={36} /></div>
@@ -354,24 +356,45 @@ function DestinationButton({ enabled, missing, destination, onOpen }) {
 }
 
 /**
- * How far behind the archive is, drawn from one definition in two places: one figure among several
- * in the summary strip, and alone above the empty state. The wording and the tone threshold are
- * shared so the figure cannot read as a warning in one place and not the other.
+ * How far behind the archive is, drawn from one definition in two places: a card in the row, and
+ * alone above the empty state. The wording and the tone threshold are shared so the date cannot
+ * read as a warning in one place and not the other. Chunks awaiting their drop and failed exports
+ * join it when either is above zero; a failed export is amber, as a backlog past the tolerance is.
+ * Without a backlog to read (archiving off, or the read failed) the date is not known.
  */
-function BacklogStat({ backlog, align }) {
+function BacklogCard({ backlog, summary }) {
+  const tracked = !!backlog?.enabled
+  const days = tracked ? overdueDays(backlog.overdue_seconds) : 0
+  const behind = tracked && backlogTone(backlog.overdue_seconds) === 'warning'
+  const { verified, failed } = summary
+  const dayWord = `${days} ${days === 1 ? 'day' : 'days'}`
+  const failedWord = plural(failed, 'export')
+
+  const counts = [verified > 0 && `${verified} awaiting drop`, failed > 0 && `${failed} failed`].filter(Boolean)
+  const state = behind && failed > 0 ? `Behind by ${dayWord}, ${failedWord} failed`
+    : behind ? `Behind by ${dayWord}`
+      : failed > 0 ? `${failedWord} failed`
+        : !tracked ? (backlog ? 'Archiving is off' : 'Could not be read')
+          : days > 0 ? `${dayWord} past the threshold` : 'Up to date'
+
   return (
-    <Stat
-      label="Unexported since"
-      align={align}
-      tone={backlogTone(backlog.overdue_seconds)}
-      value={formatDate(backlog.oldest_unexported)}
-      title={
-        `Telemetry after this point is not yet verified on the remote endpoint — ` +
-        `${overdueDays(backlog.overdue_seconds)} day(s) past the ` +
-        `${backlog.threshold_days}-day threshold. Up to a week is normal: a chunk is ` +
-        `not eligible until its whole span has passed the threshold. Beyond ` +
-        `${ARCHIVE_BACKLOG_TOLERANCE_DAYS} days the Archive Backlog alert fires.`
-      }
+    <SummaryCard
+      title="Unexported since"
+      testId="card-backlog"
+      value={tracked ? formatDate(backlog.oldest_unexported) : NO_VALUE}
+      detail={counts.length ? counts.join(' · ') : tracked ? `${backlog.threshold_days}-day threshold` : 'Not tracked'}
+      state={state}
+      tone={behind || failed > 0 ? 'warning' : undefined}
+      tip={[
+        tracked
+          ? `Telemetry after this date is not yet verified on the remote endpoint: ${dayWord} past the ` +
+            `${backlog.threshold_days}-day threshold. Up to a week is normal, since a chunk is not ` +
+            `eligible until its whole span has passed the threshold. Beyond ` +
+            `${ARCHIVE_BACKLOG_TOLERANCE_DAYS} days the Archive Backlog alert fires.`
+          : backlog ? 'Archiving is off, so nothing is tracked as unexported.' : 'How far behind the archive is could not be read.',
+        verified > 0 && `${plural(verified, 'chunk')} exported and verified, with the raw rows still in the historian until the next drop.`,
+        failed > 0 && `${failedWord} failed. Nothing was dropped: a chunk cannot be removed unless its export verified.`
+      ].filter(Boolean).join(' ')}
     />
   )
 }

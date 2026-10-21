@@ -6149,7 +6149,9 @@ ol.gateway-steps {
 .stat-center { min-width: 0; text-align: center; }
 .stat-center .stat-value { font-size: 26px; }
 /* COLD STORAGE: the catalogue rows and the destination dialog. */
-.cold-backlog-lead { margin-bottom: var(--stack); }
+/* Alone above the empty state, the backlog card is centred at about the width it has in the row. */
+.cold-backlog-lead { display: flex; justify-content: center; margin-bottom: var(--stack); }
+.cold-backlog-lead > .summary-card { width: min(100%, 320px); }
 /* The two commands sit on their own lines so a wrapped command is one a reader can select. */
 .cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }
 .cold-empty-commands > div:nth-of-type(2) { margin-top: 8px; }
