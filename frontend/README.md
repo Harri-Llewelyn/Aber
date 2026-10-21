@@ -136,8 +136,13 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
 
 - **Which pages are open.** Arriving on a page opens its tabs and marks the current one
   `aria-current="page"` (its page's link then says `aria-current="true"`); a change of tab moves
-  the mark. A page opened by hand stays open until it is closed. Closing the current page lasts
-  until the next arrival on it.
+  the mark. Arriving also closes every other page's tabs, those opened by hand included: any change
+  of page does, from the rail, a link, `[` and `]` or the address bar. Until then, pages opened by
+  hand stay open together. Closing the current page lasts until the next arrival on it.
+- **Collapse all tabs**, the foot's item under the account control, closes every list, the current
+  page's included. While none is open it is `aria-disabled`, dimmed and inert but still a Tab stop,
+  rather than hidden, so the foot never changes height. It is 34px, the row the account menu's
+  arrow is measured from.
 - **Counts.** A signal from `useNavSignals` belongs to a page, and `signalTab` names the tab it is
   about: Devices' Quarantine and Approvals' Awaiting a decision. While the page's tabs are on
   screen the number moves to that tab, named as the tab bar names it ("Quarantine, 3 waiting"), and
@@ -145,10 +150,8 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
 - **No tooltips** on the tab entries. A tooltip on every row would flash as the pointer moves down
   the rail, and the tab bar's tabs already carry each tab's sentence.
 - **The modes.** The list shows only on the wide rail: as it opens in Hover mode, always in Expanded
-  mode, and on keyboard focus. Collapsed mode has no room for it, so a plain click (or Enter) on a
-  tabbed page's icon pops the list out beside the rail (`.sidebar-tabs-popout`, fixed, as the
-  account menu is); Escape, a click elsewhere, a scroll or choosing a tab closes it. A page without
-  tabs navigates as before.
+  mode, and on keyboard focus. Collapsed mode has no room for it, and the page's own tab bar is one
+  click away, so a click on a tabbed page's icon opens the page, as any page's does.
 - **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
   copy in the database's order, before the page has read them. A category missing from it still
   shows on the page. Directory lists its three groups; the page adds a tab for any service type
@@ -395,12 +398,15 @@ row and all, so the two read alike.
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
   in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
-  above the behaviour control: Profile first, then the Theme switch, Report Bug and Sign Out. The
-  switch is a `SegmentedControl` with `menu` across the whole row: a `role="group"` named Theme
-  holding a Light and a Dark `menuitemradio`, each its icon (a sun, a moon) and its name, the
-  current theme checked. The row has no visible "Theme" label: the segments' names say what they
-  are, and the group's name tells a screen reader what the row is for. Choosing applies at once and
-  the menu stays open, since the result shows behind it. A third theme would be a third segment.
+  above Collapse all tabs: the session's facts, then the Theme switch and the Sidebar layout switch,
+  each a section of its own, then Profile, Report Bug and Sign Out. Each switch is a
+  `SegmentedControl` with `menu` across the whole row: a `role="group"` of `menuitemradio`s, each
+  its icon and its name, the current one checked. Theme holds Light and Dark (a sun, a moon).
+  Sidebar layout holds Hover, Expanded and Collapsed, the three `SIDEBAR_MODES` in short words so
+  they fit the menu, and the chosen layout's description is the line beneath it and the group's
+  `aria-describedby`. Neither row has a visible label: the segments' names say what they are, and
+  the group's name tells a screen reader what the row is for. Choosing applies at once and the menu
+  stays open, since the result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
   rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
@@ -412,8 +418,8 @@ row and all, so the two read alike.
   (`aber_theme`, `aber_sidebar_mode`, `aber_single_key_shortcuts`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
   row is seeded from that copy's theme and layout (`utils/userSettings.js`, ON CONFLICT DO NOTHING,
-  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
-  the rail's control and Appearance all write through the one hook's setters. A choice made before the row
+  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's two switches
+  and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
@@ -1118,7 +1124,7 @@ Three rules that were each learned from a real bug:
   stylesheet defines.
 
 **A panel that opens from a button points at it.** The alert list, the notifications, the account
-menu, the sidebar behaviour menu and the Filters panel share one radius (`--radius-sm`), one shadow
+menu and the Filters panel share one radius (`--radius-sm`), one shadow
 (`--shadow-popover`) and one arrow rule (App.css, *Popover arrows*): a 10px square turned 45°,
 centred on the panel's border on the side that faces the button, so the outline runs on into the
 point. It is pure CSS, as each panel's position is already known: a placement library such as
@@ -1126,9 +1132,10 @@ Floating UI would add only what these panels have. The arrow is the wrapper's `:
 `:has(> panel)` while the panel is open, because the alert, notification and account panels clip or
 scroll their own overflow; the Filters panel clips nothing and draws its own `::before`. The top-bar
 arrows point up from `left: 50%` of the wrapper, so they follow the pill as its count widens it. The
-two rail menus are `position: fixed`, and so are their arrows: they point left from the panels' left
-border, 60px or 240px, at heights taken from the rail's foot (27px and 65px above the window's
-bottom). Change the foot's padding or its rows and those two numbers move with it. The Filters panel
+account menu is `position: fixed`, and so is its arrow: it points left from the panel's left border,
+60px or 240px, 65px above the window's bottom, the centre of the account row over the foot's
+padding and its 34px Collapse all tabs row. Change the foot's padding or its rows and that number
+moves with it. The Filters panel
 is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
 the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
 to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.
