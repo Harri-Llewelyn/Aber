@@ -478,7 +478,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           {/* Offered while there is something to enlarge: a plan, or the outline with a pin on it.
               Stopped, or the card behind it opens the area's panel too. */}
           {(ar.plan_path || areaCells.some(isPlaced)) && (
-            <ExpandButton name={ar.area_name} className="plan-expand" onClick={e => { e.stopPropagation(); setExpandedAreaId(ar.area_id) }} />
+            <ExpandButton name={ar.area_name} onClick={e => { e.stopPropagation(); setExpandedAreaId(ar.area_id) }} />
           )}
           <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
         </div>
