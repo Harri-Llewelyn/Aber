@@ -223,7 +223,7 @@ describe('the Same transaction control', () => {
     await show()
     // The kind filter lives in the Filters popover.
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/),
+    fireEvent.change(screen.getByRole('combobox', { name: 'Entity' }),
       { target: { value: 'DEVICE' } })
     // The filter is a query parameter, so the page refetches; selecting before that lands picks
     // an event out of the list that is about to be replaced.
@@ -235,7 +235,7 @@ describe('the Same transaction control', () => {
     fireEvent.click(control())
 
     await waitFor(() =>
-      expect(screen.getByTitle(/Show only events against one kind of entity/).value).toBe(''))
+      expect(screen.getByRole('combobox', { name: 'Entity' }).value).toBe(''))
   })
 
   it('shows deleted entities, whose rows the count includes', async () => {

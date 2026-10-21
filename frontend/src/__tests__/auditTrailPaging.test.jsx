@@ -11,6 +11,7 @@ import {
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { AUDIT_TRAIL_ENTITY_TYPES } from '../constants'
+import { tooltipOf } from '../test/tooltips'
 
 // Spread from the real module, not replaced: api.js exports constants the tab reads at import time,
 // and a bare stub drops them, which renders as an empty timeline.
@@ -282,7 +283,7 @@ describe('AuditTrailTab section coverage', () => {
 
     // The kind filter lives in the Filters popover.
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const select = screen.getByTitle('Show only events against one kind of entity')
+    const select = screen.getByRole('combobox', { name: 'Entity' })
     const options = [...select.querySelectorAll('option')]
 
     for (const { kind, label } of AUDIT_TRAIL_ENTITY_TYPES) {
@@ -436,7 +437,7 @@ describe('AuditTrailTab total', () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
     render(<AuditTrailTab />)
     expect(await screen.findByText('All 2 shown.')).toBeInTheDocument()
-    expect(screen.queryByText(/2\/2|2 of 2/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/2\/2|2 of 2/, { ignore: '[role=tooltip]' })).not.toBeInTheDocument()
   })
 
   it('states no count against a server that returns no total, whose total is only an estimate', async () => {
@@ -485,8 +486,8 @@ describe('AuditTrailTab total', () => {
 
     const button = await screen.findByRole('button', { name: /Export CSV/ })
     expect(button).toHaveTextContent('Export CSV (2/467)')
-    expect(button.getAttribute('title')).toMatch(/loaded here/i)
-    expect(button.getAttribute('title')).toMatch(/467 match the current filters/i)
+    expect(tooltipOf(button)).toMatch(/loaded here/i)
+    expect(tooltipOf(button)).toMatch(/467 match the current filters/i)
   })
 
   it('Export CSV promises the filtered set once it really holds it', async () => {
@@ -495,7 +496,7 @@ describe('AuditTrailTab total', () => {
 
     const button = await screen.findByRole('button', { name: /Export CSV/ })
     expect(button).toHaveTextContent('Export CSV (2)')
-    expect(button.getAttribute('title')).toBe(
+    expect(tooltipOf(button)).toBe(
       'Download the events matching the current filters as CSV'
     )
   })

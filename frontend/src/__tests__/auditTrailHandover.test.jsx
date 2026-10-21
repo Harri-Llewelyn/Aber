@@ -6,6 +6,7 @@ import { api } from '../api';
 import { ENTITY_KIND_BY_TABLE } from '../constants';
 import { trailUrl } from '../routes';
 import { navigate } from '../hooks/useUrlState';
+import { tooltipOf } from '../test/tooltips';
 
 /**
  * The Devices page navigates here with the device it was on, as an address (routes.js trailUrl).
@@ -150,7 +151,7 @@ describe('AuditTrailTab handover', () => {
     // describe one EVENT, and a lane is one ASSET.
     const marker = await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ });
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(1);
-    expect(marker.getAttribute('title')).not.toMatch(/Invalid Date/);
+    expect(tooltipOf(marker)).not.toMatch(/Invalid Date/);
 
     fireEvent.click(marker);
 

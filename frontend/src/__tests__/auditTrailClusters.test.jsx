@@ -13,6 +13,7 @@ import {
   AuditTrailTab, clusterEvents, clusterSummary, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 const WIDTH = 1000
 
@@ -327,7 +328,7 @@ describe('the component draws the badges', () => {
 
   it('breaks the group down on hover, in the legend words', async () => {
     await draw()
-    expect(badges()[0].getAttribute('title')).toContain('2 events: 1 Created, 1 Operational')
+    expect(tooltipOf(badges()[0])).toContain('2 events: 1 Created, 1 Operational')
   })
 
   it('opens the drawer on the oldest member when the badge is clicked', async () => {
@@ -336,7 +337,7 @@ describe('the component draws the badges', () => {
 
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
     // Oldest first, so a click lands at the START of the burst and Next means "and then what".
-    expect(screen.getByTitle(/Position in this entity's history/)).toHaveTextContent('Event 1 of 3')
+    expect(getByTooltip(/this entity's history/)).toHaveTextContent('Event 1 of 3')
   })
 
   it('keeps the badge ringed while Previous/Next steps through the events inside it', async () => {
@@ -351,7 +352,7 @@ describe('the component draws the badges', () => {
     const next = () => screen.getByRole('button', { name: 'Next' })
     fireEvent.click(next())
     await waitFor(() =>
-      expect(screen.getByTitle(/Position in this entity's history/)).toHaveTextContent('Event 2 of 3'))
+      expect(getByTooltip(/this entity's history/)).toHaveTextContent('Event 2 of 3'))
     expect(badges()[0].className).toContain('trail-node-selected')
 
     fireEvent.click(next())
@@ -364,7 +365,7 @@ describe('the component draws the badges', () => {
        shrinks to two seconds, and the same two events are a track's width apart. */
     await draw()
 
-    fireEvent.change(screen.getByTitle('Limit the timeline to a time range'),
+    fireEvent.change(screen.getByRole('combobox', { name: 'Time range' }),
       { target: { value: '15m' } })
 
     await waitFor(() => expect(badges()).toHaveLength(0))
