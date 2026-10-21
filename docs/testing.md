@@ -729,16 +729,26 @@ live schema carries 35 and the fixture 21, so the whole table cannot land, and `
 column that makes an audit row attributable. The rest of `auth` is GoTrue's own bookkeeping, which
 no migration reads.
 
-**What the suites do against history, and the one that does not.** Twenty-eight of the twenty-nine
-database suites pass unchanged against a real stack's rows — most scope their assertions to ids
-they seeded and genuinely do not care what else is in the table.
-`test_audit_trail_paging.py` is the exception, and not because paging is broken. Its `walk()`
-follows at most 100 pages of 7, and its fixture is stamped `2026-01-01`, older than every real
-row; on a stack carrying 4,075 events the newest-first walk spends its whole budget before
-reaching the rows it seeded. The same bound quietly costs that file its control — the test
-asserting a `recorded_at`-only cursor *loses* rows, without which the rest of it is vacuous, then
-passes because the budget ran out rather than because the cursor is wrong. Scoping the walk to the
-fixture's own range would fix both; until then, expect that one suite red here and read the rest.
+**What the suites do against history.** Every database suite passes against a real stack's rows as
+it does against an empty database, because each scopes what it asserts to what it set up. A suite
+written against an empty database breaks here in one of three ways, and each has met this lane:
+
+- **It counts from zero.** A count of audit rows for a seeded gateway meets the rows a site already
+  holds. Take the count before the call (`before = …`) and assert the difference
+  (`test_a_shadow_gateway_holds_no_health.py`).
+- **It reads a whole table.** A list of every row meets other people's. Scope the read to the ids
+  the fixture made (`rows()` in `test_user_settings.py`; `p_entity_ids` in
+  `test_audit_trail_paging.py`, whose newest-first walk once spent its page budget on a real
+  stack's events before it reached its own).
+- **It assumes a worker has never run.** `start_playback_job()` refuses a target whose credential
+  was issued after the playback worker last reported one, and a used stack's worker has reported.
+  Clear the state the function reads, inside the test's rolled-back transaction
+  (`DELETE FROM public.playback_worker_status` in `test_capture_audit.py` and
+  `test_only_the_seed_makes_a_playback_gateway.py`, as `test_playback_credential_delivery.py`
+  does).
+
+A red suite here and green on the plain lane is one of these, or a migration that cannot meet real
+rows. The second is what the lane exists to find, so read the failure before deciding which.
 
 Two things make the load possible and are worth knowing before changing it. Triggers and foreign
 keys are off for the duration (`session_replication_role = replica`) — the audit stamp trigger

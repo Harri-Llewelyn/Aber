@@ -101,7 +101,12 @@ class UserSettingsBase(unittest.TestCase):
         self.as_owner()
 
     def rows(self):
-        self.cur.execute("SELECT user_id::text, theme, sidebar_mode FROM public.user_settings ORDER BY user_id")
+        """The fixture's people's rows the caller can read: a used database holds other people's."""
+        self.cur.execute(
+            "SELECT user_id::text, theme, sidebar_mode FROM public.user_settings"
+            " WHERE user_id IN (%s, %s, %s) ORDER BY user_id",
+            (ALICE, BOB, ADMIN),
+        )
         return self.cur.fetchall()
 
 

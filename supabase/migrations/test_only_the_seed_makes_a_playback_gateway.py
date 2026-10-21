@@ -129,9 +129,14 @@ class Base(unittest.TestCase):
         return self.cur.fetchone()[0]
 
     def _credential(self, gateway_id):
-        """What start_playback_job() asks of its target: a broker credential on record."""
+        """
+        What start_playback_job() asks of its target: a broker credential on record, and no report
+        from the playback worker that it holds an older one. On a used database the worker has
+        reported the seeded Playback gateway's credential, from before this one was issued.
+        """
         self.cur.execute("SELECT public.record_gateway_credential_issued_by_service(%s);",
                          (gateway_id,))
+        self.cur.execute("DELETE FROM public.playback_worker_status;")
 
     # -- callers ----------------------------------------------------------------------------
 
