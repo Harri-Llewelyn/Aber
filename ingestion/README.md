@@ -1969,7 +1969,8 @@ image pull.
 - **A third-party edge node that does not buffer loses the gap, by design.** Sparkplug leaves the
   choice to the edge node; the daemon cannot hold its readings for it without leaving the
   specification. Configure such a node with this site's primary host id
-  (`ingestion.primaryHostId`) and enable its store and forward if it has one. The sequence
+  (`ingestion.primaryHostId`) and enable its store and forward if it has one
+  ([Bringing your own edge node](../help/site/bring-your-own-edge-node.md) lists what such a node must do). The sequence
   counters do not see this loss ([below](#the-sequence-counters-are-a-lower-bound-and-that-is-inherent)).
 - **Upgrade below the knee.** After the birth the edge nodes replay alongside live traffic; the
   appliance paces its replay to 50 readings a second after a random delay of up to 30 s, so a fleet
