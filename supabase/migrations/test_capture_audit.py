@@ -442,6 +442,9 @@ class PlaybackIsAudited(Base):
         super().setUp()
         self.lane, self.lane_wire = self._device(PLAYBACK_GATEWAY, shadow_of=self.dev)
         self.cur.execute("SELECT public.record_gateway_credential_issued_by_service(%s);", (PLAYBACK_GATEWAY,))
+        # On a used database the playback worker has reported holding the credential issued before
+        # this one, and start_playback_job() would refuse the target as stale.
+        self.cur.execute("DELETE FROM public.playback_worker_status;")
         self.capture, self.path = self._capture(device_ids=[self.dev_wire])
 
     START = "SELECT public.start_playback_job(%s, %s, %s::jsonb, 2.0)::text;"

@@ -133,18 +133,21 @@ class TheMigrationClearsWhatAReplayLeft(ShadowHealth):
 
     def test_a_recorded_flow_deployed_row_stays(self):
         # audit_trail is append-only to every role, the migration's included: it only clears the
-        # columns. The row is written the way the daemon's old call did.
+        # columns. The row is written the way the daemon's old call did, and counted on top of
+        # those a used database already holds.
+        before = self.audit_rows(self.playback, "FLOW_DEPLOYED")
         self.cur.execute(
             "SELECT public.ingest_record_gateway_health(%s::uuid, 'ONLINE', now(), %s::jsonb);",
             (self.playback, json.dumps({"flow_hash": "b" * 64})))
-        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), 1)
+        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), before + 1)
         self.run_migration()
-        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), 1)
+        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), before + 1)
 
 
 class TheDaemonsHeartbeat(ShadowHealth):
     def test_a_heartbeat_with_no_health_records_none_and_no_flow_deployed_row(self):
         """What the daemon now sends for a shadow gateway: p_health NULL."""
+        before = self.audit_rows(self.playback, "FLOW_DEPLOYED")
         self.cur.execute(
             "SELECT public.ingest_record_gateway_health(%s::uuid, 'ONLINE', now(), NULL);",
             (self.playback,))
@@ -152,7 +155,7 @@ class TheDaemonsHeartbeat(ShadowHealth):
                          (self.playback,))
         self.assertEqual(self.cur.fetchone(), ("ONLINE", True), "the heartbeat itself was not written")
         self.assertEqual(self.health(self.playback), NO_HEALTH)
-        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), 0)
+        self.assertEqual(self.audit_rows(self.playback, "FLOW_DEPLOYED"), before)
 
     def test_the_daemons_role_reads_the_flag_with_the_rest_of_the_row(self):
         """The directory refresher and the per-gateway lookup select _GATEWAY_COLUMNS as this role."""
