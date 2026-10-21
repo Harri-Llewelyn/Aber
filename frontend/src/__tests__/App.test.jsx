@@ -189,7 +189,8 @@ describe('App Component', () => {
       expect(screen.getAllByText('Site Map').length).toBeGreaterThan(0)
     })
 
-    const devicesTab = screen.getByText('Devices')
+    // The page's link, not the Capture page's Devices tab, once permissions list that page too.
+    const devicesTab = screen.getByRole('link', { name: 'Devices' })
     fireEvent.click(devicesTab)
 
     await waitFor(() => {
