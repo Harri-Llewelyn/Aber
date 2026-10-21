@@ -53,8 +53,9 @@ import {
 /**
  * How wide the grid runs and how big a pin is drawn on it: one area takes the width, two split it,
  * and three or more settle on thirds. The pin scales with the tile because this is the only view
- * of the map -- at the narrowest tile a pin is still above the 24px a pointer needs. No pin exceeds
- * 40px, the disc the plan frame's margin is sized for (`.area-plan` in App.css).
+ * of the map -- at the narrowest tile a pin is still above the 24px a pointer needs. The grid hands
+ * the size to its cards as --pin-size, and each card's plan keeps a margin of half that pin round
+ * the drawing (`.area-card .area-plan` in App.css), so a pin on the plan's edge is drawn whole.
  */
 const COLUMNS_FOR = (n) => Math.min(3, Math.max(1, n))
 const PIN_SIZE = { 1: 40, 2: 36, 3: 28 }

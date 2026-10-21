@@ -8,7 +8,7 @@ import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
  * An area with no plan gets the default outline, drawn here in the same coordinate space, so a
  * place set before a plan is uploaded stays where it was put.
  *
- * Places are fractions of the drawing, not of the frame: the frame keeps a margin of half a pin
+ * Places are fractions of the drawing, not of the plan's box: the box keeps a margin of half a pin
  * round the drawing (`.area-plan` in App.css), so a pin on the plan's edge is drawn whole.
  */
 
