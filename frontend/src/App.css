@@ -1002,6 +1002,17 @@ a.sidebar-item { text-decoration: none; }
 
 .global-search-result-enter { color: var(--accent); flex-shrink: 0; }
 
+/* The Help group's label: its rows are headings in the help, and their detail is a help page's
+   title, which would otherwise read as the page a card is on. */
+.global-search-group {
+  padding: 8px 12px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .global-search-empty {
   display: flex;
   align-items: center;
@@ -4160,9 +4171,10 @@ a.chip { text-decoration: none; }
    :root block, not the themed one: themeContrast.test.js scrapes every token out of the themed
    block and compares it against the light theme, and a layout length there would read as a missing
    token. clamp() rather than a fixed width, so the drawer's tables get room on a wide monitor
-   without the drawer dominating the page. */
+   without the drawer dominating the page. The expanded width is the help drawer's alone. */
 :root {
   --context-panel-width: clamp(320px, 28vw, 560px);
+  --context-panel-width-expanded: 50vw;
 }
 
 .context-panel {
@@ -4246,7 +4258,8 @@ a.chip { text-decoration: none; }
   gap: 6px;
 }
 
-.context-panel-close {
+.context-panel-close,
+.context-panel-expand {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -4264,6 +4277,11 @@ a.chip { text-decoration: none; }
 
 .context-panel-close:hover { color: var(--danger-text); border-color: var(--danger); }
 .context-panel-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Help's Expand, beside the X. Its auto margin takes the header's free space, so the two stay
+   together on the right. */
+.context-panel-expand { margin-left: auto; }
+.context-panel-expand:hover { color: var(--accent-text); border-color: var(--accent); }
+.context-panel-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Scrolls independently of the page. A device with twenty metadata rows must not make the panel
    taller than the viewport, or the actions at its foot become unreachable. */
@@ -4472,7 +4490,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border-left: 1px solid var(--border);
   border-radius: 0;
   box-shadow: none;
+  /* With the drawer as it expands or shrinks, so its header stays at the window's edge. */
+  transition: width 0.25s ease;
 }
+
+/* Expanded, help takes half the window for a guide's tables and commands, and the page narrows
+   beside it as it does when the drawer opens. On help's <aside> only, which no page's drawer is
+   inside, so theirs keep their width. */
+.context-panel-app.context-panel-expanded { --context-panel-width: var(--context-panel-width-expanded); }
 
 /* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
    normally follows; in this panel it is the only thing in the body, and a border at the very top
@@ -4695,6 +4720,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     border-radius: 0;
     border-right: none;
   }
+  /* Expanded, the help overlay takes the whole width. */
+  .context-panel-app.context-panel-expanded.context-panel-open { width: 100%; }
 }
 
 /* One drawer at a time below 1440px, where two would squeeze the page (frontend/README.md has the
@@ -4705,6 +4732,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 @media (max-width: 1439px) {
   .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
 }
+/* Expanded help hides a page's drawer the same way at every width: beside half the window, two
+   drawers would leave the page no room. */
+.app-body:has(> .context-panel-app.context-panel-expanded.context-panel-open) > .content .context-panel-open { display: none; }
 
 /* A table inside a modal. Auto layout gives the one variable-length column the leftovers and
    overflows sideways; fixed layout plus a `<colgroup>` declares the proportions and fits the
