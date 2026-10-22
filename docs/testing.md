@@ -473,7 +473,14 @@ python supabase/migrations/test_area_plans.py
 # that cascaded, so a gateway archived with Permanent Retention was deleted by its CELL's timer.
 # The test asserts the catalogue fact over every child of `cells`, not only the one that was
 # wrong, and that the un-filing is recorded against the gateway rather than lost with the cell.
+# Since 0198 only a live cell can hold anything, so the fixture deletes one.
 python supabase/migrations/test_archive_purge_cascade.py
+# A cell is archived only when nothing is in it (0198): refused while any device resolves to it,
+# live, offline, archived, quarantined or through its gateway, or while any gateway is filed in
+# it; nothing is filed in an archived cell, and no device is assigned to an archived gateway, by a
+# PATCH, relocate_devices() or an approval from Quarantine. Unchanged writes, Restore and a second
+# boot pass. Every test rolls back.
+python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
