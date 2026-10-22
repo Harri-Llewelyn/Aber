@@ -83,6 +83,33 @@ describe('the drawer', () => {
     expect(openPanel().getByText('3d 4h')).toBeInTheDocument()
   })
 
+  it('shows the bundle and both forge heads with no health report', async () => {
+    // Enrolment writes the bundle and the forge writes the heads; an appliance on a bundle that
+    // reports no health is when the version matters most.
+    await show([gateway({
+      deployment: 'remote',
+      agent_version: '1.5.0',
+      forge_head_sha: 'abcdef0123456789',
+      forge_head_at: new Date().toISOString(),
+      forge_appliance_sha: '0123456789abcdef',
+      forge_appliance_at: new Date().toISOString()
+    })])
+    const panel = openPanel()
+    expect(panel.getByText('1.5.0')).toBeInTheDocument()
+    expect(panel.getByText(/^abcdef012345 · /)).toBeInTheDocument()
+    expect(panel.getByText(/^0123456789ab · /)).toBeInTheDocument()
+    expect(panel.queryByText('Health Reported')).toBeNull()
+  })
+
+  it('leaves out the bundle and the forge heads while they have no value', async () => {
+    await show([gateway({ deployment: 'remote', health_reported_at: new Date().toISOString() })])
+    const panel = openPanel()
+    expect(panel.getByText('Health Reported')).toBeInTheDocument()
+    for (const label of ['Bundle', 'Committed', 'Reported']) {
+      expect(panel.queryByText(label), label).toBeNull()
+    }
+  })
+
   it('tells the credential dialog whether the gateway is the Playback gateway', async () => {
     await show([gateway({ is_shadow: true, is_simulated: true })])
     fireEvent.click(openPanel().getByText('Generate Broker Credential'))

@@ -155,6 +155,15 @@ describe("a Third-party gateway's drawer", () => {
     expect(panel.queryByText('Disk Free')).toBeNull()
   })
 
+  it('shows no bundle and no forge heads, even with values left on its row', async () => {
+    // Hidden by the gateway's type, not by its values: a row edited to Third-party keeps its columns.
+    await show([gateway({ agent_version: '1.5.0', forge_head_sha: 'abcdef0123456789', forge_appliance_sha: '0123456789abcdef' })])
+    const panel = openDrawer()
+    for (const label of ['Bundle', 'Committed', 'Reported']) {
+      expect(panel.queryByText(label), label).toBeNull()
+    }
+  })
+
   it('gives the reason it has no repository', async () => {
     await show()
     expect(openDrawer().getByText(/A Third-party gateway has no repository of its own/)).toBeTruthy()
