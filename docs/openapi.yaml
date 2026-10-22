@@ -315,7 +315,7 @@ paths:
         - name: name
           in: query
           schema: { type: string }
-          description: 'Filter, e.g. `eq.Building 3`. Names are unique.'
+          description: 'Filter, e.g. `eq.North Shop`. Names are unique.'
       responses:
         '200':
           description: Matching areas.
@@ -4592,9 +4592,12 @@ components:
       description: An ISA-95 area — one part of the one site. The level between the site (a setting, `site.name`) and the cells.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        name: { type: string, example: Building 3, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
+        name: { type: string, example: North Shop, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
         description: { type: string, nullable: true }
         icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the area is for.' }
+        is_archived: { type: boolean, default: false }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true, description: 'Retention purge deadline. NULL means permanent retention — the purge honours this, never `archived_at` age.' }
         created_at: { type: string, format: date-time, readOnly: true }
         plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `area-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
         plan_aspect: { type: number, nullable: true, description: 'Width over height of the plan''s viewBox; NULL exactly when `plan_path` is. Cell places are fractions of the plan, so this is what turns them back into a distance.' }
@@ -4606,22 +4609,25 @@ components:
     AreaWrite:
       type: object
       properties:
-        name: { type: string, example: Building 3 }
+        name: { type: string, example: North Shop }
         description: { type: string, nullable: true }
         icon: { type: string, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap] }
         plan_path: { type: string, nullable: true }
         plan_aspect: { type: number, nullable: true }
+        is_archived: { type: boolean, description: 'true is refused while any device or gateway is `area_wide` in the area (see the PATCH). Nothing can be made `area_wide` in an archived area.' }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true }
 
     Cell:
       type: object
-      description: A shopfloor cell zone — an ISA-95 work center.
+      description: A shopfloor cell, the ISA-95 level below an area.
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'The area this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
         plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its area''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `area_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell in the same area. Moving the cell to another area clears it, unless the same write names a new place.' }
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
-        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Site Map when present.' }
+        description: { type: string, nullable: true, description: 'Free text. The Cells page shows it under the name and in the drawer, and the Site Map as a field in the cell''s panel. i3X serves it as the cell object''s description.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -4654,6 +4660,7 @@ components:
           type: string
           example: Sim_Gateway_Cell1_Machining
           description: Display label only. Freely editable and NOT unique; edge nodes are matched on `sparkplug_id`.
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the gateway object''s description; nothing acts on it.' }
         sparkplug_id:
           type: string
           readOnly: true
@@ -4705,7 +4712,7 @@ components:
       type: object
       properties:
         name: { type: string, example: Sim_Gateway_Cell1_Machining }
-        description: { type: string, nullable: true, description: 'Operator note. Free text, read by nothing.' }
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the gateway object''s description; nothing acts on it.' }
         sparkplug_group:
           type: string
           example: Aber
@@ -4747,6 +4754,7 @@ components:
           type: string
           example: Sim_CNC_Mill_01
           description: Display label only. Freely editable and NOT unique; renaming does not affect ingestion or telemetry history.
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the device object''s description; nothing acts on it. Typed identification belongs in the nameplate.' }
         sparkplug_id:
           type: string
           readOnly: true
@@ -4836,6 +4844,7 @@ components:
       type: object
       properties:
         name: { type: string, example: Sim_CNC_Mill_01 }
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the device object''s description; nothing acts on it.' }
         gateway_id: { type: string, format: uuid, nullable: true }
         cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=area_wide`; must be NULL otherwise.' }
