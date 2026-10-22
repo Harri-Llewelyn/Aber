@@ -142,9 +142,9 @@ describe('repository paths in the dashboard', () => {
   })
 
   it('a repository page opens on GitHub at this release, marked as online', () => {
-    render(<RepoLink path="docs/remote-gateways.md" anchor="7-the-two-addresses-that-must-be-right">docs/remote-gateways.md</RepoLink>)
+    render(<RepoLink path="docs/remote-gateways.md" anchor="8-certificates-and-the-two-clocks-they-run-on">docs/remote-gateways.md</RepoLink>)
     const link = screen.getByRole('link', { name: /^docs\/remote-gateways\.md \(online/ })
-    expect(link.getAttribute('href')).toBe(repoUrl('docs/remote-gateways.md', '7-the-two-addresses-that-must-be-right'))
+    expect(link.getAttribute('href')).toBe(repoUrl('docs/remote-gateways.md', '8-certificates-and-the-two-clocks-they-run-on'))
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.hasAttribute('title')).toBe(false)
     expect(link.dataset.help).toBeUndefined()

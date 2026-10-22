@@ -923,7 +923,9 @@ groups:
             Edge node {{ $labels.edge_node }} sent readings the platform refused for their timestamp
             ({{ $labels.reason }}), so they were not recorded. too_new or too_old means the
             gateway's clock is wrong; historical_too_old means it replayed an outage older than the
-            platform keeps (ingestion.historicalMaxAgeSeconds). See docs/remote-gateways.md.
+            platform keeps (ingestion.historicalMaxAgeSeconds). See docs/remote-gateways.md,
+            "The clock is part of certificate verification", and help/site/remote-gateways.md,
+            "Late data after an outage".
         data:
           - refId: A
             relativeTimeRange:
@@ -977,7 +979,8 @@ groups:
             Edge node {{ $labels.edge_node }} reported an outage in which it dropped readings: they
             were never recorded and cannot be recovered. Its buffer was full or switched off, or the
             outage outlasted what it keeps. The Gateway Outages row of the Stack & Ingestion Health
-            dashboard has the window and the counts; see docs/remote-gateways.md.
+            dashboard has the window and the counts; see help/site/remote-gateways.md,
+            "Troubleshooting".
         data:
           - refId: A
             relativeTimeRange:
@@ -1088,7 +1091,8 @@ groups:
             Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more
             than a minute, so every reading it sends is being filed at the wrong time. Nothing
             corrects this centrally -- devices are trusted for their own timestamps. Fix time
-            synchronisation on the appliance; see docs/remote-gateways.md.
+            synchronisation on the appliance; see docs/remote-gateways.md,
+            "The clock is part of certificate verification".
         data:
           - refId: A
             relativeTimeRange:

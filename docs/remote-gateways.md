@@ -493,7 +493,8 @@ It is outbound only, needs no inventory, heals itself on a timer, and is idempot
   what `bootstrap.mjs` wrote inside the container.
 
 **The first run is a person's**, or the installer's if the appliance was set up with the command
-(§2). The playbook installs the timer that runs it afterwards. To run it by hand:
+([§2](../help/site/remote-gateways.md#2-provisioning-step-by-step)). The playbook installs the timer
+that runs it afterwards. To run it by hand:
 
 ```bash
 sudo apt-get install -y ansible-core

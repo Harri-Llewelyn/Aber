@@ -201,7 +201,8 @@ script and two cluster files; the chart and Aber's images are downloaded from GH
 
 These steps are needed once per cluster. Traefik is told to keep each client's address, and
 cert-manager runs the [internal CA](../guides/glossary.md#internal-ca-and-root-certificate) that issues every
-certificate (runbook, *Install* and *TLS*).
+certificate ([Running the server, *Install*](running-the-server.md#install) and
+[*TLS*](running-the-server.md#tls)).
 
 ```bash
 git clone --branch v1.5.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
@@ -305,7 +306,8 @@ Install `aber-ca.crt` in the trust store of every browser, operator laptop and g
 use Aber: by Group Policy on Windows, an MDM profile on macOS, and on Debian or Ubuntu by copying it
 to `/usr/local/share/ca-certificates/` and running `update-ca-certificates`. Until you do, every page
 shows a certificate warning. Do not get into the habit of clicking past it: it is the warning that
-would tell you if someone were intercepting your sign-in (runbook, *TLS → 3*).
+would tell you if someone were intercepting your sign-in
+([Running the server, *TLS → 3*](running-the-server.md#3-distribute-the-root-certificate)).
 
 ### 9. Sign in
 
@@ -379,7 +381,7 @@ On a site, every part of Aber is a host under the domain you gave `npm run setup
 | Forge (Gitea) | `https://git.<domain>` | http://git.localhost |
 | API reference (Swagger UI) | `https://docs.<domain>` | http://docs.localhost |
 | i3X | `https://i3x.<domain>` | http://i3x.localhost |
-| Supabase Studio, `Administrator` only | off by default; runbook, *Reaching the stack* | http://studio.localhost |
+| Supabase Studio, `Administrator` only | off by default; [Running the server, *Reaching the stack*](running-the-server.md#reaching-the-stack) | http://studio.localhost |
 | MQTT broker | the machine's address: 8883 (TLS), which gateways use, and 1883 | `localhost`: 8883 and 1883 |
 | Prometheus | `kubectl -n aber port-forward svc/prometheus 9090` | `npm run dev:forward`, then http://localhost:9090 |
 

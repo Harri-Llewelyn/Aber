@@ -941,9 +941,10 @@ kubeconfig are left alone. It publishes no host port. A pass deletes the cluster
 a failure leaves it, and prints where its kubeconfig and values are.
 
 - **install** writes the values with the checkout's `scripts/setup.mjs --domain=rehearsal.aber.test
-  --admin-email=…` and a `site.yaml` like the runbook's (*Install → A*): ingress and broker TLS from
-  the internal CA. Before the install it applies the Traefik setting, cert-manager and the internal
-  CA, as the runbook does.
+  --admin-email=…` and a `site.yaml` like the one in
+  [Running the server](../help/site/running-the-server.md#a-from-the-published-chart-no-image-builds)
+  (*Install → A*): ingress and broker TLS from the internal CA. Before the install it applies the
+  Traefik setting, cert-manager and the internal CA, as that page does.
 - **Both run with NetworkPolicies on**, as `values-prod.yaml.example` has them, because that is
   what a site starts from. The `site.yaml` adds `networkPolicy.enabled`, `kube-system` for DNS and
   the ingress controller, and the node's own address as `apiServerCidr`.

@@ -87,7 +87,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
 The Content-Security-Policy, as one nginx add_header line mounted over the image's empty include.
 It names what config.js hands the bundle: the API (Realtime over its WebSocket scheme) and the
 Studio and forge doors the sign-out beacons fetch. blob: and data: are the 3D viewer's textures and
-buffers. deploy/k8s/README.md says what each directive is for.
+buffers. help/site/running-the-server.md, *What a browser may load*, says what each directive is
+for.
 */ -}}
 {{- $cspMode := dig "contentSecurityPolicy" "mode" "enforce" .Values.frontend -}}
 {{- if not (has $cspMode (list "enforce" "report-only")) }}

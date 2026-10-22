@@ -602,7 +602,7 @@ Every workload rolls once, for the new security contexts. Grafana restarts once 
 datasource file changed. The historian's maintenance Job creates the job that brings a late replay
 into the rollups (#788). A replay more than a day late that arrives in the minutes before that Job
 runs is stored, but missing from the rollups until refreshed by hand
-([`remote-gateways.md`](../../docs/remote-gateways.md), *Late data after an outage*).
+([`remote-gateways.md`](remote-gateways.md#late-data-after-an-outage)).
 
 ### From 1.4.0, no Job prints a secret: rotate the historian's passwords
 

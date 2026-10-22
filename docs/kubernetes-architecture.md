@@ -306,7 +306,7 @@ deploy/
       ingress.yaml
       networkpolicy.yaml
       {pdbs,hpas}.yaml
-  k8s/README.md                          install/upgrade/teardown runbook and divergence table
+  k8s/README.md                          runbook: prerequisites, dev loop, releases, hardening
 ```
 
 **Validation is triggered from `NOTES.txt`.** It has to live somewhere that renders on every
