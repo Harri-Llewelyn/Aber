@@ -1269,6 +1269,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             {editing && (
               <div className="form-group">
                 <label className="form-label" htmlFor="device-conformance">Schema Conformance</label>
+                <Withheld field="conformance_policy" />
                 <select
                   id="device-conformance"
                   className="form-control"

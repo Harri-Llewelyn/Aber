@@ -36,7 +36,7 @@ export const PROPOSAL_FORMS = {
     withheld: {
       active_gateway_id: 'The gateway is this device’s data path — an Administrator moves it.',
       schema_ids: 'The schemas are what this device’s telemetry is judged against — an Administrator changes them.',
-      conformance_policy: 'Conformance policy decides what happens to unmodelled metrics — an Administrator sets it.'
+      conformance_policy: 'Schema Conformance decides whether a value that breaks the schema is kept or dropped. It cannot be proposed: someone who can edit devices sets it.'
     }
   },
   /* The one form whose fields are already column names: DeviceNameplateModal builds itself from a
