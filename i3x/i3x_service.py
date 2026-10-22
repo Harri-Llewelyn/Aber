@@ -1542,10 +1542,13 @@ class Handler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def _allowed_origin(self) -> Optional[str]:
-        """The request's Origin if allow-listed. send_error may run before headers parse."""
+        """
+        The allow-list's own entry for the request's Origin, or None: the header carries the
+        configured string, never the request's. send_error may run before headers parse.
+        """
         headers = getattr(self, "headers", None)
         origin = headers.get("Origin") if headers is not None else None
-        return origin if origin in CORS_ORIGINS else None
+        return next((o for o in CORS_ORIGINS if o == origin), None)
 
     # -- plumbing ----------------------------------------------------------------------------
     def log_message(self, fmt, *args):
