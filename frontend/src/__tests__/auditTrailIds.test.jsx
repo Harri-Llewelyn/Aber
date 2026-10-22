@@ -102,7 +102,7 @@ describe('one name per id, across the drawer and the export', () => {
 
   it('exports the same two words the drawer uses', async () => {
     await show()
-    fireEvent.click(screen.getByTitle(/Download the events matching the current filters as CSV/))
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
 
     await waitFor(() => expect(downloadCSV).toHaveBeenCalled())
     const [rows] = downloadCSV.mock.calls[0]
@@ -118,7 +118,7 @@ describe('one name per id, across the drawer and the export', () => {
     // The count the drawer acts on, so a reader of the export can tell a single-row act
     // from a group the filters cut without re-deriving it from the transaction id column.
     await show()
-    fireEvent.click(screen.getByTitle(/Download the events matching the current filters as CSV/))
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
 
     await waitFor(() => expect(downloadCSV).toHaveBeenCalled())
     const [rows] = downloadCSV.mock.calls[0]

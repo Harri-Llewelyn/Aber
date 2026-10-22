@@ -13,6 +13,7 @@ import {
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
+import { tooltipOf } from '../test/tooltips'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
    .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
@@ -127,7 +128,7 @@ const selectEvent = async (pattern) => {
   await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
 }
 
-const rangeSelect = () => screen.getByTitle('Limit the timeline to a time range')
+const rangeSelect = () => screen.getByRole('combobox', { name: 'Time range' })
 
 /** The kind and action filters live in the Filters popover, which is opened first. */
 const openFilters = () => {
@@ -135,8 +136,8 @@ const openFilters = () => {
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
   }
 }
-const kindSelect = () => { openFilters(); return screen.getByTitle(/Show only events against one kind of entity/) }
-const actionSelect = () => { openFilters(); return screen.getByTitle(/Filter by the database action/) }
+const kindSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Entity' }) }
+const actionSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Action' }) }
 
 describe('Audit Trail card header', () => {
   it('names the page with its icon, title and description, and nothing else', async () => {
@@ -156,14 +157,14 @@ describe('Audit Trail filter bar', () => {
     expect(bar).toBeTruthy()
     expect(within(bar).getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
     expect(bar.contains(rangeSelect())).toBe(true)
-    expect(screen.queryByTitle(/Show only events against one kind of entity/)).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Entity' })).toBeNull()
 
     openFilters()
     const popover = screen.getByRole('dialog', { name: 'Filters' })
-    expect(within(popover).getByTitle(/Show only events against one kind of entity/)).toBeInTheDocument()
+    expect(within(popover).getByRole('combobox', { name: 'Entity' })).toBeInTheDocument()
     // The wording is load-bearing: this control filters `audit_trail.action`, while the markers
     // show a derived classification. See auditTrailActionFilter.test.jsx.
-    expect(within(popover).getByTitle(/Filter by the database action/)).toBeInTheDocument()
+    expect(within(popover).getByRole('combobox', { name: 'Action' })).toBeInTheDocument()
   })
 
   it('counts the popover\'s own filters on its button, and its Clear resets only those', async () => {
@@ -427,7 +428,7 @@ describe('Audit Trail swimlanes', () => {
     const lane = screen.getByText('99999999…5555').closest('.trail-lane')
     const flag = within(lane).getByText('deleted')
     expect(flag).toBeInTheDocument()
-    expect(flag.getAttribute('title')).toMatch(/carry no name to recover/)
+    expect(tooltipOf(flag.closest('.trail-lane-label'))).toMatch(/carry no name to recover/)
   })
 
   it('does not flag a lane whose kind nothing looks up', async () => {
@@ -911,7 +912,7 @@ describe('Audit Trail drawer navigation', () => {
   /* Targeted by tooltip, not by lane: Press_02's two markers carry the same aria-label prefix and
      sit newest-first, so "the first UPDATE on Press_02" would select the latest event. The tooltip
      names the classification. */
-  const markerByTooltip = (substr) => nodes().find(n => n.getAttribute('title').includes(substr))
+  const markerByTooltip = (substr) => nodes().find(n => tooltipOf(n).includes(substr))
   const OLDEST = 'UPDATE · Lifecycle'      // the 08:00 archival
   const NEWEST = 'UPDATE · Configuration'  // the 09:00 schema rebind
 
@@ -1005,12 +1006,12 @@ describe('Audit Trail attribution', () => {
     await selectEvent(/DELETE on Decommissioned Line/)
     // Rows written before archived migration 0005_digital_thread_signal_and_attribution.sql. After it, this should never appear -- which is the point of
     // making it loud rather than blank.
-    expect(screen.getByText(/Unattributed/)).toBeInTheDocument()
+    expect(screen.getByText(/Unattributed/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   it('names the actor on hover too, so the timeline is readable without opening anything', async () => {
     await show()
-    expect(nodeFor(/INSERT on Host_Gateway_NodeRED/).getAttribute('title'))
+    expect(tooltipOf(nodeFor(/INSERT on Host_Gateway_NodeRED/)))
       .toContain('Ingestion daemon')
   })
 
@@ -1618,7 +1619,7 @@ describe('Audit Trail — removed tag filter', () => {
     const label = screen.getByText('Test-Schema').closest('.trail-lane-label')
     expect(within(label).getByText('v2')).toHaveClass('trail-lane-qualifier')
     // And still one string wherever one is wanted -- the hover, the export, the drawer.
-    expect(label.getAttribute('title')).toContain('Test-Schema v2')
+    expect(tooltipOf(label)).toContain('Test-Schema v2')
     expect(screen.queryByText(SCHEMA_ID)).toBeNull()
   })
 

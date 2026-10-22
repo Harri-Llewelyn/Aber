@@ -28,6 +28,7 @@ import { CAPTURE_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -483,7 +484,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               className="form-control control-md"
               value={storedFilter}
               onChange={e => setStoredFilter(e.target.value)}
-              title="Filter by whether a capture is stored for the subject"
               aria-label="Stored capture filter"
             >
               <option value="all">All subjects ({allRows.length})</option>
@@ -498,7 +498,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 className="form-control control-lg"
                 value={gatewayFilter}
                 onChange={e => setGatewayFilter(e.target.value)}
-                title="Filter devices by the gateway they publish through"
                 aria-label="Gateway filter"
               >
                 <option value="">All gateways</option>
@@ -518,7 +517,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 permitted={canManage}
                 deniedTitle={DENIED_TITLE}
                 onClick={() => playFileRef.current?.click()}
-                title="Store a capture file and go straight to playing it back. Every device the file recorded must exist on this site. Dropping the file on this card does the same."
+                title="Store a capture file and play it straight back. Every device the file recorded must exist on this site. Dropping it on this card does the same."
               >
                 <IconPlay size={13} /> Play a file…
               </ActionButton>
@@ -568,14 +567,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                     {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
                   </SortHeader>
                   {subjectKind === 'device' && (
-                    <SortHeader sort={sort} column="gateway" title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
+                    <SortHeader sort={sort} column="gateway" title="The edge node it publishes through. A capture of the device also records that node's birth certificate.">
                       Gateway
                     </SortHeader>
                   )}
                   <SortHeader sort={sort} column="sparkplug_id" title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </SortHeader>
-                  <SortHeader sort={sort} column="type" title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack) or Simulated (readings generated)">
+                  <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings."}>
                     Type
                   </SortHeader>
                   <SortHeader sort={sort} column="stored" title="The one capture stored for this subject. Recording again replaces it">
@@ -732,13 +731,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 <span className="section-count capture-label-count">
                   {capture.manifest.device_ids.length}
                 </span>
+                <HelpTip label="What a playback makes of these" text="A playback of this capture creates one replay lane for each of these devices." />
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {capture.manifest.device_ids.map(id => (
-                  <Badge key={id} size="sm" className="mono"
-                         title={`A playback of this capture creates one replay lane for ${id}`}>
-                    {id}
-                  </Badge>
+                  <Badge key={id} size="sm" className="mono">{id}</Badge>
                 ))}
               </div>
               {capture.manifest.edge_node_ids?.length > 0 && (
@@ -762,7 +759,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 pill is one metric. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {machineMetrics.map(name => (
-                <Badge key={name} size="sm" title={name}>{name}</Badge>
+                <Badge key={name} size="sm">{name}</Badge>
               ))}
               {/* The cap is the database's, not this list's; said out loud so a short list is not read
                   as a short capture. */}
@@ -835,26 +832,27 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               {capture ? 'Replace by upload' : 'Upload a capture'}
             </div>
             {canManage ? (
-              <div
-                role="button"
-                tabIndex={0}
-                aria-label={`Upload a capture for ${selected.name}`}
-                onClick={() => fileRef.current?.click()}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-                onDragOver={e => { e.preventDefault(); setDragging(true) }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={e => {
-                  e.preventDefault()
-                  setDragging(false)
-                  const dropped = e.dataTransfer?.files?.[0]
-                  if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
-                }}
-                className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
-                title="Upload a capture recorded elsewhere, or by ingestion/capture.py record. To play it back, every device it recorded must exist on this site."
-              >
-                <IconUpload size={14} className="capture-drop-icon" />
-                Drop a capture file here, or click to choose one
-              </div>
+              <Tooltip text="Upload a capture recorded elsewhere. To play it back, every device it recorded must exist on this site.">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Upload a capture for ${selected.name}`}
+                  onClick={() => fileRef.current?.click()}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+                  onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault()
+                    setDragging(false)
+                    const dropped = e.dataTransfer?.files?.[0]
+                    if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
+                  }}
+                  className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
+                >
+                  <IconUpload size={14} className="capture-drop-icon" />
+                  Drop a capture file here, or click to choose one
+                </div>
+              </Tooltip>
             ) : (
               <p className="form-hint">{DENIED_TITLE}.</p>
             )}
@@ -961,31 +959,30 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
         ) : (
           <>
             {/* A bar for the clock and numbers for the other two caps: a single bar at 10% would
-                promise 90% remaining when the message cap might fire in two seconds. */}
-            <div
-              style={{
-                height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
-                overflow: 'hidden', margin: '8px 0 6px'
-              }}
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={job.max_seconds}
-              aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
-              aria-label="Elapsed against the duration cap"
-              // The caps are NOT NULL columns, so they are always present on a real row -- but the
-              // title is cosmetic and must not be the thing that throws if one is ever absent.
-              title={`${job.elapsed_seconds}s of the ${job.max_seconds}s duration cap.`
-                + (job.max_messages && job.max_bytes
-                  ? ` The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatBytes(job.max_bytes)}, whichever comes first.`
-                  : '')}
-            >
+                promise 90% remaining when the message cap might fire in two seconds. The caps are
+                NOT NULL columns, but the tooltip must not be the thing that throws if one is absent. */}
+            <Tooltip text={job.max_messages && job.max_bytes
+              ? `The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatBytes(job.max_bytes)}, whichever comes first.`
+              : null}>
               <div
                 style={{
-                  width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
-                  height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
+                  height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+                  overflow: 'hidden', margin: '8px 0 6px'
                 }}
-              />
-            </div>
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={job.max_seconds}
+                aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
+                aria-label="Elapsed against the duration cap"
+              >
+                <div
+                  style={{
+                    width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
+                    height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
+                  }}
+                />
+              </div>
+            </Tooltip>
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
               {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
               {plural(job.messages, 'message')} · {formatBytes(job.bytes)}
@@ -1056,7 +1053,6 @@ function PlaybackStrip({ job, onStop, stopPending, canManage }) {
             aria-valuemax={total}
             aria-valuenow={Math.min(job.messages_sent, total)}
             aria-label="Messages played back against the capture's total"
-            title={`${job.messages_sent} of ${total} messages played back at ${job.speed}× speed.`}
           >
             <div
               style={{
@@ -1173,14 +1169,15 @@ function RecentFailures({ jobs, kind = 'capture' }) {
               {outcome}
               {detail}
             </div>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => dismiss(job.id)}
-              title="Dismiss this notice. It will not come back, on this browser."
-              aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
-            >
-              <IconX size={13} />
-            </button>
+            <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => dismiss(job.id)}
+                aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
+              >
+                <IconX size={13} />
+              </button>
+            </Tooltip>
           </div>
         )
       })}
@@ -1232,14 +1229,15 @@ function RecentDiscards({ jobs }) {
               {' '}
               <HelpTip label="Why readings were discarded" text="Playback keeps the gap between a reading's timestamp and its message's arrival. A reading already old when recorded, or stamped by a fast device clock, stays outside the window. A slow speed stretches the gap: try 1x." />
             </div>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => dismiss(job.id)}
-              title="Dismiss this notice. It will not come back, on this browser."
-              aria-label="Dismiss the discarded-readings notice"
-            >
-              <IconX size={13} />
-            </button>
+            <Tooltip text="Dismiss this notice. It will not come back, on this browser.">
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => dismiss(job.id)}
+                aria-label="Dismiss the discarded-readings notice"
+              >
+                <IconX size={13} />
+              </button>
+            </Tooltip>
           </div>
         )
       })}
@@ -1294,7 +1292,6 @@ function SubjectRow({ row, selected, onSelect }) {
         e.preventDefault()
         onSelect()
       }}
-      title="Click to inspect this subject in the details panel"
     >
       <td>{row.name}</td>
       {row.kind === 'device' && (
@@ -1303,7 +1300,7 @@ function SubjectRow({ row, selected, onSelect }) {
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
       {/* A column rather than a badge on the name, matching the Gateways page. */}
       <td>
-        <Badge tone={gatewayTypeTone(row.type)} size="sm" title={gatewayTypeDescription(row.type)}>
+        <Badge tone={gatewayTypeTone(row.type)} size="sm">
           {gatewayTypeLabel(row.type)}
         </Badge>
       </td>
@@ -1324,7 +1321,7 @@ function SubjectRow({ row, selected, onSelect }) {
                   tone="warning"
                   size="sm"
                   className="badge-follow"
-                  title="No NBIRTH was recorded, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again to replace it."
+                  title="No NBIRTH was recorded, so a playback refuses this capture. Record it again to replace it."
                 >
                   NO BIRTH
                 </Badge>
