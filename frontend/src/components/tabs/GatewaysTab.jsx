@@ -672,7 +672,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
           />
           <div className="form-hint">
-            Optional, and read by nothing — a note for whoever comes to this next.
+            Optional: a note for whoever comes to this next. Shown here, and served by i3X as the
+            gateway's description; nothing acts on it.
           </div>
         </div>
         {/* One select over the legal states rather than two checkboxes, ahead of Location because
@@ -1044,7 +1045,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             label: 'Description',
             value: selected.description || null,
             full: true,
-            help: 'Operator note. Free text, read by nothing.'
+            help: "Operator note. Shown here, and served by i3X as the gateway's description; nothing acts on it."
           },
         ] : []}
         actions={selected ? [

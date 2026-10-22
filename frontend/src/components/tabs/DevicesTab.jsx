@@ -1105,7 +1105,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               <div className="form-hint">
                 {/* Says what it is NOT for, because the tempting misuse is to encode something here
                     that belongs in a typed field -- and then to start parsing it. */}
-                Optional, and read by nothing. For identification a consumer should trust — manufacturer, serial number, firmware — use the Digital Nameplate, whose fields carry published IDTA identifiers.
+                Optional. Shown here, and served by i3X as the device's description; nothing acts on it. For identification a consumer should trust — manufacturer, serial number, firmware — use the Digital Nameplate, whose fields carry published IDTA identifiers.
               </div>
             </div>
 
@@ -1559,7 +1559,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'Description',
             value: selectedDevice.description || null,
             full: true,
-            help: 'Operator note. Free text, read by nothing.'
+            help: "Operator note. Shown here, and served by i3X as the device's description; nothing acts on it."
           },
         ] : []}
         /* The 3D model, the drawer's width and ruled off, after the fields and above the actions.
