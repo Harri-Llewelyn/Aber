@@ -49,7 +49,7 @@ checks.
    [Sparkplug group](../guides/glossary.md#sparkplug-group) (`tck-id-topic-structure`). **If the ID
    is wrong,** the broker drops every message without an error, so nothing arrives. **If the group
    is wrong,** Aber still stores the data, and the Gateways page warns that the gateway publishes
-   under another group ([adding devices](remote-gateways.md#10-adding-devices--nothing-is-pre-registered)).
+   under another group ([adding devices](remote-gateways.md#adding-devices--nothing-is-pre-registered)).
 4. **Hold a Sparkplug session.** Connect with an NDEATH as the MQTT Will, at QoS 1, carrying a bdSeq
    one more than the last connection's (`tck-id-message-flow-edge-node-birth-publish-will-message`,
    `tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq`,

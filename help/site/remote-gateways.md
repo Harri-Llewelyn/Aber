@@ -14,8 +14,7 @@ does not enrol, and the dashboard issues its credential instead. This page is ab
 
 This page holds the steps. The reasons behind them are in
 [`docs/remote-gateways.md`](../../docs/remote-gateways.md), a reference page for people who change
-how gateways enrol. Each section keeps its number on both pages. So a section named here but not on
-this page (1, 3 to 6, 8, 9 or 12) is there.
+how gateways enrol.
 
 > **The short version.** Create the gateway in the dashboard with its **Type** set to *Remote*.
 > Paste the command it shows on a fresh Ubuntu machine: it installs everything, enrols, and prints
@@ -25,7 +24,7 @@ this page (1, 3 to 6, 8, 9 or 12) is there.
 
 ---
 
-## 2. Provisioning, step by step
+## Provisioning, step by step
 
 ### In the dashboard
 
@@ -35,8 +34,9 @@ token.
 
 0. **The deployment must know its own address first.** The page asks `gateway-bundle` whether an
    appliance could enrol. If not, it says so above the table and in the form, and names the variable
-   to set (§7). Save is held back for a Remote gateway until it can. Host and Simulated gateways are
-   unaffected. `npm run setup` asks for the domain when it writes a values file.
+   to set ([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)). Save is
+   held back for a Remote gateway until it can. Host and Simulated gateways are unaffected.
+   `npm run setup` asks for the domain when it writes a values file.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Set Type to “Remote”.** Before you save, the form says what will happen:
    *“Runs on its own hardware out on the plant network. Set up with an install command or a bundle;
@@ -53,7 +53,8 @@ Coming back later works differently, on purpose:
 **Gateways → the gateway → Set Up Gateway** (or **Re-issue Setup**, for one that enrolled and never
 published). Somebody may already be carrying that
 gateway's command or bundle to a machine. So the modal
-**asks first and makes you type the gateway's name** before it mints anything. See §6.
+**asks first and makes you type the gateway's name** before it mints anything. See
+[`docs/remote-gateways.md`, *Re-issuing, and what it invalidates*](../../docs/remote-gateways.md#6-re-issuing-and-what-it-invalidates).
 
 ### On the appliance: the command
 
@@ -71,7 +72,7 @@ and a route to Aber. Paste the command. It runs two stages in one line:
   header, and runs it as root with the token and the pin in its environment. The installer:
   - puts in place the packages the playbook needs;
   - fetches the platform playbook and runs it (packages, upgrades, chrony, Docker, the compose
-    project; §12);
+    project; [`docs/remote-gateways.md`, *The operating system, and the platform playbook*](../../docs/remote-gateways.md#12-the-operating-system-and-the-platform-playbook));
   - writes the appliance's `.env` from a fetch that needs the token;
   - copies the pinned root beside it as `platform-root.pem` (the enrolment container trusts that
     file, not the host's store);
@@ -82,8 +83,9 @@ and a route to Aber. Paste the command. It runs two stages in one line:
 
 The command ends by printing the Node-RED editor password **once**. Within about a minute the
 dashboard shows the gateway **ONLINE**. The installer then runs the appliance's first convergence (a
-run of the platform playbook, §12) from the forge, Aber's built-in Git server. The timer the
-playbook installed runs the later ones.
+run of the platform playbook,
+[`docs/remote-gateways.md`, *The operating system, and the platform playbook*](../../docs/remote-gateways.md#12-the-operating-system-and-the-platform-playbook))
+from the forge, Aber's built-in Git server. The timer the playbook installed runs the later ones.
 
 **Why the command is not `curl | bash` alone.** A fresh appliance does not trust Aber's internal
 root. A one-liner ending in `curl -k` would be worse than the bundle. The pin lets the appliance
@@ -122,31 +124,38 @@ unpacked folder to the machine, then:
 
 ```bash
 cd aber-gateway-<name>-<sparkplug_id>
-docker compose up -d --build          # ~1 minute; builds on the appliance, see §4
+docker compose up -d --build          # ~1 minute; builds on the appliance
 docker compose logs bootstrap         # prints the Node-RED editor password, ONCE
 ```
 
+The image is built on the appliance, not pulled, for the reasons in
+[`docs/remote-gateways.md`, *Why the image is built on the appliance*](../../docs/remote-gateways.md#4-why-the-image-is-built-on-the-appliance).
+
 Within about a minute the dashboard shows the gateway **ONLINE**. Nothing manages the host of a
-bundle-installed appliance until somebody runs the platform playbook on it once (§12).
+bundle-installed appliance until somebody runs the platform playbook on it once
+([`docs/remote-gateways.md`, *The operating system, and the platform playbook*](../../docs/remote-gateways.md#12-the-operating-system-and-the-platform-playbook)).
 
 ### Prerequisites on the appliance
 
 * For the command: Ubuntu, `curl` and `openssl` (both in a default install), and `sudo`.
 * For the bundle: Docker and the Compose plugin.
 * A route to Aber's API: the address in `ABER_SUPABASE_URL`. The server refuses to set it to
-  anything in-stack, meaning an address that only works inside Aber (§7).
+  anything in-stack, meaning an address that only works inside Aber
+  ([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)).
 * A route to the broker on **8883**. Remote gateways use MQTTS only. Port 1883 is published only
   for gateways not yet moved, and is not used here.
 * A route to the forge's SSH on **2222**, or **22** on a site whose values leave
   `gitea.ssh.external.port` at the chart's default (one not set up with `npm run setup`). The
-  puller fetches the gateway's flow there, and convergence fetches the platform playbook (§11,
-  §12). The clone URL enrolment hands out carries the port.
+  puller fetches the gateway's flow there ([*Proposing a flow*](#proposing-a-flow)), and
+  convergence fetches the platform playbook
+  ([`docs/remote-gateways.md`, *The operating system, and the platform playbook*](../../docs/remote-gateways.md#12-the-operating-system-and-the-platform-playbook)).
+  The clone URL enrolment hands out carries the port.
 * The broker's hostname must resolve. It must also be in the certificate's SAN (its list of
-  names); see §7.
+  names); see [*The two addresses that must be right*](#the-two-addresses-that-must-be-right).
 
 ---
 
-## 7. The two addresses that must be right
+## The two addresses that must be right
 
 Aber refuses either of these when it is in-stack, rather than falling back to a default. A wrong
 value here gives an appliance that enrols perfectly and then connects to nothing. That is the
@@ -302,7 +311,7 @@ flow builds plain objects. A local broker bridged to the centre would hold the w
 appliance instead, which is why the buffer is in the flow.
 
 The limits are constants at the top of **store and forward**. Change them in the gateway's own
-repository, like any flow change ([§11](#11-proposing-a-flow)):
+repository, like any flow change ([*Proposing a flow*](#proposing-a-flow)):
 
 | Constant | Default | What it bounds |
 | :--- | :--- | :--- |
@@ -381,7 +390,7 @@ job skips such a window for this reason.
 
 ---
 
-## 10. Adding devices — nothing is pre-registered
+## Adding devices — nothing is pre-registered
 
 The sample flow includes a **▶ SEND A DEVICE READING** inject node. Click it, and an example device,
 `press-01`, publishes a Sparkplug `DBIRTH` (its birth certificate). It then appears in the
@@ -401,7 +410,7 @@ telemetry. An edge node of your own follows the same rules
 
 ---
 
-## 11. Proposing a flow
+## Proposing a flow
 
 **A pull request in the gateway's own repository.** To change a Remote gateway's flow:
 
@@ -532,12 +541,13 @@ the two copies of the check together, by running the same files through both.
 
 ---
 
-## 13. Troubleshooting
+## Troubleshooting
 
 **The Gateways page says remote gateways cannot be enrolled on this deployment.**
-One of the two addresses in §7 is unset or in-stack; the notice names which. Set it where the
-deployment is configured (`global.publicBaseDomain` in the chart's values), and restart the
-functions service. The notice clears the next time you open the page.
+One of the two addresses is unset or in-stack
+([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)); the notice
+names which. Set it where the deployment is configured (`global.publicBaseDomain` in the chart's
+values), and restart the functions service. The notice clears the next time you open the page.
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
 The token is unknown, expired or already redeemed. Re-issue from the dashboard.
@@ -553,15 +563,18 @@ The claim could not be released. That bundle is spent: generate a new one.
 The appliance holds a credential but is not publishing. Check `docker compose logs node-red`:
 
 * `Connection failed to broker`: the broker is unreachable on 8883, or the certificate does not name
-  the address being dialled (§7). A wrong password gives the same message, and it never mentions
-  certificates.
+  the address being dialled
+  ([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)). A wrong
+  password gives the same message, and it never mentions certificates.
 
 **Nothing at all in the dashboard, and bootstrap never ran.**
 Run `docker compose ps`. If `bootstrap` exited non-zero, `node-red` will not have started at all
 (`depends_on: service_completed_successfully`). Its logs give the reason.
 
 **The gateway is `ONLINE` but its devices are not.**
-They are in the quarantine queue awaiting approval (§10). That is the design, not a fault.
+They are in the quarantine queue awaiting approval
+([*Adding devices — nothing is pre-registered*](#adding-devices--nothing-is-pre-registered)). That
+is the design, not a fault.
 
 **`Gateway Outage Lost Readings` fired.**
 The gateway reported an outage that dropped readings. They were never recorded. The *Gateway

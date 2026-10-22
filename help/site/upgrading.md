@@ -185,7 +185,7 @@ gateway keeps the clone URL and host key it enrolled with. So an upgrade is some
 
 - **A gateway's flow changes only through a pull request** in its own repository in the forge.
   Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,
-  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#11-proposing-a-flow)).
+  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#proposing-a-flow)).
 - **A gateway's operating system follows the platform playbook at the tag its `platform.yml` names.**
   An upgrade publishes the new version's playbook, but each gateway stays on its own tag until a pull
   request in its repository moves it. Move one gateway first.

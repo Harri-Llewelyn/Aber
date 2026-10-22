@@ -1423,7 +1423,8 @@ const OPERATOR_PAIRS = [
 // 116. A pointer at a reference page of OPERATOR_PAIRS names a section that page still has. Check 1
 // follows links; this reads words, a sentence at a time (comment markers and backticks off, wrapped
 // lines joined). A title in italics or quotes, after `→`, or after a comma or `;` that follows a
-// file's name belongs to the nearest file named before it, else after it. A bare "runbook" is
+// file's name belongs to the nearest file named before it, else after it, unless it is the text of
+// a link to a heading of its own page, which check 1 resolves. A bare "runbook" is
 // deploy/k8s/README.md, and a reference page that names no file names itself. It fails when the
 // title heads a section of a help page of a pair and none of that file's; so does a `§N` just after
 // the name (or alone in the page itself), or a `#anchor` on it. Records and mirrors are skipped.
@@ -1532,6 +1533,7 @@ const OPERATOR_PAIRS = [
       const report = (at, target, h, as) => wrong.push(`${file}:${lineAt(at)} names ${target} with ${as}, which is a section of ${h.page}, not of ${target}`);
       for (const title of titles) {
         for (let at = text.indexOf(title); at >= 0; at = text.indexOf(title, at + 1)) {
+          if (/^[*"”]?\]\(#/.test(text.slice(at + title.length))) continue;
           const lead = text.slice(Math.max(0, at - 4), at);
           const listed = mentions.some((m) => m.end <= at && /^[)\]"']*[,;]\s+$/.test(text.slice(m.end, at)));
           if (!(/[*"“[]$|→\s+$/.test(lead) || listed) || !closes(text.slice(at + title.length, at + title.length + 8))) continue;
