@@ -98,8 +98,9 @@ by the database.
 Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
 means a real link (the Directory's open chip, a `.count-link`). A value that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
-id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`); the tooltip and the copy
-carry the full value. A read-only or disabled `.form-control` takes the page background and muted
+id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
+label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
+tooltip opens, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
 text, and `.btn-warning` is the amber button for a risky action that is not destructive.
 
 ### The rail opens when the pointer rests on it

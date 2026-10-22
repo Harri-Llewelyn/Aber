@@ -50,7 +50,9 @@ export async function copyText(text) {
 /**
  * `truncate` says which end gives way when the value does not fit: `"end"` (the default) cuts the
  * end, `"start"` keeps the last `TAIL_CHARS` characters and cuts the middle, so the part that tells two
- * long ids apart stays visible. The tooltip, the aria label and the copy always carry the full value.
+ * long ids apart stays visible. The aria label and the copy always carry the full value, and so does
+ * the tooltip whenever the chip is cut; one that fits says "Click to copy this {label}". A `title`
+ * replaces either.
  */
 /**
  * `variant="button"` styles it as `.btn-ghost`: the understated `.copyable-id` is right for an id
@@ -60,7 +62,9 @@ export async function copyText(text) {
 export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant, truncate = 'end' }) {
   const asButton = variant === 'button'
   const [state, setState] = useState(null) // 'copied' | 'failed'
+  const [cut, setCut] = useState(false)
   const timer = useRef(null)
+  const valueRef = useRef(null)
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -87,11 +91,22 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
   const shown = display || value
   const split = !asButton && truncate === 'start' && shown.length > TAIL_CHARS
 
+  // Measured as the tooltip opens: the chip's width comes from where it sits, so only the browser
+  // knows whether the value fits. With `truncate="start"` the head span is the one that gives way.
+  const measure = () => {
+    const el = valueRef.current
+    setCut(Boolean(el) && [el, ...el.children].some(n => n.scrollWidth > n.clientWidth))
+  }
+
   return (
-    <Tooltip text={title || `Click to copy this ${label}`}>
+    <Tooltip text={title || (cut
+      ? <>Click to copy <span className="copyable-id-full">{value}</span></>
+      : `Click to copy this ${label}`)}>
       <button
         type="button"
         onClick={handleCopy}
+        onMouseEnter={measure}
+        onFocus={measure}
         // `mono` only when showing the value itself. A fixed label like "Copy Command" is prose and
         // reads worse in a monospace face beside the buttons it sits next to.
         className={(asButton
@@ -103,7 +118,7 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
           ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
           : null}
         {asButton ? <span>{shown}</span> : (
-          <span className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
+          <span ref={valueRef} className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
             {split
               ? <><span className="copyable-id-head">{shown.slice(0, -TAIL_CHARS)}</span><span className="copyable-id-tail">{shown.slice(-TAIL_CHARS)}</span></>
               : shown}
