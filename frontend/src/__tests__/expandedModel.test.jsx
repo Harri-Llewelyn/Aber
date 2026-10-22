@@ -50,7 +50,10 @@ describe('the expanded 3D model', () => {
     const drawerViewer = await screen.findByTestId('model-3d-viewer')
     expect(drawerViewer.getAttribute('auto-rotate')).toBe('')
     const expand = screen.getByRole('button', { name: 'Expand model: CNC_01' })
-    expect(expand.closest('.model-viewer-holder')).toBe(drawerViewer.closest('.model-viewer-holder'))
+    const frame = drawerViewer.closest('.expand-frame')
+    expect(frame).not.toBeNull()
+    expect(expand.parentElement).toBe(frame)
+    expect(expand).toHaveClass('expand-corner')
     expect(expand).not.toHaveAttribute('title')
   })
 

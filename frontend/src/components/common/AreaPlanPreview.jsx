@@ -75,13 +75,14 @@ export const planIsExpandable = (area, cells, highlightCellId = null) =>
   !!area?.plan_path || previewCells(area, cells, highlightCellId).length > 0
 
 /**
- * The preview with an Expand button beside it, for the Cells panel. The button is outside the
- * preview because the preview is a link, and a button cannot sit inside one.
+ * The preview on a card of its own, with Expand in the card's top-right corner, for the Areas and
+ * Cells panels. The card draws the frame, so the button is on it but beside the preview's link,
+ * not inside it: a button cannot sit inside a link.
  */
 export function ExpandablePlanPreview({ area, cells, highlightCellId = null, onOpen }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="plan-preview-row">
+    <div className="expand-frame plan-card">
       <AreaPlanPreview area={area} cells={cells} highlightCellId={highlightCellId} onOpen={onOpen} />
       {planIsExpandable(area, cells, highlightCellId) && (
         <ExpandButton name={area.area_name} onClick={() => setExpanded(true)} />

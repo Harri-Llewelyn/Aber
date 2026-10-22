@@ -7,7 +7,8 @@ Helm chart. To install or run Aber, use [`help/site/install.md`](../help/site/in
 This document is the **why** behind the Helm chart in `deploy/helm/aber`: the decisions that
 are not obvious from reading the templates, and the failures each one exists to prevent. The
 operational half — install, upgrade, teardown, hardening — is
-[`deploy/k8s/README.md`](../deploy/k8s/README.md).
+[`deploy/k8s/README.md`](../deploy/k8s/README.md), with its steps in
+[`help/site/running-the-server.md`](../help/site/running-the-server.md).
 
 > **September 2026.** Docker Compose was the second deployment target when this was written and
 > has since been removed. The comparisons below are the record of why the chart is shaped as it is,

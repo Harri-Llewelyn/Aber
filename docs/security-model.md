@@ -3,6 +3,10 @@
 How Aber protects its data and who may reach what. To report a vulnerability, see
 [`SECURITY.md`](../SECURITY.md).
 
+What an administrator does about it, in plain terms, is in the help page
+[Keeping Aber secure](../help/site/security.md), which the dashboard shows too. This page stays the
+reference that the code and the tests cite for each claim.
+
 **Aber runs on a site's own network.** It is built for the devices, gateways and people on one
 shopfloor network, with every service behind the deployment's internal CA
 ([`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml)). Reaching it from outside that network

@@ -1347,6 +1347,79 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 }
 
 // -------------------------------------------------------------------------------------------------
+// 111. A reference page whose operator steps moved into help/site/, or that a page there sums up,
+// and that help page link to each other in their opening lines, before the first `## `: the design
+// stayed where the code cites it, and a reader of either half has to find the other. A page that
+// moved whole leaves a stub at its old path (`back: false`): the stub points on, and the help page
+// owes it nothing.
+// -------------------------------------------------------------------------------------------------
+const OPERATOR_PAIRS = [
+  { design: 'docs/remote-gateways.md', help: 'help/site/remote-gateways.md' },
+  { design: 'docs/upgrades.md', help: 'help/site/upgrading.md', back: false },
+  { design: 'deploy/k8s/README.md', help: 'help/site/running-the-server.md' },
+  // A plain summary for administrators, not moved steps (`moved: false`): 112 has nothing to compare.
+  { design: 'docs/security-model.md', help: 'help/site/security.md', moved: false },
+];
+{
+  const opening = (file) => read(file).split(/\n## /)[0];
+  const linksTo = (file) => [...opening(file).matchAll(/\[[^\]]+\]\(([^)\s#]+)[^)\s]*\)/g)]
+    .filter((m) => !/^[a-z][a-z0-9+.-]*:/i.test(m[1]))
+    .map((m) => posix.normalize(posix.join(posix.dirname(file), m[1])));
+  const wrong = [];
+  for (const { design, help, back = true } of OPERATOR_PAIRS) {
+    const missing = [design, help].filter((f) => !existsSync(join(REPO, f)));
+    if (missing.length) { wrong.push(`${missing.join(' and ')} missing`); continue; }
+    if (!linksTo(design).includes(help)) wrong.push(`${design} does not link to ${help}, where its operator steps are, before its first section`);
+    if (back && !linksTo(help).includes(design)) wrong.push(`${help} does not link back to ${design}, where the design behind its steps is, before its first section`);
+  }
+  if (wrong.length) {
+    fail('a reference page and the help page its steps moved to do not point at each other:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`all ${OPERATOR_PAIRS.length} reference page(s) split into help/site/ and their help pages link to each other at the top`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 112. A step an operator's page in help/site/ gives is not given again in the reference page it was
+// split from, where the two copies would drift as soon as one is edited. A step is a code block
+// (compared whole, each line trimmed) or a code span of 20 characters or more holding a space or
+// `://` (a command or a URL rather than a name). Lines are not compared one by one: the runbook
+// reuses one in different steps (a `for` over the images, a rollout restart). Version pins in
+// either copy are check 40's and check 39's.
+// -------------------------------------------------------------------------------------------------
+{
+  const steps = (file) => {
+    const out = [];
+    let block = null;
+    for (const line of read(file).split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) {
+        if (block) { if (block.length) out.push(block.join('\n')); block = null; } else block = [];
+        continue;
+      }
+      if (block) { if (line.trim()) block.push(line.trim()); continue; }
+      for (const m of line.matchAll(/`([^`]+)`/g)) if (m[1].trim().length >= 20 && /\s|:\/\//.test(m[1].trim())) out.push(m[1].trim());
+    }
+    return out;
+  };
+  const wrong = [];
+  let given = 0;
+  const moved = OPERATOR_PAIRS.filter((p) => p.moved !== false && existsSync(join(REPO, p.design)) && existsSync(join(REPO, p.help)));
+  for (const { design, help } of moved) {
+    const own = steps(help);
+    const reference = new Set(steps(design));
+    if (!own.length) wrong.push(`${help} gives no step in a code block or span; the extraction no longer matches`);
+    given += own.length;
+    for (const s of new Set(own.filter((x) => reference.has(x)))) wrong.push(`${help} and ${design} both give \`${s.split('\n')[0]}\`${s.includes('\n') ? ' (a block)' : ''}`);
+  }
+  if (wrong.length) {
+    fail('an operator step in help/site/ is also written out in the reference page it moved from, so the two can drift:\n' +
+      wrong.map((w) => `        ${w}`).join('\n') + '\n        Keep the step in the help page, and link to it from the reference page.');
+  } else {
+    pass(`the ${given} code block(s) and command span(s) in ${moved.length} operator page(s) of help/site/ appear in none of the reference pages they moved from`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 71. The Playback gateway is never reported stale, and its replay lanes are never expected to
 // publish. The last declaration of platform_health_rows() keeps `NOT g.is_shadow` in its
 // gateway_stale arm (archived migration 0061 added it, 0074 lost it in a redeclaration, 0182 put it
@@ -4910,7 +4983,7 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 // -------------------------------------------------------------------------------------------------
 {
   const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'help/site/install.md',
-    'docs/architecture.md', 'docs/security-model.md', 'supabase/README.md'];
+    'help/site/running-the-server.md', 'docs/architecture.md', 'docs/security-model.md', 'supabase/README.md'];
   const ARTEFACTS = [/\bkong\.yml\b/, /\bKONG_[A-Z]/, /checksum\/kong-/, /\bkong_[a-z]/, /(?<![\w-])kong:\d/, /\bkey-auth\b/];
   const offences = [];
   for (const file of CURRENT) {
@@ -6466,17 +6539,18 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 }
 
 // -------------------------------------------------------------------------------------------------
-// 25. The runbook's inline Traefik manifest is deploy/k8s/traefik-config.yaml, which the dev loop
-// applies: an install from the registry has no checkout, so the runbook carries a copy.
+// 25. The inline Traefik manifest in help/site/running-the-server.md (the runbook's Install) is
+// deploy/k8s/traefik-config.yaml, which the dev loop applies: an install from the registry has no
+// checkout, so the page carries a copy.
 // -------------------------------------------------------------------------------------------------
 {
   const manifest = (text) => text.split('\n').filter((l) => l.trim() && !l.trimStart().startsWith('#')).join('\n');
   const file = manifest(read('deploy/k8s/traefik-config.yaml'));
-  const block = read('deploy/k8s/README.md').match(/kubectl apply -f - <<'EOF'\n([\s\S]*?)\nEOF\n/);
+  const block = read('help/site/running-the-server.md').match(/kubectl apply -f - <<'EOF'\n([\s\S]*?)\nEOF\n/);
   if (!block) {
-    fail("deploy/k8s/README.md no longer carries the Traefik HelmChartConfig as a `kubectl apply -f - <<'EOF'` block");
+    fail("help/site/running-the-server.md no longer carries the Traefik HelmChartConfig as a `kubectl apply -f - <<'EOF'` block");
   } else if (manifest(block[1]) !== file) {
-    fail('the Traefik HelmChartConfig in deploy/k8s/README.md differs from deploy/k8s/traefik-config.yaml, which the dev loop applies');
+    fail('the Traefik HelmChartConfig in help/site/running-the-server.md differs from deploy/k8s/traefik-config.yaml, which the dev loop applies');
   } else if (!read('scripts/dev-cluster.mjs').includes("'deploy/k8s/traefik-config.yaml'")) {
     fail('scripts/dev-cluster.mjs no longer applies deploy/k8s/traefik-config.yaml, so the dev loop measures a different Traefik');
   } else {
@@ -6786,7 +6860,7 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
   // Where a person applies cert-manager by hand, and the version the dev loop (and so CI) applies.
   const CERT_MANAGER = /cert-manager\/releases\/download\/(v[\w.-]+)\/cert-manager\.yaml/g;
   const pins = [];
-  for (const file of ['help/site/install.md', 'deploy/k8s/README.md']) {
+  for (const file of ['help/site/install.md', 'help/site/running-the-server.md']) {
     read(file).split('\n').forEach((line, i) => {
       for (const m of line.matchAll(CERT_MANAGER)) pins.push({ at: `${file}:${i + 1}`, version: m[1] });
     });
@@ -6809,8 +6883,8 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
   if (version && chart && version !== chart) {
     wrong.push(`${INSTALLER} installs ABER_VERSION=${version}, and Chart.yaml's version: is ${chart}. Change ABER_VERSION to ${chart}`);
   }
-  if (!pins.some((p) => p.at.startsWith('help/site/install.md')) || !pins.some((p) => p.at.startsWith('deploy/k8s/README.md')) || !devLoop) {
-    wrong.push('help/site/install.md, deploy/k8s/README.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
+  if (!pins.some((p) => p.at.startsWith('help/site/install.md')) || !pins.some((p) => p.at.startsWith('help/site/running-the-server.md')) || !devLoop) {
+    wrong.push('help/site/install.md, help/site/running-the-server.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
   }
   const stalePins = pins.filter((p) => certManager && p.version !== certManager);
   if (stalePins.length) {

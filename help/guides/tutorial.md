@@ -69,7 +69,7 @@ the gateway has to exist before its password can be issued.
 **A Remote gateway works differently.** It runs on its own computer beside the machines. Its drawer
 offers an install command to paste on a fresh Ubuntu machine, or a bundle for one that already has
 Docker. That computer then sets itself up and gets its own password, which never passes through a
-browser. [`docs/remote-gateways.md`](../../docs/remote-gateways.md) covers it.
+browser. [Remote gateways](../site/remote-gateways.md) covers it.
 
 ### 5. Register a metric
 
@@ -344,7 +344,7 @@ is put together and what each part needs.
 ## Related
 
 - [`glossary.md`](glossary.md): the terms used here
-- [`../../docs/remote-gateways.md`](../../docs/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
+- [`../site/remote-gateways.md`](../site/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
 - [`../../node-red/README.md`](../../node-red/README.md): how Node-RED's editor and APIs are protected; [`../../node-red/node-red-init.mjs`](../../node-red/node-red-init.mjs) prepares it at every start
 - [`../../mosquitto/README.md`](../../mosquitto/README.md): the broker's policy, its configuration ([`mosquitto.conf`](../../mosquitto/mosquitto.conf)) and roles ([`dynsec-roles.json`](../../mosquitto/dynsec-roles.json)), and which topics each gateway may use
 - [`../../ingestion/README.md`](../../ingestion/README.md): how these messages are read and checked

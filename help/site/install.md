@@ -4,7 +4,7 @@ Aber has two parts. **The server** runs on one Linux machine on your network, un
 **Gateways** connect your machines to it, and you add them from the dashboard once the server is
 running. This guide installs the server, signs you in, and points you at your first gateway.
 
-Every option, and the reason for each step, is in the [runbook](../../deploy/k8s/README.md). The server
+Every option, and the reason for each step, is in [Running the server](running-the-server.md). The server
 is installed from the Helm chart in [`deploy/helm/aber`](../../deploy/helm/aber), and why it is built that
 way is in [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md). Words you may not know are in
 the [glossary](../guides/glossary.md).
@@ -357,7 +357,7 @@ A gateway connects a machine's devices to the server. Create each one in the das
   Either way, the gateway needs to reach the server's API, its broker on 8883, and the forge's SSH on
   2222 (22 on a site that kept it there), where it fetches its flow and its platform playbook. Its
   image is built on the gateway itself, which is how an arm64 Pi runs it.
-  [`docs/remote-gateways.md`](../../docs/remote-gateways.md) covers it in
+  [Remote gateways](remote-gateways.md) covers it in
   full, and [`forge/gateway-platform/appliance/`](../../forge/gateway-platform/appliance) holds what the
   bundle contains.
 - **A Host or Simulated gateway** runs inside the server, in Aber's own Node-RED, and needs nothing

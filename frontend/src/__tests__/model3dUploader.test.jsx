@@ -149,9 +149,11 @@ describe('Model3DUploader', () => {
     expect(api.uploadDeviceModel).not.toHaveBeenCalled()
   })
 
-  it('warns that the bucket is public, since an export publishes the URL', () => {
+  // The warning is the section label's tip (Model3DLabel, tested in model3dLayout.test.jsx), not a
+  // line under the card.
+  it('leaves the public-bucket warning to the section label', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
-    expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
+    expect(screen.queryByText(/anyone with the link can read it/i)).toBeNull()
   })
 
   // Download is a button beside Replace and Remove.
