@@ -1433,133 +1433,115 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 : "The DDATA topic this device publishes on. No Sparkplug group is recorded on its gateway, so that segment is a wildcard."
           },
           {
-            /* The 3D model beside where the device is and what it is: a tile of fixed height, so it
-               cannot push the actions off the drawer, and high enough to be seen without
-               scrolling. onChange reloads so model_3d_path cannot go stale. */
-            beside: (
-              <div className="model-tile">
-                <Model3DLabel attached={Boolean(selectedDevice.model_3d_path)} />
-                <Model3DUploader
-                  device={selectedDevice}
-                  canManage={canManage && !selectedDevice.is_archived}
-                  showToast={showToast}
-                  onChange={() => loadAll()}
-                />
-              </div>
-            ),
-            fields: [
-              {
-                // A link, not a picker: rebinding lives in Edit Details behind an explicit save.
-                label: 'Serving Gateway',
-                full: true,
-                value: selectedDevice.active_gateway_id ? (
-                  <RouteLink
-                    className="chip chip-link"
-                    to={gatewayUrl(selectedDevice.active_gateway_id)}
-                    onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
-                    title="Open this gateway on the Gateways page"
-                  >
-                    <IconRadio size={11} />
-                    <span className="chip-name">
-                      {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
-                        || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
-                    </span>
-                  </RouteLink>
-                ) : null,
-                help: "The edge node carrying this device's data. Reassign it in Edit Details."
-              },
-              {
-                // One row for where the device is: Area › Cell, the lane standing in for a cell, or
-                // Unassigned. The resolved location, not the explicit override; "(from gateway)" marks
-                // the inherited case, which moves when the gateway does.
-                label: 'Location',
-                full: true,
-                value: selectedLocation && (() => {
-                  const source = selectedLocation.location_source
-                  if (source === SOURCE_UNASSIGNED) {
-                    return <Badge tone="warning" size="sm" icon={<IconAlertTriangle size={10} />}>Unassigned</Badge>
-                  }
-                  const area = areaById.get(selectedLocation.effective_area_id)
-                  const cell = cellById.get(selectedLocation.effective_cell_id)
-                  const place = cell ? (
+            // A link, not a picker: rebinding lives in Edit Details behind an explicit save.
+            label: 'Serving Gateway',
+            full: true,
+            value: selectedDevice.active_gateway_id ? (
+              <RouteLink
+                className="chip chip-link"
+                to={gatewayUrl(selectedDevice.active_gateway_id)}
+                onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
+                title="Open this gateway on the Gateways page"
+              >
+                <IconRadio size={11} />
+                <span className="chip-name">
+                  {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
+                    || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+                </span>
+              </RouteLink>
+            ) : null,
+            help: "The edge node carrying this device's data. Reassign it in Edit Details."
+          },
+          {
+            // One row for where the device is: Area › Cell, the lane standing in for a cell, or
+            // Unassigned. The resolved location, not the explicit override; "(from gateway)" marks
+            // the inherited case, which moves when the gateway does.
+            label: 'Location',
+            full: true,
+            value: selectedLocation && (() => {
+              const source = selectedLocation.location_source
+              if (source === SOURCE_UNASSIGNED) {
+                return <Badge tone="warning" size="sm" icon={<IconAlertTriangle size={10} />}>Unassigned</Badge>
+              }
+              const area = areaById.get(selectedLocation.effective_area_id)
+              const cell = cellById.get(selectedLocation.effective_cell_id)
+              const place = cell ? (
+                <RouteLink
+                  className="chip chip-link"
+                  to={cellUrl(cell.cell_id)}
+                  onNavigate={() => onSelectCell?.(cell.cell_id)}
+                  title="Open this cell on the Cells page"
+                >
+                  <IconLayoutDashboard size={11} />
+                  <span className="chip-name">{cell.cell_name}</span>
+                </RouteLink>
+              ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
+              if (!place) return null
+              return (
+                <div className="device-location">
+                  {area && (
+                    <>
+                      <RouteLink
+                        className="chip chip-link"
+                        to={areaUrl(area.area_id)}
+                        onNavigate={() => onSelectArea?.(area.area_id)}
+                        title="Open this area on the Areas page"
+                      >
+                        <AreaIcon area={area} size={11} />
+                        <span className="chip-name">{area.area_name}</span>
+                      </RouteLink>
+                      <span aria-hidden="true">›</span>
+                    </>
+                  )}
+                  {place}
+                  {source === SOURCE_INHERITED && <span className="cell-meta">(from gateway)</span>}
+                </div>
+              )
+            })(),
+            help: selectedLocation?.location_source === SOURCE_UNASSIGNED
+              ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
+              : selectedLocation?.location_source === SOURCE_EXPLICIT
+                ? 'Set on the device itself, so it stays here regardless of its gateway.'
+                : selectedLocation?.location_source === SOURCE_INHERITED
+                  ? 'Inherited from its gateway. It will follow the gateway if that moves.'
+                  : selectedLocation?.location_scope === SCOPE_SITE_WIDE
+                    ? 'Marked Site-Wide: it belongs to no single cell.'
+                    : selectedLocation?.location_scope === SCOPE_AREA_WIDE
+                      ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
+                      : noCellReason(selectedGateway) || undefined
+          },
+          {
+            // Resolved through schemasForDevice: every `device_submodels` row
+            // (`submodel_schema_ids`), since a device may carry several.
+            label: 'Schema',
+            value: (() => {
+              const attached = schemasForDevice(selectedDevice, schemas)
+              if (attached.length === 0) return null
+              return (
+                <div className="context-device-list">
+                  {attached.map(schema => (
                     <RouteLink
+                      key={schema.schema_uuid}
                       className="chip chip-link"
-                      to={cellUrl(cell.cell_id)}
-                      onNavigate={() => onSelectCell?.(cell.cell_id)}
-                      title="Open this cell on the Cells page"
+                      to={schemaUrl(schema.schema_uuid)}
+                      onNavigate={() => onSelectSchema?.(schema.schema_uuid)}
+                      title={`Open ${schema.schema_name} on the Schemas page`}
                     >
-                      <IconLayoutDashboard size={11} />
-                      <span className="chip-name">{cell.cell_name}</span>
+                      <IconClipboardList size={11} />
+                      <span className="chip-name">{schema.schema_name}</span>
                     </RouteLink>
-                  ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
-                  if (!place) return null
-                  return (
-                    <div className="device-location">
-                      {area && (
-                        <>
-                          <RouteLink
-                            className="chip chip-link"
-                            to={areaUrl(area.area_id)}
-                            onNavigate={() => onSelectArea?.(area.area_id)}
-                            title="Open this area on the Areas page"
-                          >
-                            <AreaIcon area={area} size={11} />
-                            <span className="chip-name">{area.area_name}</span>
-                          </RouteLink>
-                          <span aria-hidden="true">›</span>
-                        </>
-                      )}
-                      {place}
-                      {source === SOURCE_INHERITED && <span className="cell-meta">(from gateway)</span>}
-                    </div>
-                  )
-                })(),
-                help: selectedLocation?.location_source === SOURCE_UNASSIGNED
-                  ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
-                  : selectedLocation?.location_source === SOURCE_EXPLICIT
-                    ? 'Set on the device itself, so it stays here regardless of its gateway.'
-                    : selectedLocation?.location_source === SOURCE_INHERITED
-                      ? 'Inherited from its gateway. It will follow the gateway if that moves.'
-                      : selectedLocation?.location_scope === SCOPE_SITE_WIDE
-                        ? 'Marked Site-Wide: it belongs to no single cell.'
-                        : selectedLocation?.location_scope === SCOPE_AREA_WIDE
-                          ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
-                          : noCellReason(selectedGateway) || undefined
-              },
-              {
-                // Resolved through schemasForDevice: every `device_submodels` row
-                // (`submodel_schema_ids`), since a device may carry several.
-                label: 'Schema',
-                value: (() => {
-                  const attached = schemasForDevice(selectedDevice, schemas)
-                  if (attached.length === 0) return null
-                  return (
-                    <div className="context-device-list">
-                      {attached.map(schema => (
-                        <RouteLink
-                          key={schema.schema_uuid}
-                          className="chip chip-link"
-                          to={schemaUrl(schema.schema_uuid)}
-                          onNavigate={() => onSelectSchema?.(schema.schema_uuid)}
-                          title={`Open ${schema.schema_name} on the Schemas page`}
-                        >
-                          <IconClipboardList size={11} />
-                          <span className="chip-name">{schema.schema_name}</span>
-                        </RouteLink>
-                      ))}
-                    </div>
-                  )
-                })(),
-                full: true,
-                help: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
-              },
-              {
-                label: 'Classification',
-                value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
-                full: true,
-                help: "Derived from the metric groups this device's schema models, plus any live findings."
-              },
-            ],
+                  ))}
+                </div>
+              )
+            })(),
+            full: true,
+            help: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
+          },
+          {
+            label: 'Classification',
+            value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
+            full: true,
+            help: "Derived from the metric groups this device's schema models, plus any live findings."
           },
           /* Connection method is not shown: nothing writes it and nothing acts on it. The column
              stays; this is a UI omission. */
@@ -1570,6 +1552,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             help: 'Operator note. Free text, read by nothing.'
           },
         ] : []}
+        /* The 3D model, the drawer's width and ruled off, after the fields and above the actions.
+           Its height follows the drawer's width whatever the state, so it cannot grow into the
+           actions. onChange reloads so model_3d_path cannot go stale. */
+        beforeActions={selectedDevice && (
+          <div className="model-section">
+            <Model3DLabel attached={Boolean(selectedDevice.model_3d_path)} />
+            <Model3DUploader
+              device={selectedDevice}
+              canManage={canManage && !selectedDevice.is_archived}
+              showToast={showToast}
+              onChange={() => loadAll()}
+            />
+          </div>
+        )}
         actions={selectedDevice ? [
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,

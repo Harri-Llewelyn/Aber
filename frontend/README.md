@@ -402,15 +402,17 @@ height is not known, and above the actions it could push Edit Details off the dr
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.
   Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they take 220px.
-- **A section of fixed height can sit among the fields**, as a field group:
-  `{ beside, fields }` draws `beside` on the left and its fields stacked on the right. The device's
-  3D model is one (#1061). As the last tool it started 747px down a drawer body that shows 754px
-  at 1920×1080, so some people did not know a device could have a model. Its tile is the viewer's
-  height whatever the state, so it cannot grow into the actions. Beside Serving Gateway, Location,
-  Schema and Classification, the whole drawer measured 715px there, with nothing to scroll.
-- **The tile is the wider column** (11 to 9), so Download, Replace and Remove keep their words in
-  a 537px drawer. A narrower tile is a container query's business (`.model-tile`): the buttons keep
-  their icons, and each word stays as the button's name, hidden but read.
+- **A section of fixed height can sit above the actions**, in `beforeActions`. The device's 3D
+  model is one. As the last tool it started 747px down a drawer body that shows 754px at
+  1920×1080, so some people did not know a device could have a model (#1061). A tile beside the
+  device's facts then fitted the whole drawer in 715px, but a 180px viewer in half the drawer's
+  width was cramped (#1070). It is now a section of its own after the fields, ruled off as the
+  actions are. The viewer takes the drawer's width at 16:9, and the empty drop zone has the same
+  shape, so the section cannot grow into the actions. At 1920×1080 the viewer is wholly in view
+  when the drawer opens (434px to 718px of the 754px body) and the actions start just below it.
+- **Download, Replace and Remove share the section's width.** In a drawer too narrow for the three
+  words, a container query (`.model-section`) leaves the buttons their icons, and each word stays as
+  the button's name, hidden but read.
 
 ### What the modelled-metrics fixture caught, twice
 
