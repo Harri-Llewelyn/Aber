@@ -5,6 +5,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { AssetConfigModal } from '../components/modals/AssetConfigModal'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * A device's Description reaches the API on create and on edit, and a device that has never
@@ -88,7 +89,7 @@ describe('a device that has never published', () => {
     await show([device(NEVER)])
     const edit = openPanel().getByText('Edit Details').closest('button')
     expect(edit).not.toBeDisabled()
-    expect(edit.getAttribute('title')).toBe('Edit device parameters')
+    expect(tooltipOf(edit)).toBe('Edit device parameters')
     fireEvent.click(edit)
     fireEvent.change(screen.getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Installed Friday' } })
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
@@ -111,7 +112,7 @@ describe('a device that has never published', () => {
     await show([device({ status: 'OFFLINE' })])
     const edit = openPanel().getByText('Edit Details').closest('button')
     expect(edit).not.toBeDisabled()
-    expect(edit.getAttribute('title')).toBe('Edit device parameters')
+    expect(tooltipOf(edit)).toBe('Edit device parameters')
   })
 
   it('reads as awaiting its first birth in the parameters dialog', async () => {

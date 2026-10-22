@@ -13,6 +13,7 @@ import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
 import { HelpTip } from '../common/HelpTip'
+import { Tooltip } from '../common/Tooltip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { LoadingState } from '../common/LoadingState'
@@ -244,11 +245,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         )}
         {/* An alert carries a flag as well as a hue: never colour alone. The glyph and wording are
             DevicesTab's, so a device does not answer to two names on two pages. */}
+        {/* The alert's name is in the chip's tooltip, so the flag carries none of its own. */}
         {alert && (
           <span
             className="chip-flag"
             style={{ color: 'var(--danger-text)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-            title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
           >
             {alert.severity === 'critical'
               ? <><IconAlertCircle size={10} /> ALARM</>
@@ -278,7 +279,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
                 : 'badge-danger'}`} />
         <span className="chip-name mono">{g.gateway_name}</span>
-        {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} title="Runs on this host"><IconZap size={9} /></span>}
+        {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} role="img" aria-label="Runs on this host"><IconZap size={9} /></span>}
       </RouteLink>
     )
   }
@@ -288,18 +289,18 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const state = stateOf(cellDevicesOf(c))
     const Icon = cellIconComponent(c.icon)
     return (
-      <button
-        key={c.cell_id}
-        type="button"
-        className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
-        onClick={() => toggleCell(c.cell_id)}
-        title={`${c.cell_name} — ${STATUS_WORD[state.pin]} — ${note}`}
-      >
-        <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
-        <Icon size={11} />
-        <span className="chip-name">{c.cell_name}</span>
-        {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
-      </button>
+      <Tooltip key={c.cell_id} text={`${STATUS_WORD[state.pin]} — ${note}`}>
+        <button
+          type="button"
+          className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
+          onClick={() => toggleCell(c.cell_id)}
+        >
+          <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
+          <Icon size={11} />
+          <span className="chip-name">{c.cell_name}</span>
+          {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
+        </button>
+      </Tooltip>
     )
   }
 
@@ -408,7 +409,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         iconSize={PIN_ICON[columns]}
         selected={selectedCellId === c.cell_id}
         onClick={() => toggleCell(c.cell_id)}
-        title={`${c.cell_name} — ${c.is_archived ? 'archived' : STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s) — click for details`}
+        title={`${c.cell_name} — ${c.is_archived ? 'archived' : STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s)`}
       />
     )
   }
@@ -442,21 +443,23 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       >
         <div className="area-card-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. An
-              archived area shows the archive glyph where the dot would be. */}
+              archived area shows the archive glyph where the dot would be. Both are said in words
+              by the name's tooltip and the ARCHIVED badge, so neither is read on its own. */}
           {archived
-            ? <IconArchive size={12} style={{ color: 'var(--warning-text)', flexShrink: 0 }} title="Archived" />
-            : <span className={`tile-dot tile-dot-${state.pin}`} title={STATUS_LABEL[state.pin]} />}
+            ? <IconArchive size={12} style={{ color: 'var(--warning-text)', flexShrink: 0 }} aria-hidden="true" />
+            : <span className={`tile-dot tile-dot-${state.pin}`} aria-hidden="true" />}
           <AreaGlyph size={14} style={{ flexShrink: 0 }} />
-          <button
-            type="button"
-            className="zone-name area-card-name"
-            /* Stopped, or the card behind it toggles the panel straight back shut. */
-            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
-            aria-pressed={selectedAreaId === ar.area_id}
-            title={`${ar.area_name} — ${archived ? 'archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}
-          >
-            {ar.area_name}
-          </button>
+          <Tooltip text={`${archived ? 'Archived' : STATUS_WORD[state.pin]}. Click for its assets and its plan.`}>
+            <button
+              type="button"
+              className="zone-name area-card-name"
+              /* Stopped, or the card behind it toggles the panel straight back shut. */
+              onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
+              aria-pressed={selectedAreaId === ar.area_id}
+            >
+              {ar.area_name}
+            </button>
+          </Tooltip>
           {archived && <ArchivedBadge size="sm" title="Archived: its cells are still filed here and its topics are unchanged" />}
           {/* The area's description, only when it has one. */}
           {ar.description && (
@@ -468,21 +471,19 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           )}
           {/* The Area-Wide tally is a breakdown, not an addition: the gateway and device figures
               beside it already include these. */}
-          <span
-            className="area-card-counts mono"
-            title={`${areaCells.length} cell(s), ${gateways.length} gateway(s), ${devices.length} device(s)`
-              + (wideCount > 0 ? `, of which ${wideCount} belong(s) to the area rather than to a cell in it` : '')}
-          >
-            {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
-            {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
-          </span>
+          <Tooltip text={wideCount > 0 ? `${wideCount} of these belong to the area rather than to a cell in it` : null}>
+            <span className="area-card-counts mono">
+              {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
+              {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
+            </span>
+          </Tooltip>
           <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
         </div>
         {/* The plan and its Expand button, in the corner of the space the plan takes. Expand is
             offered while there is something to enlarge: a plan, or the outline with a pin on it. It
             stops its own click, or the card behind it opens the area's panel too. */}
         <div className="expand-frame expand-frame-fill">
-          <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
+          <AreaPlan area={ar}>
             {areaCells.map(cellPin)}
           </AreaPlan>
           {(ar.plan_path || areaCells.some(isPlaced)) && (
@@ -491,14 +492,15 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         </div>
         {/* A cell filed here that the plan does not draw: a job, not a tally, so it keeps its line. */}
         {unplaced.length > 0 && (
-          <button
-            type="button"
-            className="area-card-aside"
-            onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
-            title={`Open ${ar.area_name} to see which cells have no place on the plan`}
-          >
-            <span className="area-card-aside-warn">{plural(unplaced.length, 'cell')} not placed</span>
-          </button>
+          <Tooltip text="Open the area to see which cells have no place on the plan">
+            <button
+              type="button"
+              className="area-card-aside"
+              onClick={e => { e.stopPropagation(); toggleArea(ar.area_id) }}
+            >
+              <span className="area-card-aside-warn">{plural(unplaced.length, 'cell')} not placed</span>
+            </button>
+          </Tooltip>
         )}
       </div>
     )
@@ -538,14 +540,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         laneGateways.length > 0 && {
           label: `Gateways (${laneGateways.length})`,
           value: <div className="context-device-list">{laneGateways.map(gatewayChip)}</div>,
-          full: true,
-          title: 'Click one to open it on the Gateways page'
+          full: true
         },
         laneAssets.length > 0 && {
           label: `Devices (${laneAssets.length})`,
           value: <div className="context-device-list">{laneAssets.map(deviceChip)}</div>,
-          full: true,
-          title: 'Click one to open it on the Devices page'
+          full: true
         }
       ].filter(Boolean),
       // Each action is offered only while the lane holds something to act on. Both are marked
@@ -587,7 +587,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               : cellChip(c, 'no place on the plan yet; set one in Edit Details on the Cells page', true))}</div>
             : null,
           full: true,
-          title: 'Click one for its details. NOT PLACED marks a cell filed here with no place on the plan, so nothing pins it.'
+          help: 'Click one for its details. NOT PLACED marks a cell filed here with no place on the plan, so nothing pins it.'
         },
         {
           label: 'Gateways',
@@ -595,7 +595,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <div className="context-device-list">{gateways.map(g => panelGatewayChip(g, wide.gateways.includes(g)))}</div>
             : null,
           full: true,
-          title: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
+          help: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
         },
         {
           label: devicesLabel(devices),
@@ -603,7 +603,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <div className="context-device-list">{devices.map(d => panelDeviceChip(d, wide.devices.includes(d)))}</div>
             : null,
           full: true,
-          title: 'Devices that resolve to its cells, then any that serve the whole area (AREA-WIDE), such as its building management system'
+          help: 'Devices that resolve to its cells, then any that serve the whole area (AREA-WIDE), such as its building management system'
         }
       ],
       actions: [
@@ -635,7 +635,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         label: 'Where',
         value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled — in no area yet',
         full: true,
-        title: 'The area this cell is filed in, as set on the Cells page'
+        help: 'The area this cell is filed in, as set on the Cells page'
       },
       { label: 'Description', value: selectedCell.description || null, full: true },
       selectedAlerts.length > 0 && {
@@ -650,15 +650,14 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           </div>
         ),
         full: true,
-        title: 'Raised by Grafana against devices in this cell'
+        help: 'Raised by Grafana against devices in this cell'
       },
       {
         label: 'Gateways',
         value: cellGatewaysOf(selectedCell).length
           ? <div className="context-device-list">{cellGatewaysOf(selectedCell).map(g => panelGatewayChip(g))}</div>
           : null,
-        full: true,
-        title: 'Edge nodes serving this cell'
+        full: true
       },
       {
         label: devicesLabel(cellDevicesOf(selectedCell)),
@@ -666,7 +665,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           ? <div className="context-device-list">{cellDevicesOf(selectedCell).map(d => panelDeviceChip(d))}</div>
           : null,
         full: true,
-        title: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
+        help: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
       },
       { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true }
     ].filter(Boolean) : [],
@@ -688,15 +687,15 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const panel = openLaneView ? lanePanel : selectedArea ? areaPanel : cellPanel
 
   // The legend decodes the pin colours and the tile dots: in the toolbar, and again in the expanded
-  // plan's header.
+  // plan's header. Each entry takes focus, so its meaning is the keyboard's as well.
   const legend = (
     <div className="shopfloor-legend">
-      <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-      <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
-      <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+      <Tooltip text={STATUS_LABEL.normal}><span tabIndex={0}><span className="tile-dot tile-dot-normal" /> Online</span></Tooltip>
+      <Tooltip text={STATUS_LABEL.attention}><span tabIndex={0}><span className="tile-dot tile-dot-attention" /> Needs attention</span></Tooltip>
+      <Tooltip text={STATUS_LABEL.idle}><span tabIndex={0}><span className="tile-dot tile-dot-idle" /> Nothing live</span></Tooltip>
       {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
           for it while the dots roll up a whole tile. */}
-      <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
+      <Tooltip text={STATUS_LABEL.alert}><span tabIndex={0}><span className="legend-chip legend-chip-danger" /> Alert firing</span></Tooltip>
     </div>
   )
 
@@ -722,15 +721,16 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <div className="filter-bar">
             {/* Offered only while an area is archived; the count is what it would draw. */}
             {archivedAreas.length > 0 && (
-              <button
-                type="button"
-                className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setShowArchived(v => !v)}
-                aria-pressed={showArchived}
-                title={`Archived areas are left off the map, and with them the ${plural(hiddenWithArchived.cells, 'cell')} and ${plural(hiddenWithArchived.devices, 'device')} filed in them.`}
-              >
-                <IconArchive size={13} /> Show archived areas ({archivedAreas.length})
-              </button>
+              <Tooltip text={`Archived areas are left off the map, and with them the ${plural(hiddenWithArchived.cells, 'cell')} and ${plural(hiddenWithArchived.devices, 'device')} filed in them.`}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowArchived(v => !v)}
+                  aria-pressed={showArchived}
+                >
+                  <IconArchive size={13} /> Show archived areas ({archivedAreas.length})
+                </button>
+              </Tooltip>
             )}
             {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
             <div className="filter-bar-actions">
@@ -743,19 +743,23 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               <>
                 {/* The rungs: enterprise, then site. */}
                 <div className="site-hierarchy" role="group" aria-label="Hierarchy">
-                  <div className="site-hierarchy-level" title="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
-                    <span className="site-hierarchy-label">Enterprise</span>
-                    {enterprise
-                      ? <span className="site-hierarchy-value">{enterprise}</span>
-                      : <span className="site-hierarchy-unset">Not set — it is the Sparkplug group named at install (the sparkplug.group_id setting)</span>}
-                  </div>
+                  <Tooltip text="The ISA-95 enterprise: the Sparkplug group the gateways publish under">
+                    <div className="site-hierarchy-level" tabIndex={0}>
+                      <span className="site-hierarchy-label">Enterprise</span>
+                      {enterprise
+                        ? <span className="site-hierarchy-value">{enterprise}</span>
+                        : <span className="site-hierarchy-unset">Not set — it is the Sparkplug group named at install (the sparkplug.group_id setting)</span>}
+                    </div>
+                  </Tooltip>
                   <IconChevronRight size={12} className="site-hierarchy-sep" aria-hidden="true" />
-                  <div className="site-hierarchy-level" title="The ISA-95 site: this campus, named on the Settings page under Site">
-                    <span className="site-hierarchy-label">Site</span>
-                    {siteName
-                      ? <span className="site-hierarchy-value">{siteName}</span>
-                      : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
-                  </div>
+                  <Tooltip text="The ISA-95 site: this campus, named on the Settings page under Site">
+                    <div className="site-hierarchy-level" tabIndex={0}>
+                      <span className="site-hierarchy-label">Site</span>
+                      {siteName
+                        ? <span className="site-hierarchy-value">{siteName}</span>
+                        : <span className="site-hierarchy-unset">Not set — name it on the Settings page under Site</span>}
+                    </div>
+                  </Tooltip>
                 </div>
 
                 {/* The lanes, three across, sharing the width; each opens into the panel. */}
@@ -768,26 +772,26 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                     // A narrow card hides the name and the counts, so the button says them itself.
                     const tally = `${lane.title}: ${plural(laneGateways.length, 'gateway')}, ${plural(laneAssets.length, 'device')}`
                     return (
-                      <button
-                        key={lane.key}
-                        type="button"
-                        /* A lane wears its hue only while it holds something: an empty Unassigned
-                           queue is the good state, so it keeps its outline and drops the fill. */
-                        className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
-                        onClick={() => toggleLane(lane.key)}
-                        aria-pressed={open}
-                        aria-label={tally}
-                        title={`${tally}. ${lane.hint} ${open ? 'Click to close.' : 'Click to list its assets.'}`}
-                      >
-                        {/* No dot on an empty lane: grey next to zero says nothing. */}
-                        {holds && <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />}
-                        <LaneIcon size={13} style={{ flexShrink: 0 }} />
-                        <span className="site-lane-name">{lane.title}</span>
-                        <span className="site-lane-counts mono" title={`${plural(laneGateways.length, 'gateway')}, ${plural(laneAssets.length, 'device')}`}>
-                          {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
-                        </span>
-                        <span className="site-lane-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
-                      </button>
+                      <Tooltip key={lane.key} text={lane.hint}>
+                        <button
+                          type="button"
+                          /* A lane wears its hue only while it holds something: an empty Unassigned
+                             queue is the good state, so it keeps its outline and drops the fill. */
+                          className={`site-lane ${lane.className}${holds ? '' : ' is-empty'}${open ? ' is-open' : ''}`}
+                          onClick={() => toggleLane(lane.key)}
+                          aria-pressed={open}
+                          aria-label={tally}
+                        >
+                          {/* No dot on an empty lane: grey next to zero says nothing. */}
+                          {holds && <span className={`tile-dot tile-dot-${status}`} aria-hidden="true" />}
+                          <LaneIcon size={13} style={{ flexShrink: 0 }} />
+                          <span className="site-lane-name">{lane.title}</span>
+                          <span className="site-lane-counts mono">
+                            {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
+                          </span>
+                          <span className="site-lane-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
+                        </button>
+                      </Tooltip>
                     )
                   })}
                 </div>
@@ -813,7 +817,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                     {unfiledCells.length > 0 && (
                       <div className="site-map-tray">
                         <div className="site-map-tray-group" data-tray="unfiled">
-                          <span className="site-map-tray-title" title="Cells in no area yet; file them on the Areas page">
+                          <span className="site-map-tray-title">
                             <IconShieldAlert size={12} /> Unfiled — in no area yet
                           </span>
                           <div className="context-device-list">

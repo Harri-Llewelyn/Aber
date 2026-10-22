@@ -38,7 +38,6 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
       <AreaPlan
         area={area}
         onPlaceClick={disabled ? undefined : place}
-        title={disabled ? undefined : 'Click where the cell is on this plan'}
       >
         {others.filter(isPlaced).map(c => (
           <AreaPlanPin
@@ -59,6 +58,7 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
       <div className="area-plan-placement-footer">
         <span style={{ fontSize: '11px', color: refusal ? 'var(--danger)' : 'var(--text-muted)' }} role={refusal ? 'alert' : undefined}>
           {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
+          {!refusal && !disabled && ' Click the plan where the cell is.'}
         </span>
         {value && !disabled && (
           <Tooltip text="Take the cell off the plan; it stays in the area">

@@ -3,6 +3,7 @@ import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './I
 import CopyableId from './CopyableId'
 import { HelpTip } from './HelpTip'
 import { RouteLink } from './RouteLink'
+import { Tooltip } from './Tooltip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
 
@@ -36,14 +37,16 @@ export const HelpDrawerContext = createContext(null)
  *
  * @param {node} subtitle Optional line under the title.
  *
- * @param {Array} fields [{ label, value, display?, mono?, copyable?, title?, help?, full?, danger? }].
+ * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger? }].
  * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
  * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
- * not say what it is for.
+ * not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
+ * screen reach.
  *
  * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
- * pendingLabel? }]. `to` is an address in this app: the action is a link to it, and a plain click
- * runs `onClick` (or goes to `to`) in place. `href` is another site's, opened in a new tab.
+ * pendingLabel? }]. `title` is the action's tooltip, the shared one, for what its label does not
+ * say, such as why it is disabled. `to` is an address in this app: the action is a link to it,
+ * and a plain click runs `onClick` (or goes to `to`) in place. `href` is another site's, opened in a new tab.
  * `pending` puts that one action into the in-flight state. The first action marked
  * `primary` is drawn highlighted at the top of the list; a later one marked `primary` is drawn as
  * a plain action in its own position.
@@ -104,25 +107,27 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
           <div className="context-panel-heading">
             {/* No type badge: the kind is already established by the page, and is announced on the
                 region label. */}
-            {/* Titled as well as truncated: an entity name long enough to overrun the drawer is exactly
-                the kind you opened the panel to read. */}
+            {/* Truncated, with the whole name in the tooltip: an entity name long enough to overrun
+                the drawer is exactly the kind you opened the panel to read. */}
             <div className="context-panel-title-row">
               {icon && <span className="context-panel-icon" aria-hidden="true">{icon}</span>}
-              <div className="context-panel-title" title={title}>{title}</div>
+              <Tooltip text={title}><div className="context-panel-title">{title}</div></Tooltip>
             </div>
             {subtitle && <div className="context-panel-subtitle">{subtitle}</div>}
           </div>
           {headerActions}
-          <button
-            ref={closeRef}
-            className="context-panel-close"
-            onClick={onClose}
-            title={`Close ${subject} (Esc)`}
-            aria-label={`Close ${subject}`}
-            tabIndex={open ? 0 : -1}
-          >
-            <IconX size={15} />
-          </button>
+          <Tooltip text={`Close ${subject} (Esc)`} describe={false}>
+            <button
+              ref={closeRef}
+              className="context-panel-close"
+              onClick={onClose}
+              aria-label={`Close ${subject}`}
+              aria-keyshortcuts="Escape"
+              tabIndex={open ? 0 : -1}
+            >
+              <IconX size={15} />
+            </button>
+          </Tooltip>
         </div>
 
         <div className="context-panel-body">
@@ -149,16 +154,17 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
                     target=_blank, so middle-click and copy link address work. By rule name, not by
                     device label: /alerting/list searches rule definitions, and `sparkplug_id`
                     exists only on evaluated instances. See grafanaAlertUrl. */}
-                <a
-                  className="context-alert-link"
-                  href={grafanaAlertUrl(alert.alert_name)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open this rule in Grafana Alerting — thresholds, state history and silences live there"
-                  tabIndex={open ? 0 : -1}
-                >
-                  View in Grafana <IconExternalLink size={11} />
-                </a>
+                <Tooltip text="Open this rule in Grafana Alerting, where its thresholds, state history and silences live">
+                  <a
+                    className="context-alert-link"
+                    href={grafanaAlertUrl(alert.alert_name)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    tabIndex={open ? 0 : -1}
+                  >
+                    View in Grafana <IconExternalLink size={11} />
+                  </a>
+                </Tooltip>
               </div>
             </div>
           )}
@@ -167,8 +173,8 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
             <dl className="context-panel-fields">
               {fields.map((f, i) => (
                 <div key={i} className={`context-field${f.full ? ' context-field-full' : ''}`}>
-                  {/* The tip sits on the LABEL, which is what a reader hovers to ask what a field
-                      is; `title` below is on the value and answers a different question. */}
+                  {/* The tip sits on the LABEL, which is where a reader looks to ask what a field
+                      is. */}
                   <dt className="context-field-label">
                     {f.label}
                     {f.help && <HelpTip text={f.help} label={`What ${f.label} means`} size={11} />}
@@ -176,7 +182,6 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
                   <dd
                     className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
                       + (f.danger ? ' context-field-danger' : '')}
-                    title={f.title}
                   >
                     {/* Empty is stated rather than left blank. A missing Sparkplug id and a blank
                         row look identical otherwise, and only one of them is a problem. */}
@@ -185,7 +190,7 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
                       /* Every identifier is copyable: this is where a UUID or topic path leaves the
                          app. `copyable-id-wrap` because a truncated identifier is useless. */
                       : f.copyable
-                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} title={f.title} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
+                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
                         : f.value}
                   </dd>
                 </div>
@@ -217,33 +222,33 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
                   )
                 }
                 return a.href ? (
-                  <a
-                    key={i}
-                    className={cls}
-                    href={a.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={a.title}
-                    tabIndex={open ? 0 : -1}
-                  >
-                    {a.icon} {a.label}
-                  </a>
+                  <Tooltip key={i} text={a.title}>
+                    <a
+                      className={cls}
+                      href={a.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      tabIndex={open ? 0 : -1}
+                    >
+                      {a.icon} {a.label}
+                    </a>
+                  </Tooltip>
                 ) : (
                   // `pending` and `disabled` are separate: btn-disabled means not permitted, which
                   // is the wrong thing to say about an action that is running.
-                  <button
-                    key={i}
-                    className={`${cls}${a.disabled ? ' btn-disabled' : ''}${a.pending ? ' btn-loading' : ''}`}
-                    onClick={a.onClick}
-                    disabled={a.disabled || a.pending}
-                    aria-busy={a.pending || undefined}
-                    title={a.title}
-                    tabIndex={open ? 0 : -1}
-                  >
-                    {a.pending
-                      ? <><span className="spinner spinner-sm" />{a.pendingLabel || a.label}</>
-                      : <>{a.icon} {a.label}</>}
-                  </button>
+                  <Tooltip key={i} text={a.title}>
+                    <button
+                      className={`${cls}${a.disabled ? ' btn-disabled' : ''}${a.pending ? ' btn-loading' : ''}`}
+                      onClick={a.onClick}
+                      disabled={a.disabled || a.pending}
+                      aria-busy={a.pending || undefined}
+                      tabIndex={open ? 0 : -1}
+                    >
+                      {a.pending
+                        ? <><span className="spinner spinner-sm" />{a.pendingLabel || a.label}</>
+                        : <>{a.icon} {a.label}</>}
+                    </button>
+                  </Tooltip>
                 )
               })}
             </div>

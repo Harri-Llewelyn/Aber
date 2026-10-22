@@ -13,6 +13,7 @@ import { ExpandButton } from './ExpandButton'
 import { HelpTip } from './HelpTip'
 import { Modal } from './Modal'
 import { deviceUrl } from '../../routes'
+import { Tooltip } from './Tooltip'
 
 /**
  * Attach one 3D visual model to a device. The model becomes an AAS `File` element in a
@@ -179,21 +180,21 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
                    Content-Disposition; the attribute applies if the bucket is ever served
                    same-origin. */
                 download={modelFileName(path)}
-                title="Download this model file"
               >
                 <IconDownload size={12} /> Download
               </a>
             )}
             {canManage && (
               <>
-                <button
-                  className="btn btn-ghost"
-                  disabled={busy}
-                  onClick={() => inputRef.current?.click()}
-                  title="Upload a different model in place of this one"
-                >
-                  <IconUpload size={12} /> Replace
-                </button>
+                <Tooltip text="Upload a different model in place of this one">
+                  <button
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    <IconUpload size={12} /> Replace
+                  </button>
+                </Tooltip>
                 {/* `busy` covers upload AND removal -- both write to the same device row -- but
                     only Remove can report, because Replace merely opens the file picker. */}
                 <ActionButton
@@ -210,45 +211,46 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
           </div>
         </div>
       ) : (
-        <div
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={() => setDragging(false)}
-          onClick={() => canManage && !busy && inputRef.current?.click()}
-          role="button"
-          tabIndex={canManage ? 0 : -1}
-          aria-label="Upload a 3D model"
-          /* The AAS consequence, as context for the gesture. */
-          title="Attached models are exported as an AAS VisualRepresentation submodel"
-          onKeyDown={(e) => {
-            if ((e.key === 'Enter' || e.key === ' ') && canManage && !busy) {
-              e.preventDefault()
-              inputRef.current?.click()
-            }
-          }}
-          style={{
-            border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
-            background: dragging ? 'var(--bg-surface)' : 'transparent',
-            borderRadius: '8px',
-            padding: '20px',
-            textAlign: 'center',
-            cursor: canManage && !busy ? 'pointer' : 'not-allowed',
-            opacity: canManage ? 1 : 0.6,
-            transition: 'border-color 120ms, background 120ms'
-          }}
-        >
-          <IconUpload size={22} />
-          <div style={{ fontSize: '13px', marginTop: '6px' }}>
-            {busy
-              ? 'Uploading…'
-              : canManage
-                ? 'Drop a 3D model here, or click to browse'
-                : 'No 3D model attached'}
+        /* The AAS consequence, as context for the gesture. */
+        <Tooltip text="Attached models are exported as an AAS VisualRepresentation submodel">
+          <div
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={() => setDragging(false)}
+            onClick={() => canManage && !busy && inputRef.current?.click()}
+            role="button"
+            tabIndex={canManage ? 0 : -1}
+            aria-label="Upload a 3D model"
+            onKeyDown={(e) => {
+              if ((e.key === 'Enter' || e.key === ' ') && canManage && !busy) {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
+            style={{
+              border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
+              background: dragging ? 'var(--bg-surface)' : 'transparent',
+              borderRadius: '8px',
+              padding: '20px',
+              textAlign: 'center',
+              cursor: canManage && !busy ? 'pointer' : 'not-allowed',
+              opacity: canManage ? 1 : 0.6,
+              transition: 'border-color 120ms, background 120ms'
+            }}
+          >
+            <IconUpload size={22} />
+            <div style={{ fontSize: '13px', marginTop: '6px' }}>
+              {busy
+                ? 'Uploading…'
+                : canManage
+                  ? 'Drop a 3D model here, or click to browse'
+                  : 'No 3D model attached'}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              {MODEL_3D_EXTENSIONS.join(', ')} · up to {formatFileSize(MAX_BYTES)}
+            </div>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {MODEL_3D_EXTENSIONS.join(', ')} · up to {formatFileSize(MAX_BYTES)}
-          </div>
-        </div>
+        </Tooltip>
       )}
 
       {error && (

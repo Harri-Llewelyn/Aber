@@ -10,6 +10,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { CellPlacementPicker } from '../components/common/CellPlacementPicker'
 import { AreaPlanPreview } from '../components/common/AreaPlanPreview'
 import { api } from '../api'
+import { getByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -110,7 +111,7 @@ describe('CellsTab places a cell on its area plan', () => {
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: 'area-1' } })
     expect(document.querySelector('.area-plan-interactive')).toBeTruthy()
     // The cells already in the area are drawn so the operator can see them.
-    expect(screen.getByTitle('Bay 1 — already in this area')).toBeInTheDocument()
+    expect(getByTooltip('Bay 1 — already in this area')).toBeInTheDocument()
   })
 
   it('draws the default outline for an area with no plan uploaded', async () => {
@@ -208,7 +209,7 @@ describe('CellPlacementPicker on its own', () => {
   it('does not place through a click on a pin', () => {
     const onChange = vi.fn()
     render(<CellPlacementPicker area={area} cells={cells} cellId="cell-9" value={null} onChange={onChange} />)
-    fireEvent.click(screen.getByTitle('Bay 1 — already in this area'))
+    fireEvent.click(getByTooltip('Bay 1 — already in this area'))
     expect(onChange).not.toHaveBeenCalled()
   })
 })

@@ -112,7 +112,7 @@ describe('remote enrolment readiness', () => {
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Press_Line'))
     const action = within(document.querySelector('.context-panel')).getByRole('button', { name: /Set Up Gateway/ })
     expect(action.disabled).toBe(true)
-    expect(action.title).toMatch(/cannot be enrolled/)
+    expect(tooltipOf(action)).toMatch(/cannot be enrolled/)
   })
 
   it('offers everything when the deployment is ready', async () => {

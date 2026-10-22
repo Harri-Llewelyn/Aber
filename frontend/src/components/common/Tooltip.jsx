@@ -179,6 +179,8 @@ const setRefs = (...refs) => (el) => {
  * describes the control (`aria-describedby`) unless its text is the control's name: its
  * `aria-label`, which an icon-only button carries so its name never depends on the tooltip, or its
  * own text, which a tooltip shows whole where the text is cut short. A name is not read twice.
+ * `describe={false}` says the same of a bubble that only rewords the name, such as an icon
+ * button's name with its shortcut, which `aria-keyshortcuts` states.
  *
  *   <Tooltip text="Send the bundle to the gateway again">
  *     <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
@@ -187,13 +189,13 @@ const setRefs = (...refs) => (el) => {
  * The child is one element, or a component that passes the ref and the handlers to one. On
  * something that takes no focus the tooltip shows to a pointer only, so keep it to controls.
  */
-export function Tooltip({ text, delay, children }) {
+export function Tooltip({ text, delay, describe = true, children }) {
   const tip = useTooltip({ delay, disabled: !text })
   const child = React.Children.only(children)
   const own = child.props
   const { trigger } = tip
   const both = (ours, theirs) => (e) => { ours(e); theirs?.(e) }
-  const describes = Boolean(text) && own['aria-label'] !== text && own.children !== text
+  const describes = Boolean(text) && describe && own['aria-label'] !== text && own.children !== text
   const describedBy = [own['aria-describedby'], describes && trigger['aria-describedby']].filter(Boolean).join(' ')
   return (
     <>

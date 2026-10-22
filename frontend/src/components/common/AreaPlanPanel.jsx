@@ -7,6 +7,7 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { ExpandablePlanPreview } from './AreaPlanPreview'
 import { IconUpload, IconTrash } from './Icons'
 import { areaUrl, siteMapAreaUrl } from '../../routes'
+import { Tooltip } from './Tooltip'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
@@ -110,12 +111,14 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
         {area.plan_path && canManage && (
           <span className="area-plan-panel-actions">
             {picker}
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker}>
               <IconUpload size={12} /> Replace plan
             </button>
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
-              <IconTrash size={12} /> Remove plan
-            </button>
+            <Tooltip text="The area keeps the default outline">
+              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)}>
+                <IconTrash size={12} /> Remove plan
+              </button>
+            </Tooltip>
           </span>
         )}
       </div>

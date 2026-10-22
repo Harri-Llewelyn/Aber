@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
 import { coldStorageSummary, coldStateLabel, formatWindow, rawWindowStatement } from '../utils/coldStorage'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: {
@@ -427,7 +428,7 @@ describe('the destination button', () => {
     await show([], 'Administrator')
     const button = await findInToolbar('Set up cold storage')
     expect(button).toHaveClass('btn-primary')
-    expect(button.getAttribute('title')).toMatch(/dropped and cannot be recovered/)
+    expect(tooltipOf(button)).toMatch(/dropped and cannot be recovered/)
   })
 
   it('warns, with an icon and a description, when archiving is on and the destination is incomplete', async () => {
@@ -448,7 +449,7 @@ describe('the destination button', () => {
     await show([], 'Administrator')
     const button = await findInToolbar('Change destination')
     expect(button).toHaveClass('btn-primary')
-    await waitFor(() => expect(button.getAttribute('title'))
+    await waitFor(() => expect(tooltipOf(button))
       .toMatch('https://s3.eu-west-2.amazonaws.com/plant-history/site=broughton-7f3a9c21/'))
   })
 

@@ -493,7 +493,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           {
             label: 'Lifecycle',
             value: statusLabel(selectedStatus),
-            title: isSchemaEditable(selectedSchema)
+            help: isSchemaEditable(selectedSchema)
               ? 'A draft. This is the only state in which a schema can be edited.'
               : 'Published or archived, and therefore immutable. Create a version to make changes.'
           },
@@ -504,7 +504,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ? (schemas.find(s => s.schema_uuid === selectedSchema.parent_schema_id)?.schema_name || selectedSchema.parent_schema_id)
               : null,
             full: true,
-            title: 'The version this one was created from. Absent on the first version of a lineage.'
+            help: 'The version this one was created from. Absent on the first version of a lineage.'
           },
           {
             // The chips answer which devices; the action below opens the Devices page filtered to
@@ -531,7 +531,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               )
             })(),
             full: true,
-            title: 'Devices registered against this exact version. Each opens on the Devices page.'
+            help: 'Devices registered against this exact version. Each opens on the Devices page.'
           },
         ] : []}
         actions={selectedSchema ? [

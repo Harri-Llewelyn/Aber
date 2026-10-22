@@ -4,7 +4,7 @@
  * A control is described by its tooltip through `aria-describedby`, unless the text is its
  * `aria-label`; find that one by its role and name instead.
  */
-import { waitFor } from '@testing-library/react'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 
 const matches = (text, want) => (want instanceof RegExp ? want.test(text) : text === want)
 
@@ -41,3 +41,12 @@ export function getByTooltip(want, container = document.body) {
 }
 
 export const findByTooltip = (want, container = document.body) => waitFor(() => getByTooltip(want, container))
+
+/** The sentence the HelpTip named `name` shows, read by pointing at it. Null with no such text. */
+export function helpTipText(name, container = document.body) {
+  const button = within(container).getByRole('button', { name })
+  fireEvent.mouseEnter(button)
+  const text = document.getElementById(button.getAttribute('aria-describedby'))?.textContent ?? null
+  fireEvent.mouseLeave(button)
+  return text
+}
