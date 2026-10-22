@@ -1354,6 +1354,7 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 // -------------------------------------------------------------------------------------------------
 const OPERATOR_PAIRS = [
   { design: 'docs/remote-gateways.md', help: 'help/site/remote-gateways.md' },
+  { design: 'docs/upgrades.md', help: 'help/site/upgrading.md', back: false },
 ];
 {
   const opening = (file) => read(file).split(/\n## /)[0];
