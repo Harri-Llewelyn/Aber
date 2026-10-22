@@ -165,7 +165,7 @@ BEGIN
           'area "%" is archived, so % "%" cannot be made Area-Wide in it. Restore the area first, or '
           'choose another.', v_area, CASE WHEN TG_TABLE_NAME = 'devices' THEN 'device' ELSE 'gateway' END,
           NEW.name
-            USING ERRCODE = 'restrict_violation';
+            USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;
 END;

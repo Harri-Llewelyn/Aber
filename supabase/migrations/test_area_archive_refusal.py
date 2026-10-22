@@ -182,7 +182,7 @@ class NothingIsMadeAreaWideInAnArchivedArea(Base):
     def _refused(self, write):
         self.cur.execute("SAVEPOINT write;")
         try:
-            with self.assertRaises(pg_errors.RestrictViolation) as raised:
+            with self.assertRaises(pg_errors.CheckViolation) as raised:
                 write()
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT write;")

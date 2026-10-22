@@ -347,7 +347,7 @@ paths:
       responses:
         '204': { description: Updated. }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: 'An archive refused: a device or gateway is still `area_wide` in the area.' }
+        '400': { description: 'The archive was refused: a device or gateway is still `area_wide` in the area (`23001`).' }
     delete:
       tags: [Assets]
       summary: Delete areas matching a filter
