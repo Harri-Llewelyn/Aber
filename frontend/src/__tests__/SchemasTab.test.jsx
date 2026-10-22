@@ -319,6 +319,22 @@ describe('the schema builder builds a schema', () => {
     expect(api.post).not.toHaveBeenCalledWith('/api/v1/devices', expect.anything())
   })
 
+  /**
+   * `required` means modelled and nothing more. Writing every metric there made a JSON Schema tool
+   * reject an ordinary DDATA, which carries only what changed.
+   */
+  it('models the ticked metrics in properties and writes no required list', async () => {
+    await openBuilder()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.change(screen.getByLabelText(/Schema Name/), { target: { value: 'KUKA_R2e_Schema' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/schemas', expect.anything()))
+    const [, body] = api.post.mock.calls.find(([path]) => path === '/api/v1/schemas')
+    expect(Object.keys(body.schema_definition.properties)).toHaveLength(1)
+    expect(body.schema_definition).not.toHaveProperty('required')
+  })
+
   it('does not fetch gateways, which nothing on the page reads any more', async () => {
     renderTab()
     await waitForRegistry()

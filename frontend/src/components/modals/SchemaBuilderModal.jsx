@@ -109,10 +109,11 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
     return {
       schema_name: schemaName,
       description,
+      // No `required`: a DDATA carries only the metrics that changed, so no single payload is the
+      // instance JSON Schema's `required` describes. `properties` is what the schema models.
       schema_definition: {
         type: 'object',
-        properties,
-        required: selectedMetrics.map(m => m.name)
+        properties
       },
       // The AAS Submodel this schema corresponds to, if it is a known one (an IDTA submodel
       // template id). Optional: most schemas are local compositions.
