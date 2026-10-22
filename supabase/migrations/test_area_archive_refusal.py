@@ -80,13 +80,16 @@ class Base(unittest.TestCase):
         )
         return area_id
 
-    def _device(self, area_id=None, name=None, **cols):
+    def _device(self, area_id=None, gateway_id=None, is_archived=False, archived_at=None,
+                is_quarantined=False):
+        """Area-Wide in `area_id` when one is given, else in a cell (through `gateway_id`, if any)."""
         device_id = str(uuid.uuid4())
-        cols = {"id": device_id, "name": name or f"Archive_Guard_Dev_{device_id[:8]}", "status": "OFFLINE",
-                **({"location_scope": "area_wide", "area_id": area_id} if area_id else {}), **cols}
-        names = ", ".join(cols)
-        marks = ", ".join(["%s"] * len(cols))
-        self.cur.execute(f"INSERT INTO public.devices ({names}) VALUES ({marks});", list(cols.values()))
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, status, location_scope, area_id, gateway_id, "
+            "is_archived, archived_at, is_quarantined) VALUES (%s, %s, 'OFFLINE', %s, %s, %s, %s, %s, %s);",
+            (device_id, f"Archive_Guard_Dev_{device_id[:8]}", "area_wide" if area_id else "cell",
+             area_id, gateway_id, is_archived, archived_at, is_quarantined),
+        )
         return device_id
 
     def _gateway(self, area_id=None, cell_id=None, name=None):

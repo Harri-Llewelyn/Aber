@@ -120,16 +120,16 @@ class Base(unittest.TestCase):
 
     # -- fixtures, as the owner ---------------------------------------------------------------
 
-    def _area(self, plan=True, **cols):
+    def _area(self, plan=True, is_archived=False, archived_at=None, auto_delete_at=None):
         """An area, with a plan at <id>/plan-1.svg unless `plan` is False. Returns (id, path)."""
         area_id = str(uuid.uuid4())
         path = f"{area_id}/plan-1.svg"
-        cols = {"id": area_id, "name": f"Plan_Sweep_{area_id[:8]}", **cols}
-        if plan:
-            cols.update(plan_path=path, plan_aspect=1.5)
-        names = ", ".join(cols)
-        marks = ", ".join(["%s"] * len(cols))
-        self.cur.execute(f"INSERT INTO public.areas ({names}) VALUES ({marks});", list(cols.values()))
+        self.cur.execute(
+            "INSERT INTO public.areas (id, name, plan_path, plan_aspect, is_archived, archived_at, "
+            "auto_delete_at) VALUES (%s, %s, %s, %s, %s, %s, %s);",
+            (area_id, f"Plan_Sweep_{area_id[:8]}", path if plan else None, 1.5 if plan else None,
+             is_archived, archived_at, auto_delete_at),
+        )
         return area_id, path
 
     def _object(self, name, age_seconds=0, bucket="area-plans"):
@@ -287,29 +287,29 @@ class TheBucketPolicies(Base):
 
     def setUp(self):
         super().setUp()
-        self.cur.execute(f"CREATE SCHEMA {PROBE};")
-        self.cur.execute(f"CREATE TABLE {PROBE}.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
-        self.cur.execute(f"ALTER TABLE {PROBE}.objects ENABLE ROW LEVEL SECURITY;")
-        self.cur.execute(f"GRANT USAGE ON SCHEMA {PROBE} TO authenticated;")
-        self.cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {PROBE}.objects TO authenticated;")
+        self.cur.execute("CREATE SCHEMA area_plan_sweep_probe;")
+        self.cur.execute("CREATE TABLE area_plan_sweep_probe.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
+        self.cur.execute("ALTER TABLE area_plan_sweep_probe.objects ENABLE ROW LEVEL SECURITY;")
+        self.cur.execute("GRANT USAGE ON SCHEMA area_plan_sweep_probe TO authenticated;")
+        self.cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON area_plan_sweep_probe.objects TO authenticated;")
         self.cur.execute(self._section())
 
         self.area_id, self.claimed = self._area()
         self.orphan = f"{self.area_id}/plan-0.svg"
         for name in (self.claimed, self.orphan):
-            self.cur.execute(f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('area-plans', %s);", (name,))
+            self.cur.execute("INSERT INTO area_plan_sweep_probe.objects (bucket_id, name) VALUES ('area-plans', %s);", (name,))
 
     def _deletes(self, caller, name):
         self.cur.execute("SAVEPOINT del;")
         try:
-            return self._run(caller, f"DELETE FROM {PROBE}.objects WHERE bucket_id = 'area-plans' "
+            return self._run(caller, "DELETE FROM area_plan_sweep_probe.objects WHERE bucket_id = 'area-plans' "
                                      "AND name = %s;", (name,)) == 1
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT del;")
 
     def _writes(self, caller, name):
         try:
-            self._run(caller, f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('area-plans', %s);",
+            self._run(caller, "INSERT INTO area_plan_sweep_probe.objects (bucket_id, name) VALUES ('area-plans', %s);",
                       (name,))
             return True
         except pg_errors.InsufficientPrivilege:
@@ -321,11 +321,11 @@ class TheBucketPolicies(Base):
 
     def test_the_sweep_sees_what_it_deletes_and_writes_nothing(self):
         """storage-api reads a deleted row back, which Postgres checks against SELECT."""
-        seen = self._run("ingestion", f"SELECT count(*) FROM {PROBE}.objects WHERE name = %s;",
+        seen = self._run("ingestion", "SELECT count(*) FROM area_plan_sweep_probe.objects WHERE name = %s;",
                          (self.orphan,))[0][0]
         self.assertEqual(seen, 1)
         self.assertFalse(self._writes("ingestion", f"{self.area_id}/plan-9.svg"))
-        updated = self._run("ingestion", f"UPDATE {PROBE}.objects SET metadata = '{{}}' WHERE name = %s;",
+        updated = self._run("ingestion", "UPDATE area_plan_sweep_probe.objects SET metadata = '{}' WHERE name = %s;",
                             (self.orphan,))
         self.assertEqual(updated, 0)
 
