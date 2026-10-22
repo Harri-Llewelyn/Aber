@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { copyText } from '../common/CopyableId'
 import { IconCheck, IconCopy, IconShieldAlert } from '../common/Icons'
+import { Tooltip } from '../common/Tooltip'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -46,14 +47,15 @@ export function PasswordShownOnce({ email, password, hint, showToast, children }
         <label className="form-label" htmlFor="person-password">Password</label>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <input id="person-password" className="form-control mono" readOnly value={password || ''} />
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={copy}
-            title="Copy password"
-            aria-label="Copy password"
-          >
-            {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-          </button>
+          <Tooltip text="Copy password">
+            <button
+              className="btn btn-ghost btn-icon"
+              onClick={copy}
+              aria-label="Copy password"
+            >
+              {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+            </button>
+          </Tooltip>
         </div>
         {hint && <div className="form-hint">{hint}</div>}
         {copyFailed && <div className="form-hint hint-danger" role="alert">{COPY_REFUSED}</div>}

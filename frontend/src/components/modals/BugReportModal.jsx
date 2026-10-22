@@ -59,8 +59,8 @@ ${desc || 'No detailed steps provided.'}
       }
     >
       <div className="form-group">
-        <label className="form-label">Issue Title</label>
-        <input className="form-control" value={title} onChange={e => { setTitle(e.target.value); setError(null) }} placeholder="e.g. Telemetry metric display error on devices page" title="Short descriptive title" />
+        <label className="form-label" htmlFor="bug-title">Issue Title</label>
+        <input id="bug-title" className="form-control" value={title} onChange={e => { setTitle(e.target.value); setError(null) }} placeholder="e.g. Telemetry metric display error on devices page" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>

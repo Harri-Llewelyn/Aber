@@ -20,9 +20,10 @@ import { TooltipBubble, useTooltip } from './Tooltip'
  * a fill and a border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes
  * `tone`, a `signal-tone-*` name; the others are muted.
  *
- * A segment's tooltip is its name, the browser's own. With a `description` it is that sentence
- * instead, in the shared bubble (Tooltip.jsx): after the hover delay, at once on keyboard focus, and
- * tied to the segment by `aria-describedby`, with no `title`.
+ * A segment's tooltip is in the shared bubble (Tooltip.jsx), after the hover delay and at once on
+ * keyboard focus. With a `description` it is that sentence, tied to the segment by
+ * `aria-describedby`; otherwise a segment with a `count` shows its name, which the label does not,
+ * and a segment whose label says it all has none.
  */
 export function SegmentedControl({ label, options, value, onChange, menu = false }) {
   const refs = useRef([])
@@ -55,12 +56,14 @@ export function SegmentedControl({ label, options, value, onChange, menu = false
   )
 }
 
-/** One segment: a component so a segment with a `description` holds its own tooltip. */
+/** One segment: a component so a segment holds its own tooltip. */
 function Segment({ option: o, checked, menu, tabIndex, buttonRef, onChoose, onKeyDown }) {
-  const tip = useTooltip()
-  const { ref: tipRef, onClick: endPress, ...tipProps } = tip.trigger
   const described = Boolean(o.description)
   const name = o.count == null ? o.label : `${o.label}, ${o.count}`
+  const text = o.description || (o.count == null ? null : name)
+  const tip = useTooltip({ disabled: !text })
+  // The name is not also the description: only a sentence is.
+  const { ref: tipRef, onClick: endPress, 'aria-describedby': describedBy, ...tipProps } = tip.trigger
 
   return (
     <>
@@ -70,17 +73,17 @@ function Segment({ option: o, checked, menu, tabIndex, buttonRef, onChoose, onKe
         role={menu ? 'menuitemradio' : 'radio'}
         aria-checked={checked}
         aria-label={o.count == null ? undefined : name}
-        title={described ? undefined : name}
+        aria-describedby={described ? describedBy : undefined}
         tabIndex={tabIndex}
         className={`segmented-option${checked ? ' segmented-option-checked' : ''}${o.tone ? ` signal-tone-${o.tone}` : ''}`}
-        {...(described ? tipProps : {})}
-        onClick={() => { if (described) endPress(); onChoose() }}
+        {...(text ? tipProps : {})}
+        onClick={() => { if (text) endPress(); onChoose() }}
         onKeyDown={onKeyDown}
       >
         {o.icon && <span className="segmented-icon" aria-hidden="true">{o.icon}</span>}
         <span className="segmented-label">{o.label}</span>
       </button>
-      {described && <TooltipBubble {...tip.bubble} text={o.description} keepMounted />}
+      {text && <TooltipBubble {...tip.bubble} text={text} keepMounted={described} />}
     </>
   )
 }

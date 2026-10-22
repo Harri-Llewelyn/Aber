@@ -10,6 +10,7 @@ import { requiresRolesTitle } from '../hooks/usePermissions'
 import { metricUrl, unmappedMetricsUrl } from '../routes'
 import { navigate } from '../hooks/useUrlState'
 import { queryTabLink, tabBar, tabLink, tabLinks } from '../test/tabBar'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -696,6 +697,9 @@ describe('Edit Metric — correcting a semantic id', () => {
     expect(document.activeElement).toBe(modal.getByRole('button', { name: 'Search vocabularies' }))
     expect(api.put).not.toHaveBeenCalled()
 
+    // The toggle has focus again, so its tooltip shows, and the next Escape closes that first.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(document.querySelector('.modal')).toBeTruthy()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(document.querySelector('.modal')).toBeNull()
   })
@@ -1713,7 +1717,7 @@ describe('Metric builder — the suggested semantic id', () => {
     await openForm()
     chooseActuatorAcceleration()
 
-    expect(screen.getByText('Suggested').title).toMatch(/ACCELERATION data item type's id/)
+    expect(tooltipOf(screen.getByText('Suggested'))).toMatch(/ACCELERATION data item type's id/)
     expect(useSuggestedButton()).toBeNull()
   })
 

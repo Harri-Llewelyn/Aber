@@ -1,6 +1,7 @@
 import React from 'react'
 import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
 import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch, IconGitCompare } from './Icons'
+import { Tooltip } from './Tooltip'
 
 /**
  * The address of a gateway's own repository in the forge. Derived, not stored: it is named from the
@@ -136,47 +137,49 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
           appliance has pushed its branch. */}
       <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         {gateway.forge_appliance_sha && (
-          <a
-            className="btn btn-ghost"
-            href={gatewayCompareUrl(gateway)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="What the appliance reports it is running, against what was approved on main"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            <IconGitCompare size={13} /> Running vs approved <IconExternalLink size={10} />
-          </a>
+          <Tooltip text="What the appliance reports it is running, against what was approved on main">
+            <a
+              className="btn btn-ghost"
+              href={gatewayCompareUrl(gateway)}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <IconGitCompare size={13} /> Running vs approved <IconExternalLink size={10} />
+            </a>
+          </Tooltip>
         )}
         <a
           className="btn btn-ghost"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          title="Open this gateway's repository in the forge"
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
           <IconGitBranch size={13} /> Open in the forge <IconExternalLink size={10} />
         </a>
-        <a
-          className="btn btn-ghost"
-          href={`${url}/issues`}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open this gateway's issues in the forge"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-        >
-          <IconAlertCircle size={13} /> Issues <IconExternalLink size={10} />
-        </a>
-        <a
-          className="btn btn-ghost"
-          href={`${url}/wiki`}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open this gateway's wiki in the forge"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-        >
-          <IconBookOpen size={13} /> Wiki <IconExternalLink size={10} />
-        </a>
+        <Tooltip text="This gateway's issues in the forge">
+          <a
+            className="btn btn-ghost"
+            href={`${url}/issues`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <IconAlertCircle size={13} /> Issues <IconExternalLink size={10} />
+          </a>
+        </Tooltip>
+        <Tooltip text="This gateway's wiki in the forge">
+          <a
+            className="btn btn-ghost"
+            href={`${url}/wiki`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <IconBookOpen size={13} /> Wiki <IconExternalLink size={10} />
+          </a>
+        </Tooltip>
       </div>
     </div>
   )

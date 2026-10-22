@@ -109,7 +109,7 @@ describe('AlertPill', () => {
 
     it('counts criticals in the hover text so the number is explained', () => {
       render(<AlertPill alerts={[alert(), alert({ id: 'a2', fingerprint: 'fp-2', severity: 'warning' })]} />)
-      expect(pill()).toHaveAttribute('title', expect.stringContaining('1 critical'))
+      expect(pill()).toHaveAccessibleDescription(expect.stringContaining('1 critical'))
     })
 
     it('draws a different SHAPE per state, so severity does not rest on hue at 13px', () => {

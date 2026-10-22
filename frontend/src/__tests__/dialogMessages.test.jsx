@@ -54,13 +54,13 @@ describe('a copy the browser refuses', () => {
     render(<GatewayCredentialModal gateway={GATEWAY} onClose={vi.fn()} showToast={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(`Type ${GATEWAY.gateway_name} to confirm`), { target: { value: GATEWAY.gateway_name } })
     await act(async () => { fireEvent.click(screen.getByText(/Issue Credential/i)) })
-    await screen.findByTitle('Copy password')
+    await screen.findByRole('button', { name: 'Copy password' })
 
-    await act(async () => { fireEvent.click(screen.getByTitle('Copy password')) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })) })
     expect(inDialog(/Broker credential/).getByRole('alert')).toHaveTextContent(CLIPBOARD)
 
     document.execCommand = vi.fn(() => true)
-    await act(async () => { fireEvent.click(screen.getByTitle('Copy password')) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })) })
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })

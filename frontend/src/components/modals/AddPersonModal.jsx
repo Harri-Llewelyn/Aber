@@ -98,7 +98,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
             className="btn btn-primary"
             onClick={add}
             disabled={!valid}
-            title={valid ? 'Add this person' : 'Enter an email address first'}
+            title={valid ? undefined : 'Enter an email address first'}
           >
             <IconPlus size={14} /> Add Person
           </ActionButton>

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { planAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
+import { Tooltip } from './Tooltip'
 
 /**
  * Where a cell sits on its area's plan, chosen by clicking the plan. The other cells in the area
@@ -60,9 +61,11 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
           {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
         </span>
         {value && !disabled && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }} title="Take the cell off the plan; it stays in the area">
-            Clear place
-          </button>
+          <Tooltip text="Take the cell off the plan; it stays in the area">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }}>
+              Clear place
+            </button>
+          </Tooltip>
         )}
       </div>
     </div>
