@@ -878,7 +878,7 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
     ...(b ? [
       { label: 'Stamp', value: b.stamp, mono: true },
       { label: 'Size', value: formatBytes(b.size_bytes) },
-      { label: 'Location', value: b.location, copyable: true, full: true, title: 'Where the files are inside the backup service\'s container' },
+      { label: 'Location', value: b.location, copyable: true, full: true, help: 'Where the files are inside the backup service\'s container' },
       { label: 'Retention', value: retentionText(b, keptBecause(b, { inFloor, retentionDays }), retentionDays), full: true },
       ...offsiteFields(b, base)
     ] : [])

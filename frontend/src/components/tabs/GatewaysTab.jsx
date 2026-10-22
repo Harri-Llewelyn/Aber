@@ -842,7 +842,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             value: `spBv1.0/${selected.sparkplug_group || '+'}/NDATA/${selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id)}`,
             mono: true,
             copyable: true,
-            title: selected.sparkplug_group
+            help: selected.sparkplug_group
               ? 'The NDATA topic this edge node publishes on.'
               : 'The NDATA topic this edge node publishes on. No Sparkplug group is recorded for it, so that segment is a wildcard.'
           },
@@ -869,7 +869,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                       </RouteLink>
                     )
                   : (selected.cell_id || null),
-            title: !gatewayAcceptsCell(selected)
+            help: !gatewayAcceptsCell(selected)
               ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership.`
               : selected.location_scope === SCOPE_SITE_WIDE
                 ? 'A host-run or central connector serving the whole campus. Its devices inherit no cell from it.'
@@ -877,14 +877,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   ? 'A connector serving one whole area. Its devices inherit no cell from it.'
                   : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
-          { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), help: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           // What a Third-party gateway does not get, said rather than left as missing rows. No claim
           // about the root it holds: Aber cannot tell.
           ...(gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY ? [{
             label: 'Not Provided',
             value: 'No setup bundle, no forge repository, no flow drift check and no appliance health.',
             full: true,
-            title: 'Aber does not manage the software on this edge node, so it sets nothing up there, '
+            help: 'Aber does not manage the software on this edge node, so it sets nothing up there, '
               + 'keeps no flow for it and reads no health from it. The engineer who runs the node '
               + 'looks after those.'
           }] : []),
@@ -895,7 +895,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {
               label: 'Health Reported',
               value: formatHeartbeat(selected.health_reported_at),
-              title: 'Age of the last heartbeat that carried appliance health. Separate from Last '
+              help: 'Age of the last heartbeat that carried appliance health. Separate from Last '
                 + 'Heartbeat on purpose: a gateway can keep beating while its collector has stopped.'
             },
             // The root this appliance holds, beside the one the platform publishes. Behind means it has
@@ -909,7 +909,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               ].filter(Boolean).join(' — ') || null,
               danger: isCertExpiring(selected.cert_expires_at)
                 || holdsOlderRoot(selected.cert_expires_at, enrolment?.ca?.not_after),
-              title: 'When the broker root THIS appliance trusts expires, as it reported. The '
+              help: 'When the broker root THIS appliance trusts expires, as it reported. The '
                 + 'platform publishes the current root to every appliance and each installs it at '
                 + 'its next hourly convergence, so a gateway can be behind for an hour by design'
                 + (enrolment?.ca?.not_after
@@ -920,13 +920,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {
               label: 'Disk Free',
               value: formatBytes(selected.disk_free_bytes),
-              title: 'Free space on the appliance\'s root filesystem, from node_exporter. An '
+              help: 'Free space on the appliance\'s root filesystem, from node_exporter. An '
                 + 'appliance that fills its disk stops publishing and reports nothing about why.'
             },
             {
               label: 'Memory Available',
               value: formatBytes(selected.mem_available_bytes),
-              title: 'Host MemAvailable -- available rather than free, so it counts reclaimable '
+              help: 'Host MemAvailable -- available rather than free, so it counts reclaimable '
                 + 'cache. That is the number that predicts whether an allocation will succeed.'
             },
             {
@@ -934,19 +934,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               value: selected.load_1m === null || selected.load_1m === undefined
                 ? null
                 : Number(selected.load_1m).toFixed(2),
-              title: 'Host 1-minute load average. NOT normalised by core count -- compare this '
+              help: 'Host 1-minute load average. NOT normalised by core count -- compare this '
                 + 'gateway against itself over time, not against another gateway.'
             },
             {
               label: 'Runtime Uptime',
               value: formatUptime(selected.uptime_seconds),
-              title: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
+              help: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
                 + 'host uptime: a restarted container resets it while the machine stays up.'
             },
             {
               label: 'Bundle',
               value: selected.agent_version || null,
-              title: 'The bundle version the appliance reports. Refreshed on every heartbeat, so an '
+              help: 'The bundle version the appliance reports. Refreshed on every heartbeat, so an '
                 + 'appliance upgraded in place shows its new version without re-enrolling.'
             },
             // The drift check: `flow_hash` (what the appliance last deployed) against
@@ -959,7 +959,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ? [selected.flow_hash.slice(0, 12), flowDriftLabel(flowDriftState(selected))].filter(Boolean).join(' · ')
                 : null,
               danger: isFlowDrift(flowDriftState(selected)),
-              title: 'First 12 characters of the SHA-256 of the flow this appliance last deployed, '
+              help: 'First 12 characters of the SHA-256 of the flow this appliance last deployed, '
                 + 'compared with the same digest at the head of main. "matches main" is '
                 + 'convergence. "main moved, deploying" is a push younger than '
                 + `${FLOW_DRIFT_GRACE_MS / 60000} minutes that the appliance has not pulled yet. `
@@ -973,7 +973,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               value: selected.forge_head_sha
                 ? `${selected.forge_head_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_head_at)}`
                 : null,
-              title: 'The head of main in this gateway\'s repository, as the forge reported it on '
+              help: 'The head of main in this gateway\'s repository, as the forge reported it on '
                 + 'the last push'
                 + (selected.forge_head_message ? `: "${selected.forge_head_message}"` : '')
                 + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
@@ -991,7 +991,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ].filter(Boolean).join(' · ')
                 : null,
               danger: flowEditedOnAppliance(selected) === true,
-              title: 'The head of the appliance branch in this gateway\'s repository: the flow and '
+              help: 'The head of the appliance branch in this gateway\'s repository: the flow and '
                 + 'the deploy record the appliance last pushed, which only its own key can do. '
                 + '"edited on the appliance" means the running flow differs from the one the puller '
                 + 'last deployed: somebody changed it in the appliance\'s editor, and the next '
@@ -1012,7 +1012,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 : null,
               danger: Boolean(selected.forge_appliance_platform_outcome)
                 && selected.forge_appliance_platform_outcome !== 'converged',
-              title: 'The platform playbook tag this appliance last converged to, and how that run '
+              help: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
                 + 'complete and the timer will try again; the appliance\'s own journal '
                 + '(journalctl -u aber-gateway-converge) says why. The tag is changed by a pull '
@@ -1032,7 +1032,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ].filter(Boolean).join(' ')
                 : null,
               danger: selected.forge_appliance_custom_outcome === 'failed',
-              title: 'How this gateway\'s own custom.yml ended on the last convergence, and the '
+              help: 'How this gateway\'s own custom.yml ended on the last convergence, and the '
                 + 'commit it ran from. A gateway whose repository carries a playbook of its own -- '
                 + 'a bespoke adapter for machinery no standard node reaches -- runs it after the '
                 + 'platform playbook. "failed" is the adapter not running: the gateway keeps '
@@ -1044,7 +1044,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             label: 'Description',
             value: selected.description || null,
             full: true,
-            title: 'Operator note. Free text, read by nothing.'
+            help: 'Operator note. Free text, read by nothing.'
           },
         ] : []}
         actions={selected ? [

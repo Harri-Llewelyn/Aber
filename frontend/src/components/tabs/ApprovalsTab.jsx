@@ -696,27 +696,24 @@ export function ApprovalsTab({
             value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
                                machineName={selected.proposed_by_machine_name}
                                currentUserId={currentUserId} />,
-            title: selected.proposed_by_email || !selected.proposed_by_machine_name
+            help: selected.proposed_by_email || !selected.proposed_by_machine_name
               ? 'Taken from the signed access token when the proposal was filed, not from a form.'
               : 'The name an Administrator gave this machine identity on the Access Control page.'
           },
           {
             // Both readings, the relative one in brackets: "31m ago" cannot be quoted in a ticket.
             label: 'Proposed at',
-            value: `${formatDateTime(selected.proposed_at)} (${formatRelative(selected.proposed_at)})`,
-            title: selected.proposed_at
+            value: `${formatDateTime(selected.proposed_at)} (${formatRelative(selected.proposed_at)})`
           },
           ...(selected.decided_at ? [{
             label: selected.status === 'expired' ? 'Expired' : `${selected.status} by`,
             // An expired proposal names nobody: the timer has no session and is not a person.
             value: selected.decided_by
               ? <ActorLabel id={selected.decided_by} currentUserId={currentUserId} />
-              : 'the expiry timer, which is not a person',
-            title: selected.decided_at
+              : 'the expiry timer, which is not a person'
           }, {
             label: 'Decided at',
-            value: `${formatDateTime(selected.decided_at)} (${formatRelative(selected.decided_at)})`,
-            title: selected.decided_at
+            value: `${formatDateTime(selected.decided_at)} (${formatRelative(selected.decided_at)})`
           }] : []),
           ...(selected.decision_reason
             ? [{ label: 'Reason', value: selected.decision_reason, full: true }]
@@ -729,7 +726,7 @@ export function ApprovalsTab({
             label: 'Audit Trail row',
             value: String(selected.applied_trail_id),
             mono: true,
-            title: 'The audit row this approval wrote, naming both the proposer and the approver.'
+            help: 'The audit row this approval wrote, naming both the proposer and the approver.'
           }] : [])
         ] : []}
         beforeActions={selected && (

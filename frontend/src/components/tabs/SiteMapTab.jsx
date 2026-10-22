@@ -540,14 +540,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         laneGateways.length > 0 && {
           label: `Gateways (${laneGateways.length})`,
           value: <div className="context-device-list">{laneGateways.map(gatewayChip)}</div>,
-          full: true,
-          title: 'Click one to open it on the Gateways page'
+          full: true
         },
         laneAssets.length > 0 && {
           label: `Devices (${laneAssets.length})`,
           value: <div className="context-device-list">{laneAssets.map(deviceChip)}</div>,
-          full: true,
-          title: 'Click one to open it on the Devices page'
+          full: true
         }
       ].filter(Boolean),
       // Each action is offered only while the lane holds something to act on. Both are marked
@@ -589,7 +587,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               : cellChip(c, 'no place on the plan yet; set one in Edit Details on the Cells page', true))}</div>
             : null,
           full: true,
-          title: 'Click one for its details. NOT PLACED marks a cell filed here with no place on the plan, so nothing pins it.'
+          help: 'Click one for its details. NOT PLACED marks a cell filed here with no place on the plan, so nothing pins it.'
         },
         {
           label: 'Gateways',
@@ -597,7 +595,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <div className="context-device-list">{gateways.map(g => panelGatewayChip(g, wide.gateways.includes(g)))}</div>
             : null,
           full: true,
-          title: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
+          help: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
         },
         {
           label: devicesLabel(devices),
@@ -605,7 +603,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             ? <div className="context-device-list">{devices.map(d => panelDeviceChip(d, wide.devices.includes(d)))}</div>
             : null,
           full: true,
-          title: 'Devices that resolve to its cells, then any that serve the whole area (AREA-WIDE), such as its building management system'
+          help: 'Devices that resolve to its cells, then any that serve the whole area (AREA-WIDE), such as its building management system'
         }
       ],
       actions: [
@@ -637,7 +635,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         label: 'Where',
         value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled — in no area yet',
         full: true,
-        title: 'The area this cell is filed in, as set on the Cells page'
+        help: 'The area this cell is filed in, as set on the Cells page'
       },
       { label: 'Description', value: selectedCell.description || null, full: true },
       selectedAlerts.length > 0 && {
@@ -652,15 +650,14 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           </div>
         ),
         full: true,
-        title: 'Raised by Grafana against devices in this cell'
+        help: 'Raised by Grafana against devices in this cell'
       },
       {
         label: 'Gateways',
         value: cellGatewaysOf(selectedCell).length
           ? <div className="context-device-list">{cellGatewaysOf(selectedCell).map(g => panelGatewayChip(g))}</div>
           : null,
-        full: true,
-        title: 'Edge nodes serving this cell'
+        full: true
       },
       {
         label: devicesLabel(cellDevicesOf(selectedCell)),
@@ -668,7 +665,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           ? <div className="context-device-list">{cellDevicesOf(selectedCell).map(d => panelDeviceChip(d))}</div>
           : null,
         full: true,
-        title: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
+        help: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
       },
       { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true }
     ].filter(Boolean) : [],

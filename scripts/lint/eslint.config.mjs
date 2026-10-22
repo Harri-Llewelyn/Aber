@@ -12,7 +12,8 @@ export default function config ({ js, react, hooks, globals }) {
   // A `title` on an HTML element is the browser's tooltip, which a keyboard and a touch screen never
   // show. A component's `title` prop (Modal's heading, SortHeader's tooltip) is not one, so only a
   // lowercase element is matched, and an Icon*, which passes it to its <svg>. `abbr` and `iframe`
-  // keep `title`: it is what the element means.
+  // keep `title`: it is what the element means. No file is let off; a link whose text is its own
+  // address may take an `eslint-disable-next-line no-restricted-syntax -- the text is the address`.
   const browserTooltip = ['error', {
     selector: 'JSXOpeningElement[name.name=/^([a-z]|Icon[A-Z])/]:not([name.name=/^(abbr|iframe)$/]) > JSXAttribute[name.name="title"]',
     message: "A title is the browser's tooltip, never shown to a keyboard. Drop it, wrap the control in <Tooltip> (common/Tooltip.jsx), or give the column header the hint: frontend/README.md, Tooltips.",
@@ -42,15 +43,6 @@ export default function config ({ js, react, hooks, globals }) {
         'no-unused-vars': unused,
         'no-restricted-syntax': browserTooltip,
       },
-    },
-    {
-      // Still carrying a browser tooltip. Rewritten by other work now, so swept once that lands: the
-      // Site Map and area plans, Backups and Cold Storage, Cells, the 3D model, the search, the drawer.
-      files: [
-        'frontend/src/components/common/GlobalSearch.jsx',
-        'frontend/src/components/common/ContextPanel.jsx',
-      ],
-      rules: { 'no-restricted-syntax': 'off' },
     },
     {
       files: ['scripts/**/*.mjs', 'forge/**/*.mjs', 'supabase/**/*.mjs', 'test-harness/**/*.mjs'],

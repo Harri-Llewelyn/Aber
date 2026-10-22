@@ -909,7 +909,6 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                       toggle()
                     },
                     tabIndex: 0,
-                    title: `Open the rules the broker holds for ${entry.rolename}`,
                   } : {}
                   return (
                     <tr key={entry.rolename} {...opens}>
@@ -960,14 +959,14 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               {
                 label: 'Held by',
                 value: `${holders} account${holders === 1 ? '' : 's'}`,
-                title: 'Broker accounts holding this role at the moment of the read',
+                help: 'Broker accounts holding this role at the moment of the read',
               },
               ...(entry.usernameRule ? [{
                 label: 'Own edge node',
                 value: entry.usernameRule,
                 mono: true,
                 full: true,
-                title: 'The broker reads %u as each account’s own username, so one role confines every gateway to its own edge node',
+                help: 'The broker reads %u as each account’s own username, so one role confines every gateway to its own edge node',
               }] : []),
             ] : []}
           >

@@ -6,6 +6,7 @@ import { dialogIsOpen } from '../../shortcuts'
 import { searchHelp } from '../../help/searchIndex'
 import { pageHelpFile } from '../../help'
 import { openHelpAt } from '../../help/openHelp'
+import { TipButton } from './TipButton'
 import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory, IconHelp, IconX } from './Icons'
 
 /**
@@ -316,19 +317,18 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
             a box holding only spaces looks empty and is not, and the control that empties it should
             appear whenever there is anything to empty. */}
         {query && (
-          <button
-            type="button"
+          <TipButton
             className="global-search-clear"
+            label="Clear the search"
+            tip="Clear the search (Esc)"
             // The box keeps the focus, so the next thing typed lands where it was going anyway.
             // `mousedown` is where the blur would happen, which is why it is stopped there and not
             // on the click.
             onMouseDown={e => e.preventDefault()}
             onClick={clear}
-            aria-label="Clear the search"
-            title="Clear the search (Esc)"
           >
             <IconX size={13} />
-          </button>
+          </TipButton>
         )}
       </div>
 

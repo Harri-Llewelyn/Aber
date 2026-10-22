@@ -625,7 +625,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 </RouteLink>
               )
               : 'Unfiled',
-            title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
+            help: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
           {
             // The plan itself, with this cell's pin ringed and the area's other cells dimmed, and
@@ -663,7 +663,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               )
               : null,
             full: true,
-            title: 'Edge nodes serving this cell. Their devices resolve here unless a device carries a cell of its own.'
+            help: 'Edge nodes serving this cell. Their devices resolve here unless a device carries a cell of its own.'
           },
           {
             // The count stays on the label: how big is this cell and is it healthy reads at a
@@ -693,7 +693,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               )
               : null,
             full: true,
-            title: "This cell's gateways' devices, plus any device filed here explicitly."
+            help: "This cell's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
           // The purge timer.
@@ -702,8 +702,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             value: selectedCell.auto_delete_at
               ? `Auto-Purge: ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
               : 'Never auto-purged',
-            full: true,
-            title: 'What happens to this archived cell and when'
+            full: true
           },
         ].filter(Boolean) : []}
         actions={selectedCell ? [

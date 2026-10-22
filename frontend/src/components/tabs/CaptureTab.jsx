@@ -631,7 +631,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
         fields={selected ? [
           { label: 'Sparkplug ID', value: selected.sparkplugId, mono: true, copyable: true,
-            title: 'The wire identity. A capture is filed under this prefix.' },
+            help: 'The wire identity. A capture is filed under this prefix.' },
           ...(selected.kind === 'device'
             ? [
               { label: 'Via gateway', value: selected.context },
@@ -661,7 +661,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   // Devices page names and an operator acts on, rather than a blank field.
                   : 'Unmodelled',
                 full: true,
-                title: selectedSchemas.length > 0
+                help: selectedSchemas.length > 0
                   ? 'What this device is modelled to publish. Opens on the Schemas page.'
                   : 'No schema is attached, so nothing declares what this device should publish.'
               }
@@ -678,14 +678,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               value: capture.manifest.requested_seconds
                 ? `${formatDuration(capture.manifest.duration_ms / 1000)} of ${formatDuration(capture.manifest.requested_seconds)}`
                 : formatDuration(capture.manifest.duration_ms / 1000),
-              title: capture.source === 'uploaded'
+              help: capture.source === 'uploaded'
                 ? 'How long the file spans, from its first message to its last.'
                 : 'How long the recording ran, against the length asked for.'
             }] : []),
             ...(STOP_REASONS[capture.manifest?.stop_reason] ? [{
               label: 'Ended',
               value: STOP_REASONS[capture.manifest.stop_reason].label,
-              title: STOP_REASONS[capture.manifest.stop_reason].title,
+              help: STOP_REASONS[capture.manifest.stop_reason].title,
               danger: !!STOP_REASONS[capture.manifest.stop_reason].cutShort
             }] : []),
             /* The rate answers how long a replay will take, which the message count alone does not.
@@ -694,7 +694,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             ...(typeof capture.manifest?.observed_rate_hz === 'number' ? [{
               label: 'Recorded rate',
               value: `${capture.manifest.observed_rate_hz} msg/s`,
-              title: capture.message_count && capture.manifest.observed_rate_hz > 0
+              help: capture.message_count && capture.manifest.observed_rate_hz > 0
                 ? `About ${Math.round(capture.message_count / capture.manifest.observed_rate_hz)}s of wall clock to replay at speed 1.`
                 : 'The rate the recording was published at. A playback follows it unless the speed is changed.',
             }] : []),
@@ -706,7 +706,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
               // A replay opens with the edge node's NBIRTH, so a playback refuses a capture without one.
               danger: capture.manifest?.birth_captured === false,
-              title: capture.manifest?.birth_captured === false
+              help: capture.manifest?.birth_captured === false
                 ? 'No birth certificate, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again; the recorder asks the edge node for one.'
                 /* Where the birth came from when the recorder had to ask for it: only a requested
                    rebirth interrupted the plant. */

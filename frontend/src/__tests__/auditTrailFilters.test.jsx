@@ -1032,7 +1032,7 @@ describe('Audit Trail attribution', () => {
     const drawer = document.querySelector('.context-panel') || document.body
     expect(drawer.textContent).toContain('Ingestion daemon')
     expect(drawer.textContent).toContain('ingestion-principal-1')
-    expect(drawer.querySelector('[title="The machine identity that made this change"]')).not.toBeNull()
+    expect(drawer.textContent).toContain('Machine identity')
     expect(drawer.innerHTML).not.toMatch(/signed-in/i)
     expect(drawer.textContent).not.toContain('Changed by user')
   })

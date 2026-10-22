@@ -518,7 +518,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               ? <div className="context-device-list">{selectedCells.map(cellChip)}</div>
               : null,
             full: true,
-            title: 'Cells filed in this area. File one from the Cells page or by dragging it onto this area.'
+            help: 'Cells filed in this area. File one from the Cells page or by dragging it onto this area.'
           },
           {
             label: 'Area-Wide Assets',
@@ -539,7 +539,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               )
               : null,
             full: true,
-            title: 'Assets marked Area-Wide here: they belong to the area rather than to any one cell in it. Set on the Devices and Gateways pages.'
+            help: 'Assets marked Area-Wide here: they belong to the area rather than to any one cell in it. Set on the Devices and Gateways pages.'
           }
         ] : []}
         actions={selectedArea ? [
