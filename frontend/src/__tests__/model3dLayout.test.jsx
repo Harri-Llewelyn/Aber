@@ -9,8 +9,9 @@ import { Model3DUploader, Model3DLabel, MODEL_STORAGE_NOTE } from '../components
 /**
  * Where the Expand button and the model's buttons sit. Expand is in the top-right corner of what
  * it enlarges, wherever that is (one rule, `.expand-corner`); Download, Replace and Remove share
- * the card's width in equal columns; the public-bucket note is the "?" tip on the section label.
- * jsdom lays nothing out, so the geometry is read from App.css.
+ * the tile's width in equal columns; the public-bucket note is the "Public" marker's tip on the
+ * section label once a model is attached, and is said in full on the empty drop zone. jsdom lays
+ * nothing out, so the geometry is read from App.css.
  */
 
 vi.mock('../api', async () => {
@@ -61,12 +62,21 @@ describe('the Expand button\'s corner', () => {
 })
 
 describe('the attached model\'s buttons', () => {
-  it('share the card\'s width in equal columns, wrapping only when too narrow for three', () => {
+  it('share the tile\'s width in equal columns, one per button', () => {
     expect(prop('.model-file-actions', 'display')).toBe('grid')
-    expect(prop('.model-file-actions', 'grid-template-columns')).toMatch(/^repeat\(auto-fit, minmax\(\d+px, 1fr\)\)$/)
-    // A row of their own under the file's name, whatever fits beside it.
-    expect(prop('.model-file-actions', 'flex')).toBe('1 1 100%')
+    expect(prop('.model-file-actions', 'grid-auto-flow')).toBe('column')
+    expect(prop('.model-file-actions', 'grid-auto-columns')).toBe('minmax(0, 1fr)')
     expect(prop('.model-file-actions > .btn', 'justify-content')).toBe('center')
+  })
+
+  it('keep their icons and drop their words in a tile too narrow for three, the word kept as the name', () => {
+    expect(prop('.model-tile', 'container')).toBe('model-tile / inline-size')
+    const narrow = APP_CSS.match(/@container model-tile \(max-width: (\d+)px\) \{\s*([^{]+)\{([^}]*)\}/)
+    expect(narrow).not.toBeNull()
+    expect(narrow[2].trim()).toBe('.model-file-actions:has(> :nth-child(3)) .model-file-action-word')
+    // Visually hidden, not display:none, so the word is still each button's accessible name.
+    expect(narrow[3]).toMatch(/clip-path:\s*inset\(50%\)/)
+    expect(narrow[3]).not.toMatch(/display:\s*none/)
   })
 
   it('are Download, Replace and Remove, in that row', async () => {
@@ -79,21 +89,54 @@ describe('the attached model\'s buttons', () => {
 })
 
 describe('the 3D Model label', () => {
-  it('carries the public-bucket note in its "?" tip, which the keyboard reaches', () => {
-    render(<Model3DLabel />)
+  it('carries the public-bucket note on a "Public" marker once a model is attached, which the keyboard reaches', () => {
+    render(<Model3DLabel attached />)
     expect(screen.getByText('3D Model')).toBeInTheDocument()
-    const tip = screen.getByRole('button', { name: 'Where 3D models are kept' })
-    expect(tip).not.toHaveAttribute('title')
-    fireEvent.focus(tip)
+    // Its visible word is its name.
+    const marker = screen.getByRole('button', { name: 'Public' })
+    expect(marker).toHaveClass('help-tip-text')
+    expect(marker).not.toHaveAttribute('title')
+    fireEvent.focus(marker)
     expect(screen.getByRole('tooltip')).toHaveTextContent(MODEL_STORAGE_NOTE)
     expect(MODEL_STORAGE_NOTE).toBe('Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.')
   })
 
-  it('is the only place the note is shown: not under the card', async () => {
+  it('has no marker while nothing is attached: the drop zone says it', () => {
+    render(<Model3DLabel />)
+    expect(screen.getByText('3D Model')).toBeInTheDocument()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('sits the marker at the label\'s right, in the label\'s size but not its capitals', () => {
+    expect(prop('.help-tip.help-tip-text', 'margin-left')).toBe('auto')
+    expect(prop('.help-tip.help-tip-text', 'text-transform')).toBe('none')
+    expect(prop('.help-tip.help-tip-text', 'width')).toBe('auto')
+  })
+
+  it('leaves the note off the attached model\'s tile: the marker carries it', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
     render(<Model3DUploader device={DEVICE} canManage showToast={vi.fn()} />)
     await screen.findByRole('link', { name: /Download/ })
     expect(screen.queryByText(/asset-3d-models/)).toBeNull()
     expect(screen.queryByText(/anyone with the link/)).toBeNull()
+  })
+})
+
+describe('the empty drop zone', () => {
+  const EMPTY = { asset_id: 'dev-1', asset_name: 'CNC_01', model_3d_path: null }
+
+  it('says where models are kept, in full, to someone who may upload one', () => {
+    render(<Model3DUploader device={EMPTY} canManage showToast={vi.fn()} />)
+    const zone = screen.getByRole('button', { name: /Upload a 3D model/i })
+    expect(zone).toHaveTextContent(MODEL_STORAGE_NOTE)
+  })
+
+  it('says nothing about storage to someone who may not upload', () => {
+    render(<Model3DUploader device={EMPTY} canManage={false} showToast={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).not.toHaveTextContent(/anyone with the link/)
+  })
+
+  it('is as tall as the viewer, so the tile keeps its height with and without a model', () => {
+    expect(prop('.model-drop', 'min-height')).toBe(prop('.model-viewer-frame', 'height'))
   })
 })

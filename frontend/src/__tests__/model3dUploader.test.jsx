@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { deviceUrl } from '../routes'
 import { Model3DUploader } from '../components/common/Model3DUploader'
 import { api } from '../api'
-import { getByTooltip } from '../test/tooltips'
+import { getByTooltip, queryByTooltip } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -106,7 +106,7 @@ describe('Model3DUploader', () => {
   it('shows the attached model with its name and size', async () => {
     render(<Model3DUploader device={device(`${DEVICE_ID}/cnc_machine.glb`)} canManage showToast={vi.fn()} />)
 
-    expect(screen.getByText(/Model attached: cnc_machine\.glb/)).toBeInTheDocument()
+    expect(screen.getByText('cnc_machine.glb')).toBeInTheDocument()
     // Fetched by HEAD so a 40 MB model is not downloaded merely to be labelled.
     await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
     expect(global.fetch.mock.calls[0][1]).toEqual({ method: 'HEAD' })
@@ -116,7 +116,7 @@ describe('Model3DUploader', () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('offline'))
     render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
 
-    expect(screen.getByText(/Model attached: cnc\.glb/)).toBeInTheDocument()
+    expect(screen.getByText('cnc.glb')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText(/size unavailable/)).toBeInTheDocument())
   })
 
@@ -134,11 +134,11 @@ describe('Model3DUploader', () => {
   it('hides every write control from a role that cannot manage devices', async () => {
     render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
 
-    expect(screen.getByText(/Model attached: cnc\.glb/)).toBeInTheDocument()
+    expect(screen.getByText('cnc.glb')).toBeInTheDocument()
     // Let the size HEAD settle before asserting, so its state update lands inside the test.
     await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
-    expect(screen.queryByTitle(/Detach this model/i)).not.toBeInTheDocument()
-    expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()
+    expect(queryByTooltip(/Detach this model/i)).toBeNull()
+    expect(queryByTooltip(/Upload a different model/i)).toBeNull()
   })
 
   it('does not upload on a drop when the user cannot manage devices', async () => {
@@ -149,11 +149,11 @@ describe('Model3DUploader', () => {
     expect(api.uploadDeviceModel).not.toHaveBeenCalled()
   })
 
-  // The warning is the section label's tip (Model3DLabel, tested in model3dLayout.test.jsx), not a
-  // line under the card.
-  it('leaves the public-bucket warning to the section label', () => {
+  // The warning is in the empty drop zone, where the decision to upload is made; with a model
+  // attached it is the "Public" marker's tip (Model3DLabel, tested in model3dLayout.test.jsx).
+  it('says the bucket is public on the empty drop zone', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
-    expect(screen.queryByText(/anyone with the link can read it/i)).toBeNull()
+    expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
   })
 
   // Download is a button beside Replace and Remove.
@@ -162,7 +162,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      expect(screen.getByRole('link', { name: /Download/ })).toBeInTheDocument()
+      expect(getByTooltip(/^Save cnc\.glb to this computer$/)).toBeInTheDocument()
       expect(screen.queryByText(/^Open$/)).not.toBeInTheDocument()
     })
 
@@ -173,7 +173,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      const link = screen.getByRole('link', { name: /Download/ })
+      const link = getByTooltip(/^Save cnc\.glb to this computer$/)
       expect(link).toHaveAttribute('href', expect.stringContaining('?download=cnc.glb'))
     })
 
@@ -182,7 +182,7 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      const download = screen.getByRole('link', { name: /Download/ })
+      const download = getByTooltip(/^Save cnc\.glb to this computer$/)
       const row = download.parentElement
       expect(row.firstElementChild).toBe(download)
       expect(download).toHaveClass('btn-primary')
@@ -196,9 +196,9 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
 
-      expect(screen.getByRole('link', { name: /Download/ })).toBeInTheDocument()
-      expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()
-      expect(screen.queryByTitle(/Detach this model/i)).not.toBeInTheDocument()
+      expect(getByTooltip(/^Save cnc\.glb to this computer$/)).toBeInTheDocument()
+      expect(queryByTooltip(/Upload a different model/i)).toBeNull()
+      expect(queryByTooltip(/Detach this model/i)).toBeNull()
     })
   })
 })

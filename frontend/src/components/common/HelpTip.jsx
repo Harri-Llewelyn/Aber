@@ -8,8 +8,11 @@ import { TooltipBubble, useTooltipPosition } from './Tooltip'
  * The bubble (the shared TooltipBubble) shows on hover and on keyboard focus; a click pins it, which
  * is the only route on a touch screen. Scrolling or resizing closes it rather than tracking the
  * trigger. `role="tooltip"` and `aria-describedby` tie the text to the button for screen readers.
+ *
+ * With `children` the button shows them in place of the "?", and they are its name, so `label` is
+ * not used: the 3D Model label's "Public" marker.
  */
-export function HelpTip({ text, label = 'More information', size = 13 }) {
+export function HelpTip({ text, label = 'More information', size = 13, children }) {
   const id = useId()
   const ref = useRef(null)
   const [hovered, setHovered] = useState(false)
@@ -25,8 +28,8 @@ export function HelpTip({ text, label = 'More information', size = 13 }) {
       <button
         ref={ref}
         type="button"
-        className={`help-tip${pinned ? ' help-tip-pinned' : ''}`}
-        aria-label={label}
+        className={`help-tip${children ? ' help-tip-text' : ''}${pinned ? ' help-tip-pinned' : ''}`}
+        aria-label={children ? undefined : label}
         aria-describedby={visible ? id : undefined}
         aria-expanded={pinned}
         onMouseEnter={() => setHovered(true)}
@@ -36,7 +39,7 @@ export function HelpTip({ text, label = 'More information', size = 13 }) {
         onClick={() => setPinned(v => !v)}
         onKeyDown={e => { if (e.key === 'Escape') { setPinned(false); setFocused(false) } }}
       >
-        <IconHelp size={size} />
+        {children ?? <IconHelp size={size} />}
       </button>
       <TooltipBubble id={id} text={text} pos={visible ? pos : null} container={container} />
     </>

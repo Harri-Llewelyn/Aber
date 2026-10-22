@@ -41,7 +41,8 @@ export const HelpDrawerContext = createContext(null)
  * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
  * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
  * not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
- * screen reach.
+ * screen reach. An entry `{ beside, fields }` is a group: `beside`, a section of fixed height such
+ * as the device's 3D model, on the left of the row, and its `fields` stacked on the right.
  *
  * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `title` is the action's tooltip, the shared one, for what its label does not
@@ -169,34 +170,20 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
             </div>
           )}
 
-          {fields.length > 0 && (
-            <dl className="context-panel-fields">
-              {fields.map((f, i) => (
-                <div key={i} className={`context-field${f.full ? ' context-field-full' : ''}`}>
-                  {/* The tip sits on the LABEL, which is where a reader looks to ask what a field
-                      is. */}
-                  <dt className="context-field-label">
-                    {f.label}
-                    {f.help && <HelpTip text={f.help} label={`What ${f.label} means`} size={11} />}
-                  </dt>
-                  <dd
-                    className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
-                      + (f.danger ? ' context-field-danger' : '')}
-                  >
-                    {/* Empty is stated rather than left blank. A missing Sparkplug id and a blank
-                        row look identical otherwise, and only one of them is a problem. */}
-                    {f.value === null || f.value === undefined || f.value === ''
-                      ? <span className="context-field-empty">Not set</span>
-                      /* Every identifier is copyable: this is where a UUID or topic path leaves the
-                         app. `copyable-id-wrap` because a truncated identifier is useless. */
-                      : f.copyable
-                        ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
-                        : f.value}
-                  </dd>
-                </div>
-              ))}
+          {/* A run of plain fields is one <dl>; a group is a row of its own, its fields a <dl> beside
+              the node. A <dl> holds only dt/dd groups, so the node cannot go inside one. */}
+          {fieldRuns(fields).map((run, r) => Array.isArray(run) ? (
+            <dl key={r} className="context-panel-fields">
+              {run.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
             </dl>
-          )}
+          ) : (
+            <div key={r} className="context-field-group">
+              <div className="context-field-beside">{run.beside}</div>
+              <dl className="context-panel-fields">
+                {run.fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
+              </dl>
+            </div>
+          ))}
 
           {/* Facts, with the metadata they belong to. */}
           {beforeActions && <div className="context-panel-facts">{beforeActions}</div>}
@@ -260,6 +247,44 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
         </div>
       </div>
     </aside>
+  )
+}
+
+/** `fields` cut into runs: an array for consecutive plain fields, the entry itself for a group. */
+function fieldRuns(fields) {
+  const runs = []
+  for (const f of fields) {
+    if (f.beside !== undefined) runs.push(f)
+    else if (Array.isArray(runs.at(-1))) runs.at(-1).push(f)
+    else runs.push([f])
+  }
+  return runs
+}
+
+/** One label and its value. */
+function Field({ f, onCopy }) {
+  return (
+    <div className={`context-field${f.full ? ' context-field-full' : ''}`}>
+      {/* The tip sits on the LABEL, which is where a reader looks to ask what a field is. */}
+      <dt className="context-field-label">
+        {f.label}
+        {f.help && <HelpTip text={f.help} label={`What ${f.label} means`} size={11} />}
+      </dt>
+      <dd
+        className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
+          + (f.danger ? ' context-field-danger' : '')}
+      >
+        {/* Empty is stated rather than left blank. A missing Sparkplug id and a blank row look
+            identical otherwise, and only one of them is a problem. */}
+        {f.value === null || f.value === undefined || f.value === ''
+          ? <span className="context-field-empty">Not set</span>
+          /* Every identifier is copyable: this is where a UUID or topic path leaves the app.
+             `copyable-id-wrap` because a truncated identifier is useless. */
+          : f.copyable
+            ? <CopyableId value={String(f.value)} label={f.label.toLowerCase()} onNotify={onCopy} display={f.display} className="copyable-id-wrap" />
+            : f.value}
+      </dd>
+    </div>
   )
 }
 

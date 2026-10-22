@@ -6,20 +6,26 @@ import {
   isAcceptedModelFile,
   modelFileName
 } from '../../utils/model3d'
-import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle } from './Icons'
+import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle, IconGlobe } from './Icons'
 import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
 import { ExpandButton } from './ExpandButton'
 import { HelpTip } from './HelpTip'
 import { Modal } from './Modal'
-import { deviceUrl } from '../../routes'
 import { Tooltip } from './Tooltip'
+import { deviceUrl } from '../../routes'
+
+/** Where an attached model is kept, and so who can read it. */
+export const MODEL_STORAGE_NOTE =
+  'Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.'
 
 /**
  * Attach one 3D visual model to a device. The model becomes an AAS `File` element in a
- * `VisualRepresentation` submodel on export, so the bucket is public-read, and the section's label
- * (Model3DLabel) says so in its tooltip. Size is checked here as well as on the bucket, so an
- * oversized file is refused before the upload rather than after.
+ * `VisualRepresentation` submodel on export, so the bucket is public-read: the empty drop zone says
+ * so in full to someone who may upload, and with a model attached the section's label
+ * (Model3DLabel) carries a "Public" marker whose tip says it. Size is checked here as well as on the
+ * bucket, so an oversized file is refused before the upload rather than after. Drawn in the device
+ * drawer's model tile (`.model-tile`), beside the device's facts.
  */
 export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [busy, setBusy] = useState(false)
@@ -131,8 +137,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const downloadUrl = path ? model3dDownloadUrl(path) : null
 
   return (
-    /* No heading of its own: the container prints the section label (Model3DLabel), and the AAS
-       consequence is on the dropzone's title and the label's tooltip. */
+    /* No heading of its own: the container prints the section label (Model3DLabel). */
     <div>
       {/* The model itself, above the controls. Only rendered when something is attached; the
           dropzone is the empty state. Expand sits in its top-right corner, as the section has no
@@ -152,68 +157,64 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
       )}
 
       {path ? (
-        <div
-          className="card"
-          style={{ marginTop: '10px', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}
-        >
-          <IconCube size={22} />
-          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-            {/* The filename can be long and this sits in a narrow drawer: constrain it, or the
-                buttons are pushed off-screen. */}
-            <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Model attached: {modelFileName(path)}
-            </div>
-            {/* The size only. Getting the file is the Download button below. */}
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              {size !== null ? formatFileSize(size) : 'size unavailable'}
-            </div>
+        <div className="model-file">
+          {/* One line under the viewer. The name is cut short in a narrow tile; Download's tooltip
+              names it whole. */}
+          <div className="model-file-name">
+            <span className="model-file-name-text">{modelFileName(path)}</span>
+            <span className="model-file-size">{size !== null ? formatFileSize(size) : 'size unavailable'}</span>
           </div>
           {/* Outside the `canManage` gate: reading a public-read object is not a write, and
               Operators and Auditors are the roles most likely to open a model. A row of their own,
-              in equal columns across the card. */}
+              in equal columns across the tile; in a tile too narrow for three words they show their
+              icons only, the word kept as each button's name. */}
           <div className="model-file-actions">
             {downloadUrl && (
-              <a
-                className="btn btn-primary"
-                href={downloadUrl}
-                /* `download` is ignored cross-origin, so `?download=` on the URL is what sets
-                   Content-Disposition; the attribute applies if the bucket is ever served
-                   same-origin. */
-                download={modelFileName(path)}
-              >
-                <IconDownload size={12} /> Download
-              </a>
+              <Tooltip text={`Save ${modelFileName(path)} to this computer`}>
+                <a
+                  className="btn btn-sm btn-primary"
+                  href={downloadUrl}
+                  /* `download` is ignored cross-origin, so `?download=` on the URL is what sets
+                     Content-Disposition; the attribute applies if the bucket is ever served
+                     same-origin. */
+                  download={modelFileName(path)}
+                >
+                  <IconDownload size={12} /> <span className="model-file-action-word">Download</span>
+                </a>
+              </Tooltip>
             )}
             {canManage && (
               <>
                 <Tooltip text="Upload a different model in place of this one">
                   <button
-                    className="btn btn-ghost"
+                    className="btn btn-sm btn-ghost"
                     disabled={busy}
                     onClick={() => inputRef.current?.click()}
                   >
-                    <IconUpload size={12} /> Replace
+                    <IconUpload size={12} /> <span className="model-file-action-word">Replace</span>
                   </button>
                 </Tooltip>
                 {/* `busy` covers upload AND removal -- both write to the same device row -- but
                     only Remove can report, because Replace merely opens the file picker. */}
                 <ActionButton
-                  className="btn btn-ghost"
+                  className="btn btn-sm btn-ghost"
                   pending={busy}
                   pendingLabel="Removing…"
                   onClick={handleRemove}
                   title="Detach this model and delete it from storage"
                 >
-                  <IconTrash size={12} /> Remove
+                  <IconTrash size={12} /> <span className="model-file-action-word">Remove</span>
                 </ActionButton>
               </>
             )}
           </div>
         </div>
       ) : (
-        /* The AAS consequence, as context for the gesture. */
+        /* The AAS consequence, as context for the gesture, is the tooltip; the storage sentence is
+           in the zone itself, where the decision to upload is made. */
         <Tooltip text="Attached models are exported as an AAS VisualRepresentation submodel">
           <div
+            className="model-drop"
             onDrop={onDrop}
             onDragOver={onDragOver}
             onDragLeave={() => setDragging(false)}
@@ -228,27 +229,24 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
               }
             }}
             style={{
-              border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
+              borderColor: dragging ? 'var(--accent)' : 'var(--border)',
               background: dragging ? 'var(--bg-surface)' : 'transparent',
-              borderRadius: '8px',
-              padding: '20px',
-              textAlign: 'center',
               cursor: canManage && !busy ? 'pointer' : 'not-allowed',
-              opacity: canManage ? 1 : 0.6,
-              transition: 'border-color 120ms, background 120ms'
+              opacity: canManage ? 1 : 0.6
             }}
           >
             <IconUpload size={22} />
-            <div style={{ fontSize: '13px', marginTop: '6px' }}>
+            <div className="model-drop-prompt">
               {busy
                 ? 'Uploading…'
                 : canManage
                   ? 'Drop a 3D model here, or click to browse'
                   : 'No 3D model attached'}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            <div className="model-drop-limits">
               {MODEL_3D_EXTENSIONS.join(', ')} · up to {formatFileSize(MAX_BYTES)}
             </div>
+            {canManage && <div className="model-drop-note">{MODEL_STORAGE_NOTE}</div>}
           </div>
         </Tooltip>
       )}
@@ -271,16 +269,19 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   )
 }
 
-/** Where an attached model is kept, and so who can read it. Every role sees it, on the label's tip. */
-export const MODEL_STORAGE_NOTE =
-  'Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.'
-
-/** The section label a page prints above Model3DUploader, with the storage note in its "?" tip. */
-export function Model3DLabel() {
+/**
+ * The section label a page prints above Model3DUploader. With a model `attached`, a "Public" marker
+ * at its right whose tip is the storage note, for every role; without one, the drop zone says it.
+ */
+export function Model3DLabel({ attached = false }) {
   return (
     <div className="context-panel-section-label context-panel-section-label-icon">
       <IconCube size={13} /> 3D Model
-      <HelpTip label="Where 3D models are kept" text={MODEL_STORAGE_NOTE} size={12} />
+      {attached && (
+        <HelpTip text={MODEL_STORAGE_NOTE}>
+          <IconGlobe size={11} /> Public
+        </HelpTip>
+      )}
     </div>
   )
 }
