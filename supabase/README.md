@@ -42,7 +42,7 @@ deletes and withdrawn grants applied in a tail, and archived migration `0135` (a
 was the third squash's.
 
 Before 1.0 there was no database for a tail to serve. No site runs a release below 1.0, and none is
-upgraded to it ([`docs/upgrades.md`](../docs/upgrades.md#the-floor-100)), so the fourth squash
+upgraded to it ([`help/site/upgrading.md`](../help/site/upgrading.md#the-floor-100)), so the fourth squash
 folded the subtractions too, with the one-shot repairs that only ever acted on an older database's
 rows. From 1.0 on, the rules below bind again.
 
