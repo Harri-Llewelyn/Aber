@@ -443,6 +443,106 @@ describe('Detail modal — read-only vs draft', () => {
     expect(showToast).toHaveBeenCalledWith('schema is active and immutable', 'error')
   })
 
+  describe('a save keeps what the dialog does not edit', () => {
+    // A value list and a range on a kept metric, a stored type the catalog would not derive, a
+    // narrower `required`, and a closed set: none of these has a control in the dialog.
+    const CONSTRAINED = {
+      ...DRAFT_V2,
+      schema_definition: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        title: 'Robot arm',
+        type: 'object',
+        properties: {
+          'Systems/TEMPERATURE': { type: 'integer', enum: [20, 40, 60], minimum: 0 },
+          'Controller/EXECUTION': { type: 'string' }
+        },
+        required: ['Systems/TEMPERATURE'],
+        additionalProperties: false
+      }
+    }
+
+    /** The PUT as the database would take it: only the keys sent are written. */
+    const storeOnPut = () => api.put.mockImplementation(async (path, body) => {
+      schemaRows = schemaRows.map(s => (path.endsWith(s.schema_uuid) ? { ...s, ...body } : s))
+      return { id: path.split('/').pop() }
+    })
+
+    it('sends no definition for a description edit, and only the new metric’s type for an add', async () => {
+      storeOnPut()
+      schemaRows = [V1, CONSTRAINED]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+      const modal = within(document.querySelector('.modal'))
+
+      // The kept metric names the keys it carries beyond its type; a plain one names none.
+      const rowOf = (name) => modal.getByLabelText(name).closest('label')
+      expect(within(rowOf('Systems/TEMPERATURE')).getByText('enum · minimum')).toBeTruthy()
+      expect(rowOf('Controller/EXECUTION').textContent).not.toMatch(/·/)
+
+      fireEvent.change(modal.getByPlaceholderText('What this schema is for'), { target: { value: 'Six axis arm, coolant loop' } })
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+      const [, descriptionOnly] = api.put.mock.calls[0]
+      expect(descriptionOnly.description).toBe('Six axis arm, coolant loop')
+      expect(descriptionOnly).not.toHaveProperty('schema_definition')
+
+      await waitFor(() => expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true))
+      fireEvent.click(modal.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+      const stored = CONSTRAINED.schema_definition
+      expect(api.put.mock.calls[1][1].schema_definition).toEqual({
+        ...stored,
+        properties: { ...stored.properties, 'Systems/SPINDLE_TEMPERATURE': { type: 'number' } },
+        required: ['Systems/TEMPERATURE']
+      })
+    })
+
+    it('drops a removed metric from properties and required, and keeps the rest', async () => {
+      api.put.mockResolvedValue({ id: 'v2-uuid' })
+      schemaRows = [V1, CONSTRAINED]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+
+      fireEvent.click(screen.getByLabelText('Systems/TEMPERATURE'))
+      fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      expect(api.put.mock.calls[0][1].schema_definition).toEqual({
+        ...CONSTRAINED.schema_definition,
+        properties: { 'Controller/EXECUTION': { type: 'string' } },
+        required: []
+      })
+    })
+
+    it('names the stored keys on a published version’s rows too', async () => {
+      schemaRows = [{ ...CONSTRAINED, schema_uuid: 'v1-uuid', schema_name: 'Robot_Arm_Schema', status: 'active', version: 1, parent_schema_id: null }]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
+
+      expect(within(document.querySelector('.modal')).getByText('enum · minimum')).toBeTruthy()
+    })
+
+    it('keeps a metric that only `required` names when another is added', async () => {
+      api.put.mockResolvedValue({ id: 'v2-uuid' })
+      schemaRows = [V1, { ...DRAFT_V2, schema_definition: { required: ['Systems/TEMPERATURE'] } }]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+
+      expect(screen.getByLabelText('Systems/TEMPERATURE').checked).toBe(true)
+      fireEvent.click(screen.getByLabelText('Controller/EXECUTION'))
+      fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }))
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      expect(api.put.mock.calls[0][1].schema_definition).toEqual({
+        required: ['Systems/TEMPERATURE'],
+        properties: { 'Controller/EXECUTION': { type: 'string' } }
+      })
+    })
+  })
+
   it('shows the version history once a lineage has more than one member', async () => {
     schemaRows = [ARCHIVED_V1, ACTIVE_V2]
     renderTab()
