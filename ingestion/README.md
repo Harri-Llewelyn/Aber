@@ -53,7 +53,10 @@ Every gateway and device carries an immutable **`sparkplug_id`**: a 3-character 
 (`gwy` / `dev`) plus 21 lowercase hex characters, 24 in total. It is a `GENERATED ALWAYS … STORED`
 column derived from the row's UUID primary key, so it cannot drift.
 
-- **This is the identity on the wire.** It appears in the MQTT topic and keys `telemetry.asset_id`.
+- **This is the identity on the wire** for every device that can be set to publish it, and it keys
+  `telemetry.asset_id` whatever the device publishes under. A device that cannot keeps its own id,
+  or its Instance_UUID, in the topic. Ingestion resolves it to this one (below), and the dashboard
+  shows the id it publishes as its **Published ID**.
 - **`name` is a display label.** Freely editable, not unique. Renaming never detaches telemetry.
 - **The topic is authoritative**; the `Asset_ID` payload metric is a cross-check. A disagreement
   quarantines the device rather than letting one silently win.

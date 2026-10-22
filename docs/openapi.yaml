@@ -4761,8 +4761,9 @@ components:
           example: dev220000000000400080000
           description: >-
             Immutable Sparkplug B device id, generated from the primary key ('dev' plus 21 hex
-            characters, 24 total). Appears in the MQTT topic and keys telemetry and birth
-            parameters.
+            characters, 24 total). Appears in the MQTT topic of every device that can be set to
+            publish it; one that cannot publishes its own id or its Instance_UUID instead
+            (`identity_source` says which). Keys telemetry and birth parameters either way.
         reported_identity:
           type: string
           nullable: true

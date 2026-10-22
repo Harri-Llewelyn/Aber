@@ -571,7 +571,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                       Gateway
                     </SortHeader>
                   )}
-                  <SortHeader sort={sort} column="sparkplug_id" title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
+                  <SortHeader sort={sort} column="sparkplug_id" title="The ID Aber issued. A capture is filed under it, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </SortHeader>
                   <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings."}>
@@ -631,7 +631,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
         fields={selected ? [
           { label: 'Sparkplug ID', value: selected.sparkplugId, mono: true, copyable: true,
-            help: 'The wire identity. A capture is filed under this prefix.' },
+            help: 'The ID Aber issued. A capture is filed under this prefix.' },
           ...(selected.kind === 'device'
             ? [
               { label: 'Via gateway', value: selected.context },
