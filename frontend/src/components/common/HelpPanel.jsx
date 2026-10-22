@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { ContextPanel } from './ContextPanel'
 import { HelpBrowser, PAGE_VIEW, plainClick, useHelpHistory, viewTitle } from './HelpBrowser'
 import { Modal, topDialog } from './Modal'
-import { IconHelp } from './Icons'
+import { IconChevronsLeftRight, IconChevronsRightLeft, IconHelp } from './Icons'
+import { TooltipBubble, useTooltip } from './Tooltip'
 import { helpTarget, onHelpRequest } from '../../help/openHelp'
 
 /**
@@ -17,8 +18,12 @@ import { helpTarget, onHelpRequest } from '../../help/openHelp'
  * a plain click on any `a[data-help]` outside it. While a dialog is open the page behind it is
  * inert, so then the help opens in a dialog of its own over that one. `onOpen` asks the App to open
  * the drawer. Closing forgets the history, so the ? always starts on the page's help.
+ *
+ * Expand, beside the X, widens it to half the window for a guide's tables and commands. `expanded`
+ * is the App's (useHelpExpanded), which `onExpandedChange` sets; while expanded, help replaces a
+ * page's drawer at every width, as it does below 1440px.
  */
-export function HelpPanel({ open, tabId, onClose, onOpen }) {
+export function HelpPanel({ open, tabId, onClose, onOpen, expanded = false, onExpandedChange }) {
   const history = useHelpHistory()
   const { go, reset } = history
   const [dialog, setDialog] = useState(null)
@@ -68,7 +73,8 @@ export function HelpPanel({ open, tabId, onClose, onOpen }) {
         /* The subtitle says what kind of thing the panel is showing; the title is what it shows. */
         subtitle="Documentation and Guide"
         subject="help"
-        className="context-panel-app"
+        className={`context-panel-app${expanded ? ' context-panel-expanded' : ''}`}
+        headerActions={open && onExpandedChange ? <HelpExpandButton expanded={expanded} onChange={onExpandedChange} /> : null}
         onClose={onClose}
       >
         {open ? <HelpBrowser history={history} tabId={tabId} /> : null}
@@ -77,6 +83,31 @@ export function HelpPanel({ open, tabId, onClose, onOpen }) {
         <HelpDialog key={dialog.key} target={dialog} tabId={tabId} onClose={() => setDialog(null)} />,
         document.body
       )}
+    </>
+  )
+}
+
+/**
+ * A toggle, so its name stays "Expand the help panel" and `aria-pressed` says which way it is; the
+ * hover text says what a press does. The bubble restates the name, so it is not also the button's
+ * description.
+ */
+function HelpExpandButton({ expanded, onChange }) {
+  const tooltip = useTooltip()
+  const { 'aria-describedby': describedBy, onClick: onTipClick, ...trigger } = tooltip.trigger
+  return (
+    <>
+      <button
+        type="button"
+        className="context-panel-expand"
+        aria-label="Expand the help panel"
+        aria-pressed={expanded}
+        {...trigger}
+        onClick={() => { onTipClick(); onChange(!expanded) }}
+      >
+        {expanded ? <IconChevronsRightLeft size={15} /> : <IconChevronsLeftRight size={15} />}
+      </button>
+      <TooltipBubble {...tooltip.bubble} text={expanded ? 'Shrink the help panel' : 'Expand the help panel'} />
     </>
   )
 }

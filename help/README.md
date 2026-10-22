@@ -11,6 +11,10 @@ Everything here is written for someone new to Aber. Pages for people who change 
 
 - [Installing Aber](site/install.md): put the server on a Linux machine, sign in, and add your
   first gateway.
+- [Remote gateways](site/remote-gateways.md): set up a gateway on its own hardware, keep it
+  running, and fix it when something goes wrong.
+- [Upgrading Aber](site/upgrading.md): move to a new release with one command, and what needs your
+  attention when you do.
 - [Bringing your own edge node](site/bring-your-own-edge-node.md): what an edge node you chose must do to send data to Aber.
 
 ## Guides

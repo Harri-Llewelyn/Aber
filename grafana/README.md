@@ -488,7 +488,7 @@ gateway reports each outage after reconnecting, and a dropped reading is lost wi
 counting it. The threshold is zero because the appliance counts exactly: there is no noise floor,
 and an outage that buffered everything does not fire. Gated on the report's age, since the gauges
 hold the last report for ever. What to do is in
-[`docs/remote-gateways.md`](../docs/remote-gateways.md#13-troubleshooting).
+[`help/site/remote-gateways.md`](../help/site/remote-gateways.md#13-troubleshooting).
 
 ### Late Replay Missing From the Rollups (`aber-ingestion-rollup-windows-failed`)
 
@@ -498,7 +498,7 @@ the historian job that refreshes the hours ingestion records in `rollup_refresh_
 record fails, `aber_ingestion_rollup_windows_failed_total` counts the hours and the daemon logs a
 warning naming the cause; the readings are stored, and the rollups lack them until someone
 refreshes the window by hand
-([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)). Nothing else
+([`help/site/remote-gateways.md`](../help/site/remote-gateways.md#late-data-after-an-outage)). Nothing else
 shows it: every dashboard built on the rollups draws the outage as a gap. Warning, not critical,
 because nothing is lost from the raw table. `for: 0s` because `increase(...[1h])` is the delay, as
 with *Database Deadlocks*; the hour keeps the alert up long enough to be read. The counter is

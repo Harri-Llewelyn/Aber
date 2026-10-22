@@ -992,7 +992,7 @@ npm run rehearse:install -- --i3x-suite=../i3x-spec/conformance-tests
 the checkout's image and completed: it replays the migration chain onto the last release's database.
 It asserts that every volume claim kept its uid, so no data volume was replaced. A StatefulSet whose
 claim templates changed must have been created again, by the `claim-templates` pre-upgrade hook
-([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
 and own its running pod; one whose claim templates did not change must be the same object. The
 hook's log is printed with the result. That pre-upgrade hook runs under the last release's
 NetworkPolicies and its own. The post-upgrade hook Jobs (`db-init`, `timescaledb-maintenance`,

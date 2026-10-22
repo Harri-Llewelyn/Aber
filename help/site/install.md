@@ -357,7 +357,7 @@ A gateway connects a machine's devices to the server. Create each one in the das
   Either way, the gateway needs to reach the server's API, its broker on 8883, and the forge's SSH on
   2222 (22 on a site that kept it there), where it fetches its flow and its platform playbook. Its
   image is built on the gateway itself, which is how an arm64 Pi runs it.
-  [`docs/remote-gateways.md`](../../docs/remote-gateways.md) covers it in
+  [Remote gateways](remote-gateways.md) covers it in
   full, and [`forge/gateway-platform/appliance/`](../../forge/gateway-platform/appliance) holds what the
   bundle contains.
 - **A Host or Simulated gateway** runs inside the server, in Aber's own Node-RED, and needs nothing

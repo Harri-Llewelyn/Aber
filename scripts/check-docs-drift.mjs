@@ -1347,6 +1347,69 @@ const HELP_SYNTAX = new URL('../frontend/src/help/syntax.js', import.meta.url).h
 }
 
 // -------------------------------------------------------------------------------------------------
+// 111. A reference page whose operator steps moved into help/site/ and the help page they moved to
+// link to each other in their opening lines, before the first `## `: the design stayed where the
+// code cites it, and a reader of either half has to find the other. A page that moved whole leaves
+// a stub at its old path (`back: false`): the stub points on, and the help page owes it nothing.
+// -------------------------------------------------------------------------------------------------
+const OPERATOR_PAIRS = [
+  { design: 'docs/remote-gateways.md', help: 'help/site/remote-gateways.md' },
+  { design: 'docs/upgrades.md', help: 'help/site/upgrading.md', back: false },
+];
+{
+  const opening = (file) => read(file).split(/\n## /)[0];
+  const linksTo = (file) => [...opening(file).matchAll(/\[[^\]]+\]\(([^)\s#]+)[^)\s]*\)/g)]
+    .filter((m) => !/^[a-z][a-z0-9+.-]*:/i.test(m[1]))
+    .map((m) => posix.normalize(posix.join(posix.dirname(file), m[1])));
+  const wrong = [];
+  for (const { design, help, back = true } of OPERATOR_PAIRS) {
+    const missing = [design, help].filter((f) => !existsSync(join(REPO, f)));
+    if (missing.length) { wrong.push(`${missing.join(' and ')} missing`); continue; }
+    if (!linksTo(design).includes(help)) wrong.push(`${design} does not link to ${help}, where its operator steps are, before its first section`);
+    if (back && !linksTo(help).includes(design)) wrong.push(`${help} does not link back to ${design}, where the design behind its steps is, before its first section`);
+  }
+  if (wrong.length) {
+    fail('a reference page and the help page its steps moved to do not point at each other:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`all ${OPERATOR_PAIRS.length} reference page(s) split into help/site/ and their help pages link to each other at the top`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 112. A command an operator's page in help/site/ gives is not given again in the reference page it
+// was split from: two copies of an installer URL, a command or a version pin
+// drift as soon as one is edited. Compared: every fenced code line, and every code span of 20
+// characters or more holding a space or `://` (a command or a URL rather than a name).
+// -------------------------------------------------------------------------------------------------
+{
+  const commands = (file) => {
+    const out = [];
+    let fence = false;
+    for (const line of read(file).split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+      if (fence) { if (line.trim()) out.push(line.trim()); continue; }
+      for (const m of line.matchAll(/`([^`]+)`/g)) if (m[1].trim().length >= 20 && /\s|:\/\//.test(m[1].trim())) out.push(m[1].trim());
+    }
+    return out;
+  };
+  const wrong = [];
+  let given = 0;
+  for (const { design, help } of OPERATOR_PAIRS.filter((p) => existsSync(join(REPO, p.design)) && existsSync(join(REPO, p.help)))) {
+    const steps = commands(help);
+    const reference = new Set(commands(design));
+    if (!steps.length) wrong.push(`${help} gives no command in a code block or span; the extraction no longer matches`);
+    given += steps.length;
+    for (const c of new Set(steps.filter((s) => reference.has(s)))) wrong.push(`${help} and ${design} both give \`${c}\``);
+  }
+  if (wrong.length) {
+    fail('an operator step in help/site/ is also written out in the reference page it moved from, so the two can drift:\n' +
+      wrong.map((w) => `        ${w}`).join('\n') + '\n        Keep the step in the help page, and link to it from the reference page.');
+  } else {
+    pass(`the ${given} command line(s) and span(s) in ${OPERATOR_PAIRS.length} operator page(s) of help/site/ appear in none of the reference pages they moved from`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 71. The Playback gateway is never reported stale, and its replay lanes are never expected to
 // publish. The last declaration of platform_health_rows() keeps `NOT g.is_shadow` in its
 // gateway_stale arm (archived migration 0061 added it, 0074 lost it in a redeclaration, 0182 put it
