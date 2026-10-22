@@ -288,7 +288,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             <SearchInput
               value={schemaSearch}
               onChange={setSchemaSearch}
-              placeholder="Search name, UUID or description…"
+              placeholder="Search name, UUID or change description…"
               ariaLabel="Search the schema registry"
             />
 
@@ -310,9 +310,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
-              {/* The only way to create a schema. Building from the catalog is what guarantees every
-                  metric has a standard and a semantic id, which device tags, unmodelled detection and
-                  the tag filters all read. */}
+              {/* The only way to create a schema. Every metric is one the site adopted, with its
+                  catalog name and datatype, and its standard and semantic id where the row has them
+                  (both are nullable). The device tags and unmodelled detection read the names. */}
               <ActionButton
                 className="btn btn-primary btn-sm"
                 permitted={canManageSchema}
