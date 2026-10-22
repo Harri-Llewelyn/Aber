@@ -236,8 +236,9 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(lanes()[2]).toHaveAttribute('aria-label', 'Unassigned: 1 gateway, 0 devices')
   })
 
-  // Archived equipment keeps its scope and cell, but it is out of service on purpose.
-  it('counts no archived gateway or device in a lane, an area card or a pin', async () => {
+  // Archived equipment keeps its scope and cell, but it is out of service on purpose. A replay lane
+  // is a recording, not equipment: left out even where its row resolved to a cell or a lane.
+  it('counts no archived gateway or device, and no replay lane, in a lane, an area card or a pin', async () => {
     const archivedGw = (id, where) => ({ ...gateway, gateway_id: id, gateway_name: id, is_archived: true, ...where })
     api.get.mockImplementation(routeGet({
       gateways: [
@@ -249,7 +250,10 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
       devices: [
         device, bms,
         { ...device, asset_id: 'dev-old', asset_name: 'Old_CNC', is_archived: true },
-        { ...bms, asset_id: 'dev-old-site', asset_name: 'Old_Tracker', area_id: null, location_scope: 'site_wide', location_source: 'site_wide', effective_area_id: null, is_archived: true }
+        { ...bms, asset_id: 'dev-old-site', asset_name: 'Old_Tracker', area_id: null, location_scope: 'site_wide', location_source: 'site_wide', effective_area_id: null, is_archived: true },
+        { ...device, asset_id: 'dev-lane', asset_name: 'Old_CNC_Replay', shadow_of: 'dev-1' },
+        { ...bms, asset_id: 'dev-lane-bms', asset_name: 'Old_BMS_Replay', shadow_of: 'dev-bms' },
+        { ...bms, asset_id: 'dev-lane-site', asset_name: 'Old_Tracker_Replay', area_id: null, location_scope: 'site_wide', location_source: 'site_wide', effective_area_id: null, shadow_of: 'dev-old-site' }
       ]
     }))
     await renderSiteMap()
@@ -658,12 +662,43 @@ describe('AreasTab files cells into areas', () => {
     expect(api.post.mock.calls[0][1]).toMatchObject({ area_name: 'Stores', icon: 'Warehouse' })
   })
 
-  it('counts the devices resolving to an area and its area-wide assets separately', async () => {
+  /* The Site Map's count: the devices in service in the area's cells and Area-Wide in it, with
+     Area-Wide a breakdown of that total. An archived device and a replay lane are left out, the lane
+     even where it resolves into a cell, and an Area-Wide gateway is counted as a gateway. */
+  it('counts the devices in service in an area, its Area-Wide ones included, as the Site Map does', async () => {
+    api.get.mockImplementation(routeGet({
+      devices: [
+        device, bms,
+        { ...device, asset_id: 'dev-old', asset_name: 'CNC_Old', is_archived: true },
+        { ...bms, asset_id: 'dev-old-bms', asset_name: 'BMS_Old', is_archived: true },
+        { ...device, asset_id: 'dev-lane', asset_name: 'CNC_01_Replay', shadow_of: 'dev-1' }
+      ],
+      gateways: [
+        gateway,
+        { ...gateway, gateway_id: 'gw-wide', gateway_name: 'Wide_Gateway', cell_id: null, location_scope: 'area_wide', area_id: 'area-a' },
+        { ...gateway, gateway_id: 'gw-old', gateway_name: 'Old_Gateway', is_archived: true }
+      ]
+    }))
     await renderAreas()
     const rowA = rowFor('North Shop')
-    // A plain number; the Area-Wide breakdown keeps its badge.
-    expect(within(rowA).getByText('1')).not.toHaveClass('badge')
-    expect(within(rowA).getByText('+1 Area-Wide')).toHaveClass('badge')
+    // A plain number; the Area-Wide breakdown keeps its badge, and is part of the number.
+    expect(within(rowA).getByText('2')).not.toHaveClass('badge')
+    expect(within(rowA).getByText('1 Area-Wide')).toHaveClass('badge')
+    expect(tooltipOf(within(rowA).getByText('1 Area-Wide'))).toBe('1 of these belongs to the area rather than to a cell in it')
+
+    fireEvent.click(screen.getByText('North Shop'))
+    expect(within(panel()).getByText('2 Cells · 2 Gateways · 2 Devices')).toBeInTheDocument()
+  })
+
+  it('counts only active cells in the panel, as the table does', async () => {
+    api.get.mockImplementation(routeGet({
+      cells: [...cells, { cell_id: 'cell-old', cell_name: 'Old Bay', area_id: 'area-a', is_archived: true, gateways: [], gateway_count: 0 }]
+    }))
+    await renderAreas()
+    fireEvent.click(screen.getByText('North Shop'))
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    // Still listed, and marked, so the count is not a puzzle.
+    expect(within(panel()).getByRole('link', { name: /Old Bay/ })).toHaveTextContent('ARCHIVED')
   })
 
   it('files a dropped cell with one write naming the area, and says so', async () => {
@@ -1009,10 +1044,10 @@ describe('AreasTab: sorting by a column (#801)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cells' }))
     expect(names()).toEqual(['Line 9', 'Line 10', 'Boiler House'])
 
-    // 0, 4 and 6: neither the archived cell's devices nor Boiler House's Area-Wide five count.
+    // 4, 5 and 6: the archived cell's devices do not count, and Boiler House's Area-Wide five do.
     fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
-    expect(names()).toEqual(['Boiler House', 'Line 10', 'Line 9'])
-    expect(within(screen.getByText('Boiler House').closest('tr')).getByText('+5 Area-Wide')).toBeInTheDocument()
+    expect(names()).toEqual(['Line 10', 'Boiler House', 'Line 9'])
+    expect(within(screen.getByText('Boiler House').closest('tr')).getByText('5 Area-Wide')).toBeInTheDocument()
 
     // The two with the default outline keep the order they came in.
     fireEvent.click(screen.getByRole('button', { name: 'Plan' }))

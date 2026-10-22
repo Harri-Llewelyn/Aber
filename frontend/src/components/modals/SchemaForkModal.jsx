@@ -2,16 +2,24 @@ import React, { useState } from 'react'
 import { IconGitBranch, IconAlertTriangle, IconInfo } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaVersion'
+import { plural } from '../../utils/format'
 
 /**
  * Create Version: prompt for the change description the new draft carries. The version number is
  * computed by `fork_schema()` and `enforce_schema_version_provenance()` refuses a directly
  * inserted one, so there is no field for it. The description is optional and the modal says so.
+ *
+ * `deviceCount` is every device attached to the version, since publishing moves them all;
+ * `archivedCount` and `replayLaneCount` say how many of those the Devices column does not count.
  */
-export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }) {
+export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, replayLaneCount = 0, onConfirm, onCancel }) {
   const [changeDescription, setChangeDescription] = useState('')
 
   const next = nextVersion(schema)
+  const outOfService = [
+    archivedCount > 0 && plural(archivedCount, 'archived device'),
+    replayLaneCount > 0 && plural(replayLaneCount, 'replay lane')
+  ].filter(Boolean).join(' and ')
 
   return (
     <ConfirmModal
@@ -60,8 +68,9 @@ export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }
         <div className="callout callout-warning">
           <IconAlertTriangle size={13} className="callout-icon" />
           <span>
-            {deviceCount} device{deviceCount === 1 ? '' : 's'} currently {deviceCount === 1 ? 'uses' : 'use'} v{schemaVersion(schema)}.
-            Publishing v{next} will move {deviceCount === 1 ? 'it' : 'them'} across in a single transaction.
+            {plural(deviceCount, 'device')} currently {deviceCount === 1 ? 'uses' : 'use'} v{schemaVersion(schema)}
+            {outOfService ? `, including ${outOfService}` : ''}.
+            Publishing v{next} will move {deviceCount === 1 ? 'it' : 'them all'} across in a single transaction.
           </span>
         </div>
       )}

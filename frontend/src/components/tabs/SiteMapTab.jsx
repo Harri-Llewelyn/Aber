@@ -24,9 +24,10 @@ import { AreaPlan, AreaPlanPin } from '../common/AreaPlan'
 import { ExpandButton } from '../common/ExpandButton'
 import { ExpandedPlanModal } from '../common/PlanViewer'
 import {
-  SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
+  SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED,
   SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
+import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { isPlaced } from '../../utils/areaPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
@@ -181,10 +182,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     scrollToAreaId.current = null
   })
 
-  // Archived equipment is out of service on purpose, so nothing on the map counts or lists it, as
-  // with an archived cell. The Archived Entities page holds it.
-  const liveGateways = useMemo(() => gwList.filter(g => !g.is_archived), [gwList])
-  const liveAssets = useMemo(() => assets.filter(a => !a.is_archived), [assets])
+  // Only equipment in service is counted or listed (utils/inService.js), as on the Cells and Areas
+  // pages. The Archived Entities page holds the archived rest.
+  const liveGateways = useMemo(() => inServiceGateways(gwList), [gwList])
+  const liveAssets = useMemo(() => inServiceDevices(assets), [assets])
 
   // Cell membership, resolved from the device list this page already holds.
   const devicesByCell = useMemo(() => groupDevicesByCell(liveAssets), [liveAssets])
@@ -217,10 +218,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   const cellGatewaysOf = (cell) => liveGateways.filter(g => g.cell_id === cell.cell_id)
   const cellDevicesOf = (cell) => devicesByCell.get(cell.cell_id) || []
-  const areaWideOf = (area) => ({
-    devices: liveAssets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === area.area_id),
-    gateways: liveGateways.filter(g => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_AREA_WIDE && g.area_id === area.area_id)
-  })
+  const areaWideOf = (area) => areaWideInService(area.area_id, liveAssets, liveGateways)
   const cellsOf = (area) => cells.filter(c => c.area_id === area.area_id && !c.is_archived)
 
   const deviceChip = (a) => {

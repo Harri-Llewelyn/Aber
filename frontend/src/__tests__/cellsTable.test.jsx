@@ -119,12 +119,73 @@ describe('assigned gateways and devices', () => {
   /* The same column as the Gateways page's Connected Devices: a summary hidden behind a "+N" would
      defeat the column it summarises. */
   it('pins an Online/Offline summary ahead of the devices themselves', async () => {
-    renderCells({}, { devices: [device(), device({ asset_id: 'dev-2', asset_name: 'CNC_Mill_02', status: 'OFFLINE' })] })
+    renderCells({}, { devices: [device(), device({ asset_id: 'dev-2', asset_name: 'CNC_Mill_02', status: 'OFFLINE', first_dbirth_at: '2026-10-01T08:00:00Z' })] })
     await ready()
 
     const row = rowFor('Assembly Line 1')
     expect(within(row).getByText('1 Online / 1 Offline')).toBeTruthy()
     expect(within(row).getByText('CNC_Mill_01')).toBeTruthy()
+  })
+
+  /* Every count on the page counts equipment in service, as the Site Map does: an archived device
+     and a replay lane are left out, the lane even where its row resolved into the cell. The
+     archived device is still listed, marked. */
+  it('counts only the devices in service, in the summary, the drawer and the sort', async () => {
+    const OTHER = { ...CELL, cell_id: 'cell-2', cell_name: 'Assembly Line 2', gateways: [{ ...GATEWAY, gateway_id: 'gw-2', gateway_name: 'Line_B_Gateway', cell_id: 'cell-2' }] }
+    renderCells({}, {
+      cells: [OTHER, CELL],
+      devices: [
+        device(),
+        device({ asset_id: 'dev-old', asset_name: 'CNC_Old', is_archived: true }),
+        device({ asset_id: 'dev-lane', asset_name: 'CNC_Mill_01_Replay', shadow_of: 'dev-1' }),
+        device({ asset_id: 'dev-b1', asset_name: 'Press_B1', effective_cell_id: 'cell-2' }),
+        device({ asset_id: 'dev-b2', asset_name: 'Press_B2', effective_cell_id: 'cell-2' })
+      ]
+    })
+    await ready()
+
+    const row = rowFor('Assembly Line 1')
+    expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(within(row).getByText('CNC_Old (archived)')).toBeTruthy()
+
+    // Line 1 holds three device rows but one device in service, so it sorts before Line 2's two.
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect([...table().querySelectorAll('tbody tr strong')].map(s => s.textContent)).toEqual(['Assembly Line 1', 'Assembly Line 2'])
+
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+    expect(within(panel()).getByText('1 Gateway · 1 Device')).toBeTruthy()
+    expect(within(panel()).getByText('Devices (1/1 online)')).toBeTruthy()
+    expect(within(panel()).getByRole('link', { name: /CNC_Old/ })).toHaveTextContent('ARCHIVED')
+  })
+
+  /* One test for the filter, the badge and the help: nothing in service in the cell. A gateway
+     with no devices is not empty, and archived equipment does not make a cell full. */
+  it('calls a cell Empty only when nothing in service is in it, in the badge and the filter alike', async () => {
+    renderCells({}, {
+      cells: [
+        { ...CELL, cell_id: 'cell-gw', cell_name: 'Gateway Only' },
+        { ...CELL, cell_id: 'cell-old', cell_name: 'Only Archived', gateways: [{ ...GATEWAY, gateway_id: 'gw-old', is_archived: true, cell_id: 'cell-old' }] },
+        { ...CELL, cell_id: 'cell-dev', cell_name: 'Device Only', gateways: [] }
+      ],
+      devices: [
+        device({ asset_id: 'dev-old', asset_name: 'Old_Press', is_archived: true, effective_cell_id: 'cell-old' }),
+        device({ asset_id: 'dev-lane', asset_name: 'Press_Replay', shadow_of: 'dev-x', effective_cell_id: 'cell-old' }),
+        device({ asset_id: 'dev-own', asset_name: 'Own_Press', effective_cell_id: 'cell-dev', location_source: 'explicit' })
+      ]
+    })
+    await ready()
+
+    const badges = () => [...table().querySelectorAll('tbody tr')]
+      .filter(r => within(r).queryByText('Empty'))
+      .map(r => r.querySelector('strong').textContent)
+    expect(badges()).toEqual(['Only Archived'])
+
+    const filter = screen.getByRole('button', { name: /^Empty/ })
+    expect(filter).toHaveTextContent('Empty (1)')
+    expect(tooltipOf(filter)).toBe('Cells with no gateway and no device in service')
+    fireEvent.click(filter)
+    expect([...table().querySelectorAll('tbody tr strong')].map(s => s.textContent)).toEqual(['Only Archived'])
   })
 
   it('collapses past three devices so a busy cell cannot grow the row without bound', async () => {

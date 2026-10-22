@@ -410,6 +410,28 @@ describe('Detail modal — read-only vs draft', () => {
       .toEqual(['Systems/SPINDLE_TEMPERATURE', 'Systems/TEMPERATURE'])
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/schemas/v2-uuid/publish', {}))
+    // The count's one name, Devices, in the toast as on the page.
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      "'Robot_Arm_Schema_v2' v2 published, v1 archived — 3 devices moved to v2", 'success', { to: '/schemas?search=v2-uuid' }
+    ))
+  })
+
+  it('says how many devices a discarded draft detached', async () => {
+    schemaRows = [V1, DRAFT_V2]
+    api.post.mockResolvedValue({ version: 2, devices_detached: 1 })
+    renderTab()
+    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+    fireEvent.click(screen.getByRole('button', { name: /Discard Draft/ }))
+    const typed = screen.getByLabelText(/Type the schema name to confirm/)
+    fireEvent.change(typed, { target: { value: 'Robot_Arm_Schema_v2' } })
+    fireEvent.click(within(typed.closest('.modal')).getByRole('button', { name: /Discard Draft/ }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/schemas/v2-uuid/discard', {}))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      "Draft v2 of 'Robot_Arm_Schema_v2' discarded — 1 device detached", 'success'
+    ))
   })
 
   it('saves edits before publishing, so a publish can never activate what was not shown', async () => {

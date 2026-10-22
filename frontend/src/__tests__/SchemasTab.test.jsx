@@ -140,6 +140,76 @@ describe('the registry rows', () => {
 })
 
 /**
+ * A schema's count is the list its link opens: the Devices page opens on Active, hides replay lanes
+ * and keeps quarantined devices on its Quarantine tab. So archived devices, replay lanes and
+ * quarantined devices are attached but not counted, in the column, its sort, the drawer and the
+ * action alike. Create Version still warns about every attachment, since publishing moves them all.
+ */
+describe('what a schema’s device count counts', () => {
+  const S1 = {
+    schema_uuid: '11110000-0000-4000-8000-000000000001', schema_name: 'Lathe_Schema',
+    version: 1, status: 'active', parent_schema_id: null, schema_definition: { properties: {} }
+  }
+  const S2 = { ...S1, schema_uuid: '22220000-0000-4000-8000-000000000002', schema_name: 'Press_Schema' }
+  const on = (id, schema, extra = {}) => ({ asset_id: id, asset_name: id, submodel_schema_ids: [schema.schema_uuid], ...extra })
+  // Lathe: one in service, plus an archived device, a replay lane and a quarantined one. Press: two.
+  const DEVICES = [
+    on('Lathe_01', S1),
+    on('Lathe_Old', S1, { is_archived: true }),
+    on('Lathe_01_Replay', S1, { shadow_of: 'Lathe_01' }),
+    on('Lathe_Unknown', S1, { is_quarantined: true }),
+    on('Press_01', S2), on('Press_02', S2)
+  ]
+
+  const renderCounts = async () => {
+    api.get.mockImplementation((path) => Promise.resolve({
+      '/api/v1/schemas': [S1, S2],
+      '/api/v1/metric-catalog': CATALOG,
+      '/api/v1/devices': DEVICES
+    }[path] || []))
+    renderTab()
+    await waitFor(() => expect(screen.getByText('Lathe_Schema')).toBeTruthy())
+  }
+  const devicesCell = (name) => screen.getByText(name).closest('tr').lastElementChild
+  const names = () => [...document.querySelectorAll('.table-wrap tbody tr')].map(r => r.querySelector('strong').textContent)
+
+  it('counts the devices in service the link opens, and sorts by that count', async () => {
+    await renderCounts()
+    expect(devicesCell('Lathe_Schema').querySelector('a.count-link')).toHaveTextContent(/^1 device$/)
+    expect(devicesCell('Press_Schema').querySelector('a.count-link')).toHaveTextContent(/^2 devices$/)
+    expect(tooltipOf(within(screen.getByRole('columnheader', { name: 'Devices' })).getByRole('button')))
+      .toMatch(/^Devices in service using this version, not counting quarantined ones/)
+
+    // Four attachments against two would put Lathe last.
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Lathe_Schema', 'Press_Schema'])
+  })
+
+  it('lists the same devices under Devices in the drawer, and names the action View N Devices', async () => {
+    await renderCounts()
+    fireEvent.click(screen.getByText('Lathe_Schema'))
+    const panel = within(document.querySelector('.context-panel'))
+
+    expect(panel.queryByText('Provisioned Devices')).toBeNull()
+    expect(panel.getByText('Devices')).toBeTruthy()
+    expect(panel.getByRole('link', { name: 'Lathe_01' })).toBeTruthy()
+    for (const name of ['Lathe_Old', 'Lathe_01_Replay', 'Lathe_Unknown']) expect(panel.queryByText(name)).toBeNull()
+    expect(panel.getByRole('link', { name: /View 1 Device$/ })).toHaveAttribute('href', `/devices?schema=${S1.schema_uuid}`)
+  })
+
+  it('warns in Create Version about every attachment, and says how many are archived or replay lanes', async () => {
+    await renderCounts()
+    fireEvent.click(screen.getByText('Lathe_Schema'))
+    fireEvent.click(within(document.querySelector('.context-panel')).getByRole('button', { name: /Create Version v2/ }))
+
+    const warning = document.querySelector('.modal .callout-warning')
+    expect(warning).toHaveTextContent(
+      '4 devices currently use v1, including 1 archived device and 1 replay lane. Publishing v2 will move them all across in a single transaction.'
+    )
+  })
+})
+
+/**
  * Sorting the registry (#801): Version by its number, and Devices by the devices attached, each
  * counted once however many times it lists the schema.
  */
