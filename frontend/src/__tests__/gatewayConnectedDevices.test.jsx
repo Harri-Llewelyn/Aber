@@ -48,7 +48,7 @@ const twenty = Array.from({ length: 20 }, (_, i) => device(i + 1))
 
 beforeEach(() => vi.clearAllMocks())
 
-describe('gateway connected devices column', () => {
+describe('the gateway devices column', () => {
   it('shows every device when the fleet is small', async () => {
     await show([device(1), device(2)])
 
@@ -109,6 +109,118 @@ describe('gateway connected devices column', () => {
   })
 })
 
+/* The summary and the chips read the shared status helpers, as the drawer and the Devices page do:
+   Online is ONLINE, Offline is OFFLINE after a first birth, and a device never heard from is
+   Awaiting first birth. A quarantined device is in none of them, and an archived one is listed but
+   counted nowhere. */
+describe('the devices column counts by the shared status rules', () => {
+  const BORN = '2026-10-01T08:00:00Z'
+  const chip = (text) => screen.getByText(text, { selector: '.badge' })
+  const summary = () => screen.getByText(/^\d+ Online \/ /).textContent
+
+  it('counts a quarantined device in neither Online nor Offline, and draws it amber and pinned', async () => {
+    // Stored ONLINE, as the quarantine insert writes it.
+    await show([...twenty.slice(0, 4), device(5, { is_quarantined: true, status: 'ONLINE' })])
+    expect(summary()).toBe('4 Online / 0 Offline')
+    expect(chip('CNC_05 (quarantined)')).toHaveClass('badge-warning')
+    expect(tooltipOf(chip('CNC_05 (quarantined)'))).toBe('CNC_05 — QUARANTINED')
+  })
+
+  it('counts a device never heard from apart, as Awaiting first birth, and an OFFLINE one after its birth as Offline', async () => {
+    await show([
+      device(1),
+      device(2, { status: 'OFFLINE', first_dbirth_at: BORN }),
+      device(3, { status: 'OFFLINE', first_dbirth_at: null }),
+      // A missing status is not running.
+      device(4, { status: null, first_dbirth_at: BORN })
+    ])
+    expect(summary()).toBe('1 Online / 2 Offline / 1 Awaiting first birth')
+    fireEvent.click(screen.getByRole('button', { name: /^\+/ }))
+    expect(chip('CNC_01')).toHaveClass('badge-online')
+    expect(chip('CNC_04')).toHaveClass('badge-neutral')
+    expect(tooltipOf(chip('CNC_03'))).toBe('CNC_03 — AWAITING FIRST BIRTH')
+  })
+
+  it('says nothing of Awaiting first birth while no device is', async () => {
+    await show([device(1), device(2, { status: 'OFFLINE', first_dbirth_at: BORN })])
+    expect(summary()).toBe('1 Online / 1 Offline')
+  })
+
+  /* The gateways embed carries `first_dbirth_at`, and the row reads its devices from it alone: no
+     flat device list is needed to tell Offline from Awaiting first birth. */
+  it('reads each device’s first birth from the gateway’s own embed', async () => {
+    const gw = gateway([
+      device(1, { first_dbirth_at: BORN }),
+      device(2, { status: 'OFFLINE', first_dbirth_at: BORN }),
+      device(3, { status: 'OFFLINE', first_dbirth_at: null })
+    ])
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/gateways')) return Promise.resolve([gw])
+      return Promise.resolve([])
+    })
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeInTheDocument())
+    expect(summary()).toBe('1 Online / 1 Offline / 1 Awaiting first birth')
+  })
+
+  it('lists an archived device, marked, and leaves it out of the summary, the sort and the drawer’s count', async () => {
+    await show([device(1), device(2, { is_archived: true, status: 'ONLINE' })])
+    expect(summary()).toBe('1 Online / 0 Offline')
+    expect(chip('CNC_02 (archived)')).toHaveClass('badge-neutral')
+    expect(tooltipOf(chip('CNC_02 (archived)'))).toBe('CNC_02 — ARCHIVED')
+
+    fireEvent.click(screen.getByText('Line_A_Gateway', { selector: 'tbody strong' }))
+    const panel = await waitFor(() => {
+      const open = document.querySelector('.context-panel-open')
+      expect(open).toBeTruthy()
+      return open
+    })
+    expect(within(panel).getByText('Devices (1)')).toBeInTheDocument()
+    expect(within(panel).getByRole('link', { name: /CNC_02/ })).toHaveTextContent('ARCHIVED')
+  })
+
+  it('sorts by the devices in service, so archived ones do not lift a gateway', async () => {
+    const at = (id, name, devs) => ({ ...gateway(devs), gateway_id: id, gateway_name: name })
+    const archived = (n) => device(n, { is_archived: true })
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/gateways')) {
+        return Promise.resolve([
+          at('gw-a', 'Few_Live', [device(1), archived(2), archived(3), archived(4)]),
+          at('gw-b', 'More_Live', [device(5), device(6)])
+        ])
+      }
+      return Promise.resolve([])
+    })
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Few_Live')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect([...document.querySelectorAll('.table-wrap tbody tr strong')].map(s => s.textContent)).toEqual(['More_Live', 'Few_Live'])
+  })
+
+  /* The Playback gateway serves replay lanes and nothing else: on this page they are what it serves,
+     so only archived devices leave its counts. */
+  it('counts the Playback gateway’s replay lanes as the devices it serves', async () => {
+    const lane = (n) => device(n, { shadow_of: `dev-src-${n}`, asset_name: `Lane_${n}` })
+    const playback = { ...gateway([lane(1), lane(2)]), gateway_id: 'gw-play', gateway_name: 'Playback', is_shadow: true, is_simulated: true, deployment: 'host', cell_id: null }
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/gateways')) return Promise.resolve([playback])
+      return Promise.resolve([])
+    })
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Playback', { selector: 'tbody strong' })).toBeInTheDocument())
+    expect(summary()).toBe('2 Online / 0 Offline')
+    expect(screen.getByText('Lane_1')).toBeInTheDocument()
+  })
+
+  it('names the column Devices, and says in its title what it lists', async () => {
+    await show([device(1)])
+    const header = screen.getByRole('columnheader', { name: 'Devices' })
+    expect(tooltipOf(within(header).getByRole('button', { name: 'Devices' }))).toMatch(/^The devices this gateway serves/)
+    expect(screen.queryByText(/Connected Devices/)).toBeNull()
+  })
+})
+
 describe('the gateways table sorts by a column (#801)', () => {
   const ago = (ms) => new Date(Date.now() - ms).toISOString()
   const MINUTE = 60_000
@@ -159,7 +271,7 @@ describe('the gateways table sorts by a column (#801)', () => {
     expect(address()).toBe('/gateways?lifecycle=all&sort=-status')
   })
 
-  it('sorts Last Heartbeat by instant with Never last, and Connected Devices by count with an archived gateway last', async () => {
+  it('sorts Last Heartbeat by instant with Never last, and Devices by count with an archived gateway last', async () => {
     await showFleet()
     expect(within(rows()[3]).getByText('Never')).toBeInTheDocument()
 
@@ -168,9 +280,9 @@ describe('the gateways table sorts by a column (#801)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Last Heartbeat' }))
     expect(names()).toEqual(['Online', 'Stale', 'Offline', 'Archived', 'Enrolled', 'Pending'])
 
-    fireEvent.click(screen.getByRole('button', { name: 'Connected Devices' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
     expect(names()).toEqual(['Pending', 'Offline', 'Online', 'Enrolled', 'Stale', 'Archived'])
-    fireEvent.click(screen.getByRole('button', { name: 'Connected Devices' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
     expect(names()).toEqual(['Stale', 'Enrolled', 'Online', 'Offline', 'Pending', 'Archived'])
   })
 
@@ -182,23 +294,23 @@ describe('the gateways table sorts by a column (#801)', () => {
     expect(names()).toEqual(['Offline', 'Enrolled', 'Online', 'Archived', 'Pending', 'Stale'])
   })
 
-  /* The open drawer drops the UUID and Connected Devices columns; a sort by one of them stays in the
+  /* The open drawer drops the UUID and Devices columns; a sort by one of them stays in the
      address and in the order of the rows, and its header returns marked when the drawer closes. */
   it('opens sorted from the address, and keeps the order while the drawer hides the sorted column', async () => {
     await showFleet('/gateways?lifecycle=all&sort=-devices')
     const sorted = ['Stale', 'Enrolled', 'Online', 'Offline', 'Pending', 'Archived']
     expect(names()).toEqual(sorted)
-    expect(screen.getByRole('columnheader', { name: 'Connected Devices' })).toHaveAttribute('aria-sort', 'descending')
+    expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending')
 
     fireEvent.click(screen.getByText('Online_Gateway', { selector: 'tbody strong' }))
-    await waitFor(() => expect(screen.queryByRole('columnheader', { name: 'Connected Devices' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('columnheader', { name: 'Devices' })).toBeNull())
     expect(screen.queryByRole('columnheader', { name: 'Gateway UUID' })).toBeNull()
     expect(document.querySelectorAll('th[aria-sort]')).toHaveLength(0)
     expect(names()).toEqual(sorted)
     expect(address()).toBe('/gateways?lifecycle=all&sort=-devices&gateway=gw-online')
 
     fireEvent.click(screen.getByText('Online_Gateway', { selector: 'tbody strong' }))
-    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Connected Devices' })).toHaveAttribute('aria-sort', 'descending'))
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending'))
     expect(names()).toEqual(sorted)
   })
 })

@@ -661,7 +661,7 @@ describe('Tables shed what the panel now carries', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
-    expect(p.getByText(/Connected Devices \(1\)/)).toBeTruthy()
+    expect(p.getByText('Devices (1)')).toBeTruthy()
     expect(p.getByText('Simulated_CNC_01')).toBeTruthy()
   })
 
@@ -945,7 +945,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
     expect(helpTipText('What Sparkplug Topic Path means', panel())).toMatch(/No Sparkplug group is recorded/)
   })
 
-  it('names the connected devices once, not a count and then a list', async () => {
+  it('names the gateway’s devices once, not a count and then a list', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
@@ -953,7 +953,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
-    expect(p.getByText(/Connected Devices \(1\)/)).toBeTruthy()
+    expect(p.getByText('Devices (1)')).toBeTruthy()
     expect(p.getByText('Simulated_CNC_01')).toBeTruthy()
     // The separate "1 (1 online)" metadata row is gone -- the named list already answers it.
     expect(p.queryByText(/^1 \(1 online\)$/)).toBeNull()
@@ -982,7 +982,7 @@ describe('Context panel layout invariants', () => {
 
     const facts = panel().querySelector('.context-panel-facts')
     const actions = panel().querySelector('.context-panel-actions')
-    expect(within(facts).getByText(/Connected Devices/)).toBeTruthy()
+    expect(within(facts).getByText('Devices (1)')).toBeTruthy()
     // "Which devices" is another thing the panel SAYS, not another thing it does.
     expect(facts.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
