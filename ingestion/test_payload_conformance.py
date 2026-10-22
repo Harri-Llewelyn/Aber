@@ -27,6 +27,7 @@ from the code under test.
 import builtins
 import json
 import os
+import re
 import sys
 import types
 import unittest
@@ -485,6 +486,16 @@ class PayloadConformanceContractTestCase(unittest.TestCase):
         """A contract exercising nothing reports green while the two sides drift freely."""
         self.assertGreater(len(self.cases), 20)
         self.assertTrue(any("expected_js" in case for case in self.cases))
+
+    def test_every_code_conformance_emits_has_a_case(self):
+        """A code no case expects is one the dashboard's copy is never held to."""
+        with open(os.path.join(INGESTION_DIR, "conformance.py"), "r", encoding="utf-8") as handle:
+            source = handle.read()
+        emitted = (set(re.findall(r'\(\s*"([a-z]+(?:_[a-z]+)+)",', source))
+                   | set(re.findall(r'"code":\s*"([a-z_]+)"', source)))
+        covered = {v["code"] for case in self.cases for v in case.get("expected", [])}
+        self.assertIn("type_mismatch", emitted)
+        self.assertEqual(emitted - covered, set())
 
     def test_every_case_matches_the_contract(self):
         for case in self.cases:
