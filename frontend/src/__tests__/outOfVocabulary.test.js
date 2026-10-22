@@ -3,6 +3,7 @@ import {
   outOfVocabularyMetrics, hasOutOfVocabularyValues, deviceTagList, availableTags,
   OUT_OF_VOCABULARY_TAG, UNMODELLED_TAG
 } from '../utils/deviceTags'
+import { deviceIds } from '../utils/sparkplugId'
 
 /**
  * The finding the vocabulary check exists to make visible: a flow once set
@@ -118,5 +119,26 @@ describe('the tag it produces', () => {
     expect(availableTags([device], [schema], dirty, CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
     // No resolver at all: the option is not offered rather than being offered and matching nothing.
     expect(availableTags([device], [schema])).not.toContain(OUT_OF_VOCABULARY_TAG)
+  })
+})
+
+describe('the readings a device is judged by', () => {
+  // As the Devices page reads telemetry_latest: keyed on asset_id, which ingestion writes as the
+  // issued sparkplug_id whatever id the device publishes under.
+  const latest = new Map([['devaaaaaaaa000040008004', { 'Controller/EXECUTION': 'RUNNING' }]])
+  const latestFor = (d) => latest.get(deviceIds(d).issued) || null
+  // Admitted from Quarantine under its own Sparkplug id.
+  const device = {
+    asset_id: 'aaaaaaaa-0000-4000-8000-000000000005', sparkplug_id: 'devaaaaaaaa000040008004',
+    reported_identity: 'VND-7731-AX', identity_source: 'reported_identity', last_birth_metrics: []
+  }
+
+  it('are found by the issued id, so a device publishing its own id has the finding', () => {
+    expect(deviceTagList(device, null, latestFor(device), CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
+    expect(availableTags([device], [], latestFor, CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
+  })
+
+  it('are not stored under the published id', () => {
+    expect(latest.get(deviceIds(device).published)).toBeUndefined()
   })
 })

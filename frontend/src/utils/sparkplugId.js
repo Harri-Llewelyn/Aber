@@ -1,8 +1,9 @@
-// Sparkplug B wire identity. Every gateway and device carries an immutable `sparkplug_id`: a
-// 3-character type prefix plus 21 lowercase hex characters. It is what appears in the MQTT topic
-// and what keys telemetry and `asset_config`; asset names are display labels only. The column is
-// GENERATED ALWAYS from the row's UUID (0001_baseline_schema.sql), so it is derived locally to save
-// a round-trip. Keep in step with the SQL: 'dev' || substr(encode(uuid_send(id), 'hex'), 1, 21).
+// Sparkplug B identities. Every gateway and device carries an immutable, issued `sparkplug_id`: a
+// 3-character type prefix plus 21 lowercase hex characters. It keys telemetry and `asset_config`;
+// asset names are display labels only. A device that cannot publish it keeps its own id in the
+// topic (deviceIds() below). The column is GENERATED ALWAYS from the row's UUID
+// (0001_baseline_schema.sql), so it is derived locally to save a round-trip. Keep in step with the
+// SQL: 'dev' || substr(encode(uuid_send(id), 'hex'), 1, 21).
 
 import { isUuid } from './isUuid';
 
@@ -33,14 +34,37 @@ export function isSparkplugId(val) {
   return typeof val === 'string' && SPARKPLUG_ID_REGEX.test(val);
 }
 
+// `devices.identity_source`: which id ingestion last resolved the device by (ingestion.py).
+const SOURCE_SPARKPLUG_ID = 'sparkplug_id';
+const SOURCE_INSTANCE_UUID = 'instance_uuid';
+
 /**
- * The identifier a device is reachable by on the wire. Third-party hardware with a factory-preset
- * Sparkplug id cannot publish a platform-issued one, so ingestion records what it saw in
- * `reported_identity`; where set, that is the id an engineer needs.
+ * A device's two Sparkplug ids. `issued` is its `sparkplug_id`, which readings, exports, the AAS
+ * shell and i3X are keyed on. `published` is the id in its topic when that is another one, else
+ * null. It follows `identity_source`: the UUID for `instance_uuid`, none for `sparkplug_id`, and
+ * otherwise `reported_identity`, which covers a device not born since the column was recorded.
  */
-export function effectiveSparkplugId(device) {
-  if (!device) return '';
-  return device.reported_identity || device.sparkplug_id || deviceSparkplugId(device.id);
+export function deviceIds(device) {
+  if (!device) return { issued: '', published: null };
+  const uuid = device.id || device.asset_id || '';
+  const issued = device.sparkplug_id || deviceSparkplugId(uuid);
+  const source = device.identity_source;
+  const published = source === SOURCE_SPARKPLUG_ID ? null
+    : source === SOURCE_INSTANCE_UUID ? uuid
+      : device.reported_identity;
+  return { issued, published: published && published !== issued ? published : null };
+}
+
+/**
+ * Every id a device answers to: its UUID, its issued and published ids, and an id it reported once,
+ * which stays on the row after the device starts publishing its issued one. For search, and for a
+ * link that names a device by any of them.
+ */
+export function deviceIdentifiers(device) {
+  if (!device) return [];
+  const { issued, published } = deviceIds(device);
+  const ids = [device.asset_id || device.id, issued, published, device.reported_identity];
+  return [...new Set(ids.filter(Boolean))];
 }
 
 /**
