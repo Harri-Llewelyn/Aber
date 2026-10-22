@@ -251,7 +251,7 @@ HELP = {
         "twice.",
     "aber_ingestion_rollup_windows_failed_total":
         "Windows of late telemetry that could not be recorded. The readings are stored, but reach the "
-        "rollups only when that window is refreshed by hand (docs/remote-gateways.md, \"Late data "
+        "rollups only when that window is refreshed by hand (help/site/remote-gateways.md, \"Late data "
         "after an outage\").",
     "aber_ingestion_write_queue_depth":
         "DDATA messages decided by the callback thread and not yet written. THE SATURATION SIGNAL: "

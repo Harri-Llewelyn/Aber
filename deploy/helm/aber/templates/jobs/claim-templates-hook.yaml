@@ -21,7 +21,7 @@
   creates the StatefulSet again, which adopts the running pod and its `data-<name>-0` claim and
   rolls it. A StatefulSet whose labels already match is left alone, so after the first upgrade this
   does nothing. Any unexpected API answer fails the Job, and the upgrade stops before Helm patches
-  anything. docs/upgrades.md has the manual command for an upgrade run with --no-hooks.
+  anything. help/site/upgrading.md has the manual command for an upgrade run with --no-hooks.
 
   Its authority: `get` and `delete` on the two StatefulSets, by name, and nothing else.
   =================================================================================================

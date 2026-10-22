@@ -73,7 +73,7 @@ Each file's header names its number in the archive and the number it was applied
 
 **It has no tail.** Each earlier squash kept its subtractions applied, because a database built by
 the chain it replaced still held what they removed. Before 1.0 no such database is upgraded
-([`docs/upgrades.md`](../../../docs/upgrades.md#the-floor-100)), so `0000`, the third squash's tail,
+([`help/site/upgrading.md`](../../../help/site/upgrading.md#the-floor-100)), so `0000`, the third squash's tail,
 folded away with the rest, and so did the one-shot repairs that only ever touched an older
 database's rows: `0136`'s Sparkplug group move, `0137`'s semantic-id authority, `0155`'s Directory
 rename, `0161`'s webhook deletion. Their tests went with them.

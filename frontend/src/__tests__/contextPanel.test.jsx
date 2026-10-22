@@ -325,7 +325,7 @@ describe('On a narrow screen help replaces the details panel', () => {
       <>
         <button type="button" onClick={() => setHelp(v => !v)}>Help for this page</button>
         <div className="app-body">
-          <HelpDrawerContext.Provider value={closeHelp}>
+          <HelpDrawerContext.Provider value={{ close: closeHelp }}>
             <main className="content">{children}</main>
           </HelpDrawerContext.Provider>
           <HelpPanel open={help} tabId="cells" onClose={closeHelp} />
@@ -738,6 +738,18 @@ describe('The panel is the single home for entity actions', () => {
 
     const archive = within(panel()).getByText(/Archive Device/i).closest('button')
     expect(archive.className).toMatch(/context-action-danger/)
+  })
+
+  /* jsdom does no layout, so the guard is on the rules. View Audit Trail is an <a> and the actions
+     around it are <button>s; Edit Details is a primary and the rest are ghosts. */
+  it('draws every action one height, whatever its element and its variant', () => {
+    const btn = APP_CSS.match(/\n\.btn \{([\s\S]*?)\n\}/)[1]
+    expect(btn).toMatch(/line-height:\s*1\.25/)
+    expect(btn).toMatch(/border:\s*1px solid transparent/)
+    // The separation is a margin: padding or a border of its own would make Archive taller.
+    const danger = APP_CSS.match(/\n\.context-action-danger \{([\s\S]*?)\n\}/)[1]
+    expect(danger).toMatch(/margin-top/)
+    expect(danger).not.toMatch(/padding|border/)
   })
 })
 

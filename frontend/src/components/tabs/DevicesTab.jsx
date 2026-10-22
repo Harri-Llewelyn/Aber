@@ -25,7 +25,7 @@ import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
-import { Model3DUploader } from '../common/Model3DUploader'
+import { Model3DUploader, Model3DLabel } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
@@ -72,7 +72,6 @@ import {
   IconHistory,
   IconClipboardList,
   IconBookOpen,
-  IconCube,
   IconAlertTriangle,
   IconPlay,
   IconAlertCircle,
@@ -1658,9 +1657,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <>
             {/* onChange reloads so model_3d_path cannot go stale. */}
             <div>
-              <div className="context-panel-section-label context-panel-section-label-icon">
-                <IconCube size={13} /> 3D Model
-              </div>
+              <Model3DLabel />
               <Model3DUploader
                 device={selectedDevice}
                 canManage={canManage && !selectedDevice.is_archived}

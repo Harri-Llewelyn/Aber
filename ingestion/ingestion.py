@@ -2867,7 +2867,7 @@ def _record_rollup_windows(cur, windows):
             logger.warning(
                 "Could not record %d window(s) of late telemetry for the rollups (%s). The readings "
                 "are stored, and reach telemetry_1m/5m/1h only when refreshed by hand "
-                "(docs/remote-gateways.md, \"Late data after an outage\"). A missing table means "
+                "(help/site/remote-gateways.md, \"Late data after an outage\"). A missing table means "
                 "the historian's maintenance Job has not run since this daemon was upgraded.",
                 len(windows), str(e).strip(),
             )
