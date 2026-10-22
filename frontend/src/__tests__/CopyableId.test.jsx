@@ -137,4 +137,46 @@ describe('CopyableId', () => {
       expect(document.querySelector('.copyable-id-tail')).toBeNull();
     });
   });
+
+  // jsdom lays nothing out, so "cut" is faked: the element named by `clipped` reports content wider
+  // than its box.
+  describe('the tooltip', () => {
+    const LONG = 'https://aber.local/semantics/iso22400/EFFECTIVENESS';
+    const clip = (clipped) => {
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+        .mockImplementation(function () { return this.matches(clipped) ? 300 : 100; });
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(100);
+    };
+    const tip = () => document.querySelector('[role=tooltip]');
+
+    it('says "Click to copy this {label}" when the chip fits', () => {
+      clip('.nothing');
+      render(<CopyableId value={LONG} label="semantic id" />);
+      fireEvent.focus(screen.getByRole('button'));
+      expect(tip()).toHaveTextContent('Click to copy this semantic id');
+      expect(tip()).not.toHaveTextContent(LONG);
+    });
+
+    it('carries the full value when the end is cut', () => {
+      clip('.copyable-id-value');
+      render(<CopyableId value={LONG} label="semantic id" />);
+      fireEvent.focus(screen.getByRole('button'));
+      expect(tip()).toHaveTextContent(`Click to copy ${LONG}`);
+      expect(tip().querySelector('.copyable-id-full')).toHaveTextContent(LONG);
+    });
+
+    it('carries the full value when "start" cuts the head, measured on hover too', () => {
+      clip('.copyable-id-head');
+      render(<CopyableId value={LONG} label="semantic id" truncate="start" />);
+      fireEvent.mouseEnter(screen.getByRole('button'));
+      expect(tip()).toHaveTextContent(`Click to copy ${LONG}`);
+    });
+
+    it('lets a title win, cut or not', () => {
+      clip('.copyable-id-value');
+      render(<CopyableId value={LONG} label="semantic id" title="The vocabulary's id" />);
+      fireEvent.focus(screen.getByRole('button'));
+      expect(tip()).toHaveTextContent("The vocabulary's id");
+    });
+  });
 });

@@ -1896,6 +1896,13 @@ td.row-actions, th.row-actions {
   overflow-wrap: anywhere;
 }
 
+/* A cut chip's full value, in its tooltip: in the chip's face, and broken anywhere, since an id
+   longer than the bubble has no space to break at. */
+.copyable-id-full {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 .copyable-id-icon { flex-shrink: 0; }
 
 .copyable-id-error {
