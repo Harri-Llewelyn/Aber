@@ -429,7 +429,7 @@ export function SchemaDetailModal({
             <span>
               {orphanedNames.length} modelled metric{orphanedNames.length === 1 ? '' : 's'} no longer in the active
               catalog ({orphanedNames.map(n => <span key={n} className="mono">{n} </span>)}) — kept as-is
-              {editable ? ', and kept on save unless you clear the schema of them deliberately.' : '.'}
+              {editable ? ', and kept on save. This dialog cannot remove them; only the REST API can.' : '.'}
             </span>
           </div>
         )}

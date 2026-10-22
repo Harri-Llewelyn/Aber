@@ -130,7 +130,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
         <EmptyState message={error} />
       ) : attachedSchemas.length > 0 ? (
         comparisonRows.length === 0 ? (
-          <EmptyState icon={<IconFileText size={36} />} message="This schema has no required metrics." />
+          <EmptyState icon={<IconFileText size={36} />} message="This device's schemas model no metrics, and it has reported none." />
         ) : (
           <div className="table-wrap">
             <table className="modal-table">
@@ -146,7 +146,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
               <thead>
                 <tr>
                   <SortHeader sort={comparisonSort} column="metric">Metric Parameter</SortHeader>
-                  <SortHeader sort={comparisonSort} column="status" title="Present: required and reported. Missing: required, not reported yet. Unmodelled: reported, outside the schema.">Status</SortHeader>
+                  <SortHeader sort={comparisonSort} column="status" title="Present: modelled and reported. Missing: modelled, not reported yet. Unmodelled: reported, outside the schema.">Status</SortHeader>
                   <th>Reported Value</th>
                   <SortHeader sort={comparisonSort} column="datatype" title="Sparkplug B datatype">Datatype</SortHeader>
                   <SortHeader sort={comparisonSort} column="last_updated">Last Updated</SortHeader>
