@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -32,7 +32,8 @@ import {
   IconHistory,
   IconExternalLink,
   IconRadio,
-  IconShieldAlert
+  IconShieldAlert,
+  IconCpu
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
@@ -267,6 +268,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const selectedCellGateways = selectedCell?.gateways || []
   const selectedCellDevices = selectedCell ? (devicesByCell.get(selectedCell.cell_id) || []) : []
   const selectedCellArea = selectedCell ? areaOf(selectedCell.area_id) : null
+  // What the database counts before it archives a cell, and refuses while either is non-zero:
+  // every device that resolves here, whatever its lifecycle, and every gateway filed here.
+  const selectedCellItems = selectedCellDevices.length + selectedCellGateways.length
+  const selectedCellHolds = [
+    selectedCellDevices.length > 0 && plural(selectedCellDevices.length, 'device'),
+    selectedCellGateways.length > 0 && plural(selectedCellGateways.length, 'gateway')
+  ].filter(Boolean).join(' and ')
+  const selectedCellQuarantined = selectedCellDevices.filter(d => d.is_quarantined).length
 
   return (
     <div className="page-layout page-fill">
@@ -396,7 +405,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         <strong>{c.cell_name}</strong>
                         {c.description && <div className="cell-meta">{c.description}</div>}
                         {c.is_archived && (
-                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: its topics are unchanged" />
+                          <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of service, with no devices or gateways in it" />
                         )}
                         {/* A cell with neither a gateway nor a device is usually half-provisioned,
                             and saying so stops it reading as a failed load. */}
@@ -752,6 +761,15 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             onClick: () => setLinksForCell(selectedCell),
             title: 'Attach or edit links for this cell — documents, an asset register, a file repository, any URL'
           },
+          // Beside Archive Cell, as the way to what holds it. The Devices page's roster leaves
+          // quarantined devices to its Quarantine table, so the tooltip counts those.
+          selectedCellDevices.length > 0 && {
+            label: 'Show Its Devices', icon: <IconCpu size={13} />,
+            to: devicesInCellUrl(selectedCell.cell_id),
+            title: `Open the Devices page on this cell's devices, archived ones included.${selectedCellQuarantined
+              ? ` ${plural(selectedCellQuarantined, 'quarantined device')} ${selectedCellQuarantined === 1 ? 'is' : 'are'} in its Quarantine table.`
+              : ''}`
+          },
           // Archive is a thing done to one cell you have chosen, like the actions before it.
           selectedCell.is_archived ? {
             label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
@@ -764,9 +782,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           } : {
             label: 'Archive Cell', icon: <IconArchive size={13} />,
             onClick: () => setArchiveTarget(selectedCell),
-            disabled: !canArchive,
+            disabled: !canArchive || selectedCellItems > 0,
             danger: true,
-            title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Archive Cell'
+            title: !canArchive
+              ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+              : selectedCellItems > 0
+                ? `This cell holds ${selectedCellHolds}. Move ${selectedCellItems === 1 ? 'it' : 'them'} to another cell, or delete ${selectedCellItems === 1 ? 'it' : 'them'}, then archive the cell.`
+                : 'Archive Cell'
           },
         ].filter(Boolean) : []}
       />

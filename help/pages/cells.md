@@ -15,8 +15,11 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 - **A column's heading sorts the table** by that column. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Cell UUID** is the identifier to quote in a query or a ticket. Copy it from the details panel.
 - **Dashboard / UI URL** links the cell to a dashboard, which **Open Dashboard** in the panel opens. When a cell has one, that is the panel's main action; otherwise **Edit Details** is (or **Restore Cell** for an archived cell). It is a link, not an embedded view: dashboards and thresholds live in Grafana.
-- **Assigned Gateways** and **Devices** list what is in the cell now. To move them, edit the gateway or device on its own page.
+- **Assigned Gateways** and **Devices** list what is in the cell now. To move one, open it from its chip and use **Edit Details** on its own page. **Show Its Devices** opens the Devices page on this cell's devices, archived ones included.
 - **Attached Links**, **View Audit Trail**, **Archive Cell** and **Restore Cell** are in the panel. Archiving takes a cell out of service and starts a retention timer on the Archived Entities page.
+- **Archive Cell** is greyed out while any device or gateway is in the cell, archived and quarantined ones included. Hover it to see how many. Move each one to another cell, or delete it, then archive the cell.
+- **To move an archived device or gateway**, restore it, move it, then archive it again. Archiving it again starts its retention timer again. Or delete it with **Permanent Delete** on the Archived Entities page.
+- **A quarantined device** is in the Quarantine table on the Devices page, not in its list. Approve it into another place, or reject it, which deletes it.
 
 ## What the states mean
 

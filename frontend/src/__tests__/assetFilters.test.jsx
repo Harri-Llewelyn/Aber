@@ -5,7 +5,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
-import { devicesForSchemaUrl } from '../routes'
+import { devicesForSchemaUrl, devicesInCellUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
@@ -142,6 +142,25 @@ describe('DevicesTab filters', () => {
     expect(screen.getByText(/provisioned with schema/i).textContent).toContain('Robot-Arm-Standard')
     // The schema select is in the Filters popover, whose button counts it.
     expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeTruthy()
+  })
+
+  it('lists every device in a cell, archived ones included, when handed one from the Cells page', async () => {
+    // Show Its Devices links here: an archived device still holds its cell, and the Active
+    // default would hide it.
+    const inCell = (d, cellId) => ({ ...d, effective_cell_id: cellId })
+    api.get.mockImplementation(routeGet({
+      devices: [
+        inCell(healthyDevice, 'cell-1'),
+        inCell({ ...offlineDevice, is_archived: true }, 'cell-1'),
+        inCell(neverBornDevice, 'cell-2')
+      ]
+    }))
+    window.history.replaceState({}, '', devicesInCellUrl('cell-1'))
+    renderDevices()
+
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    expect(screen.getByText('CNC_02')).toBeTruthy()
+    expect(screen.queryByText('Robot_03')).toBeNull()
   })
 
   it('reads the schema filter from the ?schema= query parameter', async () => {

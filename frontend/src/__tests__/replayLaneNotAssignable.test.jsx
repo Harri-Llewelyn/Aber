@@ -55,16 +55,16 @@ const device = (overrides = {}) => ({
   ...overrides
 })
 
-const routeGet = (rows) => (path) => {
-  if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+const routeGet = (rows, gateways = GATEWAYS) => (path) => {
+  if (path.startsWith('/api/v1/gateways')) return Promise.resolve(gateways)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(CELLS)
   if (path.startsWith('/api/v1/quarantine')) return Promise.resolve([])
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(rows)
   return Promise.resolve([])
 }
 
-const show = async (rows, expectName = 'CNC_01') => {
-  api.get.mockImplementation(routeGet(rows))
+const show = async (rows, expectName = 'CNC_01', gateways = GATEWAYS) => {
+  api.get.mockImplementation(routeGet(rows, gateways))
   render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getByText(expectName)).toBeTruthy())
 }
@@ -177,6 +177,18 @@ describe("the device form's gateway picker", () => {
     expect(screen.getByText(/This is a replay lane\. It stays on the Playback gateway/)).toBeTruthy()
   })
 
+  /* An archived gateway is not offered, and the database refuses one. A device already on one
+     keeps it on save (an unchanged gateway passes), so the picker shows it rather than Unassigned. */
+  it('shows the archived gateway a device is on, and offers no other', async () => {
+    const retired = (id, name) => ({ gateway_id: id, gateway_name: name, cell_id: null, location_scope: 'cell', status: 'OFFLINE', is_archived: true, devices: [] })
+    await show([device({ active_gateway_id: 'gw-old' })], 'CNC_01',
+      [...GATEWAYS, retired('gw-old', 'Retired_Gateway'), retired('gw-older', 'Older_Gateway')])
+    openEdit()
+    expect(gatewaySelect().value).toBe('gw-old')
+    expect(optionFor(gatewaySelect(), 'gw-old').textContent).toMatch(/archived$/)
+    expect(optionFor(gatewaySelect(), 'gw-older')).toBeUndefined()
+  })
+
   it('leaves an ordinary device free to move between gateways', async () => {
     await show([device()])
     openEdit()
@@ -220,5 +232,26 @@ describe("the quarantine approval modal's gateway picker", () => {
     )
     expect(optionFor(select, PLAYBACK).disabled).toBe(true)
     expect(optionFor(select, 'gw-1').disabled).toBe(false)
+  })
+
+  /* The database refuses a device assigned to an archived gateway, and the Playback gateway takes
+     no device: neither may be the gateway the dialog starts on, whether the device arrived through
+     it or it is first in the list. */
+  it('never starts on an archived gateway or the Playback gateway', () => {
+    const retired = { gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', cell_id: null, location_scope: 'cell', status: 'OFFLINE', is_archived: true, devices: [] }
+    render(
+      <ApproveQuarantineModal
+        item={{ ...item, gateway_id: 'gw-old' }}
+        cells={CELLS}
+        gateways={[retired, GATEWAYS[1], GATEWAYS[0]]}
+        suggestion={null}
+        onApprove={vi.fn()}
+        onMerge={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+    const select = document.getElementById('approve-gateway')
+    expect(select.value).toBe('gw-1')
+    expect(optionFor(select, 'gw-old')).toBeUndefined()
   })
 })
