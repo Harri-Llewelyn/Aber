@@ -61,20 +61,29 @@ function CodeBlock({ lang, text }) {
   )
 }
 
-function inline(nodes, key) {
+/**
+ * A code span in a table cell, with a place to wrap after each `/` that ends a segment, so a topic
+ * or a path wraps between its parts in a narrow column and never inside a word. `<wbr>` adds no
+ * character, so a copy is the text as written. Never inside `//`, so a URL's scheme stays whole.
+ */
+function cellCode(text) {
+  return text.split(/(?<=[^/]\/)(?=[^/])/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]))
+}
+
+function inline(nodes, key, inCell = false) {
   return nodes.map((n, i) => {
     const k = `${key}.${i}`
     if (typeof n === 'string') return <React.Fragment key={k}>{n}</React.Fragment>
     switch (n.type) {
-      case 'strong': return <strong key={k}>{inline(n.children, k)}</strong>
-      case 'em': return <em key={k}>{inline(n.children, k)}</em>
-      case 'codespan': return <code key={k}>{n.text}</code>
+      case 'strong': return <strong key={k}>{inline(n.children, k, inCell)}</strong>
+      case 'em': return <em key={k}>{inline(n.children, k, inCell)}</em>
+      case 'codespan': return <code key={k}>{inCell ? cellCode(n.text) : n.text}</code>
       case 'br': return <br key={k} />
       case 'link':
-        if (n.help) return <HelpLink key={k} to={n.anchor ? `${n.help}#${n.anchor}` : n.help}>{inline(n.children, k)}</HelpLink>
-        if (n.repo) return <RepoLink key={k} path={n.repo} anchor={n.anchor}>{inline(n.children, k)}</RepoLink>
-        if (isLocal(n.href)) return <a key={k} href={n.href} target="_blank" rel="noopener noreferrer">{inline(n.children, k)}</a>
-        return <OnlineLink key={k} href={n.href}>{inline(n.children, k)}</OnlineLink>
+        if (n.help) return <HelpLink key={k} to={n.anchor ? `${n.help}#${n.anchor}` : n.help}>{inline(n.children, k, inCell)}</HelpLink>
+        if (n.repo) return <RepoLink key={k} path={n.repo} anchor={n.anchor}>{inline(n.children, k, inCell)}</RepoLink>
+        if (isLocal(n.href)) return <a key={k} href={n.href} target="_blank" rel="noopener noreferrer">{inline(n.children, k, inCell)}</a>
+        return <OnlineLink key={k} href={n.href}>{inline(n.children, k, inCell)}</OnlineLink>
       default: return null
     }
   })
@@ -107,7 +116,7 @@ function blocks(nodes, key) {
               </thead>
               <tbody>
                 {n.rows.map((row, r) => (
-                  <tr key={r}>{row.map((cell, j) => <td key={j} className={ALIGN[n.align[j]]}>{inline(cell, `${k}.${r}.${j}`)}</td>)}</tr>
+                  <tr key={r}>{row.map((cell, j) => <td key={j} className={ALIGN[n.align[j]]}>{inline(cell, `${k}.${r}.${j}`, true)}</td>)}</tr>
                 ))}
               </tbody>
             </table>

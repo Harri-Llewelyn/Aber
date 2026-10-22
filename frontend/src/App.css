@@ -4712,8 +4712,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   vertical-align: top;
 }
 .help-prose th { background: var(--bg-glass); font-weight: 600; color: var(--text-muted); }
-/* A code token in a cell breaks only where its text allows a break, as at a space or after a
-   hyphen, never inside a word. A table its tokens make wider than the panel scrolls in its wrapper. */
+/* A code token in a cell breaks only where its text allows a break, as at a space, after a hyphen
+   or after a `/` (HelpMarkdown's `<wbr>`), never inside a word. A table its tokens make wider than
+   the panel scrolls in its wrapper. */
 .help-prose td code { overflow-wrap: normal; }
 .help-prose tbody tr:last-child td { border-bottom: none; }
 .help-prose .help-align-center { text-align: center; }

@@ -1272,8 +1272,12 @@ help's header before the X, in ContextPanel's `headerActions` slot. No page's dr
   scrolls sideways in `.help-table-wrap` or `.help-code pre`, expanded or not. The inner shell holds
   the drawer's width, so nothing on a help page can widen the drawer. A code token in a table cell
   breaks only where its text allows, such as at a space or after a hyphen, never inside a word
-  (`overflow-wrap: normal`). So the tutorial's topic table scrolls when docked. With `anywhere` it
-  fitted, by showing `NBIRTH` as `NBIR` above `TH`.
+  (`overflow-wrap: normal`). With `anywhere` the tutorial's topic table fitted the docked panel by
+  showing `NBIRTH` as `NBIR` above `TH`. With `normal` alone a topic had nowhere to break, so the
+  table scrolled and its *What it is for* column started off-screen. So HelpMarkdown also puts a
+  `<wbr>` after each `/` that ends a segment of a code span in a cell: a topic wraps between its
+  parts, and the table fits the docked panel again. A `<wbr>` adds no character, so a copy is the
+  text as written, and `//` is never split.
 - **Help opened over a dialog has no Expand.** It is a `Modal` of size `lg`, and keeps that size.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.

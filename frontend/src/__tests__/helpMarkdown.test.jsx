@@ -107,6 +107,26 @@ describe('the walker draws every construct the parse keeps', () => {
     expect(declaration(css, '.help-table-wrap', 'overflow-x')).toBe('auto')
   })
 
+  it('lets a code span in a cell wrap after each "/" that ends a segment, and nowhere else', () => {
+    const { container } = draw(`| Topic | URL |
+| :--- | :--- |
+| \`spBv1.0/Aber/NBIRTH/gwy1\` | \`https://app.<domain>/v1/\` |
+
+Also \`spBv1.0/Aber\` in prose.
+`)
+    const [topic, url] = container.querySelectorAll('td code')
+    // The text is unchanged, so a copy is what the page says.
+    expect(topic.textContent).toBe('spBv1.0/Aber/NBIRTH/gwy1')
+    expect([...topic.childNodes].map((n) => n.nodeName === 'WBR' ? '|' : n.textContent).join(''))
+      .toBe('spBv1.0/|Aber/|NBIRTH/|gwy1')
+    // Not inside the scheme's `//`, and not after a trailing slash.
+    expect(url.textContent).toBe('https://app.<domain>/v1/')
+    expect([...url.childNodes].map((n) => n.nodeName === 'WBR' ? '|' : n.textContent).join(''))
+      .toBe('https://app.<domain>/|v1/')
+    // Prose wraps as text does; only a cell's column is squeezed.
+    expect(container.querySelector('p code').querySelector('wbr')).toBeNull()
+  })
+
   it('draws a fenced block as text, with a Copy button that copies it', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
