@@ -476,16 +476,19 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
             {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
           </span>
-          {/* Offered while there is something to enlarge: a plan, or the outline with a pin on it.
-              Stopped, or the card behind it opens the area's panel too. */}
+          <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
+        </div>
+        {/* The plan and its Expand button, in the corner of the space the plan takes. Expand is
+            offered while there is something to enlarge: a plan, or the outline with a pin on it. It
+            stops its own click, or the card behind it opens the area's panel too. */}
+        <div className="expand-frame expand-frame-fill">
+          <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
+            {areaCells.map(cellPin)}
+          </AreaPlan>
           {(ar.plan_path || areaCells.some(isPlaced)) && (
             <ExpandButton name={ar.area_name} onClick={e => { e.stopPropagation(); setExpandedAreaId(ar.area_id) }} />
           )}
-          <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
         </div>
-        <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
-          {areaCells.map(cellPin)}
-        </AreaPlan>
         {/* A cell filed here that the plan does not draw: a job, not a tally, so it keeps its line. */}
         {unplaced.length > 0 && (
           <button
