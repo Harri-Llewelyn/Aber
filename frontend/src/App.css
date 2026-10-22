@@ -1002,6 +1002,17 @@ a.sidebar-item { text-decoration: none; }
 
 .global-search-result-enter { color: var(--accent); flex-shrink: 0; }
 
+/* The Help group's label: its rows are headings in the help, and their detail is a help page's
+   title, which would otherwise read as the page a card is on. */
+.global-search-group {
+  padding: 8px 12px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .global-search-empty {
   display: flex;
   align-items: center;
@@ -1533,6 +1544,10 @@ th[aria-sort] > .sort-header { color: var(--text-primary); }
 
 .sort-header:not(:hover):not(:focus-visible) > .sort-arrow-idle { visibility: hidden; }
 
+/* A header that cannot be sorted but has a tooltip (ColumnHeader): its label takes focus. */
+.column-hint { cursor: help; }
+.column-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
 td {
   padding: 12px 16px;
   font-size: 14px;
@@ -1951,16 +1966,20 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Buttons ===== */
+/* One height whatever the element and the variant. The line-height is set because a <button> takes
+   the browser's `normal` and an <a> would inherit the page's 1.6. The border is transparent rather
+   than none, so a variant without one (primary, warning) is as tall as one with (ghost, danger). */
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 9px 18px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-family: var(--font-display);
   font-size: 14px;
   font-weight: 500;
+  line-height: 1.25;
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
@@ -2977,16 +2996,28 @@ main:focus { outline: none; }
 
 /* Wraps, so a card too narrow for the name and the counts together gives the counts their own
    line rather than shrinking the name away to nothing. Four tallies and an open context panel is
-   where that happens: the name is the one thing on the card that must survive. */
+   where that happens: the name is the one thing on the card that must survive. The chevron is out
+   of the flow, at the right of the name's line, so it never wraps alone: the right padding is its
+   column (the side padding, the 14px glyph and the gap). */
 .area-card-header {
+  position: relative;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 2px 8px;
-  padding: 0 10px;
+  padding: 0 32px 0 10px;
   font-weight: 600;
   font-size: 13px;
   min-width: 0;
+}
+
+/* One line of the name, high: the name is 13px at the page's 1.6, and the tallest thing on its line. */
+.area-card-header > .area-card-chevron {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  height: 1lh;
+  align-items: center;
 }
 
 .area-card-header .zone-name { flex: 1 1 auto; }
@@ -3111,10 +3142,9 @@ main:focus { outline: none; }
 .area-plan-interactive { cursor: crosshair; }
 
 /* A read-only plan in the Areas and Cells panels, capped as a Site Map card's plan is. As a link it
-   opens the Site Map on its area. */
+   opens the Site Map on its area. It sits on a `.plan-card`, which draws its frame. */
 .area-plan-preview { --plan-max-height: 260px; border-radius: var(--radius-sm); }
 a.area-plan-preview { display: block; cursor: pointer; color: inherit; text-decoration: none; }
-a.area-plan-preview:hover .area-plan { border-color: var(--border-hover); }
 .area-plan-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .area-plan-image,
@@ -3977,20 +4007,43 @@ a.chip { text-decoration: none; }
 }
 
 /* The expanded views (PlanViewer.jsx, Model3DViewer's `expanded`) and the Expand button that opens
-   them. The button sits in the drawer's viewer's top-right corner, over the model. */
-.expand-button { flex-shrink: 0; }
-.model-viewer-holder { position: relative; }
-.model-viewer-holder > .model-viewer-expand {
+   them (ExpandButton.jsx). The button sits in the top-right corner of what it enlarges: an
+   `.expand-frame` holds the view and the button side by side, so the button is never inside the
+   preview's link. Above the pins (z-index 2). Compounded with .btn-icon, so its ground and border
+   hold under .btn-icon:hover. */
+.expand-frame { position: relative; }
+.btn-icon.expand-corner {
   position: absolute;
   top: 6px;
   right: 6px;
+  z-index: 3;
   background: var(--bg-surface);
   border: 1px solid var(--border);
 }
 
-/* In the Cells panel, beside the preview: the preview is a link, which a button cannot sit inside. */
-.plan-preview-row { display: flex; align-items: flex-start; gap: 6px; }
-.plan-preview-row > .area-plan-preview { flex: 1 1 auto; min-width: 0; }
+/* On the Site Map card, the space under the header: it takes the card's spare height, and the
+   plan's auto margins centre the plan in it, as they did in the card. */
+.expand-frame-fill { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* In the Areas and Cells panels, the card the preview and its button share. The card draws the
+   frame the plan drew, across the panel's width, and the plan is centred on it. */
+.plan-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+}
+.plan-card .area-plan { border: 0; border-radius: 0; background: none; }
+.plan-card:has(> a.area-plan-preview:hover) { border-color: var(--border-hover); }
+
+/* The attached model's Download, Replace and Remove: equal columns across the card, two or one to
+   a row in a very narrow drawer. */
+.model-file-actions {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+.model-file-actions > .btn { justify-content: center; }
 
 /* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
    placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
@@ -4160,9 +4213,10 @@ a.chip { text-decoration: none; }
    :root block, not the themed one: themeContrast.test.js scrapes every token out of the themed
    block and compares it against the light theme, and a layout length there would read as a missing
    token. clamp() rather than a fixed width, so the drawer's tables get room on a wide monitor
-   without the drawer dominating the page. */
+   without the drawer dominating the page. The expanded width is the help drawer's alone. */
 :root {
   --context-panel-width: clamp(320px, 28vw, 560px);
+  --context-panel-width-expanded: 50vw;
 }
 
 .context-panel {
@@ -4246,7 +4300,8 @@ a.chip { text-decoration: none; }
   gap: 6px;
 }
 
-.context-panel-close {
+.context-panel-close,
+.context-panel-expand {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -4264,6 +4319,11 @@ a.chip { text-decoration: none; }
 
 .context-panel-close:hover { color: var(--danger-text); border-color: var(--danger); }
 .context-panel-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Help's Expand, beside the X. Its auto margin takes the header's free space, so the two stay
+   together on the right. */
+.context-panel-expand { margin-left: auto; }
+.context-panel-expand:hover { color: var(--accent-text); border-color: var(--accent); }
+.context-panel-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Scrolls independently of the page. A device with twenty metadata rows must not make the panel
    taller than the viewport, or the actions at its foot become unreachable. */
@@ -4361,12 +4421,10 @@ a.chip { text-decoration: none; }
 
 /* Archive and its kin. Separated from the reads above it rather than tinted red on arrival: this
    is a list someone scans, and a permanently red row teaches people to ignore red. The colour
-   arrives on hover, when the pointer is already on it. */
+   arrives on hover, when the pointer is already on it. The separation is a gap above the button,
+   not padding inside it, so the button is as tall as the others. */
 .context-action-danger {
-  margin-top: 4px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  margin-top: 6px;
 }
 
 .context-action-danger:hover:not(:disabled) {
@@ -4472,7 +4530,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border-left: 1px solid var(--border);
   border-radius: 0;
   box-shadow: none;
+  /* With the drawer as it expands or shrinks, so its header stays at the window's edge. */
+  transition: width 0.25s ease;
 }
+
+/* Expanded, help takes half the window for a guide's tables and commands, and the page narrows
+   beside it as it does when the drawer opens. On help's <aside> only, which no page's drawer is
+   inside, so theirs keep their width. */
+.context-panel-app.context-panel-expanded { --context-panel-width: var(--context-panel-width-expanded); }
 
 /* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
    normally follows; in this panel it is the only thing in the body, and a border at the very top
@@ -4695,6 +4760,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     border-radius: 0;
     border-right: none;
   }
+  /* Expanded, the help overlay takes the whole width. */
+  .context-panel-app.context-panel-expanded.context-panel-open { width: 100%; }
 }
 
 /* One drawer at a time below 1440px, where two would squeeze the page (frontend/README.md has the
@@ -4705,6 +4772,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 @media (max-width: 1439px) {
   .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
 }
+/* Expanded help hides a page's drawer the same way at every width: beside half the window, two
+   drawers would leave the page no room. */
+.app-body:has(> .context-panel-app.context-panel-expanded.context-panel-open) > .content .context-panel-open { display: none; }
 
 /* A table inside a modal. Auto layout gives the one variable-length column the leftovers and
    overflows sideways; fixed layout plus a `<colgroup>` declares the proportions and fits the

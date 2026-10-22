@@ -1128,7 +1128,7 @@ describe('Metric Catalog — Add Metric dialog', () => {
     await waitForCatalog()
 
     expect(addButton().disabled).toBe(true)
-    expect(addButton().title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    expect(addButton()).toHaveAccessibleDescription(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     fireEvent.click(addButton())
     expect(screen.queryByRole('dialog')).toBeNull()
   })

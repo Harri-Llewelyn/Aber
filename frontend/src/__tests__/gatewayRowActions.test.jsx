@@ -489,7 +489,7 @@ describe('the Gateways list', () => {
     await open([live()], () => false)
     const button = screen.getByRole('button', { name: /New Gateway/ })
     expect(button.disabled).toBe(true)
-    expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
+    expect(button).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
   })
 
   it('opens the drawer from the keyboard: the row takes focus, and Enter opens and closes it', async () => {

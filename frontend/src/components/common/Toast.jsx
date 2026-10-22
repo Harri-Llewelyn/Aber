@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { IconInfo, IconAlertTriangle, IconShieldAlert, IconX, IconExternalLink } from './Icons'
 import { RouteLink } from './RouteLink'
+import { Tooltip } from './Tooltip'
 import { groupOf, isSafeDestination } from '../../hooks/useToast'
 import { pathSegments } from '../../hooks/useUrlState'
 import { TABS } from '../../navigation'
@@ -80,11 +81,13 @@ export function MessageLink({ to, className, onFollow, children }) {
   const title = destinationTitle(to)
   if (isExternalDestination(to)) {
     return (
-      <a className={className} href={to} target="_blank" rel="noopener noreferrer" title={title} onClick={onFollow}>
-        {children}
-        <span className="sr-only"> (opens Grafana in a new tab)</span>
-        <IconExternalLink size={11} className="message-link-external" aria-hidden="true" />
-      </a>
+      <Tooltip text={title}>
+        <a className={className} href={to} target="_blank" rel="noopener noreferrer" onClick={onFollow}>
+          {children}
+          <span className="sr-only"> (opens Grafana in a new tab)</span>
+          <IconExternalLink size={11} className="message-link-external" aria-hidden="true" />
+        </a>
+      </Tooltip>
     )
   }
   return <RouteLink className={className} to={to} title={title} onClick={onFollow}>{children}</RouteLink>
@@ -163,9 +166,11 @@ export function Toast({ id, msg, type, group, to, onDismiss, onExpire }) {
       ) : (
         <span className="toast-msg">{text}</span>
       )}
-      <button type="button" className="toast-dismiss" onClick={() => onDismiss?.(id)} aria-label="Dismiss" title="Dismiss">
-        <IconX size={14} />
-      </button>
+      <Tooltip text="Dismiss">
+        <button type="button" className="toast-dismiss" onClick={() => onDismiss?.(id)} aria-label="Dismiss">
+          <IconX size={14} />
+        </button>
+      </Tooltip>
     </div>
   )
 }

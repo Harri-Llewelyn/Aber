@@ -93,7 +93,7 @@
   "python-logger-credential-disclosure ingestion/playback_worker.py d4695d8531b8": "The message names a credential but logs a path, a role name, gateway ids or a count, never a password.",
   "python-logger-credential-disclosure ingestion/playback_worker.py f106107ab406": "The message names a credential but logs a path, a role name, gateway ids or a count, never a password.",
   "spawn-shell-true scripts/audit-dependencies.mjs 28905c9b7212": "A fixed argument list; shell is set on Windows only, where npm is npm.cmd and cannot be spawned without one.",
-  "spawn-shell-true scripts/lint-js.mjs 322533031b80": "A fixed argument list; shell is set on Windows only, where npm is npm.cmd and cannot be spawned without one.",
+  "spawn-shell-true scripts/lint/load-eslint.mjs 322533031b80": "A fixed argument list; shell is set on Windows only, where npm is npm.cmd and cannot be spawned without one.",
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py 284ac9263222": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py 6ffd48392a70": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py cf070cf7fb46": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",

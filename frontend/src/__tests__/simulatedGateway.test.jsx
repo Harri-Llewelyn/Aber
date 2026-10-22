@@ -173,14 +173,14 @@ describe('the Type control', () => {
     // Guards the misreading that choosing Simulated diverts or quarantines the data.
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
-    expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
+    expect(screen.getByText(/Ingestion is unchanged/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   it('says that devices inherit the mark', async () => {
     // Said beside the control, where somebody would look for a per-device setting that does not exist.
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
-    expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
+    expect(screen.getByText(/devices inherit the mark/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 })
 

@@ -121,12 +121,10 @@ describe('Merged navigation shell', () => {
     for (const tab of tabs) {
       const label = tab.querySelector('.sidebar-item-label')?.textContent?.trim()
       expect(label).toBeTruthy()
-      // The title must contain the label rather than merely exist: a generic "Navigate" on every
-      // item would satisfy a presence check.
-      expect(tab.getAttribute('title')).toContain(label)
-      // And an aria-label: a title is a weak accessible name that some screen readers drop when
-      // another source exists, and this button's other source is invisible text.
+      // The name is the label, in an aria-label: its other source is invisible text. The pointer
+      // gets the same word in the shared tooltip, never the browser's.
       expect(tab.getAttribute('aria-label')).toBe(label)
+      expect(tab).not.toHaveAttribute('title')
     }
   })
 

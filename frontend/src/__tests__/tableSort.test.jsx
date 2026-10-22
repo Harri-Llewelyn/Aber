@@ -174,11 +174,12 @@ describe('SortHeader', () => {
   const rows = [{ name: 'Pump 2', count: 5 }, { name: 'Pump 10', count: 1 }, { name: 'Boiler', count: 12 }]
   const names = () => screen.getAllByRole('row').slice(1).map(r => r.cells[0].textContent)
 
-  it('is a button in the header cell, with the hover text on the cell', () => {
+  it('is a button in the header cell, described by the column\'s tooltip', () => {
     at('/devices')
     render(<Table rows={rows} />)
     const button = screen.getByRole('button', { name: 'Name' })
-    expect(button.closest('th')).toHaveAttribute('title', 'The thing\'s name')
+    expect(button).toHaveAccessibleDescription('The thing\'s name')
+    expect(button.closest('th')).not.toHaveAttribute('title')
     expect(button).toHaveAttribute('type', 'button')
     expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
   })

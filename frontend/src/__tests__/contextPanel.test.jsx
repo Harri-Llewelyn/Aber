@@ -9,6 +9,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 /**
  * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
@@ -324,7 +325,7 @@ describe('On a narrow screen help replaces the details panel', () => {
       <>
         <button type="button" onClick={() => setHelp(v => !v)}>Help for this page</button>
         <div className="app-body">
-          <HelpDrawerContext.Provider value={closeHelp}>
+          <HelpDrawerContext.Provider value={{ close: closeHelp }}>
             <main className="content">{children}</main>
           </HelpDrawerContext.Provider>
           <HelpPanel open={help} tabId="cells" onClose={closeHelp} />
@@ -618,7 +619,7 @@ describe('Tables shed what the panel now carries', () => {
     // No picker anywhere in the panel -- the write is gone from the read surface entirely.
     expect(within(panel()).queryByTitle(/Rebind this device/i)).toBeNull()
 
-    const link = within(panel()).getByTitle(/Open this gateway on the Gateways page/i)
+    const link = getByTooltip(/Open this gateway on the Gateways page/i, panel())
     // An anchor: the Gateways page's address names the gateway, so middle-click and "copy link
     // address" work, and a plain click navigates in place.
     expect(link.tagName).toBe('A')
@@ -737,6 +738,18 @@ describe('The panel is the single home for entity actions', () => {
 
     const archive = within(panel()).getByText(/Archive Device/i).closest('button')
     expect(archive.className).toMatch(/context-action-danger/)
+  })
+
+  /* jsdom does no layout, so the guard is on the rules. View Audit Trail is an <a> and the actions
+     around it are <button>s; Edit Details is a primary and the rest are ghosts. */
+  it('draws every action one height, whatever its element and its variant', () => {
+    const btn = APP_CSS.match(/\n\.btn \{([\s\S]*?)\n\}/)[1]
+    expect(btn).toMatch(/line-height:\s*1\.25/)
+    expect(btn).toMatch(/border:\s*1px solid transparent/)
+    // The separation is a margin: padding or a border of its own would make Archive taller.
+    const danger = APP_CSS.match(/\n\.context-action-danger \{([\s\S]*?)\n\}/)[1]
+    expect(danger).toMatch(/margin-top/)
+    expect(danger).not.toMatch(/padding|border/)
   })
 })
 
@@ -928,7 +941,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
     const topic = within(panel()).getByText(/spBv1\.0\/\+\/NDATA/)
     expect(topic).toBeTruthy()
     // And says why, rather than leaving the wildcard unexplained.
-    expect(topic.closest('button').getAttribute('title')).toMatch(/No Sparkplug group is recorded/)
+    expect(tooltipOf(topic.closest('button'))).toMatch(/No Sparkplug group is recorded/)
   })
 
   it('names the connected devices once, not a count and then a list', async () => {
@@ -1002,7 +1015,7 @@ describe('Context panel layout invariants', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const topic = within(panel()).getByText(/^spBv1\.0\/\+\/DDATA/)
-    expect(topic.closest('button').getAttribute('title')).toMatch(/No Sparkplug group is recorded/)
+    expect(tooltipOf(topic.closest('button'))).toMatch(/No Sparkplug group is recorded/)
   })
 
   it('labels the 3D model section with its icon and nothing else', async () => {

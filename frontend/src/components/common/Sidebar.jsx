@@ -4,6 +4,7 @@ import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { useUrl } from '../../hooks/useUrlState'
 import { IconChevronDown, IconChevronUp, IconChevronsDownUp } from './Icons'
 import { RouteLink } from './RouteLink'
+import { Tooltip } from './Tooltip'
 
 /** How long the pointer rests on the rail before hover mode opens it. A pointer crossing takes less. */
 export const RAIL_OPEN_DELAY_MS = 150
@@ -122,7 +123,7 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
                 signal: signals[t.id],
                 onNavigate: onNavigate ? () => onNavigate(t.id) : undefined,
               }
-              if (!t.pageTabs?.length) return <PageLink key={t.id} {...link} />
+              if (!t.pageTabs?.length) return <PageLink key={t.id} {...link} expanded={expanded} />
               return (
                 <SidebarPage
                   key={t.id}
@@ -144,16 +145,17 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
 
           {/* Disabled rather than hidden while nothing is open, so the foot never changes height
               under the pointer. aria-disabled keeps it a Tab stop that says why it does nothing. */}
-          <button
-            type="button"
-            className="sidebar-collapse-all"
-            onClick={collapseAll}
-            aria-disabled={!anyOpen}
-            title={anyOpen ? 'Collapse all tabs' : 'Collapse all tabs: none are open'}
-          >
-            <span className="sidebar-item-icon"><IconChevronsDownUp size={16} aria-hidden="true" /></span>
-            <span className="sidebar-item-label">Collapse all tabs</span>
-          </button>
+          <Tooltip text={anyOpen ? (expanded ? null : 'Collapse all tabs') : 'No page has its tabs open'}>
+            <button
+              type="button"
+              className="sidebar-collapse-all"
+              onClick={collapseAll}
+              aria-disabled={!anyOpen}
+            >
+              <span className="sidebar-item-icon"><IconChevronsDownUp size={16} aria-hidden="true" /></span>
+              <span className="sidebar-item-label">Collapse all tabs</span>
+            </button>
+          </Tooltip>
         </div>
       </nav>
     </aside>
@@ -164,18 +166,20 @@ const countText = (n) => (n > 99 ? '99+' : n)
 
 /**
  * A page's own entry. A page with work waiting takes the warning colour and its number, and says
- * why on its title and label (the count is aria-hidden: the label already carries it).
+ * why in its tooltip and label (the count is aria-hidden: the label already carries it). Otherwise
+ * the tooltip is the page's name, while the rail is too narrow to show it.
  * `ariaCurrent` is what the current page's link says: `page`, or `true` while the tab beneath it
  * is the one marked `page`.
  */
-function PageLink({ page, href, current, signal, onNavigate, ariaCurrent = 'page' }) {
+function PageLink({ page, href, current, signal, onNavigate, expanded, ariaCurrent = 'page' }) {
+  const name = signal ? `${page.label} — ${signal.note}` : page.label
   return (
     <RouteLink
       to={href}
       onNavigate={onNavigate}
       className={`sidebar-item${current ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
-      title={signal ? `${page.label} — ${signal.note}` : `Navigate to ${page.label} page`}
-      aria-label={signal ? `${page.label} — ${signal.note}` : page.label}
+      title={signal || !expanded ? name : undefined}
+      aria-label={name}
       aria-current={current ? ariaCurrent : undefined}
     >
       <span className="sidebar-item-icon">{page.icon}</span>
@@ -210,6 +214,7 @@ function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, op
           current={current}
           signal={onTab ? null : signal}
           onNavigate={onNavigate}
+          expanded={expanded}
           ariaCurrent={shown ? 'true' : 'page'}
         />
         <button

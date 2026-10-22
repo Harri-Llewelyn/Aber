@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
 import { GRAFANA_ALERT_HISTORY_URL, GRAFANA_URL } from '../constants'
+import { getByTooltip, queryByTooltip, tooltipOf } from '../test/tooltips'
 
 /**
  * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
@@ -213,14 +214,14 @@ describe('AlertPill', () => {
     // Queried by title, not accessible name: the row's name is computed from its contents, so "Show
     // <id> on the Devices page" is hover text, and the only thing telling the operator the row
     // navigates.
-    const row = () => screen.queryByTitle(/on the Devices page$/)
+    const row = () => queryByTooltip(/on the Devices page$/)
 
     it('navigates to the device on a row click, and closes on the way', () => {
       const onSelectDevice = vi.fn()
       render(<AlertPill alerts={[alert()]} onSelectDevice={onSelectDevice} />)
       fireEvent.click(pill())
 
-      expect(row()).toHaveAttribute('title', expect.stringContaining('dev220000000000400080000'))
+      expect(tooltipOf(row())).toContain('dev220000000000400080000')
       // A link to the Devices page's address, so Ctrl-click opens the device in a new tab.
       expect(row()).toHaveAttribute('href', '/devices?search=dev220000000000400080000')
       fireEvent.click(row())
@@ -289,7 +290,7 @@ describe('AlertPill', () => {
       )
       fireEvent.click(pill())
 
-      const link = screen.getByTitle(/on the Gateways page$/)
+      const link = getByTooltip(/on the Gateways page$/)
       expect(link).toHaveAttribute('href', '/gateways?search=gwy160000000000400080000')
       fireEvent.click(link)
       expect(onSelectGateway).toHaveBeenCalledWith('gwy160000000000400080000')
@@ -308,7 +309,7 @@ describe('AlertPill', () => {
         />
       )
       fireEvent.click(pill())
-      fireEvent.click(screen.getByTitle(/on the Devices page$/))
+      fireEvent.click(getByTooltip(/on the Devices page$/))
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
       expect(onSelectGateway).not.toHaveBeenCalled()
     })
@@ -319,7 +320,7 @@ describe('AlertPill', () => {
       const onSelectDevice = vi.fn()
       render(<AlertPill alerts={[alert()]} onSelectDevice={onSelectDevice} />)
       fireEvent.click(pill())
-      fireEvent.click(screen.getByTitle(/on the Devices page$/))
+      fireEvent.click(getByTooltip(/on the Devices page$/))
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
     })
 

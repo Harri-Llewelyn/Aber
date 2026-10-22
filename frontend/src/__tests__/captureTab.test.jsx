@@ -44,6 +44,7 @@ vi.mock('../api', async () => {
 vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 
 import { api } from '../api'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 const GATEWAY = {
   id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy120000000000400080000',
@@ -278,7 +279,7 @@ describe('a stored capture', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(row).getByText('NO BIRTH')).toBeInTheDocument()
-    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
+    expect(getByTooltip(/a playback refuses this capture/, row)).toBeInTheDocument()
   })
 
   it('says the same of a birthless capture that uses aliases', async () => {
@@ -287,7 +288,7 @@ describe('a stored capture', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
+    expect(getByTooltip(/a playback refuses this capture/, row)).toBeInTheDocument()
   })
 
   it('does not mark one that did', async () => {
@@ -594,7 +595,7 @@ describe('the read-only role', () => {
     renderTab({ userRole: 'Auditor' })
     const stop = await screen.findByRole('button', { name: /Stop/ })
     expect(stop).toBeDisabled()
-    expect(stop).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+    expect(stop).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
   })
 
   it('offers a Shopfloor Manager the write actions', async () => {
@@ -736,7 +737,7 @@ describe('playing a capture back', () => {
     api.playbackTargets.mockResolvedValue([{ ...TARGET, gateway_has_broker_credential: false }])
     await open()
     fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
-    expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
+    expect(await screen.findByText(/holds no broker credential/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
@@ -791,7 +792,7 @@ describe('playing a capture back', () => {
     await screen.findByLabelText('Target device for dev270000000000400080000')
     const publish = screen.getByRole('button', { name: 'Play back' })
     expect(publish).toBeDisabled()
-    expect(publish).toHaveAttribute('title', expect.stringContaining('to map'))
+    expect(publish).toHaveAccessibleDescription(expect.stringContaining('to map'))
   })
 
   it('passes the target, the map and the speed to the gate', async () => {
@@ -879,7 +880,7 @@ describe('playing a capture back', () => {
     await open()
     fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
-    expect(await screen.findByText(/was not given/)).toBeInTheDocument()
+    expect(await screen.findByText(/was not given/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
@@ -1010,7 +1011,7 @@ describe('playing a capture back', () => {
         { target: { value: 'dev310000000000400080000' } })
       const start = screen.getByRole('button', { name: 'Play back' })
       expect(start).toBeDisabled()
-      expect(start.getAttribute('title')).toMatch(/not deployed.*playback\.enabled/)
+      expect(tooltipOf(start)).toMatch(/not deployed.*playback\.enabled/)
     })
 
     it('tells a queued playback it will not start, and how to fix that', async () => {
@@ -1147,7 +1148,7 @@ describe('the playback strip', () => {
       error: 'this worker holds no broker credential for gwy130000000000400080000'
     }])
     renderTab()
-    expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
+    expect(await screen.findByText(/holds no broker credential/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   // ==========================================================================================
@@ -1442,7 +1443,7 @@ describe('playing a file', () => {
     const button = screen.getByRole('button', { name: /Play a file…/ })
     expect(button).toBeDisabled()
     expect(button).toHaveClass('btn-primary', 'btn-disabled')
-    expect(button).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+    expect(button).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
 
     dropOnCard(editedFile())
     await new Promise(r => setTimeout(r, 0))

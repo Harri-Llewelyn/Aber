@@ -1,5 +1,6 @@
 import React from 'react'
 import { IconArchive } from './Icons'
+import { Tooltip } from './Tooltip'
 
 /**
  * Tone to CSS class. The seven documented tones come first; the rest are the names the existing
@@ -27,7 +28,7 @@ export const TONE_CLASS = {
  * `tone` is one of success | info | warning | danger | neutral | pending | brand (an unrecognised
  * tone renders neutral). `size` is "sm" for a table cell (11px) and omitted elsewhere (12px).
  * `icon` is an element drawn before the label, `dot` draws the status dot instead, `title` is the
- * hover text, and `brand` ("sharepoint" | "drive") picks the provider colour for tone "brand".
+ * hover text (the shared tooltip; a badge takes no focus, so a keyboard never sees it), and `brand` ("sharepoint" | "drive") picks the provider colour for tone "brand".
  * `className` adds classes, for a margin or a modifier.
  *
  *   <Badge tone="success" size="sm">Online</Badge>
@@ -41,11 +42,13 @@ export function Badge({ tone = 'neutral', size, icon, dot, title, brand, classNa
     className
   ].filter(Boolean).join(' ')
   return (
-    <span className={classes} title={title}>
-      {dot && <span className="badge-dot" />}
-      {icon}
-      {children}
-    </span>
+    <Tooltip text={title}>
+      <span className={classes}>
+        {dot && <span className="badge-dot" />}
+        {icon}
+        {children}
+      </span>
+    </Tooltip>
   )
 }
 

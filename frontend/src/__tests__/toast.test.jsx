@@ -428,7 +428,7 @@ describe('a firing platform alert', () => {
     expect(link).toHaveAttribute('href', grafanaAlertUrl('Historian Backup Stale'))
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAttribute('title', 'Open in Grafana, in a new tab')
+    expect(link).toHaveAccessibleDescription('Open in Grafana, in a new tab')
     expect(hook.toasts[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
