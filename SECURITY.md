@@ -73,7 +73,7 @@ docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.5.0 --f
 The chart is verified the same way with `ghcr.io/harri-llewelyn/aber/aber:1.5.0`; it carries no
 SBOM or provenance of its own. The install-side commands, and the admission rule for a cluster that
 wants to refuse anything unsigned, are under **Install** in
-[`deploy/k8s/README.md`](deploy/k8s/README.md#verify-what-you-are-about-to-install).
+[`help/site/running-the-server.md`](help/site/running-the-server.md#verify-what-you-are-about-to-install).
 
 ## Two things that are documented, not defects
 

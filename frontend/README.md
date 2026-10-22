@@ -315,10 +315,20 @@ on the backdrop.
 
 ### A plan and a 3D model open expanded
 
-An area's plan (Site Map card, Areas panel heading, beside the Cells panel's preview) and a device's
-3D model (the drawer viewer's corner) each have an Expand button (`common/ExpandButton.jsx`). It
-opens `Modal` at size `full`, the window less a 24px margin, with `fill`. The button's hover text is
-the shared tooltip (`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+An area's plan (on a Site Map card, and in the Areas and Cells panels) and a device's 3D model (in
+its drawer) each have an Expand button (`common/ExpandButton.jsx`). It opens `Modal` at size
+`full`, the window less a 24px margin, with `fill`. The button's hover text is the shared tooltip
+(`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+
+- **Where the button sits.** In the top-right corner of what it enlarges, so nobody misses it: one
+  rule, `.expand-corner`, inside an `.expand-frame` that holds the view and the button side by side.
+  On a Site Map card the frame is the space under the header (`.expand-frame-fill`), which the plan
+  is centred in. In the panels it is `.plan-card`, which draws the frame the plan used to draw,
+  across the panel, because the preview is a link and a button cannot sit inside one. On the model
+  it is the viewer's box. The button is above the pins, inside the plan's margin where the plan
+  fills the frame's width: it covers at most 16 by 5px of the drawing, at three columns. A pin
+  placed on the drawing's top-right corner has the upper part of its disc under the button; the
+  rest of the pin, and its label, can still be clicked.
 
 - **The plan viewer** (`common/PlanViewer.jsx`) zooms by laying the drawing out wider, never by a
   CSS scale: the SVG is redrawn sharp at every size, and the pins over it (`AreaPlanPin`, 40px) keep
@@ -707,7 +717,7 @@ in any built bundle.
 ### The Content-Security-Policy names what a page may load
 
 The chart sends the dashboard's policy from nginx, built from the same addresses as `/config.js`
-([`deploy/k8s/README.md`](../deploy/k8s/README.md#what-a-browser-may-load-the-content-security-policy)
+([`help/site/running-the-server.md`](../help/site/running-the-server.md#what-a-browser-may-load-the-content-security-policy)
 lists each directive). Under it, the browser refuses:
 
 - a request to an origin `/config.js` does not name: a new `fetch`, image or WebSocket elsewhere;
@@ -1142,6 +1152,15 @@ file at that heading. The index and the matcher are exported for the top bar's s
 | `searchHelp(query, { currentFile, limit, index })` | ranked results, `{ file, id, heading, page, kind, snippet }`; `limit` defaults to `HELP_RESULT_LIMIT` (20) |
 | `helpTerms(text)` | the matcher's split, for highlighting |
 
+**The top bar's search has a Help group** (`GlobalSearch.jsx`). It calls `searchHelp` on the same
+index, ranked for the open page's help file, and shows at most five results (`HELP_GROUP_LIMIT`),
+so a common word leaves room for pages and records. The panel's own search lists the rest. The
+group sits after the pages, cards and settings and before the records, under a Help label, and
+waits for two characters as the name search does. A row is the heading, with the title of the page
+or guide it is in beside it (none when the heading is that title). The arrow keys and Enter walk it
+like any other row. Choosing one calls `openHelpAt(file, id)` and closes the search. The panel
+opens itself on that call, so `App.jsx` needs no wiring for it.
+
 ### Opening help from anywhere
 
 - **From code:** `openHelpAt(file, headingId?)` in `src/help/openHelp.js` opens the panel at a file
@@ -1201,6 +1220,30 @@ narrower than the 480px that 1440px was first chosen for. Moving the threshold w
 the commonest laptop width does today, where help replaces the page's drawer, for those 9px. So
 `ONE_DRAWER_QUERY` stays `(max-width: 1439px)`. The expanded rail (232px) takes 180px more at
 every width; the threshold does not move with it.
+
+**Expand widens help to half the window**, for the guides' tables and commands. The toggle sits in
+help's header before the X, in ContextPanel's `headerActions` slot. No page's drawer has one.
+
+- **Half the window, with the page beside it.** Expanded, help is `--context-panel-width-expanded`
+  (`50vw`), and the page narrows beside it as it does when help opens. With the rail collapsed that
+  is 720px of help and a 668px page at 1440px wide, and 683px and 631px at 1366px. Help's own
+  `<aside>` redefines `--context-panel-width` (`.context-panel-app.context-panel-expanded`), so a
+  page's drawer keeps its width. Below 800px the expanded overlay takes the whole width.
+- **Expanded help replaces a page's drawer at every width**, as docked help does below 1440px. A
+  rule beside that media query hides the drawer without closing it, and a page's drawer that opens
+  or changes subject closes help: `HelpDrawerContext` carries `{ close, expanded }` for that.
+  Pressing Expand is not such a change. It hides the details and leaves help open, and shrinking
+  help shows them again.
+- **One name for the toggle.** It is "Expand the help panel" with `aria-pressed`, as a toggle's
+  name should not change with its state. Its tooltip (the shared `useTooltip`) says "Shrink the
+  help panel" while pressed, and is not also its description.
+- **The choice is this browser's**, in localStorage under `aber_help_expanded` (`on` or `off`,
+  `hooks/useHelpExpanded.js`). It is not in the `user_settings` row: the width that suits depends
+  on the screen.
+- **Wide content still scrolls inside its own box.** A table or command wider than the panel
+  scrolls sideways in `.help-table-wrap` or `.help-code pre`, expanded or not. The inner shell holds
+  the drawer's width, so nothing on a help page can widen the drawer.
+- **Help opened over a dialog has no Expand.** It is a `Modal` of size `lg`, and keeps that size.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
 The panel stays in the DOM so its width can transition, but a page of prose whose first line is the

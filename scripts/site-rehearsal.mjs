@@ -158,7 +158,7 @@ function removeWorktree () {
 }
 
 /**
- * What the runbook's site.yaml says (deploy/k8s/README.md, Install, A): what only a site can say.
+ * What the runbook's site.yaml says (help/site/running-the-server.md, Install, A): what only a site can say.
  * `hardened` adds the NetworkPolicy layer for k3s: DNS and Traefik in kube-system, and the API
  * server on the node itself, which is where a pod's connection to it lands after the Service's DNAT.
  */

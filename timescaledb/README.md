@@ -302,7 +302,7 @@ Measured on 2.29.2, with the shipped settings (raw chunks compressed after 12 ho
 
 The refresh rebuilds every series in the window, so a window costs the same however little of it
 the replay holds; the cost grows with the fleet.
-If a window was not recorded, `docs/remote-gateways.md` ("Late data after an outage") gives the
+If a window was not recorded, `help/site/remote-gateways.md` ("Late data after an outage") gives the
 refresh to run by hand, and Grafana's *Late Replay Missing From the Rollups* fires. The restore
 rehearsal asserts the job is registered and scheduled after a restore; a dump carries it.
 

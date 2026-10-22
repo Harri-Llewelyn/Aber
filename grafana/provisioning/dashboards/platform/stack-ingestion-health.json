@@ -538,7 +538,7 @@
       "id": 21,
       "type": "timeseries",
       "title": "Late Replay Hours: Recorded, Not Recorded",
-      "description": "Hours of telemetry written more than 23 hours late, as a replay is. Recorded hours reach the rollups within five minutes. Hours not recorded hold readings that are stored but missing from telemetry_1m/5m/1h until refreshed by hand: docs/remote-gateways.md, \"Late data after an outage\".",
+      "description": "Hours of telemetry written more than 23 hours late, as a replay is. Recorded hours reach the rollups within five minutes. Hours not recorded hold readings that are stored but missing from telemetry_1m/5m/1h until refreshed by hand: help/site/remote-gateways.md, \"Late data after an outage\".",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
