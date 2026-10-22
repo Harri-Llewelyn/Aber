@@ -76,12 +76,12 @@ const openTab = async () => {
 const rowOf = (name) => within(document.querySelector('.card table')).getByText(name).closest('tr')
 const catalogueButton = (name) => within(rowOf(name)).getByRole('button', { name: /Catalogue/ })
 
-const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
-const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
+const standardSelect = () => screen.getByLabelText('Standard')
+const groupSelect = () => screen.getByLabelText('Group')
 const instanceInput = () => screen.getByPlaceholderText('e.g. C')
 const nameInput = () => screen.getByPlaceholderText('e.g. VIBRATION_RMS')
 const datatypeSelect = () =>
-  screen.getAllByTitle(/How the value is encoded on the wire/).find(el => el.tagName === 'SELECT')
+  screen.getByLabelText('Sparkplug Datatype')
 const namePreview = () => screen.getByText(/Devices will publish this metric as/)
 
 beforeEach(() => {
@@ -118,7 +118,7 @@ describe('Uncatalogued tab: the label', () => {
   it('says a failed read on its tab, carries no count, and leaves the catalog working', async () => {
     uncatalogued = () => Promise.reject(new Error('permission denied for view uncatalogued_metrics'))
     renderTab()
-    await waitFor(() => expect(within(document.querySelector('.card table')).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+    await waitFor(() => expect(within(document.querySelector('.card table')).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
     expect(uncataloguedTab().textContent).toBe('Uncatalogued')
 
     fireEvent.click(uncataloguedTab())
@@ -145,7 +145,7 @@ describe('Uncatalogued tab: the rows', () => {
     expect(row.getByText('Double')).toBeTruthy()
     expect(row.getByText(/2 Oct 2026/)).toBeTruthy()
     expect(within(rowOf('Spindle/2/LOAD')).getByText('Int32, Double')).toBeTruthy()
-    expect(within(rowOf('vibration')).getByTitle(/so how it is encoded is not recorded/).textContent).toBe('—')
+    expect(rowOf('vibration').querySelectorAll('td')[3].textContent).toBe('—')
   })
 
   it('links each device to its device, and marks one in quarantine', async () => {
@@ -301,7 +301,7 @@ describe('Uncatalogued tab: Catalogue', () => {
 
     const button = catalogueButton('Motor Speed')
     expect(button.disabled).toBe(true)
-    expect(button.title).toMatch(/cannot hold this name.*Remove: space.*Rename it on the devices/)
+    expect(tooltipOf(button)).toMatch(/cannot hold this name.*Remove: space.*Rename it on the devices/)
   })
 
   it('starts the next Add Metric blank', async () => {

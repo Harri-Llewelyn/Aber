@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -89,7 +90,7 @@ describe('gateway connected devices column', () => {
     // The entries are keyed by asset_id; a tooltip full of UUIDs would be worse than none.
     await show(twenty)
 
-    const title = screen.getByRole('button', { name: '+18' }).title
+    const title = tooltipOf(screen.getByRole('button', { name: '+18' }))
     expect(title).toMatch(/^CNC_03, CNC_04/)
     expect(title).not.toMatch(/dev-/)
   })

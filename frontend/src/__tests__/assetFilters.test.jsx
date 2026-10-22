@@ -158,7 +158,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'online' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'online' } })
     await waitFor(() => expect(screen.queryByText('CNC_02')).toBeNull())
     expect(screen.getByText('CNC_01')).toBeTruthy()
   })
@@ -168,7 +168,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'unborn' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'unborn' } })
     // CNC_02 is OFFLINE but has a first_dbirth_at, so it is not "never seen".
     await waitFor(() => expect(screen.queryByText('CNC_02')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()
@@ -182,7 +182,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'offline' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'offline' } })
     await waitFor(() => expect(screen.getByText('CNC_02')).toBeTruthy())
     expect(screen.queryByText('Robot_03')).toBeNull()
   })
@@ -194,7 +194,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'unborn' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'unborn' } })
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
     // Scoped to the row: "Online" is also the text of an option in the filter above it.
@@ -242,7 +242,7 @@ describe('DevicesTab filters', () => {
 
     // gw-2 / cell-2 is the quarantined device's gateway. Only Robot_03 should surface.
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-2' } })
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     const tableNames = deviceTableRows().map(r => r.textContent)
@@ -267,7 +267,7 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-2' } })
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
@@ -278,7 +278,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'offline' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'offline' } })
     const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('2')
 

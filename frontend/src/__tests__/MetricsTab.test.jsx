@@ -149,8 +149,8 @@ const selectMetric = (table, name) => {
  */
 const waitForCatalog = async () => {
   await waitFor(() => expect(catalogTable()).toBeTruthy())
-  await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
-  for (const header of within(catalogTable()).queryAllByTitle(/^Expand /)) {
+  await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
+  for (const header of within(catalogTable()).queryAllByRole('button', { expanded: false })) {
     fireEvent.click(header)
   }
 }
@@ -258,22 +258,22 @@ describe('Metric Catalog — collapsible groups', () => {
     // Collapsed on arrival: the catalog outgrew being unrolled.
     renderTab()
 
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
     expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
     expect(screen.queryByText('safety_interlock')).toBeNull()
 
     // The header names the group and carries no count; its tooltip says how many it holds.
-    const header = screen.getByTitle('Expand Controller (2 metrics)')
+    const header = screen.getByRole('button', { name: 'Controller', expanded: false })
     expect(within(header).getByText('Controller')).toBeTruthy()
     expect(header.querySelector('.section-count')).toBeNull()
   })
 
   it('expands a single group without touching the others', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle('Expand Controller (2 metrics)'))
+    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: false }))
 
     expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
     expect(screen.getByText('Controller/FIRMWARE')).toBeTruthy()
@@ -283,10 +283,10 @@ describe('Metric Catalog — collapsible groups', () => {
 
   it('collapses again on a second click', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle('Expand Controller (2 metrics)'))
-    fireEvent.click(screen.getByTitle('Collapse Controller'))
+    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: true }))
 
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
@@ -706,7 +706,7 @@ describe('Metric Catalog — search', () => {
 
   it('auto-expands matching groups, so a search is not a list of shut headers', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
 
@@ -718,7 +718,7 @@ describe('Metric Catalog — search', () => {
 
   it('matches case-insensitively on the metric name', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'axes/' } })
     expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy()
@@ -726,7 +726,7 @@ describe('Metric Catalog — search', () => {
 
   it('says so when nothing matches, rather than rendering a bare table header', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'no-such-metric' } })
     expect(screen.getByText(/No metric matches/)).toBeTruthy()
@@ -734,7 +734,7 @@ describe('Metric Catalog — search', () => {
 
   it('restores the collapsed view when the search is cleared', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
     expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
@@ -745,10 +745,10 @@ describe('Metric Catalog — search', () => {
 
   it('lets a group the search opened be closed', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Controller', expanded: false })).toBeTruthy())
 
     fireEvent.change(search(), { target: { value: 'EXECUTION' } })
-    fireEvent.click(screen.getByTitle('Collapse Controller'))
+    fireEvent.click(screen.getByRole('button', { name: 'Controller', expanded: true }))
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
 })
@@ -799,7 +799,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
   const setup = async () => {
     mockFilterCatalog()
     renderTab()
-    await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+    await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
   }
 
   it('sits in the toolbar beside the search, before Expand all', async () => {
@@ -922,7 +922,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
     expect(listed()).toEqual([])
     expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(within(catalogTable()).getByTitle('Expand OEE (1 metric)'))
+    fireEvent.click(within(catalogTable()).getByRole('button', { name: 'OEE', expanded: false }))
     expect(listed()).toEqual(['OEE/MTBF'])
   })
 
@@ -940,7 +940,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
     // Back to the collapsed catalog, with every group listed.
     expect(listed()).toEqual([])
-    expect(within(catalogTable()).getAllByTitle(/^Expand /)).toHaveLength(6)
+    expect(within(catalogTable()).getAllByRole('button', { expanded: false })).toHaveLength(6)
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 
@@ -964,7 +964,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     it('replaces a search, a standard and the Deprecated Metrics tab already in use', async () => {
       mockFilterCatalog()
       renderTab()
-      await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+      await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
       fireEvent.change(search(), { target: { value: 'o' } })
       chooseStandard('MTConnect')
       fireEvent.click(tab('Deprecated Metrics'))
@@ -998,7 +998,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
       window.history.replaceState(null, '', '/metrics?unmapped=yes&standard=no-such-standard')
       renderTab()
 
-      await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+      await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
       expect(standardFilter().value).toBe('')
       expect(listed()).toEqual([])
@@ -1146,7 +1146,7 @@ const openFormForError = async () => {
   renderTab()
   await waitForCatalog()
   fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
-  fireEvent.change(screen.getByTitle(/The MTConnect data item type/), { target: { value: 'ANGLE' } })
+  fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
   fireEvent.click(screen.getByRole('button', { name: 'Add' }))
   await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
 }
@@ -1236,21 +1236,21 @@ describe('Metric drawer', () => {
 
 // Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA / ASHRAE 223P) and semantic ids
 
-const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
+const standardSelect = () => screen.getByLabelText('Standard')
 // The Add Metric form's SemanticIdField, the only one on the page while no dialog is open.
 const semanticIdInput = () => screen.getByRole('textbox', { name: /Semantic ID/ })
 const referenceTypeSelect = () => screen.getByRole('combobox', { name: 'Reference Type' })
 const useSuggestedButton = () => screen.queryByRole('button', { name: 'Use suggested' })
 // The Datatype column header shares the picker's first sentence, so the query names the element kind.
 const datatypeSelect = () =>
-  screen.getAllByTitle(/How the value is encoded on the wire/).find(el => el.tagName === 'SELECT')
-const conceptSelect = () => screen.getByTitle(/The ASHRAE 223P concept this point is attached to/)
+  screen.getByLabelText('Sparkplug Datatype')
+const conceptSelect = () => screen.getByLabelText('Concept')
 const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
 
 // The Units column header has a title of its own, but a query by title text can still match the
 // wrong element kind, so it names the select.
 const unitsSelect = () =>
-  screen.getAllByTitle(/The unit of measure|Only SAMPLE data items carry units/).find(el => el.tagName === 'SELECT')
+  screen.getByLabelText('Units')
 
 /** The "Devices will publish this metric as …" line. */
 const namePreview = () => screen.getByText(/Devices will publish this metric as/)
@@ -1301,7 +1301,7 @@ describe('Metric builder — standard selector', () => {
     // another vocabulary would be a wrong interoperability claim rather than a cosmetic bug.
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
-    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    fireEvent.change(screen.getByLabelText('KPI'), { target: { value: 'AVAILABILITY' } })
     expect(semanticIdInput().value).toContain('iso22400/AVAILABILITY')
 
     fireEvent.change(standardSelect(), { target: { value: 'MTConnect' } })
@@ -1316,7 +1316,7 @@ describe('Metric builder — vocabulary prefill', () => {
   it('fills an ISO KPI’s unit, semantic id and group from the standard', async () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
-    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    fireEvent.change(screen.getByLabelText('KPI'), { target: { value: 'AVAILABILITY' } })
 
     expect(unitsSelect().value).toBe('PERCENT')
     expect(semanticIdInput().value).toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
@@ -1330,7 +1330,7 @@ describe('Metric builder — vocabulary prefill', () => {
     // vocabulary had just supplied.
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
-    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'MTBF' } })
+    fireEvent.change(screen.getByLabelText('KPI'), { target: { value: 'MTBF' } })
 
     expect(unitsSelect().value).toBe('HOUR')
   })
@@ -1339,7 +1339,7 @@ describe('Metric builder — vocabulary prefill', () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
     fireEvent.change(
-      screen.getByTitle(/OPC UA companion specification data point/),
+      screen.getByLabelText('Data Point'),
       { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
     )
 
@@ -1354,7 +1354,7 @@ describe('Metric builder — vocabulary prefill', () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
     fireEvent.change(
-      screen.getByTitle(/OPC UA companion specification data point/),
+      screen.getByLabelText('Data Point'),
       { target: { value: 'OPC 40001 Machinery::Manufacturer' } }
     )
 
@@ -1368,12 +1368,12 @@ describe('Metric builder — vocabulary prefill', () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
     fireEvent.change(
-      screen.getByTitle(/OPC UA companion specification data point/),
+      screen.getByLabelText('Data Point'),
       { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
     )
     expect(datatypeSelect().value).toBe('10')
 
-    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Machine' } })
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'Machine' } })
 
     expect(datatypeSelect().value).toBe('')
     expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
@@ -1394,8 +1394,8 @@ describe('Metric builder — OPC UA points that share a browse name', () => {
     semantic_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011'
   }
   const AM_KEY = 'OPC 40540 Additive Manufacturing::Manufacturer'
-  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
-  const dataPointSelect = () => screen.getByTitle(/OPC UA companion specification data point/)
+  const groupSelect = () => screen.getByLabelText('Group')
+  const dataPointSelect = () => screen.getByLabelText('Data Point')
 
   // Feedstock is registered, so the prefill selects it as a group rather than typing it new.
   const mockVocabularies = () => api.get.mockImplementation((path) => Promise.resolve(
@@ -1535,7 +1535,7 @@ describe('Metric builder — ASHRAE 223P', () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
 
-    const groupSelect = screen.getByTitle(/The component this metric belongs to/)
+    const groupSelect = screen.getByLabelText('Group')
     const bms = [...groupSelect.querySelectorAll('option')].find(o => o.value === 'BMS')
     expect(bms.closest('optgroup').label).toBe('ASHRAE 223P (1)')
   })
@@ -1551,7 +1551,7 @@ describe('Metric builder — semantic id', () => {
   it('holds no reference type without an id, which would export as a Reference with no key', async () => {
     await openForm()
     api.post.mockResolvedValue({})
-    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
     fireEvent.change(semanticIdInput(), { target: { value: '' } })
 
     expect(referenceTypeSelect().disabled).toBe(true)
@@ -1568,7 +1568,7 @@ describe('Metric builder — semantic id', () => {
 
   it('leaves a metric addable once it has an id', async () => {
     await openForm()
-    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
     expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
   })
 
@@ -1580,7 +1580,7 @@ describe('Metric builder — semantic id', () => {
 
   it('says an Administrator can correct the id later with Edit, not that anyone can', async () => {
     await openForm()
-    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
     expect(namePreview().textContent).toMatch(/unlike the name, an Administrator can correct it later with Edit/)
   })
 
@@ -1589,7 +1589,7 @@ describe('Metric builder — semantic id', () => {
     // IRI beside an IRDI.
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
-    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    fireEvent.change(screen.getByLabelText('KPI'), { target: { value: 'AVAILABILITY' } })
     expect(referenceTypeSelect().value).toBe('IRI')
 
     fireEvent.change(semanticIdInput(), { target: { value: '0173-1#02-ABI218#003/0173-1#01-AGZ672#004' } })
@@ -1599,7 +1599,7 @@ describe('Metric builder — semantic id', () => {
   it('stays addable when the operator clears the derived id entirely', async () => {
     // Unmapped must remain a legitimate state — nothing forces a semantic id on a metric.
     await openForm()
-    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
     fireEvent.change(semanticIdInput(), { target: { value: '' } })
 
     expect(semanticIdInput().value).toBe('')
@@ -1608,12 +1608,12 @@ describe('Metric builder — semantic id', () => {
 })
 
 describe('Metric builder — MTConnect semantic id derivation', () => {
-  const typePicker = () => screen.getByTitle(/MTConnect data item type/)
+  const typePicker = () => screen.getByLabelText('Data Item Type')
 
   it('derives the data item type vocabulary id, in the local namespace', async () => {
     await openForm()
     fireEvent.change(typePicker(), { target: { value: 'ANGLE' } })
-    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Axes' } })
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'Axes' } })
 
     expect(semanticIdInput().value).toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
     expect(referenceTypeSelect().value).toBe('IRI')
@@ -1622,7 +1622,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
   it('derives nothing until a type is chosen', async () => {
     // With only a group picked the composed name is `Axes`, which names a group, not a metric.
     await openForm()
-    fireEvent.change(screen.getByTitle(/The component this metric belongs to/), { target: { value: 'Axes' } })
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'Axes' } })
     expect(semanticIdInput().value).toBe('')
   })
 
@@ -1665,7 +1665,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
     expect(semanticIdInput().value).toBe('')
 
     fireEvent.change(
-      screen.getByTitle(/OPC UA companion specification data point/),
+      screen.getByLabelText('Data Point'),
       { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
     )
     expect(semanticIdInput().value).toBe('nsu=http://opcfoundation.org/UA/Robotics/;i=16662')
@@ -1681,8 +1681,8 @@ describe('Metric builder — the suggested semantic id', () => {
   const ACCELERATION_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ACCELERATION'
   const ANGLE_ID = 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE'
   const ECLASS = '0173-1#02-AAO677#002'
-  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
-  const typePicker = () => screen.getByTitle(/MTConnect data item type/)
+  const groupSelect = () => screen.getByLabelText('Group')
+  const typePicker = () => screen.getByLabelText('Data Item Type')
   const chooseActuatorAcceleration = () => {
     fireEvent.change(groupSelect(), { target: { value: 'Actuator' } })
     fireEvent.change(typePicker(), { target: { value: 'ACCELERATION' } })
@@ -1767,7 +1767,7 @@ describe('Metric builder — the suggested semantic id', () => {
   it('restores the id an ISO 22400 KPI carries', async () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
-    fireEvent.change(screen.getByTitle(/ISO 22400-2 key performance indicator/), { target: { value: 'AVAILABILITY' } })
+    fireEvent.change(screen.getByLabelText('KPI'), { target: { value: 'AVAILABILITY' } })
     fireEvent.change(semanticIdInput(), { target: { value: 'urn:example:availability' } })
 
     fireEvent.click(useSuggestedButton())
@@ -1804,7 +1804,7 @@ describe('Metric builder — choosing a semantic id from the vocabularies', () =
   const search = (text) =>
     fireEvent.change(screen.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: text } })
   const options = () => within(screen.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')
-  const typePicker = () => screen.getByTitle(/MTConnect data item type/)
+  const typePicker = () => screen.getByLabelText('Data Item Type')
 
   it('lists matches from every source with their standard and id', async () => {
     await openForm()
@@ -1930,7 +1930,7 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
     await waitForCatalog()
 
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
-    expect(within(row).getByTitle(/Not mapped to a standard concept/)).toBeTruthy()
+    expect(row.querySelectorAll('td')[5]).toHaveTextContent(/^—$/)
   })
 
   it('renders a semantic id as a copyable value that keeps its end', async () => {
@@ -2066,9 +2066,9 @@ describe('Add Metric — Group picker follows the Standard', () => {
     await waitForCatalog()
     fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
   }
-  const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
+  const groupSelect = () => screen.getByLabelText('Group')
   // The catalog table also has a Standard column header, so match the form control's own text.
-  const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
+  const standardSelect = () => screen.getByLabelText('Standard')
   const groupNames = () =>
     [...groupSelect().querySelectorAll('option')].map(o => o.textContent)
 
@@ -2127,7 +2127,7 @@ describe('Add Metric — Group picker follows the Standard', () => {
 
     fireEvent.change(groupSelect(), { target: { value: '__new__' } })
     fireEvent.change(screen.getByPlaceholderText('e.g. Hydraulic'), { target: { value: 'Coolant' } })
-    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
     fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(

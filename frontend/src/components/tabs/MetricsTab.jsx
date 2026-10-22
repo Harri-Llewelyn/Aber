@@ -34,7 +34,8 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
-import { SortHeader } from '../common/SortHeader'
+import { ColumnHeader, SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
 import { deviceUrl, metricUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
@@ -756,12 +757,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     <>
       <td><span className="mono">{m.name}</span></td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
-      <td className="cell-meta" title={m.standard ? `Named from the ${m.standard} vocabulary` : undefined}>
-        {m.standard || LOCAL_EXTENSION_LABEL}
-      </td>
-      <td className="cell-meta" title={m.category ? `MTConnect ${m.category} observation` : undefined}>
-        {m.category || '—'}
-      </td>
+      <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
+      <td className="cell-meta">{m.category || '—'}</td>
       <td className="cell-meta">{m.units || '—'}</td>
       <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
       {/* Cut in the middle: the ids share a long prefix, and the end tells two apart. */}
@@ -773,7 +770,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               onNotify={showToast}
               truncate="start"
             />
-          : <span className="cell-meta" title="Not mapped to a standard concept. Legitimate for a local extension, which no vocabulary names. Edit can map any metric, and suggests its standard's id.">—</span>}
+          : <span className="cell-meta">—</span>}
       </td>
       <td className="cell-meta">{m.description || '—'}</td>
     </>
@@ -819,9 +816,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       <SortHeader sort={sort} column="name">Name</SortHeader>
       <SortHeader sort={sort} column="standard" title="Which standard vocabulary this metric was named from">Standard</SortHeader>
       <SortHeader sort={sort} column="category" title="MTConnect observation category">Category</SortHeader>
-      <SortHeader sort={sort} column="units" title="Unit of measure, where the metric has one">Units</SortHeader>
+      <SortHeader sort={sort} column="units">Units</SortHeader>
       <SortHeader sort={sort} column="datatype" title="How the value is encoded on the wire">Datatype</SortHeader>
-      <SortHeader sort={sort} column="semantic_id" title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</SortHeader>
+      <SortHeader sort={sort} column="semantic_id" title="The AAS id of the concept the metric measures. A dash is a metric mapped to none, which Edit can map.">Semantic ID</SortHeader>
       <SortHeader sort={sort} column="description">Description</SortHeader>
     </>
   )
@@ -866,7 +863,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   value={standardFilter}
                   onChange={e => setStandardFilter(e.target.value)}
                   aria-label="Filter the catalog by standard"
-                  title="Filter by the Standard column: the vocabulary a metric was named from, or Local extension for a metric this site defined itself"
                 >
                   <option value="">All standards ({currentCatalog.length})</option>
                   {FILTER_STANDARDS.map(o => (
@@ -874,15 +870,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   ))}
                   <option value={LOCAL_STANDARD_FILTER}>{LOCAL_EXTENSION_LABEL} ({standardCount(LOCAL_STANDARD_FILTER)})</option>
                 </select>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${unmappedOnly ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setUnmappedOnly(v => !v)}
-                  aria-pressed={unmappedOnly}
-                  title="Show only metrics with no semantic id. An AAS export writes them without one, so they cannot fill a Digital Nameplate field. Select one and use Edit to map it."
-                >
-                  Unmapped ({unmappedCount})
-                </button>
+                <Tooltip text="Metrics with no semantic id. An AAS export writes them without one, so they cannot fill a Digital Nameplate field.">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${unmappedOnly ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setUnmappedOnly(v => !v)}
+                    aria-pressed={unmappedOnly}
+                  >
+                    Unmapped ({unmappedCount})
+                  </button>
+                </Tooltip>
                 <ExpandAllToggle
                   anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
                   onExpandAll={() => setAllGroups(true)}
@@ -896,7 +893,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="btn btn-primary btn-sm"
                     permitted={canManageSchema}
                     deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-                    title="Add a new metric to the catalog"
                     onClick={() => setShowAddMetric(true)}
                   >
                     <IconPlus size={13} /> Add Metric
@@ -927,25 +923,21 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                           <tr className="table-group-row">
                             <td colSpan={7}>
                               {/* The whole header row is the control, as on the Vocabulary page. */}
-                              <button
-                                type="button"
-                                className="table-group-button"
-                                onClick={() => toggleGroup(group.label)}
-                                aria-expanded={open}
-                                title={open
-                                  ? `Collapse ${group.label}`
-                                  : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
-                              >
-                                {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                                <span
-                                  className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}
-                                  title={group.isUngrouped
-                                    ? 'These metric names carry no "Group/Metric" prefix, so they belong to no component'
-                                    : `Metrics named "${group.label}/…"`}
+                              <Tooltip text={group.isUngrouped
+                                ? `${group.metrics.length} metric name${group.metrics.length === 1 ? '' : 's'} with no "Group/Metric" prefix, so in no component`
+                                : `${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'} named "${group.label}/…"`}>
+                                <button
+                                  type="button"
+                                  className="table-group-button"
+                                  onClick={() => toggleGroup(group.label)}
+                                  aria-expanded={open}
                                 >
-                                  {group.label}
-                                </span>
-                              </button>
+                                  {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                                  <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
+                                    {group.label}
+                                  </span>
+                                </button>
+                              </Tooltip>
                             </td>
                           </tr>
                           {open && catalogSort.apply(group.metrics).map(m => (
@@ -975,7 +967,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     <thead>
                       <tr>
                         {catalogHeaders(deprecatedSort)}
-                        <SortHeader sort={deprecatedSort} column="superseded_by" title="The metric named as this one's replacement when it was deprecated">Superseded By</SortHeader>
+                        <SortHeader sort={deprecatedSort} column="superseded_by" title="The metric named as its replacement when it was deprecated, or a dash where none was.">Superseded By</SortHeader>
                       </tr>
                     </thead>
                     <tbody>
@@ -987,7 +979,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                             <td>
                               {replacement
                                 ? <span className="mono">{replacement.name}</span>
-                                : <span className="cell-meta" title="No replacement was named">—</span>}
+                                : <span className="cell-meta">—</span>}
                             </td>
                           </tr>
                         )
@@ -1040,9 +1032,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                       <tr>
                         <SortHeader sort={uncataloguedSort} column="name">Name</SortHeader>
                         <SortHeader sort={uncataloguedSort} column="devices" title="How many devices declare this name">Devices</SortHeader>
-                        <th title="The devices that declare it. Each opens on the Devices page.">Declared By</th>
-                        <SortHeader sort={uncataloguedSort} column="datatype" title="The datatype the devices' birth certificates gave it, where one gave it a value">Datatype</SortHeader>
-                        <SortHeader sort={uncataloguedSort} column="last_declared" title="The latest birth certificate that changed what one of these devices declares. A rebirth that declares the same names does not move it.">Last Declared</SortHeader>
+                        <ColumnHeader title="The devices that declare it. Each opens on the Devices page.">Declared By</ColumnHeader>
+                        <SortHeader sort={uncataloguedSort} column="datatype" title="The datatype the devices' births gave it. A dash means none gave it a value; several mean they disagree.">Datatype</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="last_declared" title="The latest birth that changed what one of these devices declares. A rebirth declaring the same names does not count.">Last Declared</SortHeader>
                         {canManageSchema && <th className="row-actions" aria-label="Actions" />}
                       </tr>
                     </thead>
@@ -1078,35 +1070,30 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                     type="button"
                                     className="chip chip-link"
                                     onClick={() => setAllDevicesShown(prev => ({ ...prev, [u.metric_name]: true }))}
-                                    title="Show every device that declares this name"
                                   >
                                     {hidden} more
                                   </button>
                                 )}
                               </div>
                             </td>
-                            <td
-                              className="cell-meta"
-                              title={datatypes.length === 0
-                                ? 'No device gave it a value in its birth certificate, so how it is encoded is not recorded'
-                                : datatypes.length > 1 ? 'Its devices declare it with different datatypes' : undefined}
-                            >
+                            <td className="cell-meta">
                               {datatypes.length ? datatypes.map(datatypeLabel).join(', ') : '—'}
                             </td>
                             <td className="cell-meta">{formatDateTime(u.last_declared_at)}</td>
                             {canManageSchema && (
                               <td className="row-actions">
-                                <button
-                                  type="button"
-                                  className={`btn btn-sm btn-ghost${nameProblem ? ' btn-disabled' : ''}`}
-                                  disabled={!!nameProblem}
-                                  onClick={() => handleCatalogue(u)}
-                                  title={nameProblem
-                                    ? `The catalog cannot hold this name as the devices declare it. ${nameProblem} Rename it on the devices.`
-                                    : 'Add this name to the catalog as a Custom metric'}
-                                >
-                                  <IconPlus size={12} /> Catalogue
-                                </button>
+                                <Tooltip text={nameProblem
+                                  ? `The catalog cannot hold this name as the devices declare it. ${nameProblem} Rename it on the devices.`
+                                  : 'Add this name to the catalog as a Custom metric'}>
+                                  <button
+                                    type="button"
+                                    className={`btn btn-sm btn-ghost${nameProblem ? ' btn-disabled' : ''}`}
+                                    disabled={!!nameProblem}
+                                    onClick={() => handleCatalogue(u)}
+                                  >
+                                    <IconPlus size={12} /> Catalogue
+                                  </button>
+                                </Tooltip>
                               </td>
                             )}
                           </tr>
@@ -1169,7 +1156,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 pendingLabel="Adding…"
                 disabled={!canAddMetric}
                 onClick={() => runAdd(handleAddMetric)}
-                title="Add this metric to the catalog"
               >
                 Add
               </ActionButton>
@@ -1179,173 +1165,193 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           <div className="metric-form">
             {/* Chosen first because it decides what every control to its right offers. */}
             <div className="form-group" style={{ flex: '0 1 150px' }}>
-              <label className="form-label">Standard</label>
-              <select
-                className="form-control"
-                value={newMetric.standard}
-                onChange={e => handleStandardChange(e.target.value)}
-                title="Which vocabulary this metric is named from. Recorded as the metric's provenance, and what an AAS export reads to decide which namespace it belongs to."
-              >
-                {STANDARD_OPTIONS.map(o => (
-                  <option key={o.label} value={o.value} title={o.hint}>{o.label}</option>
-                ))}
-              </select>
+              <label className="form-label" htmlFor="metric-standard">Standard</label>
+              {/* The tooltip describes the choice made, which the options cannot do for a keyboard. */}
+              <Tooltip text={STANDARD_OPTIONS.find(o => o.value === newMetric.standard)?.hint
+                || 'The vocabulary the metric is named from. An AAS export reads it to choose the namespace.'}>
+                <select
+                  id="metric-standard"
+                  className="form-control"
+                  value={newMetric.standard}
+                  onChange={e => handleStandardChange(e.target.value)}
+                >
+                  {STANDARD_OPTIONS.map(o => (
+                    <option key={o.label} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </Tooltip>
             </div>
 
             <div className="form-group" style={{ flex: '0 1 170px' }}>
-              <label className="form-label">Group</label>
-              <select
-                className="form-control"
-                value={newMetric.group}
-                onChange={e => handleGroupChange(e.target.value)}
-                title="The component this metric belongs to. Becomes the first segment of its name, so it is part of what the device publishes."
-              >
-                <option value="">— No group —</option>
-                {groupOptions.map(bucket => (
-                  <optgroup key={bucket.label} label={`${bucket.label} (${bucket.names.length})`}>
-                    {bucket.names.map(g => <option key={g} value={g}>{g}</option>)}
-                  </optgroup>
-                ))}
-                <option value={NEW_GROUP}>+ New group…</option>
-              </select>
+              <label className="form-label" htmlFor="metric-group">Group</label>
+              <Tooltip text="The component the metric belongs to. It is the first segment of the name the device publishes.">
+                <select
+                  id="metric-group"
+                  className="form-control"
+                  value={newMetric.group}
+                  onChange={e => handleGroupChange(e.target.value)}
+                >
+                  <option value="">— No group —</option>
+                  {groupOptions.map(bucket => (
+                    <optgroup key={bucket.label} label={`${bucket.label} (${bucket.names.length})`}>
+                      {bucket.names.map(g => <option key={g} value={g}>{g}</option>)}
+                    </optgroup>
+                  ))}
+                  <option value={NEW_GROUP}>+ New group…</option>
+                </select>
+              </Tooltip>
             </div>
 
             {newMetric.group === NEW_GROUP && (
               <div className="form-group" style={{ flex: '0 1 170px' }}>
-                <label className="form-label">New Group Name</label>
-                <input
-                  className="form-control"
-                  value={newMetric.newGroup}
-                  onChange={e => setNewMetric(m => ({ ...m, newGroup: e.target.value.replace(/\//g, '') }))}
-                  placeholder="e.g. Hydraulic"
-                  title="A single name segment — it cannot contain a slash"
-                />
+                <label className="form-label" htmlFor="metric-new-group">New Group Name</label>
+                <Tooltip text="One segment of the name, so it cannot contain a slash.">
+                  <input
+                    id="metric-new-group"
+                    className="form-control"
+                    value={newMetric.newGroup}
+                    onChange={e => setNewMetric(m => ({ ...m, newGroup: e.target.value.replace(/\//g, '') }))}
+                    placeholder="e.g. Hydraulic"
+                  />
+                </Tooltip>
               </div>
             )}
 
             <div className="form-group" style={{ flex: '0 1 110px' }}>
-              <label className="form-label">Instance</label>
-              <input
-                className="form-control"
-                value={newMetric.instance}
-                onChange={e => setNewMetric(m => ({ ...m, instance: e.target.value.replace(/\//g, '') }))}
-                placeholder="e.g. C"
-                title="Which one, when the component occurs more than once — the axis name, the spindle number. Leave blank if there is only one."
-              />
+              <label className="form-label" htmlFor="metric-instance">Instance</label>
+              <Tooltip text="Which one, when the component occurs more than once: the axis name, the spindle number. Blank if only one.">
+                <input
+                  id="metric-instance"
+                  className="form-control"
+                  value={newMetric.instance}
+                  onChange={e => setNewMetric(m => ({ ...m, instance: e.target.value.replace(/\//g, '') }))}
+                  placeholder="e.g. C"
+                />
+              </Tooltip>
             </div>
 
             {/* One slot, four vocabularies. The Standard selector decides which fills it, so the
                 label changes with it. */}
             {isMTConnect && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label">Data Item Type</label>
-                <select
-                  className="form-control"
-                  value={newMetric.type}
-                  onChange={e => handleTypeChange(e.target.value)}
-                  title="The MTConnect data item type. Grouped by category: SAMPLE is a continuous measurement, EVENT a discrete state change, CONDITION a fault or warning."
-                >
-                  <option value="">— Select a type —</option>
-                  {typeGroups.map(g => (
-                    <optgroup key={g.category} label={`${g.category} (${g.types.length})`}>
-                      {g.types.map(t => <option key={t} value={t}>{t}</option>)}
-                    </optgroup>
-                  ))}
-                  <option value={CUSTOM_TYPE}>+ Not in MTConnect…</option>
-                </select>
+                <label className="form-label" htmlFor="metric-type">Data Item Type</label>
+                <Tooltip text="SAMPLE is a continuous measurement, EVENT a discrete change of state, CONDITION a fault or warning.">
+                  <select
+                    id="metric-type"
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                  >
+                    <option value="">— Select a type —</option>
+                    {typeGroups.map(g => (
+                      <optgroup key={g.category} label={`${g.category} (${g.types.length})`}>
+                        {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                      </optgroup>
+                    ))}
+                    <option value={CUSTOM_TYPE}>+ Not in MTConnect…</option>
+                  </select>
+                </Tooltip>
               </div>
             )}
 
             {isIso && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label">KPI</label>
-                <select
-                  className="form-control"
-                  value={newMetric.type}
-                  onChange={e => handleTypeChange(e.target.value)}
-                  title="The ISO 22400-2 key performance indicator. Selecting one fills in its unit, its semantic id and the group it files under — those are properties of the standard, not choices."
-                >
-                  <option value="">— Select a KPI —</option>
-                  {isoKpis.map(k => (
-                    <option key={k.name} value={k.name} title={k.formula || ''}>
-                      {k.name}{k.kpi_id && k.kpi_id !== k.name ? ` (${k.kpi_id})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <label className="form-label" htmlFor="metric-type">KPI</label>
+                <Tooltip text={isoKpis.find(k => k.name === newMetric.type)?.formula
+                  || 'Choosing a KPI fills in its unit, semantic id and group, which belong to the standard.'}>
+                  <select
+                    id="metric-type"
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                  >
+                    <option value="">— Select a KPI —</option>
+                    {isoKpis.map(k => (
+                      <option key={k.name} value={k.name}>
+                        {k.name}{k.kpi_id && k.kpi_id !== k.name ? ` (${k.kpi_id})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Tooltip>
               </div>
             )}
 
             {isOpcua && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label">Data Point</label>
-                <select
-                  className="form-control"
-                  value={chosenDataPoint
-                    ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
-                    : ''}
-                  onChange={e => handleTypeChange(e.target.value)}
-                  title="The OPC UA companion specification data point. Selecting one fills in its group, its datatype and its semantic id."
-                >
-                  <option value="">— Select a data point —</option>
-                  {/* Says why it is empty: a group no companion specification covers yields
-                      nothing. Disabled because it is a message, not a choice. */}
-                  {opcuaGroups.length === 0 && (
-                    <option value="" disabled>
-                      No OPC UA data points under &quot;{opcuaGroupFilter}&quot; — clear the group to see all
-                    </option>
-                  )}
-                  {opcuaGroups.map(section => (
-                    <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
-                      {section.entries.map(p => (
-                        <option
-                          key={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
-                          value={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
-                          title={p.description || ''}
-                        >
-                          {p.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                <label className="form-label" htmlFor="metric-type">Data Point</label>
+                <Tooltip text={chosenDataPoint?.description
+                  || 'Choosing a data point fills in its group, its datatype and its semantic id.'}>
+                  <select
+                    id="metric-type"
+                    className="form-control"
+                    value={chosenDataPoint
+                      ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
+                      : ''}
+                    onChange={e => handleTypeChange(e.target.value)}
+                  >
+                    <option value="">— Select a data point —</option>
+                    {/* Says why it is empty: a group no companion specification covers yields
+                        nothing. Disabled because it is a message, not a choice. */}
+                    {opcuaGroups.length === 0 && (
+                      <option value="" disabled>
+                        No OPC UA data points under &quot;{opcuaGroupFilter}&quot; — clear the group to see all
+                      </option>
+                    )}
+                    {opcuaGroups.map(section => (
+                      <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
+                        {section.entries.map(p => (
+                          <option
+                            key={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
+                            value={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
+                          >
+                            {p.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </Tooltip>
               </div>
             )}
 
             {isAshrae && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label">Concept</label>
-                <select
-                  className="form-control"
-                  value={newMetric.type}
-                  onChange={e => handleTypeChange(e.target.value)}
-                  title="The ASHRAE 223P concept this point is attached to. Selecting one fills in the group and the name; the datatype, units and semantic id stay yours to choose, because a concept names a thing, not a reading."
-                >
-                  <option value="">— Select a concept —</option>
-                  {ashraeSections.map(section => (
-                    <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
-                      {section.entries.map(c => (
-                        <option key={c.name} value={c.name} title={c.description || ''}>
-                          {c.label || c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                <label className="form-label" htmlFor="metric-type">Concept</label>
+                <Tooltip text={ashraeSections.flatMap(s => s.entries).find(c => c.name === newMetric.type)?.description
+                  || 'Choosing a concept fills in the group and the name. A concept names a thing, so the rest stays yours.'}>
+                  <select
+                    id="metric-type"
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                  >
+                    <option value="">— Select a concept —</option>
+                    {ashraeSections.map(section => (
+                      <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
+                        {section.entries.map(c => (
+                          <option key={c.name} value={c.name}>{c.label || c.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </Tooltip>
               </div>
             )}
 
             {(usingCustomType || isCustomStandard) && (
               <div className="form-group" style={{ flex: '1 1 170px' }}>
-                <label className="form-label">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
-                <input
-                  className="form-control"
-                  value={newMetric.customType}
-                  onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
-                  placeholder="e.g. VIBRATION_RMS"
-                  title={isCustomStandard
-                    ? 'A local extension with no standard behind it. It still composes into Group/Instance/Name, so it groups and tags like everything else.'
-                    : 'A local extension. MTConnect permits these, but prefer a standard type where one fits.'}
-                />
+                <label className="form-label" htmlFor="metric-custom">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
+                <Tooltip text={isCustomStandard
+                  ? 'A local extension, with no standard behind it. It still groups and tags like every other metric.'
+                  : 'A local extension. MTConnect allows these, but prefer a standard type where one fits.'}>
+                  <input
+                    id="metric-custom"
+                    className="form-control"
+                    value={newMetric.customType}
+                    onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
+                    placeholder="e.g. VIBRATION_RMS"
+                  />
+                </Tooltip>
               </div>
             )}
 
@@ -1353,53 +1359,59 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 browse name are whole concepts, so there is nothing to qualify. */}
             {isMTConnect && (
               <div className="form-group" style={{ flex: '0 1 150px' }}>
-                <label className="form-label">Sub Type</label>
-                <select
-                  className="form-control"
-                  value={newMetric.subType}
-                  onChange={e => setNewMetric(m => ({ ...m, subType: e.target.value }))}
-                  title="Optional MTConnect qualifier — ACTUAL vs COMMANDED vs TARGET. It becomes the last segment of the name, because Sparkplug keys only on the name and the variants would otherwise collide."
-                >
-                  <option value="">— None —</option>
-                  {availableSubTypes.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <label className="form-label" htmlFor="metric-subtype">Sub Type</label>
+                <Tooltip text="An optional qualifier, such as ACTUAL or COMMANDED. It ends the name, so the variants do not collide.">
+                  <select
+                    id="metric-subtype"
+                    className="form-control"
+                    value={newMetric.subType}
+                    onChange={e => setNewMetric(m => ({ ...m, subType: e.target.value }))}
+                  >
+                    <option value="">— None —</option>
+                    {availableSubTypes.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </Tooltip>
               </div>
             )}
 
             <div className="form-group" style={{ flex: '0 1 150px' }}>
-              <label className="form-label">Units</label>
-              <select
-                className="form-control"
-                value={unitsApply ? newMetric.units : ''}
-                disabled={!unitsApply}
-                onChange={e => setNewMetric(m => ({ ...m, units: e.target.value }))}
-                title={unitsApply
-                  ? 'The unit of measure. A vocabulary entry fills it where its standard states one; otherwise you choose it.'
-                  : 'Only SAMPLE data items carry units'}
-              >
-                <option value="">— None —</option>
-                {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
+              <label className="form-label" htmlFor="metric-units">Units</label>
+              <Tooltip text={unitsApply
+                ? 'A vocabulary entry fills it where its standard states one; otherwise you choose it.'
+                : 'Only SAMPLE data items carry units.'}>
+                <select
+                  id="metric-units"
+                  className="form-control"
+                  value={unitsApply ? newMetric.units : ''}
+                  disabled={!unitsApply}
+                  onChange={e => setNewMetric(m => ({ ...m, units: e.target.value }))}
+                >
+                  <option value="">— None —</option>
+                  {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </Tooltip>
             </div>
 
             <div className="form-group" style={{ flex: '0 1 140px' }}>
-              <label className="form-label">Sparkplug Datatype</label>
-              <select
-                className="form-control"
-                value={datatypeChosen ? newMetric.datatype : ''}
-                onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}
-                title="How the value is encoded on the wire. A vocabulary entry fills it where its standard says; otherwise you choose it, and it cannot be changed later."
-              >
-                {/* Shown only while nothing is chosen: a select must not read "Double" while the
-                    form holds no datatype. */}
-                {!datatypeChosen && <option value="">— Choose —</option>}
-                {SPARKPLUG_DATATYPES.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
-              </select>
+              <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype</label>
+              <Tooltip text="How the value is encoded on the wire. A vocabulary entry fills it where it can. It cannot change later.">
+                <select
+                  id="metric-datatype"
+                  className="form-control"
+                  value={datatypeChosen ? newMetric.datatype : ''}
+                  onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}
+                >
+                  {/* Shown only while nothing is chosen: a select must not read "Double" while the
+                      form holds no datatype. */}
+                  {!datatypeChosen && <option value="">— Choose —</option>}
+                  {SPARKPLUG_DATATYPES.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
+                </select>
+              </Tooltip>
             </div>
 
             <div className="form-group" style={{ flex: '2 1 200px' }}>
-              <label className="form-label">Description</label>
-              <input className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
+              <label className="form-label" htmlFor="metric-description">Description</label>
+              <input id="metric-description" className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
             </div>
 
             {/* The field Edit uses too. It shows the suggestion until the operator types or picks
