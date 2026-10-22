@@ -5658,7 +5658,7 @@ components:
       properties:
         group_id: { type: string, example: Aber, description: 'Empty when the device is bound to no gateway.' }
         node_id: { type: string, example: gwy120000000000400080000 }
-        device_id: { type: string, example: dev220000000000400080000 }
+        device_id: { type: string, example: dev220000000000400080000, description: 'The id in the device''s topic: its issued `sparkplug_id`, or the id it publishes under in its place (its own, or its Instance_UUID).' }
 
     DirectoryDevice:
       type: object

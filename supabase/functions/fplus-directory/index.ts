@@ -57,6 +57,13 @@ interface DirectoryEntry {
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
+ * What a device entry is projected from. The same list as `_DEVICE_COLUMNS` in directory_publish.py.
+ * One literal, not a concatenation: supabase-js types a select by parsing its literal type.
+ */
+const DEVICE_COLUMNS =
+  "id,name,sparkplug_id,reported_identity,identity_source,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)";
+
+/**
  * The qualification every schema identifier leaves this service wearing. One constant read by both
  * schema routes, so a local `schemas.id` is never mistaken for a registered Factory+ Schema_UUID.
  */
@@ -126,7 +133,7 @@ export default async function handler(req: Request): Promise<Response> {
 
       let query = supabase
         .from("devices")
-        .select("id,name,sparkplug_id,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)")
+        .select(DEVICE_COLUMNS)
         .eq("is_archived", false);
       if (requested) query = query.eq("id", requested);
 
@@ -145,7 +152,7 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     // GET /v1/address/{group}/{node}[/{device}]. The group is part of the address, so two groups
-    // cannot collide into one row.
+    // cannot collide into one row. A device is found by any id ingestion resolves it by.
     if (path.startsWith("/v1/address/")) {
       const parts = path.slice("/v1/address/".length).split("/").map(decodeURIComponent);
       if (parts.length < 2 || !parts[0] || !parts[1]) {
@@ -166,17 +173,19 @@ export default async function handler(req: Request): Promise<Response> {
 
       const { data: devices, error: devError } = await supabase
         .from("devices")
-        .select("id,name,sparkplug_id,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)")
+        .select(DEVICE_COLUMNS)
         .eq("gateway_id", gateway.id)
         .eq("is_archived", false);
       if (devError) return serverError(req, SERVICE_NAME, devError, { error: "Address lookup failed" });
 
-      const entries = await attachSchemas(supabase, (devices ?? []).map(deviceEntry));
+      const rows = devices ?? [];
+      const entries = await attachSchemas(supabase, rows.map(deviceEntry));
 
       if (deviceId) {
-        const match = entries.find((e) => e.address.device_id === deviceId || e.uuid === deviceId);
-        if (!match) return json({ error: "No such device at that address" }, 404);
-        return json(match);
+        // In step with `entries`: attachSchemas() fills each entry in place.
+        const at = rows.findIndex((row) => answersTo(row, deviceId));
+        if (at < 0) return json({ error: "No such device at that address" }, 404);
+        return json(entries[at]);
       }
 
       return json({
@@ -361,6 +370,30 @@ async function attachSchemas(
   return entries;
 }
 
+/**
+ * The device id in a device's topic: its own id or its Instance_UUID where ingestion last resolved
+ * it by one (`identity_source`), else its issued `sparkplug_id`. With no source recorded, a
+ * `reported_identity` stands. MIRRORED by `_published_device_id()` in directory_publish.py.
+ */
+function publishedDeviceId(row: Record<string, unknown>): string {
+  const source = row.identity_source;
+  const published = source === "sparkplug_id"
+    ? null
+    : source === "instance_uuid"
+    ? row.id
+    : row.reported_identity;
+  return String(published || row.sparkplug_id || "");
+}
+
+/**
+ * Whether `id` names this device as ingestion resolves one: its issued `sparkplug_id`, the id it
+ * reported, or its Instance_UUID in any letter case.
+ */
+function answersTo(row: Record<string, unknown>, id: string): boolean {
+  return row.sparkplug_id === id || row.reported_identity === id ||
+    (UUID_RE.test(id) && String(row.id).toLowerCase() === id.toLowerCase());
+}
+
 /** Project one `devices` row (with its gateway embedded) onto a Directory entry. */
 function deviceEntry(row: Record<string, unknown>): DirectoryEntry {
   const gw = (row.gateways ?? {}) as { sparkplug_id?: string; sparkplug_group?: string };
@@ -372,7 +405,8 @@ function deviceEntry(row: Record<string, unknown>): DirectoryEntry {
       // client destructuring the object does not have to special-case the shape.
       group_id: gw.sparkplug_group ?? "",
       node_id: gw.sparkplug_id ?? "",
-      device_id: (row.sparkplug_id as string) ?? "",
+      // The id the device publishes under, so a consumer meeting its traffic finds it here.
+      device_id: publishedDeviceId(row),
     },
     online: row.status === "ONLINE",
     // A quarantined device is in the directory: it exists on the wire, and the flag says why its

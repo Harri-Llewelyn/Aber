@@ -63,6 +63,13 @@ DIRECTORY_BASE = SUPABASE_URL
 DASHBOARD_DEVICE_UUID = "2af00000-0000-4000-8000-000000000001"
 DASHBOARD_DEVICE_NAME = "Directory_Dashboard_Schema_Device"
 
+# A device admitted from Quarantine under its own Sparkplug id, as one behind an edge node an
+# engineer brings is. It publishes under PUBLISHED_ID, never its issued id. Its UUID differs from
+# both pinned ones in the second byte, for the reason above.
+PUBLISHED_DEVICE_UUID = "2bf00000-0000-4000-8000-000000000001"
+PUBLISHED_DEVICE_NAME = "Directory_Published_Id_Device"
+PUBLISHED_ID = "Directory_Vendor_Id_01"
+
 # Nothing has this id. Used to assert 404 rather than 500 for an identifier that is well formed and
 # simply not here -- the shape a client gets after a schema is deleted underneath it.
 ABSENT_UUID = "00000000-0000-4000-8000-00000000dead"
@@ -168,15 +175,41 @@ def provision(token):
     return schema_id, [device["id"], DASHBOARD_DEVICE_UUID]
 
 
+def provision_published(token) -> bool:
+    """The published-id device, on the fixture's gateway, as approval leaves one. True if it exists."""
+    status, detail = rest("POST", "/devices?on_conflict=id", token, {
+        "id": PUBLISHED_DEVICE_UUID,
+        "name": PUBLISHED_DEVICE_NAME,
+        "gateway_id": aas_fixture.GATEWAY_UUID,
+        "status": "OFFLINE",
+        "is_quarantined": False,
+        "connection_method": "MQTT / Sparkplug B",
+        # What ingestion records when the device arrives in Quarantine, and approval keeps.
+        "reported_identity": PUBLISHED_ID,
+        "identity_source": "reported_identity",
+    }, {"Prefer": "resolution=merge-duplicates,return=representation"})
+    if status not in (200, 201):
+        print(f"[test_fplus_directory] could not provision the published-id device: {status} {detail}")
+        return False
+    return True
+
+
+def issued_id(token, device_id) -> str | None:
+    status, rows = rest("GET", f"/devices?id=eq.{device_id}&select=sparkplug_id", token)
+    return rows[0]["sparkplug_id"] if status == 200 and rows else None
+
+
 def teardown(token):
     """Best effort, and the Devices page's device first: it references the fixture's gateway and schema."""
     rest("DELETE", f"/devices?id=eq.{DASHBOARD_DEVICE_UUID}", token)
+    rest("DELETE", f"/devices?id=eq.{PUBLISHED_DEVICE_UUID}", token)
     aas_fixture.teardown(SUPABASE_URL, token, PUBLISHABLE_KEY)
 
 
 TOKEN = sign_in()
 SCHEMA_ID, EXPECTED_DEVICE_IDS = provision(TOKEN) if TOKEN else (None, [])
 LIVE = TOKEN is not None and SCHEMA_ID is not None
+PUBLISHED = LIVE and provision_published(TOKEN)
 SKIP_REASON = "no reachable stack, or the shared AAS fixture could not be provisioned"
 
 
@@ -358,6 +391,60 @@ class TestForwardReverseAgreement(unittest.TestCase):
             with self.subTest(device=device["uuid"]):
                 _, forward = get(f"/v1/device/{device['uuid']}", TOKEN)
                 self.assertEqual(sorted(device["schemas"]), sorted(forward["schemas"]))
+
+
+@unittest.skipUnless(PUBLISHED, SKIP_REASON + ", or the published-id device could not be provisioned")
+class TestADevicePublishingItsOwnId(unittest.TestCase):
+    """
+    A device admitted from Quarantine under its own Sparkplug id publishes on a topic naming that id.
+    A consumer meeting its traffic looks it up by that address, so the Directory gives it, and
+    resolves the device by it as well as by the issued id and the UUID.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        status, cls.entry = get(f"/v1/device/{PUBLISHED_DEVICE_UUID}", TOKEN)
+        assert status == 200, f"/v1/device/{PUBLISHED_DEVICE_UUID} answered {status}"
+        cls.issued = issued_id(TOKEN, PUBLISHED_DEVICE_UUID)
+        assert cls.issued, "the published-id device's sparkplug_id is not readable"
+
+    def lookup(self, device_id):
+        address = self.entry["address"]
+        path = "/".join(urllib.parse.quote(part, safe="")
+                        for part in (address["group_id"], address["node_id"], device_id))
+        return get(f"/v1/address/{path}", TOKEN)
+
+    def test_its_address_names_the_id_it_publishes_under(self):
+        self.assertEqual(self.entry["address"]["device_id"], PUBLISHED_ID)
+        self.assertTrue(self.entry["address"]["group_id"])
+        self.assertTrue(self.entry["address"]["node_id"])
+
+    def test_the_address_resolves_it_by_the_id_it_publishes_under(self):
+        status, body = self.lookup(PUBLISHED_ID)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["uuid"], PUBLISHED_DEVICE_UUID)
+
+    def test_the_address_resolves_it_by_its_issued_id_and_its_uuid(self):
+        for device_id in (self.issued, PUBLISHED_DEVICE_UUID, PUBLISHED_DEVICE_UUID.upper()):
+            with self.subTest(device_id=device_id):
+                status, body = self.lookup(device_id)
+                self.assertEqual(status, 200)
+                self.assertEqual(body["uuid"], PUBLISHED_DEVICE_UUID)
+
+    def test_the_edge_nodes_list_gives_it_the_same_address(self):
+        address = self.entry["address"]
+        path = "/".join(urllib.parse.quote(part, safe="")
+                        for part in (address["group_id"], address["node_id"]))
+        status, body = get(f"/v1/address/{path}", TOKEN)
+        self.assertEqual(status, 200)
+        listed = next(d for d in body["devices"] if d["uuid"] == PUBLISHED_DEVICE_UUID)
+        self.assertEqual(listed["address"], address)
+
+    def test_a_device_publishing_its_issued_id_is_addressed_by_it(self):
+        fixture = EXPECTED_DEVICE_IDS[0]
+        status, entry = get(f"/v1/device/{fixture}", TOKEN)
+        self.assertEqual(status, 200)
+        self.assertEqual(entry["address"]["device_id"], issued_id(TOKEN, fixture))
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)

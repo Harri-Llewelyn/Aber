@@ -1613,6 +1613,11 @@ registered Factory+ `Schema_UUID`s, and the REST responses say so. The MQTT docu
 note verbatim — `scripts/check-mirror-drift.mjs` compares the two languages' copies — because the
 interoperability claim would become false the moment the payload left HTTP.
 
+**A device's address is the one it publishes on.** Its `device_id` is the id in its topic: its own
+id or its `Instance_UUID` where `identity_source` says ingestion last resolved it by one, else its
+issued `sparkplug_id`. Both halves read the same columns and apply the same rule, and
+`scripts/check-mirror-drift.mjs` (10) compares them.
+
 ### Configuration
 
 | Variable | Default | |
