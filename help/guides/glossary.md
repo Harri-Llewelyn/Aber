@@ -27,7 +27,7 @@ The computer that talks to your machines and sends their data to Aber's [broker]
 are five types:
 
 - **Remote:** runs on its own hardware beside the machines. It is the usual type
-  ([remote gateways](../../docs/remote-gateways.md)).
+  ([remote gateways](../site/remote-gateways.md)).
 - **Third-party:** an edge node on its own machine, running software Aber does not manage. The
   dashboard issues its broker credential, and the engineer who runs it configures it.
 - **Host:** runs inside the server's own Node-RED.
@@ -224,7 +224,7 @@ cannot be changed afterwards.
 
 Aber issues its own certificates for HTTPS and the broker, from a certificate authority (CA) that
 runs inside the server. Browsers and gateways trust those certificates once the CA's *root
-certificate* is installed on them ([runbook, *TLS*](../../deploy/k8s/README.md#tls)).
+certificate* is installed on them ([Running the server, *TLS*](../site/running-the-server.md#tls)).
 
 ### Edge function
 

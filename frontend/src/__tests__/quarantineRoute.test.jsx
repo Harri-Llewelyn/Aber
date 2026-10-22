@@ -99,7 +99,8 @@ describe('the routes into the Quarantine tab', () => {
     const search = screen.getByRole('combobox', { name: /search/i })
     fireEvent.focus(search)
     fireEvent.change(search, { target: { value: 'quarantine' } })
-    fireEvent.click(await screen.findByRole('option', { name: /^Quarantine/ }))
+    // The first is the card; the help's own Quarantine headings follow it in the Help group.
+    fireEvent.click((await screen.findAllByRole('option', { name: /^Quarantine/ }))[0])
     await waitFor(() => expect(selectedTab()).toHaveAccessibleName('Quarantine'))
     expect(window.location.pathname).toBe('/devices/quarantine')
   })

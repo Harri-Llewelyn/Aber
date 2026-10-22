@@ -3,17 +3,24 @@ import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
 import { dialogIsOpen } from '../../shortcuts'
-import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory, IconX } from './Icons'
+import { searchHelp } from '../../help/searchIndex'
+import { pageHelpFile } from '../../help'
+import { openHelpAt } from '../../help/openHelp'
+import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory, IconHelp, IconX } from './Icons'
 
 /**
- * One box that answers three questions: where is the page called X (the nav), where is the card or
- * setting called X (`searchIndex.js`), and what is this UUID (resolved against the database, and
+ * One box that answers four questions: where is the page called X (the nav), where is the card or
+ * setting called X (`searchIndex.js`), where does the help explain X (`help/searchIndex.js`, the
+ * help panel's own index), and what is this UUID (resolved against the database, and
  * always also offered to the Audit Trail, which knows every kind in AUDIT_TRAIL_ENTITY_TYPES
  * where `resolveId` reads five). A UUID is detected, not declared: nothing in the static index can look like one. Names
  * are searched too, because the page-level box can only be used by somebody who knows which page
  * the thing is on. The estate lookup is capped per kind (see `searchAssets`): this finds one thing, and the
  * page's own box works with a set.
  */
+
+/** Most help headings the box lists; the help panel's own search lists the rest. */
+export const HELP_GROUP_LIMIT = 5
 
 const ENTITY_LABEL = {
   device: 'Device',
@@ -66,6 +73,12 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     // An id is not matched against the static index: no page or card contains a hex string.
     () => (looksLikeId || !trimmed ? [] : matchTargets(trimmed, targets)),
     [trimmed, targets, looksLikeId]
+  )
+  // Two characters, as the name search: one letter starts a word in most of the help.
+  const helpHits = useMemo(
+    () => (looksLikeId || trimmed.length < 2 ? []
+      : searchHelp(trimmed, { limit: HELP_GROUP_LIMIT, currentFile: currentTab ? pageHelpFile(currentTab) : null })),
+    [trimmed, looksLikeId, currentTab]
   )
 
   /* The id lookup, debounced and sequenced. `isUuid` only passes a complete id, so the debounce is
@@ -125,8 +138,18 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       }]
     }
 
-    // Pages and cards first, assets after: the static index answers instantly and the estate lookup
-    // arrives later, so assets on top would move under the cursor.
+    // A heading in the help, with the page or guide it is in unless the heading is that title.
+    const helpRows = helpHits.map(h => ({
+      key: `help:${h.file}#${h.id}`,
+      kind: 'help',
+      label: h.heading,
+      detail: h.heading === h.page ? null : h.page,
+      icon: <IconHelp size={15} />,
+      help: h
+    }))
+
+    // Pages and cards first, then the help, assets last: the first two answer instantly and the
+    // estate lookup arrives later, so assets above them would move under the cursor.
     return [...matches.map(m => ({
       key: m.key,
       kind: m.kind,
@@ -135,8 +158,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       detail: m.kind === 'page' ? null : m.page,
       icon: m.icon,
       target: m
-    })), ...assetHits]
-  }, [looksLikeId, entities, matches, trimmed])
+    })), ...helpRows, ...assetHits]
+  }, [looksLikeId, entities, matches, helpHits, trimmed])
 
   // The highlight is clamped rather than reset, so it survives a keystroke that only shortens the
   // list. Resetting to 0 on every change would fight a user who has arrowed down and then typed.
@@ -196,6 +219,9 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       // The id goes into the page's own search, which matches the entity id of every kind rather
       // than the five `resolveId` can name.
       onSelectTrail?.(result.trailId)
+    } else if (result.kind === 'help') {
+      // The help panel opens itself on this (HelpPanel.jsx); an id of '' is the file's top.
+      openHelpAt(result.help.file, result.help.id || null)
     } else if (result.kind === 'setting' && onSelectSetting) {
       // A setting CAN be jumped to: the page has a tab per category, so its category is an
       // anchor in all but name and landing on the wrong one would hide the row that was asked for.
@@ -229,6 +255,32 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
   const showPanel = open && trimmed.length > 0
   const activeId = results[cursor] ? `global-search-result-${cursor}` : undefined
 
+  const row = (r, i) => (
+    <button
+      key={r.key}
+      id={`global-search-result-${i}`}
+      type="button"
+      role="option"
+      aria-selected={i === cursor}
+      className={`global-search-result${i === cursor ? ' global-search-result-active' : ''}`}
+      // `mouseMove`, not `mouseEnter`: a list that re-renders under a stationary pointer
+      // fires enter events on its own and would steal the highlight from the arrow keys.
+      onMouseMove={() => setCursor(i)}
+      onClick={() => activate(r)}
+    >
+      <span className="global-search-result-icon">{r.icon || <IconChevronRight size={14} />}</span>
+      <span className="global-search-result-label">{r.label}</span>
+      {r.detail && <span className="global-search-result-detail">{r.detail}</span>}
+      {/* Only on the highlighted row: thirteen return arrows down the side of the list
+          would be thirteen claims that Enter does thirteen different things. */}
+      {i === cursor && <IconCornerDownLeft size={13} className="global-search-result-enter" />}
+    </button>
+  )
+  // The help rows sit together under a label of their own. Each row keeps its index in `results`,
+  // which is what the cursor and the arrow keys count.
+  const helpFrom = results.findIndex(r => r.kind === 'help')
+  const helpTo = helpFrom + helpHits.length
+
   return (
     <div className="global-search" ref={wrapRef}>
       <div className={`global-search-box${open ? ' global-search-box-open' : ''}`}>
@@ -247,7 +299,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           aria-controls="global-search-results"
           aria-activedescendant={showPanel ? activeId : undefined}
           aria-autocomplete="list"
-          aria-label="Search pages, cards, settings and assets by name or id"
+          aria-label="Search pages, cards, settings, help and assets by name or id"
           aria-keyshortcuts={isMac() ? 'Meta+K' : 'Control+K'}
           autoComplete="off"
           spellCheck="false"
@@ -299,27 +351,16 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
             <div className="global-search-empty">Nothing matches “{trimmed}”.</div>
           )}
 
-          {results.map((r, i) => (
-            <button
-              key={r.key}
-              id={`global-search-result-${i}`}
-              type="button"
-              role="option"
-              aria-selected={i === cursor}
-              className={`global-search-result${i === cursor ? ' global-search-result-active' : ''}`}
-              // `mouseMove`, not `mouseEnter`: a list that re-renders under a stationary pointer
-              // fires enter events on its own and would steal the highlight from the arrow keys.
-              onMouseMove={() => setCursor(i)}
-              onClick={() => activate(r)}
-            >
-              <span className="global-search-result-icon">{r.icon || <IconChevronRight size={14} />}</span>
-              <span className="global-search-result-label">{r.label}</span>
-              {r.detail && <span className="global-search-result-detail">{r.detail}</span>}
-              {/* Only on the highlighted row: thirteen return arrows down the side of the list
-                  would be thirteen claims that Enter does thirteen different things. */}
-              {i === cursor && <IconCornerDownLeft size={13} className="global-search-result-enter" />}
-            </button>
-          ))}
+          {helpFrom === -1 ? results.map(row) : (
+            <>
+              {results.slice(0, helpFrom).map(row)}
+              <div role="group" aria-label="Help">
+                <div className="global-search-group" aria-hidden="true">Help</div>
+                {results.slice(helpFrom, helpTo).map((r, i) => row(r, helpFrom + i))}
+              </div>
+              {results.slice(helpTo).map((r, i) => row(r, helpTo + i))}
+            </>
+          )}
 
           {/* The keyboard contract, printed once at the foot. */}
           {currentTab && (

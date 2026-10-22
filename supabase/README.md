@@ -42,7 +42,7 @@ deletes and withdrawn grants applied in a tail, and archived migration `0135` (a
 was the third squash's.
 
 Before 1.0 there was no database for a tail to serve. No site runs a release below 1.0, and none is
-upgraded to it ([`docs/upgrades.md`](../docs/upgrades.md#the-floor-100)), so the fourth squash
+upgraded to it ([`help/site/upgrading.md`](../help/site/upgrading.md#the-floor-100)), so the fourth squash
 folded the subtractions too, with the one-shot repairs that only ever acted on an older database's
 rows. From 1.0 on, the rules below bind again.
 
@@ -5414,7 +5414,7 @@ started and exited.
 ### The one-liner (archived migration 0105)
 
 Commissioning as a pasted command
-([`docs/remote-gateways.md`](../docs/remote-gateways.md#on-the-appliance-the-command)).
+([`help/site/remote-gateways.md`](../help/site/remote-gateways.md#on-the-appliance-the-command)).
 `gateway-bundle` mints the token as before and, asked for `format: "command"`, answers JSON
 instead of a ZIP: the token, its expiry, the command, and the pin. `gateway-install` is what the
 command and the installer fetch from, three things against the token in `X-Enrolment-Token`: the

@@ -2,7 +2,7 @@
 
 **The question this answers:** *"If we run this, what are we signing up for?"*
 
-[`upgrades.md`](upgrades.md) is the mechanical half — what survives an upgrade, and why nothing
+[`help/site/upgrading.md`](../help/site/upgrading.md) is the mechanical half — what survives an upgrade, and why nothing
 needs reconfiguring. This is the other half: how long a release is looked after, what the version
 number tells you, and how you find out that a release matters to you.
 
@@ -66,10 +66,10 @@ Anything a running site would notice as a break. Concretely, any of:
   alert rule queries.
 - **A change to the shape of a topic** the platform publishes or consumes.
 - **Dropping support for a Kubernetes version** the previous release supported.
-- **A change `helm upgrade` cannot carry**, which moves [the floor](upgrades.md#the-floor-100): a
+- **A change `helm upgrade` cannot carry**, which moves [the floor](../help/site/upgrading.md#the-floor-100): a
   renamed chart (its name is in every workload's immutable selector), a PostgreSQL major version,
   or a schema older than the migration chain is verified to converge. The release says so under
-  *Action required before upgrading* and moves the floor in `upgrades.md` in the same change.
+  *Action required before upgrading* and moves the floor in `help/site/upgrading.md` in the same change.
 
 Anything not on that list is not a major change, whatever it looks like in the diff.
 
@@ -81,18 +81,18 @@ Anything not on that list is not a major change, whatever it looks like in the d
 you must pass through. That is a property of how the schema is applied rather than a promise being
 made on top of it: `db-init` replays **every** migration in filename order on every boot, with no
 applied-migrations ledger, so arriving from `1.0.0` and arriving from `1.3.2` run exactly the same
-files. [`upgrades.md`](upgrades.md#the-database-upgrades-itself) has the
+files. [`help/site/upgrading.md`](../help/site/upgrading.md#the-database-upgrades-itself) has the
 mechanism.
 
 **Nothing below 1.0.0 upgrades to it.** 0.1.0 and any install from a checkout before 1.0 reach it
-by reinstalling, and no data is carried across; [`upgrades.md`](upgrades.md#the-floor-100) says
+by reinstalling, and no data is carried across; [`help/site/upgrading.md`](../help/site/upgrading.md#the-floor-100) says
 why.
 
 **Skipping minors is supported. Rolling back is not.** A site that skips a minor reads the notes of
 every release it skips: a deprecation announced in one minor and taking effect in the next reaches
 it in a single upgrade. The images can be rolled back and the schema cannot — there are no
 down-migrations. Take a backup before upgrading if a rollback is a real
-possibility for you; [`upgrades.md`](upgrades.md#migrations-are-forward-only) says how, and the
+possibility for you; [`help/site/upgrading.md`](../help/site/upgrading.md#migrations-are-forward-only) says how, and the
 Backups page is the way with no shell.
 
 ---
@@ -155,7 +155,7 @@ to verify it is in [`SECURITY.md`](../SECURITY.md#what-a-release-carries-and-how
 
 ## Related
 
-- [`upgrades.md`](upgrades.md) — what survives an upgrade, and the four places that is not the
+- [`help/site/upgrading.md`](../help/site/upgrading.md) — what survives an upgrade, and the four places that is not the
   whole truth
 - [`testing.md`](testing.md#releases) — what the release workflow builds and checks
 - [`../deploy/k8s/README.md`](../deploy/k8s/README.md#publishing-a-release) — publishing one

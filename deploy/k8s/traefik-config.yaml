@@ -6,7 +6,7 @@
 #   kubectl apply -f deploy/k8s/traefik-config.yaml
 #
 # once per cluster, before installing the chart; k3s's helm controller redeploys Traefik with it.
-# deploy/k8s/README.md, "Install", says what it changes on a cluster with more than one node.
+# help/site/running-the-server.md, "Install", says what it changes on a cluster with more than one node.
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:

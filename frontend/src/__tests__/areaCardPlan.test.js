@@ -82,11 +82,27 @@ describe('An area card on the Site Map', () => {
   it('adds no padding of the card\'s own at the sides or the bottom of the plan', () => {
     const card = sides(prop('.area-card', 'padding'))
     expect(card).toEqual({ top: 10, right: 0, bottom: 0, left: 0 })
-    // The header and the line under the plan pad their own sides, as the card did.
+    // The header and the line under the plan pad their own sides, as the card did. The header's
+    // right padding also holds the chevron, which is out of its flow (see the next test).
     const header = sides(prop('.area-card-header', 'padding'))
     const aside = sides(prop('.area-card-aside', 'padding'))
-    expect([header.left, header.right, header.top, header.bottom]).toEqual([10, 10, 0, 0])
+    expect([header.left, header.top, header.bottom]).toEqual([10, 0, 0])
     expect([aside.left, aside.right, aside.top, aside.bottom]).toEqual([10, 10, 0, 10])
+  })
+
+  it('keeps the chevron at the right of the name\'s line, so only the counts can wrap', () => {
+    const chevron = '.area-card-header > .area-card-chevron'
+    expect(prop('.area-card-header', 'position')).toBe('relative')
+    expect(prop(chevron, 'position')).toBe('absolute')
+    expect(prop(chevron, 'top')).toBe('0')
+    // One line high, so it is centred on the name's line however many lines the header takes.
+    expect(prop(chevron, 'height')).toBe('1lh')
+    // The header's right padding is the chevron's column: its inset, its glyph and the row's gap.
+    const glyph = Number(SITE_MAP.match(/className="area-card-chevron"[^>]*><IconChevronRight size=\{(\d+)\}/)[1])
+    const gap = parseFloat(prop('.area-card-header', 'gap').split(/\s+/).pop())
+    const right = parseFloat(prop(chevron, 'right'))
+    expect(right).toBe(sides(prop('.area-card-header', 'padding')).left)
+    expect(sides(prop('.area-card-header', 'padding')).right).toBe(right + glyph + gap)
   })
 
   it('stretches the cards in a row to one height, and centres a shorter plan between the header and the line under it', () => {
@@ -94,6 +110,11 @@ describe('An area card on the Site Map', () => {
     expect(prop('.area-card', 'display')).toBe('flex')
     expect(prop('.area-card', 'flex-direction')).toBe('column')
     expect(prop('.area-card .area-plan', 'margin')).toBe('auto')
+    // The plan sits in the space its Expand button shares, which takes the card's spare height and
+    // centres it there in turn.
+    expect(prop('.expand-frame-fill', 'flex')).toBe('1 1 auto')
+    expect(prop('.expand-frame-fill', 'display')).toBe('flex')
+    expect(prop('.expand-frame-fill', 'flex-direction')).toBe('column')
   })
 
   it('keeps the plan\'s height caps', () => {
