@@ -5,6 +5,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -132,7 +133,7 @@ describe('gateway row actions', () => {
     const rebirth = openPanel().getByText('Request Rebirth').closest('button')
 
     expect(rebirth.disabled).toBe(true)
-    expect(rebirth.title).toMatch(/once this gateway has published/)
+    expect(tooltipOf(rebirth)).toMatch(/once this gateway has published/)
   })
 
   it('leaves Request Rebirth enabled once the gateway has published', async () => {
@@ -215,7 +216,7 @@ describe('gateway row actions', () => {
     expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
     expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
     // The hint names the roles that can, from the same table the grants come from.
-    expect(panel.getByText(/Archive Gateway/i).closest('button').title).toBe('Requires Administrator or Shopfloor Manager')
+    expect(tooltipOf(panel.getByText(/Archive Gateway/i).closest('button'))).toBe('Requires Administrator or Shopfloor Manager')
     // The audit trace is withdrawn, not disabled: the nav hides its page from this reader.
     expect(panel.queryByText(/View Audit Trail/i)).toBeNull()
   })

@@ -65,8 +65,8 @@ describe('a Third-party gateway on the Site Map', () => {
     fireEvent.click(lane.closest('button'))
     await waitFor(() => expect(chipNamed('Vendor_Wide')).toBeTruthy())
 
-    expect(chipNamed('Vendor_Wide').querySelector('[title="Runs on this host"]')).toBeNull()
+    expect(chipNamed('Vendor_Wide').querySelector('[aria-label="Runs on this host"]')).toBeNull()
     expect(tooltipOf(chipNamed('Vendor_Wide'))).not.toMatch(/Host-run/)
-    expect(chipNamed('Host_Wide').querySelector('[title="Runs on this host"]')).not.toBeNull()
+    expect(chipNamed('Host_Wide').querySelector('[aria-label="Runs on this host"]')).not.toBeNull()
   })
 })

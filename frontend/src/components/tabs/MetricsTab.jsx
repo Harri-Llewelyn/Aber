@@ -787,8 +787,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
       e.preventDefault()
       selectRow(m)
-    },
-    title: 'Click to inspect this metric'
+    }
   })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
@@ -1130,7 +1129,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             label: 'Superseded By',
             value: selectedReplacement ? selectedReplacement.name : null,
             mono: true,
-            title: selectedReplacement ? undefined : 'No replacement was named'
+            help: selectedReplacement ? undefined : 'No replacement was named'
           },
           {
             label: 'Schemas',

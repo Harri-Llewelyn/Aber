@@ -48,6 +48,7 @@ import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
+import { Tooltip } from '../common/Tooltip'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
@@ -305,7 +306,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               className="form-control control-sm"
               value={filterMode}
               onChange={e => setFilterMode(e.target.value)}
-              title="Filter by lifecycle state"
               aria-label="Lifecycle"
             >
               <option value="all">All ({cells.length})</option>
@@ -313,21 +313,23 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               <option value="archived">Archived ({cells.filter(c => c.is_archived).length})</option>
             </select>
 
-            <button
-              className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setAttentionOnly(v => !v)}
-              title="Cells containing an offline or stale gateway, or any quarantined device"
-            >
-              <IconShieldAlert size={13} /> Needs attention ({attentionCount})
-            </button>
+            <Tooltip text="Cells containing an offline or stale gateway, or any quarantined device">
+              <button
+                className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setAttentionOnly(v => !v)}
+              >
+                <IconShieldAlert size={13} /> Needs attention ({attentionCount})
+              </button>
+            </Tooltip>
 
-            <button
-              className={`btn btn-sm ${emptyOnly ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setEmptyOnly(v => !v)}
-              title="Cells with no gateways, or gateways serving no devices"
-            >
-              Empty ({emptyCount})
-            </button>
+            <Tooltip text="Cells with no gateways, or gateways serving no devices">
+              <button
+                className={`btn btn-sm ${emptyOnly ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setEmptyOnly(v => !v)}
+              >
+                Empty ({emptyCount})
+              </button>
+            </Tooltip>
 
             <div className="filter-bar-actions">
               <ClearFilters
@@ -338,7 +340,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 className="btn btn-primary btn-sm"
                 permitted={canManage}
                 deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-                title="Configure new cell"
                 onClick={() => openForm(null, blank)}
               >
                 <IconPlus size={14} /> New Cell
@@ -365,10 +366,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   {/* The cell's own glyph, chosen in the New Cell form. Its header is a
                       screen-reader label, because a 32px column cannot carry a word. */}
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
-                  <SortHeader sort={sort} column="name" title="Human-readable cell name">Cell Name</SortHeader>
-                  <SortHeader sort={sort} column="area" title="The ISA-95 area this cell is in, and whether it has a place on that area's plan">Area</SortHeader>
-                  <SortHeader sort={sort} column="uuid" title="The cell's unique UUID">Cell UUID</SortHeader>
-                  <SortHeader sort={sort} column="gateways" title="Edge gateways assigned to this cell">Assigned Gateways</SortHeader>
+                  <SortHeader sort={sort} column="name">Cell Name</SortHeader>
+                  <SortHeader sort={sort} column="area" title="The ISA-95 area the cell is in, and whether it has a place on its plan. Edit Details files or places it.">Area</SortHeader>
+                  <SortHeader sort={sort} column="uuid">Cell UUID</SortHeader>
+                  <SortHeader sort={sort} column="gateways">Assigned Gateways</SortHeader>
                   <SortHeader sort={sort} column="devices" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly">Devices</SortHeader>
                 </tr>
               </thead>
@@ -389,7 +390,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       tabIndex={0}
                       onClick={rowSelectHandler(() => toggleCell(c.cell_id))}
                       onKeyDown={onOwnKey(() => toggleCell(c.cell_id))}
-                      title="Click to inspect this cell in the details panel"
                     >
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
                       <td>
@@ -408,12 +408,12 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         {/* Unfiled is a state to act on, in the queue's colour; a place is context. */}
                         {c.area_id
                           ? <span>{areas.find(a => a.area_id === c.area_id)?.area_name || <span className="mono">{c.area_id}</span>}</span>
-                          : <Badge tone="warning" size="sm" title="Not filed in any area — file it on the Areas page or in Edit Details">Unfiled</Badge>}
+                          : <Badge tone="warning" size="sm">Unfiled</Badge>}
                         {c.area_id && (
                           <div className="cell-meta">
                             {isPlaced(c)
-                              ? <span title="Has a place on its area's plan; the details panel shows where">placed</span>
-                              : <Badge tone="warning" size="sm" title="In the area but not yet placed on its plan — set a place in Edit Details">not placed</Badge>}
+                              ? <span>placed</span>
+                              : <Badge tone="warning" size="sm">not placed</Badge>}
                           </div>
                         )}
                       </td>
@@ -453,7 +453,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                                 key: '__summary__',
                                 priority: true,
                                 className: 'badge badge-sm badge-neutral',
-                                title: 'Devices in this cell, by state',
                                 content: `${onlineCount} Online / ${offlineCount} Offline`
                               },
                               ...cellAssets.map(a => ({
@@ -493,7 +492,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 onClick={() => runSave(save)}
                 title={proposeMode
                   ? 'Ask for these changes — an approver applies them, or says why not'
-                  : 'Save cell'}
+                  : undefined}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -501,12 +500,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           }
         >
           <div className="form-group">
-            <label className="form-label">Cell Name</label>
-            <input className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" title="The cell's name" />
+            <label className="form-label" htmlFor="cell-name">Cell Name</label>
+            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="cell-description">Description (Optional)</label>
-            <input id="cell-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Five-axis machining, two shifts" title="Shown in the cell's details panel on the Site Map" />
+            <Tooltip text="Shown in the cell's details panel on the Site Map">
+              <input id="cell-description" className="form-control" value={formVal.description || ''} onChange={e => setFormVal(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Five-axis machining, two shifts" />
+            </Tooltip>
           </div>
           <div className="form-group">
             {/* A grid of buttons, not a select: the choice is visual. */}
@@ -520,7 +521,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
                   className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
                   onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                  title={label}
                 >
                   <Icon size={20} />
                   <span>{label}</span>
@@ -532,16 +532,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               the Areas page; the place is this cell's own. */}
           <div className="form-group">
             <label className="form-label" htmlFor="cell-area">Area</label>
-            <select
-              id="cell-area"
-              className="form-control"
-              value={formVal.area_id || ''}
-              onChange={e => chooseArea(e.target.value)}
-              title="The ISA-95 area this cell is in. Unfiled cells are listed as a queue on the Areas page."
-            >
-              <option value="">— Unfiled —</option>
-              {areas.map(a => <option key={a.area_id} value={a.area_id}>{a.area_name}</option>)}
-            </select>
+            <Tooltip text="The ISA-95 area this cell is in. Unfiled cells are listed as a queue on the Areas page.">
+              <select
+                id="cell-area"
+                className="form-control"
+                value={formVal.area_id || ''}
+                onChange={e => chooseArea(e.target.value)}
+              >
+                <option value="">— Unfiled —</option>
+                {areas.map(a => <option key={a.area_id} value={a.area_id}>{a.area_name}</option>)}
+              </select>
+            </Tooltip>
           </div>
           {formArea && (
             <div className="form-group">
@@ -560,8 +561,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             </div>
           )}
           <div className="form-group">
-            <label className="form-label">Dashboard / UI URL (Optional)</label>
-            <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
+            <label className="form-label" htmlFor="cell-access-url">Dashboard / UI URL (Optional)</label>
+            <input id="cell-access-url" className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" />
           </div>
           {/* The rationale, only when proposing: it is written to an approver who has not stood
               in the cell. */}
@@ -624,7 +625,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 </RouteLink>
               )
               : 'Unfiled',
-            title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
+            help: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
           {
             // The plan itself, with this cell's pin ringed and the area's other cells dimmed, and
@@ -662,7 +663,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               )
               : null,
             full: true,
-            title: 'Edge nodes serving this cell. Their devices resolve here unless a device carries a cell of its own.'
+            help: 'Edge nodes serving this cell. Their devices resolve here unless a device carries a cell of its own.'
           },
           {
             // The count stays on the label: how big is this cell and is it healthy reads at a
@@ -692,7 +693,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               )
               : null,
             full: true,
-            title: "This cell's gateways' devices, plus any device filed here explicitly."
+            help: "This cell's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
           // The purge timer.
@@ -701,8 +702,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             value: selectedCell.auto_delete_at
               ? `Auto-Purge: ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
               : 'Never auto-purged',
-            full: true,
-            title: 'What happens to this archived cell and when'
+            full: true
           },
         ].filter(Boolean) : []}
         actions={selectedCell ? [

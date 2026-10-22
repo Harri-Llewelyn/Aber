@@ -2017,11 +2017,11 @@ export function AuditTrailTab({ userRole, showToast }) {
           </div>
         )}
         fields={selected ? [
-          { label: 'Recorded', value: new Date(selected.timestamp).toLocaleString(), title: selected.timestamp },
+          { label: 'Recorded', value: new Date(selected.timestamp).toLocaleString() },
           {
             label: 'Actor',
             value: actorLabel(selected, machinePrincipals),
-            title: actorTitle(selected, machinePrincipals)
+            help: actorTitle(selected, machinePrincipals)
           },
           // Only when the row names a principal: a user's id, or the machine identity's name
           // (its id where nothing here names it).
@@ -2032,17 +2032,16 @@ export function AuditTrailTab({ userRole, showToast }) {
                 value: selected.changed_by,
                 display: entityNames.get(selected.changed_by),
                 copyable: true,
-                mono: true,
-                title: 'The machine identity that made this change'
+                mono: true
               }
-              : { label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
+              : { label: 'User ID', value: selected.changed_by, copyable: true, mono: true }]
             : []),
           {
             label: 'Entity ID',
             value: selected.entity_id,
             copyable: true,
             mono: true,
-            title: 'The entity this change was made to',
+            
             help: ENTITY_ID_HELP
           },
           // The audit row's own id. It identifies THIS mutation rather than the entity it touched,
@@ -2052,7 +2051,7 @@ export function AuditTrailTab({ userRole, showToast }) {
             value: String(selected.event_id),
             copyable: true,
             mono: true,
-            title: 'Audit row ID for this single change',
+            
             help: MUTATION_ID_HELP
           },
           // Only when there is one: rows written before causation existed carry none.
@@ -2062,8 +2061,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                 value: String(selected.causation_id),
                 copyable: true,
                 mono: true,
-                title: 'The database transaction that wrote this row. Every audit row sharing it '
-                     + 'was written by ONE act. Unique within this database only.',
+                
                 help: TRANSACTION_ID_HELP
               }]
             : []),

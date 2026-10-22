@@ -1426,7 +1426,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             value: `spBv1.0/${selectedGateway?.sparkplug_group || '+'}/DDATA/${selectedGateway ? (selectedGateway.sparkplug_id || selectedGateway.gateway_id) : '+'}/${effectiveSparkplugId(selectedDevice)}`,
             mono: true,
             copyable: true,
-            title: !selectedGateway
+            help: !selectedGateway
               ? 'The DDATA topic this device would publish on. It has no serving gateway, so the group and edge node segments are wildcards.'
               : selectedGateway.sparkplug_group
                 ? 'The DDATA topic this device publishes on.'
@@ -1466,7 +1466,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     </span>
                   </RouteLink>
                 ) : null,
-                title: "The edge node carrying this device's data. Reassign it in Edit Details."
+                help: "The edge node carrying this device's data. Reassign it in Edit Details."
               },
               {
                 // One row for where the device is: Area › Cell, the lane standing in for a cell, or
@@ -1514,7 +1514,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     </div>
                   )
                 })(),
-                title: selectedLocation?.location_source === SOURCE_UNASSIGNED
+                help: selectedLocation?.location_source === SOURCE_UNASSIGNED
                   ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
                   : selectedLocation?.location_source === SOURCE_EXPLICIT
                     ? 'Set on the device itself, so it stays here regardless of its gateway.'
@@ -1551,13 +1551,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   )
                 })(),
                 full: true,
-                title: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
+                help: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
               },
               {
                 label: 'Classification',
                 value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
                 full: true,
-                title: "Derived from the metric groups this device's schema models, plus any live findings."
+                help: "Derived from the metric groups this device's schema models, plus any live findings."
               },
             ],
           },
@@ -1567,7 +1567,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'Description',
             value: selectedDevice.description || null,
             full: true,
-            title: 'Operator note. Free text, read by nothing.'
+            help: 'Operator note. Free text, read by nothing.'
           },
         ] : []}
         actions={selectedDevice ? [

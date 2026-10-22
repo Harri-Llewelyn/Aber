@@ -9,7 +9,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
-import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 
 /**
  * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
@@ -941,7 +941,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
     const topic = within(panel()).getByText(/spBv1\.0\/\+\/NDATA/)
     expect(topic).toBeTruthy()
     // And says why, rather than leaving the wildcard unexplained.
-    expect(tooltipOf(topic.closest('button'))).toMatch(/No Sparkplug group is recorded/)
+    expect(helpTipText('What Sparkplug Topic Path means', panel())).toMatch(/No Sparkplug group is recorded/)
   })
 
   it('names the connected devices once, not a count and then a list', async () => {
@@ -1014,8 +1014,8 @@ describe('Context panel layout invariants', () => {
     fireEvent.click(list().getByText('Simulated_CNC_01'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    const topic = within(panel()).getByText(/^spBv1\.0\/\+\/DDATA/)
-    expect(tooltipOf(topic.closest('button'))).toMatch(/No Sparkplug group is recorded/)
+    expect(within(panel()).getByText(/^spBv1\.0\/\+\/DDATA/)).toBeInTheDocument()
+    expect(helpTipText('What Sparkplug Topic Path means', panel())).toMatch(/No Sparkplug group is recorded/)
   })
 
   it('labels the 3D model section with its icon and nothing else', async () => {

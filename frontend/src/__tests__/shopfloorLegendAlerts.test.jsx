@@ -3,6 +3,7 @@ import { render, screen, waitFor, within, fireEvent } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 /**
  * The Site Map legend and its alert category. A cell's pin turns red when Grafana
@@ -112,7 +113,8 @@ describe('shopfloor legend categories', () => {
     const card = (await screen.findByRole('button', { name: 'North Shop' })).closest('.area-card')
     expect(card).toHaveClass('area-card-alerting')
     expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-alert')
-    expect(card.querySelector('.area-card-header .tile-dot')).toHaveAttribute('title', expect.stringMatching(/Alert firing/))
+    // Never colour alone: the name's tooltip says the state in words.
+    expect(tooltipOf(within(card).getByRole('button', { name: 'North Shop' }))).toMatch(/Alert firing/)
   })
 
   it('keeps the area card in the rollup colour while nothing is firing', async () => {
@@ -126,10 +128,10 @@ describe('shopfloor legend categories', () => {
     renderMap()
 
     await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
-    const entry = screen.getByTitle(/Alert firing/)
+    const entry = getByTooltip(/^Alert firing — /)
 
     // The colour relays Grafana's verdict; the map evaluates no threshold of its own.
-    expect(entry.getAttribute('title')).toMatch(/Grafana/)
+    expect(tooltipOf(entry)).toMatch(/Grafana/)
   })
 })
 
@@ -145,8 +147,8 @@ describe('alerting cell pin', () => {
     renderMap({ devices: [device()], activeAlerts: [alert()] })
     const el = await pin()
     expect(el.className).toMatch(/area-plan-pin-alert/)
-    // Never colour alone: the title says the state in words.
-    expect(el.getAttribute('title')).toMatch(/Alert firing/)
+    // Never colour alone: the tooltip says the state in words.
+    expect(tooltipOf(el)).toMatch(/Alert firing/)
   })
 
   it('does not go red for an alert on an archived device', async () => {

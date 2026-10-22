@@ -5,6 +5,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
 import { tabLink } from '../test/tabBar'
+import { helpTipText } from '../test/tooltips'
 
 /**
  * The Devices tab's location UI. The distinction under test is between the resolved cell and the
@@ -442,7 +443,7 @@ describe('the Location row in the context panel', () => {
   it('drops "(from gateway)" for a device filed on itself', async () => {
     const value = await location({ cell_id: CELL_2, location_source: 'explicit' })
     expect(value.textContent).toBe('North Shop›Paint Shop')
-    expect(value).toHaveAttribute('title', expect.stringMatching(/^Set on the device itself/))
+    expect(helpTipText('What Location means')).toMatch(/^Set on the device itself/)
   })
 
   it('says Unassigned, as a warning, when nothing supplies a cell', async () => {

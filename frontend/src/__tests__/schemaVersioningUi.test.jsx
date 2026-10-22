@@ -5,7 +5,7 @@ import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
-import { getByTooltip } from '../test/tooltips'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -155,7 +155,8 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab(false)
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const button = panelFor('Robot_Arm_Schema').getByTitle(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    panelFor('Robot_Arm_Schema')
+    const button = getByTooltip(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE), document.querySelector('.context-panel'))
     expect(button.disabled).toBe(true)
   })
 
@@ -164,8 +165,9 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const button = panelFor('Robot_Arm_Schema').getByTitle(
-      'A draft (Robot_Arm_Schema_v2) already exists — publish or discard it first'
+    panelFor('Robot_Arm_Schema')
+    const button = getByTooltip(
+      'A draft (Robot_Arm_Schema_v2) already exists — publish or discard it first', document.querySelector('.context-panel')
     )
     expect(button.disabled).toBe(true)
   })
@@ -332,7 +334,7 @@ describe('Downloading a version definition', () => {
 
     const item = panelFor('Robot_Arm_Schema').getByText('Download JSON').closest('button')
     expect(item.disabled).toBe(true)
-    expect(item.getAttribute('title')).toBe('This version has no definition to download')
+    expect(tooltipOf(item)).toBe('This version has no definition to download')
   })
 
   it('offers the download as a visible button inside the detail modal', async () => {

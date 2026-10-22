@@ -44,7 +44,7 @@ vi.mock('../api', async () => {
 vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 
 import { api } from '../api'
-import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 
 const GATEWAY = {
   id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy120000000000400080000',
@@ -428,7 +428,7 @@ describe('the running card', () => {
     selectRow(row)
     const button = panelAction(/Record/)
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', expect.stringContaining('One at a time'))
+    expect(button).toHaveAccessibleDescription(expect.stringContaining('One at a time'))
   })
 
   it('warns when no birth has arrived and the window has passed', async () => {
@@ -570,7 +570,7 @@ describe('the read-only role', () => {
     selectRow(row); expect(panelAction(/Download/)).not.toBeDisabled()
     for (const name of [/Record/, /Play back/, /Delete capture/]) {
       expect(panelAction(name)).toBeDisabled()
-      expect(panelAction(name)).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+      expect(panelAction(name)).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
     }
     expect(screen.getByText('Requires Administrator or Shopfloor Manager.')).toBeInTheDocument()
     expect(document.querySelector('.callout-info')).toBeNull()
@@ -1059,7 +1059,7 @@ describe('playing a capture back', () => {
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); expect(panelAction(/Play back/)).toBeDisabled()
-    expect(panelAction(/Play back/)).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+    expect(panelAction(/Play back/)).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
   })
 })
 
@@ -1649,7 +1649,7 @@ describe('the capture preview', () => {
     await openCapture(withManifest({ birth_captured: true, rebirth_requested: true }))
     const birth = await screen.findByText('Birth certificate')
     expect(birth.closest('div').textContent).toMatch(/Captured/)
-    expect(screen.getByTitle(/requesting a rebirth/i)).toBeInTheDocument()
+    expect(helpTipText('What Birth certificate means')).toMatch(/requesting a rebirth/i)
   })
 
   it('still renders the panel for a capture whose manifest holds no devices', async () => {

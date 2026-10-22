@@ -185,24 +185,27 @@ screen readers read it unevenly, and on an icon-only button it was often the onl
   description. A tooltip shows on hover and focus, so it goes on something that takes focus; a
   sentence about anything else belongs in visible text or a `HelpTip`, or on the column header.
   A control that gets focus back, as a dialog's opener does, shows its tooltip, and the first
-  Escape closes that. A component
-  that draws a control takes the text as a prop and wraps its own element: `ActionButton`'s
-  `title` and `deniedTitle`, `RouteLink`'s and `CopyableId`'s `title`. `Badge`'s `title` is the one
-  on something that takes no focus, so a pointer alone sees it.
-- **In a test**, `src/test/tooltips.js` finds a control by its tooltip (`getByTooltip`) and reads
-  one (`tooltipOf`). A closed bubble is in the document, hidden, so a `getByText` that would also
+  Escape closes that. A component that draws a control takes the text as a prop and wraps its own
+  element: `ActionButton`'s `title` and `deniedTitle`, `RouteLink`'s, `CopyableId`'s and
+  `AreaPlanPin`'s `title`, and a `ContextPanel` action's. `Badge`'s `title` is the one on
+  something that takes no focus, so a pointer alone sees it. An icon-only button is a `TipButton`,
+  whose name is its `label` and whose bubble repeats it without describing it again
+  (`describe={false}`). A drawer field's sentence is its `help`, a HelpTip beside the label, which
+  a keyboard and a touch screen reach; fields take no tooltip.
+- **In a test**, `src/test/tooltips.js` finds a control by its tooltip (`getByTooltip`), reads
+  one (`tooltipOf`) and reads a HelpTip's sentence (`helpTipText`). A closed bubble is in the document, hidden, so a `getByText` that would also
   match a tooltip's words passes `{ ignore: '[role=tooltip]' }`.
 - **The words.** About 20 words, plain sentences, no code, and never the visible label again.
-- **The guard.** `npm run lint:js` fails on a `title` on an HTML element in `frontend/src`, a
-  `no-restricted-syntax` rule in `scripts/lint/eslint.config.mjs`. A component's prop named
-  `title`, such as a dialog's heading, is not matched. `title` stays where it is what the element
+- **The guard.** `npm run lint:js` fails on a `title` on an HTML element or an `Icon*` (which
+  passes it to its `<svg>`) in `frontend/src`, a `no-restricted-syntax` rule in
+  `scripts/lint/eslint.config.mjs`. A component's prop named `title`, such as a dialog's heading,
+  is not matched. `title` stays where it is what the element
   means: `<abbr>` and `<iframe>`, which the rule lets through, and an SVG's `<title>` element,
   which is not an attribute. A link whose text is its own address, cut short, wants
   `<Tooltip text={url}>`, which shows it whole; a `title` there takes an
-  `eslint-disable-next-line no-restricted-syntax -- the text is the address`. The files other work
-  is rewriting are listed beside the rule until they are swept, and
-  `scripts/lint/browser-tooltip.test.mjs` fails on one that no longer carries a `title`, so the
-  list only shrinks.
+  `eslint-disable-next-line no-restricted-syntax -- the text is the address`. No file is let off
+  the rule: `scripts/lint/browser-tooltip.test.mjs` fails on a block that turns it off, on a line
+  let off with no reason, and on any `title` left in the dashboard.
 
 ### Tooltips on a tab
 

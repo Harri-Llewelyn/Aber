@@ -370,12 +370,12 @@ describe('Deprecated Metrics tab', () => {
     selectMetric(deprecatedTable(), 'temperature')
     const restore = drawerButton('Restore')
     expect(restore.disabled).toBe(true)
-    expect(restore.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    expect(tooltipOf(restore)).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     await waitForCatalog()
     selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
     const deprecate = drawerButton('Deprecate')
     expect(deprecate.disabled).toBe(true)
-    expect(deprecate.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    expect(tooltipOf(deprecate)).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
   })
 
   it('keeps the card and its rows on screen while the catalog reloads', async () => {
@@ -519,7 +519,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     selectMetric(catalogTable(), 'Controller/EXECUTION')
     const edit = drawerButton('Edit')
     expect(edit.disabled).toBe(true)
-    expect(edit.title).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
+    expect(tooltipOf(edit)).toBe(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     fireEvent.click(edit)
     expect(document.querySelector('.modal')).toBeNull()
   })

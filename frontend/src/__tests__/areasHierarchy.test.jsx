@@ -11,7 +11,7 @@ import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton, pageToolbar } from '../test/cardHeading'
-import { getByTooltip } from '../test/tooltips'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -255,7 +255,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await renderSiteMap()
     expect(lanes()[0].querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
     expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
-    expect(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' })).toHaveAttribute('title', expect.stringContaining('1 gateway(s), 1 device(s)'))
+    expect(tooltipOf(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }))).toContain('1 gateway(s), 1 device(s)')
     fireEvent.click(screen.getByRole('button', { name: /Site-Wide/ }))
     expect(within(panel()).getByText('No Site-Wide assets.')).toBeInTheDocument()
     expect(within(panel()).queryByText(/Old_/)).toBeNull()
@@ -456,7 +456,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(toggle.parentElement).toBe(pageToolbar())
     expect(follows(toggle, pageToolbar().querySelector('.filter-bar-actions'))).toBe(true)
     // Says what is hidden with it: North Shop's two cells, CNC_01 in Bay 1 and its BMS.
-    expect(toggle).toHaveAttribute('title', expect.stringMatching(/2 cells and 2 devices/))
+    expect(toggle).toHaveAccessibleDescription(expect.stringMatching(/2 cells and 2 devices/))
 
     // Shown, the dot gives way to the archive glyph and the card is muted.
     fireEvent.click(toggle)
@@ -465,7 +465,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(card).toHaveClass('area-card-archived')
     expect(within(card).getByText('ARCHIVED')).toBeInTheDocument()
     expect(card.querySelector('.area-card-header .tile-dot')).toBeNull()
-    expect(screen.getByRole('button', { name: 'North Shop' })).toHaveAttribute('title', expect.stringMatching(/archived/))
+    expect(screen.getByRole('button', { name: 'North Shop' })).toHaveAccessibleDescription(/archived/i)
     expect(pinNames()).toEqual(expect.arrayContaining(['Bay 1', 'Bay 2']))
     // The one beside it is untouched.
     expect(screen.getByRole('button', { name: 'Press Hall' }).closest('.area-card')).not.toHaveClass('area-card-archived')

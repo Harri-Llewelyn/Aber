@@ -353,7 +353,7 @@ describe('CellsTab filters', () => {
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle(/offline or stale gateway, or any quarantined device/i))
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention/ }))
     await waitFor(() => expect(screen.queryByText('Assembly Line 1')).toBeNull())
     expect(screen.getByText('Weld Cell 2')).toBeTruthy()
   })
@@ -363,7 +363,7 @@ describe('CellsTab filters', () => {
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle(/no gateways, or gateways serving no devices/i))
+    fireEvent.click(screen.getByRole('button', { name: /^Empty/ }))
     await waitFor(() => expect(screen.queryByText('Assembly Line 1')).toBeNull())
     expect(screen.getByText('Spare Bay 3')).toBeTruthy()
   })
