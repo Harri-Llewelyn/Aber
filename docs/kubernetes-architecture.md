@@ -836,8 +836,9 @@ Port 1883 is raw TCP. Shopfloor gateways connect to it directly.
   Gateway API's `TCPRoute` is the forward-looking option once §7.1's swap happens.
 - **Klipper binds the port on the node**, so 1883 must be free on the host — a Compose stack still
   running on the same machine will hold it, and the Service then sits `Pending` with no obvious
-  cause. Worth stating in the runbook: this is the most likely first-boot surprise on a developer
-  machine running both targets.
+  cause. [Running the server, *MQTT needs a free host port*](../help/site/running-the-server.md#mqtt-needs-a-free-host-port)
+  states it, because this is the most likely first-boot surprise on a developer machine running
+  both targets.
 - **9001** (MQTT over WebSockets) *can* ride the Ingress and should, on `mqtt.<domain>`.
 
 1883 is plaintext with password auth. Reachable on a LoadBalancer IP, TLS on 8883 stops being

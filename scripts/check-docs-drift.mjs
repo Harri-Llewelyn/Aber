@@ -6683,9 +6683,9 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 25. The inline Traefik manifest in help/site/running-the-server.md (the runbook's Install) is
-// deploy/k8s/traefik-config.yaml, which the dev loop applies: an install from the registry has no
-// checkout, so the page carries a copy.
+// 25. The inline Traefik manifest in help/site/running-the-server.md (the help page Running the
+// server, its Install) is deploy/k8s/traefik-config.yaml, which the dev loop applies: an install
+// from the registry has no checkout, so the page carries a copy.
 // -------------------------------------------------------------------------------------------------
 {
   const manifest = (text) => text.split('\n').filter((l) => l.trim() && !l.trimStart().startsWith('#')).join('\n');
@@ -6698,7 +6698,7 @@ const OPERATOR_PAIRS = [
   } else if (!read('scripts/dev-cluster.mjs').includes("'deploy/k8s/traefik-config.yaml'")) {
     fail('scripts/dev-cluster.mjs no longer applies deploy/k8s/traefik-config.yaml, so the dev loop measures a different Traefik');
   } else {
-    pass('the runbook and the dev loop apply the same Traefik HelmChartConfig');
+    pass('Running the server (help/site/running-the-server.md) and the dev loop apply the same Traefik HelmChartConfig');
   }
 }
 
