@@ -488,7 +488,7 @@ gateway reports each outage after reconnecting, and a dropped reading is lost wi
 counting it. The threshold is zero because the appliance counts exactly: there is no noise floor,
 and an outage that buffered everything does not fire. Gated on the report's age, since the gauges
 hold the last report for ever. What to do is in
-[`help/site/remote-gateways.md`](../help/site/remote-gateways.md#13-troubleshooting).
+[`help/site/remote-gateways.md`](../help/site/remote-gateways.md#troubleshooting).
 
 ### Late Replay Missing From the Rollups (`aber-ingestion-rollup-windows-failed`)
 

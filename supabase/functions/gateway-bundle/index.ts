@@ -33,7 +33,7 @@ import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts"
  * the appliance obtains one at first boot. `NODERED_CREDENTIAL_SECRET` is generated per bundle, so
  * one appliance's credential file cannot be decrypted with another bundle's .env.
  *
- * The command is two stages in one line (docs/remote-gateways.md). Stage 0 carries no secret:
+ * The command is two stages in one line (help/site/remote-gateways.md). Stage 0 carries no secret:
  * it fetches the platform's root over plain HTTP from the dashboard's host, checks its public
  * key against the pin minted here beside the token over the authenticated browser session, which
  * is the trusted channel, and installs it. Stage 1 fetches the installer from gateway-install over

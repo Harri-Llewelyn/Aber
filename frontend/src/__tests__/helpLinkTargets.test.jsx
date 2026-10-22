@@ -31,7 +31,7 @@ describe('links into the help panel', () => {
   it('finds the Gateways page link to the two addresses an appliance dials', () => {
     expect(LINKS).toContainEqual({
       path: '../components/tabs/GatewaysTab.jsx',
-      to: 'site/remote-gateways#7-the-two-addresses-that-must-be-right',
+      to: 'site/remote-gateways#the-two-addresses-that-must-be-right',
     })
   })
 

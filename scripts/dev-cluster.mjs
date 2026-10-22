@@ -65,7 +65,8 @@ const CLUSTER = process.env.ABER_DEV_CLUSTER || 'aber'
 const NS = process.env.ABER_DEV_NAMESPACE || 'aber'
 const RELEASE = 'aber'
 export const IMG_NS = 'ghcr.io/harri-llewelyn/aber'
-// The runbook's pin. cert-manager is cluster administration, installed once, not a chart dependency.
+// The pin help/site/running-the-server.md installs (TLS, step 0). cert-manager is cluster
+// administration, installed once, not a chart dependency.
 const CERT_MANAGER_VERSION = 'v1.16.2'
 
 // Every image the chart names, tagged exactly as it pulls them: an empty `image.tag` resolves to
@@ -228,8 +229,9 @@ function ensureCluster () {
   console.log(`  context k3d-${CLUSTER}, API on 127.0.0.1:${port}`)
 }
 
-// The runbook's Traefik setting, applied the same way, so the dev loop measures the client address
-// a site gets. k3s's helm controller redeploys Traefik with it; the Service changing is the signal.
+// The Traefik setting of help/site/running-the-server.md (Install), applied the same way, so the
+// dev loop measures the client address a site gets. k3s's helm controller redeploys Traefik with
+// it; the Service changing is the signal.
 export async function ensureTraefikConfig () {
   step('Traefik keeps the client address')
   const policy = () => capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik',

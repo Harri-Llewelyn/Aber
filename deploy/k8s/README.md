@@ -249,14 +249,17 @@ The addresses an appliance dials use this machine's LAN address instead:
 - The bundle's API address is `api.<LAN address>.nip.io`, and Traefik routes it as well as
   `api.localhost`. The forge's clone URLs name `git.<LAN address>.nip.io`. Both names resolve only
   where the DNS resolver answers nip.io names carrying private addresses. Many home routers refuse
-  to, as DNS-rebind protection. `help/site/remote-gateways.md` §7 has the details.
+  to, as DNS-rebind protection. `help/site/remote-gateways.md`,
+  [*The dev loop's addresses*](../../help/site/remote-gateways.md#the-dev-loops-addresses), has the
+  details.
 
 Where the resolver does answer them, `--domain=<LAN address>.nip.io` moves every host onto the LAN,
 and the Studio and forge logins then need `ingress.tls`.
 
 `up` also enables the backup service, which brings storage and the forge with it, and generates the
 forge sweep secret once. The stack lane tests all of it. Before cert-manager, `up` also applies
-Traefik's client-address setting from *Install*.
+Traefik's client-address setting from
+[*Install*](../../help/site/running-the-server.md#first-traefik-keeps-each-clients-address).
 
 Its other options:
 
@@ -550,7 +553,8 @@ transparency log. Nothing is stored, rotated or leakable.
 The same job then verifies each signature against that identity, and reads the SBOM and provenance
 back out of the registry. So a release cannot report green with an artefact nothing signed.
 [`sign-and-verify.sh`](../../.github/scripts/sign-and-verify.sh) is that check, and
-*Verify what you are about to install*, under **Install**, is the consumer's half.
+[*Verify what you are about to install*](../../help/site/running-the-server.md#verify-what-you-are-about-to-install),
+in *Running the server*, is the consumer's half.
 
 Three consequences of signing:
 
@@ -579,7 +583,7 @@ helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.5.0
 - **No `latest` tag**, for any image or the chart. The chart finds every built image by its own
   `appVersion`, so that a chart release can only run the images built beside it. A floating tag
   invites the mixed-version stack that this design prevents.
-- **No arm64.** See the note under *Install*.
+- **No arm64.** See the note under [*Install*](../../help/site/running-the-server.md#install).
 - **No signature on the release asset.** `aber-<version>-sbom.tar.gz` is a convenience copy, and the
   signed SBOM is the one in the registry, under the image's own signature.
 - **It does not re-run the E2E or in-cluster suites.** Those ran on the commit the tag points at. It

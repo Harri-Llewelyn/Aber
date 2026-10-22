@@ -142,7 +142,7 @@ spec:
             */}}
             - name: SUPABASE_PUBLIC_URL
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.supabasePublicUrl | default (include "aber.supabaseUrl" .) | quote }}
-            {{- /* THE ONE-LINER (docs/remote-gateways.md). Where a fresh appliance fetches the
+            {{- /* THE ONE-LINER (help/site/remote-gateways.md). Where a fresh appliance fetches the
                    platform's root over plain HTTP before it trusts anything: the dashboard's host,
                    which serves the ingress TLS Secret's ca.crt at this path (frontend.yaml). The
                    pin the command carries is computed from the same Secret, mounted below. */}}

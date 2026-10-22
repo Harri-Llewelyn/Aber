@@ -3,9 +3,10 @@
  * A site's install and a site's upgrade, rehearsed on a k3d cluster made for the run.
  *
  *   node scripts/site-rehearsal.mjs install   install the checkout as a new site: values from the
- *                                             checkout's setup.mjs, the runbook's site.yaml with
- *                                             NetworkPolicies on (values-prod.yaml.example turns
- *                                             them on), the checkout's chart and images
+ *                                             checkout's setup.mjs, the site.yaml of
+ *                                             help/site/running-the-server.md with NetworkPolicies
+ *                                             on (values-prod.yaml.example turns them on), the
+ *                                             checkout's chart and images
  *   node scripts/site-rehearsal.mjs upgrade   install the last release as a site would (its own
  *                                             setup.mjs, the published chart and images), then
  *                                             `helm upgrade` it to the checkout with the same values

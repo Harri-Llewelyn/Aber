@@ -6,9 +6,13 @@ bundle carries, the enrolment lifecycle, re-issuing, certificates and the clock,
 and the platform playbook.
 
 The steps a site's operator follows are in the help page
-[Remote gateways](../help/site/remote-gateways.md), which the dashboard shows too: provisioning
-(§2), the two addresses (§7), adding devices (§10), proposing a flow (§11) and troubleshooting
-(§13). Each section keeps its number on both pages.
+[Remote gateways](../help/site/remote-gateways.md), which the dashboard shows too:
+[*Provisioning, step by step*](../help/site/remote-gateways.md#provisioning-step-by-step),
+[*The two addresses that must be right*](../help/site/remote-gateways.md#the-two-addresses-that-must-be-right),
+[*Adding devices — nothing is pre-registered*](../help/site/remote-gateways.md#adding-devices--nothing-is-pre-registered),
+[*Proposing a flow*](../help/site/remote-gateways.md#proposing-a-flow) and
+[*Troubleshooting*](../help/site/remote-gateways.md#troubleshooting). This page keeps its section
+numbers, so it has no 2, 7, 10, 11 or 13: those are the five that moved.
 
 ---
 
@@ -131,6 +135,13 @@ useless on the day a few appliances are ordered.
    Two credentials for one gateway would silently compete for a single Sparkplug identity.
 2. **Issues the broker credential** through the credential service beside the broker.
 3. **Marks the gateway `AWAITING_BIRTH`.**
+4. **Registers the appliance's deploy key with the forge.** It creates the gateway's own repository,
+   or adopts the one already there, protects its branches, and registers the public key the
+   appliance sent as that repository's only deploy key. Where the deployment names a platform
+   version, the same key may also read the platform repository. The response carries the clone URL
+   and the forge's host key. The step is **non-fatal**: the token is spent and the credential
+   exists by now, so a failure is logged and the response carries no repository. The appliance then
+   publishes, but has nothing to converge to. A deployment with no forge skips the step.
 
 If step 2 fails, the claim is **released** and the response is `503` with `retryable: true`. The
 same bundle then works again, so a broker restart during commissioning costs a retry, not a new
@@ -493,7 +504,8 @@ It is outbound only, needs no inventory, heals itself on a timer, and is idempot
   what `bootstrap.mjs` wrote inside the container.
 
 **The first run is a person's**, or the installer's if the appliance was set up with the command
-(§2). The playbook installs the timer that runs it afterwards. To run it by hand:
+([Remote gateways, *Provisioning, step by step*](../help/site/remote-gateways.md#provisioning-step-by-step)).
+The playbook installs the timer that runs it afterwards. To run it by hand:
 
 ```bash
 sudo apt-get install -y ansible-core

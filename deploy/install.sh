@@ -680,7 +680,8 @@ ca_is_ready() {
 
 prepare_cluster() {
   step "Prepare the cluster: Traefik, cert-manager and the internal CA"
-  # Traefik keeps each client's address, so sign-in limits apply per client (runbook, Install).
+  # Traefik keeps each client's address, so sign-in limits apply per client
+  # (help/site/running-the-server.md, Install).
   run kc apply -f "$SRC/deploy/k8s/traefik-config.yaml" || die "Traefik's settings did not apply."
   wait_until "Traefik keeps each client's address" 300 traefik_is_local || die "Traefik's Service did not switch to externalTrafficPolicy Local within 5 minutes.
 Aber needs the Traefik that k3s installs. 'kubectl -n kube-system get svc traefik' shows its state."

@@ -54,7 +54,8 @@ the forge refuses anonymous reads and the appliance has no key yet), runs it, wr
 appliance's `.env` and, beside it, the pinned root as `platform-root.pem` (the enrolment container
 trusts that file, not the host's store), and enrols by starting the compose project. Install first, enrol last: every
 step before enrolment can be re-run with the same command, and the token is spent only by the
-enrolment. The runbook is in `docs/remote-gateways.md`.
+enrolment. The steps are in `help/site/remote-gateways.md` (*On the appliance: the command*), and
+the design in `docs/remote-gateways.md`.
 
 ## How an appliance runs it
 

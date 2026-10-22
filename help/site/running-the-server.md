@@ -24,8 +24,9 @@ every step by hand, with the reason for each.
 There are two ways to install, for two different jobs:
 
 - **From the registry** (*A* below), if you want to run Aber.
-- **From a checkout** (*B* below), if you are changing it. `npm run dev:up` (*The development
-  loop* above) does this on k3d, as one command.
+- **From a checkout** (*B* below), if you are changing it. `npm run dev:up`
+  ([`deploy/k8s/README.md`, *The development loop*](../../deploy/k8s/README.md#the-development-loop))
+  does this on k3d, as one command.
 
 Both start with one change to Traefik.
 
@@ -273,12 +274,13 @@ projects sign them, or nobody does, and they are outside this rule.
 
 > **linux/amd64 only.** These images are not built for arm64, so on a Pi, Jetson or Graviton node
 > the pods are scheduled and then fail with `exec format error`. On arm64, build the images locally
-> (*Images you must build* below). The Dockerfiles need no changes on a native arm64 host.
+> ([`deploy/k8s/README.md`, *Images you must build*](../../deploy/k8s/README.md#images-you-must-build)).
+> The Dockerfiles need no changes on a native arm64 host.
 
 ### B. From a checkout (development)
 
 ```bash
-# Mirror repository-owned config files into the chart (see "Chart files" below).
+# Mirror repository-owned config files into the chart (deploy/k8s/README.md, "Chart files").
 node scripts/sync-helm-chart-files.mjs
 
 kubectl create namespace aber

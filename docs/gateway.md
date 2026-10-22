@@ -95,7 +95,7 @@ Three things break it, each without an error:
   rewrites every outside request's source to the node's pod-network address, so every client is
   one client and one limit serves the whole site.
   [`deploy/k8s/traefik-config.yaml`](../deploy/k8s/traefik-config.yaml) sets `Local`; the
-  runbook's *Install* section applies it.
+  *Install* section of [Running the server](../help/site/running-the-server.md#install) applies it.
 - **A proxy in front of Traefik that the hop count leaves out.** Every request then comes from the
   proxy. Name it in Traefik's `forwardedHeaders.trustedIPs`, and add one to
   `supabaseEnvoy.trustedProxyHops` for it.

@@ -201,9 +201,9 @@ describe('links', () => {
   })
 
   it('opens a repository path on GitHub at this release, marked as needing the internet', () => {
-    const { container } = draw(`Read [the runbook](${UP}docs/remote-gateways.md#7-the-two-addresses-that-must-be-right).`)
+    const { container } = draw(`Read [the runbook](${UP}docs/remote-gateways.md#8-certificates-and-the-two-clocks-they-run-on).`)
     const a = container.querySelector('a')
-    expect(a.getAttribute('href')).toBe(`${GITHUB_REPO_URL}/blob/${sourceRef()}/docs/remote-gateways.md#7-the-two-addresses-that-must-be-right`)
+    expect(a.getAttribute('href')).toBe(`${GITHUB_REPO_URL}/blob/${sourceRef()}/docs/remote-gateways.md#8-certificates-and-the-two-clocks-they-run-on`)
     expect(a.getAttribute('target')).toBe('_blank')
     expect(a.getAttribute('rel')).toContain('noopener')
     expect(a.getAttribute('aria-label')).toBe('the runbook (online: opens in a new tab and needs the internet)')

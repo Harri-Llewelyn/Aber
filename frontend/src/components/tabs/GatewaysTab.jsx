@@ -412,8 +412,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {enrolmentProblems.join('; ')}. An appliance dials these addresses, so they are set on
             the deployment rather than here: set <span className="mono">global.publicBaseDomain</span>{' '}
             in the chart&rsquo;s values and restart the functions service (the help page{' '}
-            <HelpLink to="site/remote-gateways#7-the-two-addresses-that-must-be-right">Remote gateways</HelpLink>,
-            section 7). Host and Simulated gateways are unaffected.
+            <HelpLink to="site/remote-gateways#the-two-addresses-that-must-be-right">Remote gateways</HelpLink>,
+            <em>The two addresses that must be right</em>). Host and Simulated gateways are unaffected.
           </span>
         </div>
       )}

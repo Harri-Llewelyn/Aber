@@ -185,7 +185,7 @@ gateway keeps the clone URL and host key it enrolled with. So an upgrade is some
 
 - **A gateway's flow changes only through a pull request** in its own repository in the forge.
   Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,
-  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#11-proposing-a-flow)).
+  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#proposing-a-flow)).
 - **A gateway's operating system follows the platform playbook at the tag its `platform.yml` names.**
   An upgrade publishes the new version's playbook, but each gateway stays on its own tag until a pull
   request in its repository moves it. Move one gateway first.
@@ -602,7 +602,7 @@ Every workload rolls once, for the new security contexts. Grafana restarts once 
 datasource file changed. The historian's maintenance Job creates the job that brings a late replay
 into the rollups (#788). A replay more than a day late that arrives in the minutes before that Job
 runs is stored, but missing from the rollups until refreshed by hand
-([`remote-gateways.md`](../../docs/remote-gateways.md), *Late data after an outage*).
+([`remote-gateways.md`](remote-gateways.md#late-data-after-an-outage)).
 
 ### From 1.4.0, no Job prints a secret: rotate the historian's passwords
 
@@ -1126,7 +1126,7 @@ is fresh.
 
 - [`releases.md`](../../docs/releases.md): how long a release is supported, what makes a version major, and how
   a site learns that a release matters to it
-- [`remote-gateways.md`](../../docs/remote-gateways.md): the gateway runbook, including issuing a new bundle and
+- [`remote-gateways.md`](../../docs/remote-gateways.md): the gateway design, including issuing a new bundle and
   what that invalidates
 - [`kubernetes-architecture.md`](../../docs/kubernetes-architecture.md): the chart, and how a release is
   published from a single `v*` tag

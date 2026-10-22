@@ -1396,7 +1396,7 @@ ingress:
   # links. Only the API: no other route is one they dial, and the browser routes' sign-ins and
   # origins are registered for publicBaseDomain's hosts alone. Empty renders the Ingress exactly as without it. With tls.enabled the certificate must name
   # these hosts too; cert-manager does when tls.certManager.clusterIssuer is set. The dev loop sets
-  # <LAN address>.nip.io, the name it hands appliances (docs/remote-gateways.md).
+  # <LAN address>.nip.io, the name it hands appliances (help/site/remote-gateways.md).
   #   additionalDomains:
   #     - 192.168.1.20.nip.io
   additionalDomains: []
