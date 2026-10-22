@@ -14,6 +14,7 @@ import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { isPlaced } from '../../utils/areaPlans'
+import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
@@ -590,15 +591,19 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               disabled: !canArchive,
               title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Return this area to service; its retention timer is cleared'
             }
-            : {
-              label: 'Archive Area', icon: <IconArchive size={13} />,
-              onClick: () => setArchiveTarget(selectedArea),
-              disabled: !canArchive,
-              danger: true,
-              title: !canArchive
-                ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-                : 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
-            }
+            : (() => {
+              // Refused by the database while anything is Area-Wide in the area (0199).
+              const refusal = archiveRefusal(areaWideIn(selectedArea.area_id, assets, gateways))
+              return {
+                label: 'Archive Area', icon: <IconArchive size={13} />,
+                onClick: () => setArchiveTarget(selectedArea),
+                disabled: !canArchive || !!refusal,
+                danger: true,
+                title: !canArchive
+                  ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+                  : refusal || 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
+              }
+            })()
         ].filter(Boolean) : []}
         beforeActions={selectedArea && (
           <AreaPlanPanel

@@ -38,9 +38,11 @@ function locationFieldsFor(scope, form, areas = []) {
  * `simulated` ahead of it). The caller's hint beneath says why.
  */
 export function LocationPicker({
-  idPrefix, form, onChange, cells = [], areas = [], disabled = false,
+  idPrefix, form, onChange, cells = [], areas: allAreas = [], disabled = false,
   cellEmptyLabel = '— No cell assigned —'
 }) {
+  // The database refuses making anything Area-Wide in an archived area.
+  const areas = allAreas.filter(a => !a.is_archived)
   const scope = disabled ? SCOPE_CELL : normaliseScope(form.location_scope)
   const chosenCell = cells.find(c => c.cell_id === form.cell_id)
   const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
