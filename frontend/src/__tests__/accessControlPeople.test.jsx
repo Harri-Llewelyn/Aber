@@ -141,7 +141,7 @@ describe('the People tab', () => {
     expect(select).toHaveAttribute('title', 'You cannot change your own role. Ask another Administrator.')
     const remove = within(mine).getByRole('button', { name: 'Remove Access' })
     expect(remove).toBeDisabled()
-    expect(remove).toHaveAttribute('title', 'You cannot remove your own access. Ask another Administrator.')
+    expect(remove).toHaveAccessibleDescription('You cannot remove your own access. Ask another Administrator.')
     fireEvent.click(remove)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -341,7 +341,7 @@ describe('setting a new password', () => {
     await showRemoved()
     const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()
-    expect(removed).toHaveAttribute('title', expect.stringMatching(/Restore it first/))
+    expect(removed).toHaveAccessibleDescription(expect.stringMatching(/Restore it first/))
   })
 
   it('sets one only after it is confirmed, then shows it once', async () => {

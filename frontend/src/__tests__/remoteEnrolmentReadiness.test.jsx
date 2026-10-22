@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * The Gateways page asks whether this deployment can enrol an appliance before it offers a remote
@@ -88,7 +89,7 @@ describe('remote enrolment readiness', () => {
     expect(typeSelect().value).toBe('remote')
     expect(screen.getByText(/This deployment cannot issue an install command or bundle yet/)).toBeTruthy()
     expect(save().disabled).toBe(true)
-    expect(save().title).toMatch(/cannot be enrolled/)
+    expect(tooltipOf(save())).toMatch(/cannot be enrolled/)
   })
 
   it('leaves Host and Simulated gateways unaffected', async () => {

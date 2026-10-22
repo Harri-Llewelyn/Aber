@@ -5,6 +5,7 @@ import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { tabLink } from '../test/tabBar'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -158,7 +159,7 @@ describe('Uncatalogued tab: the rows', () => {
     const quarantined = row.getByRole('link', { name: /Press_02/ })
     expect(quarantined.getAttribute('href')).toBe('/devices?search=press-2')
     expect(quarantined.textContent).toMatch(/quarantined/)
-    expect(quarantined.title).toMatch(/in quarantine/)
+    expect(tooltipOf(quarantined)).toMatch(/in quarantine/)
 
     // A plain click navigates in place.
     fireEvent.click(press, { button: 0 })

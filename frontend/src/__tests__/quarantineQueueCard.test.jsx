@@ -6,6 +6,7 @@ import { api } from '../api'
 import { formatDateTime } from '../utils/format'
 import { deviceUrl, tabUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * The Devices page is one card with two tabs: Registered, the roster, which opens on Active and
@@ -179,8 +180,8 @@ describe('the Quarantine tab', () => {
 
     const button = within(card()).getByRole('button', { name: 'Approve & Onboard' })
     expect(button).toBeDisabled()
-    expect(button.title).toMatch(/^Requires /)
-    expect(button.title).not.toMatch(/Admin permissions/)
+    expect(tooltipOf(button)).toMatch(/^Requires /)
+    expect(tooltipOf(button)).not.toMatch(/Admin permissions/)
   })
 
   it('opens on the Quarantine tab when the address names it, as the rail links to it', async () => {

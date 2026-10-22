@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
+import { getAllByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
   api: {
@@ -116,7 +117,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
     // The meaning lives on the badge's tooltip now rather than in three lines beside it.
-    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(1)
+    expect(getAllByTooltip(/Broker column says whether an account exists/i).length).toBe(1)
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
@@ -184,7 +185,7 @@ describe('AccessControlTab', () => {
     const stray = (await screen.findByRole('button', { name: /gwy999999999999999999999/ })).closest('tr')
     const badge = within(stray).getByText('No gateway')
     expect(badge.className).toContain('badge-neutral')
-    expect(badge.title).toMatch(/revoke-orphaned-broker-accounts/)
+    expect(tooltipOf(badge)).toMatch(/revoke-orphaned-broker-accounts/)
     expect(within(stray).getByText(/no gateway claims it/)).toBeTruthy()
     // The platform account is listed beside it, first, and unmarked; a known gateway is not listed.
     const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
@@ -235,8 +236,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(4))
     // FOUR BADGES, FOUR TOOLTIPS, AND NOT ONE LINE OF REPEATED BODY TEXT. The second assertion is
     // the one that matters: it fails the moment the sentence is put back into the column.
-    expect(screen.getAllByTitle(/Broker column says whether an account exists/i).length).toBe(4)
-    expect(screen.queryByText(/Broker column says whether an account exists/i)).toBeNull()
+    expect(getAllByTooltip(/Broker column says whether an account exists/i).length).toBe(4)
+    expect(screen.queryByText(/Broker column says whether an account exists/i, { ignore: '[role=tooltip]' })).toBeNull()
   })
 
   /** Archived gateways are hidden by default and offer no action when shown: archiving rotated the
@@ -928,9 +929,9 @@ describe('AccessControlTab', () => {
     expect(within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)).toBeTruthy()
     // Said in the chart's terms: the Secret key the Deployment reads, and which Deployment.
     const rotate = within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)
-    expect(rotate.getAttribute('title')).toMatch(/SUPABASE_INGESTION_KEY in the release Secret/)
-    expect(rotate.getAttribute('title')).toMatch(/ingestion Deployment/)
-    expect(rotate.getAttribute('title')).not.toMatch(/\.env|containers/)
+    expect(tooltipOf(rotate)).toMatch(/SUPABASE_INGESTION_KEY in the release Secret/)
+    expect(tooltipOf(rotate)).toMatch(/ingestion Deployment/)
+    expect(tooltipOf(rotate)).not.toMatch(/\.env|containers/)
     expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
     // The MCP client is the one that command IS right for, so it keeps it.
     expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
@@ -947,9 +948,9 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_ReleaseCheck')).toBeTruthy())
     const row = screen.getByText('Service_ReleaseCheck').closest('tr')
     const rotate = within(row).getByLabelText(/npm run keys:rotate/)
-    expect(rotate.getAttribute('title')).toMatch(/SUPABASE_RELEASE_CHECK_KEY in the release Secret/)
-    expect(rotate.getAttribute('title')).toMatch(/release-check CronJob at each run/)
-    expect(rotate.getAttribute('title')).not.toMatch(/Deployment/)
+    expect(tooltipOf(rotate)).toMatch(/SUPABASE_RELEASE_CHECK_KEY in the release Secret/)
+    expect(tooltipOf(rotate)).toMatch(/release-check CronJob at each run/)
+    expect(tooltipOf(rotate)).not.toMatch(/Deployment/)
     expect(within(row).queryByRole('button', { name: /Issue Token/i })).toBeNull()
   })
 

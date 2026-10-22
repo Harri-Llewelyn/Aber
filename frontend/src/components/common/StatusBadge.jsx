@@ -32,7 +32,7 @@ export function gatewayStatusTone(status) {
   return 'warning'
 }
 
-/** The gateway status chip, drawn through Badge. */
+/** The gateway status chip, drawn through Badge. A status that is not its own explanation says why in its tooltip. */
 export function StatusBadge({ status }) {
   const playback = PLAYBACK_STATES[status]
   if (playback) return <Badge tone={playback.tone} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
@@ -42,11 +42,10 @@ export function StatusBadge({ status }) {
 
   const label = GATEWAY_STATUS_LABELS[status] || status
 
-  const title = isPending
-    ? status === 'PENDING_ENROLLMENT'
+  const title = !isPending ? undefined
+    : status === 'PENDING_ENROLLMENT'
       ? 'A bundle has been generated for this gateway. It is waiting for the appliance to run it and enrol.'
       : 'The appliance enrolled and holds a broker credential. It has not published its first Sparkplug birth yet.'
-    : `Operational Status: ${status}`
 
   return <Badge tone={tone} dot title={title}>{label}</Badge>
 }

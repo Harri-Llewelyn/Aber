@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { IconCopy, IconCheck } from './Icons'
 import { overlayHost } from './Modal'
+import { Tooltip } from './Tooltip'
 
 const FEEDBACK_MS = 1600
 const TAIL_CHARS = 24
@@ -87,31 +88,32 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
   const split = !asButton && truncate === 'start' && shown.length > TAIL_CHARS
 
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      // `mono` only when showing the value itself. A fixed label like "Copy Command" is prose and
-      // reads worse in a monospace face beside the buttons it sits next to.
-      className={(asButton
-        ? `btn btn-ghost ${className}`
-        : `copyable-id ${display ? '' : 'mono'} ${className}`).trim()}
-      title={title || `Click to copy this ${label}`}
-      aria-label={`Copy ${label} ${value}`}
-    >
-      {asButton
-        ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
-        : null}
-      {asButton ? <span>{shown}</span> : (
-        <span className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
-          {split
-            ? <><span className="copyable-id-head">{shown.slice(0, -TAIL_CHARS)}</span><span className="copyable-id-tail">{shown.slice(-TAIL_CHARS)}</span></>
-            : shown}
-        </span>
-      )}
-      {!asButton && (state === 'copied'
-        ? <IconCheck size={12} className="copyable-id-icon" />
-        : <IconCopy size={12} className="copyable-id-icon" />)}
-      {state === 'failed' && <span className="copyable-id-error">copy blocked</span>}
-    </button>
+    <Tooltip text={title || `Click to copy this ${label}`}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        // `mono` only when showing the value itself. A fixed label like "Copy Command" is prose and
+        // reads worse in a monospace face beside the buttons it sits next to.
+        className={(asButton
+          ? `btn btn-ghost ${className}`
+          : `copyable-id ${display ? '' : 'mono'} ${className}`).trim()}
+        aria-label={`Copy ${label} ${value}`}
+      >
+        {asButton
+          ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
+          : null}
+        {asButton ? <span>{shown}</span> : (
+          <span className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
+            {split
+              ? <><span className="copyable-id-head">{shown.slice(0, -TAIL_CHARS)}</span><span className="copyable-id-tail">{shown.slice(-TAIL_CHARS)}</span></>
+              : shown}
+          </span>
+        )}
+        {!asButton && (state === 'copied'
+          ? <IconCheck size={12} className="copyable-id-icon" />
+          : <IconCopy size={12} className="copyable-id-icon" />)}
+        {state === 'failed' && <span className="copyable-id-error">copy blocked</span>}
+      </button>
+    </Tooltip>
   )
 }

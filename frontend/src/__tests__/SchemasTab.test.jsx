@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * The schema registry. The metric catalog left this page for its own (MetricsTab.test.jsx), so
@@ -365,7 +366,7 @@ describe('the builder says why it will not save', () => {
   it('says what is still needed on the button itself, before it is clicked', async () => {
     await openBuilder()
     const save = screen.getByRole('button', { name: /^Save Schema$/ })
-    expect(save.getAttribute('title')).toMatch(/a name and at least one metric/)
+    expect(tooltipOf(save)).toMatch(/a name and at least one metric/)
   })
 
   it('saves once the form is complete', async () => {

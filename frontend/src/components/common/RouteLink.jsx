@@ -1,5 +1,6 @@
 import React from 'react'
 import { navigate } from '../../hooks/useUrlState'
+import { Tooltip } from './Tooltip'
 
 /**
  * Whether a click on a link should navigate in place: the main button with no modifier. Ctrl, Cmd
@@ -12,8 +13,9 @@ export const isPlainClick = (e) =>
  * A link to a page of this app: a real `<a href>`, so Ctrl-click, middle-click and "Copy link
  * address" work, that navigates in place on a plain click. `onNavigate` runs on that plain click
  * instead of the default navigation, for a link whose in-place click does more than go to `to`.
+ * `title` is its tooltip, the shared one.
  */
-export function RouteLink({ to, onNavigate, onClick, children, ...rest }) {
+export function RouteLink({ to, onNavigate, onClick, title, children, ...rest }) {
   const handleClick = (e) => {
     onClick?.(e)
     if (e.defaultPrevented || !isPlainClick(e)) return
@@ -21,5 +23,5 @@ export function RouteLink({ to, onNavigate, onClick, children, ...rest }) {
     if (onNavigate) onNavigate(e)
     else navigate(to)
   }
-  return <a href={to} onClick={handleClick} {...rest}>{children}</a>
+  return <Tooltip text={title}><a href={to} onClick={handleClick} {...rest}>{children}</a></Tooltip>
 }

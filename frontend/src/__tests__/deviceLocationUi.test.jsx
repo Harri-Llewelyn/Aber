@@ -335,7 +335,7 @@ describe('the edit form', () => {
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
     expect(document.querySelector('#device-cell').disabled).toBe(true)
-    expect(screen.getByText(/belong to the Simulated lane/i)).toBeInTheDocument()
+    expect(screen.getByText(/belong to the Simulated lane/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
   it('keeps a cell already stored on a device whose gateway went simulated', async () => {
@@ -367,7 +367,7 @@ describe('the Sparkplug topic in the context panel', () => {
     await show([device()])
     openPanel()
     expect(topicButton()).toBeInTheDocument()
-    expect(screen.queryByText(/Click to copy/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Click to copy/i, { ignore: '[role=tooltip]' })).not.toBeInTheDocument()
   })
 
   it('fills the edge node segment in from the serving gateway', async () => {
@@ -432,8 +432,8 @@ describe('the Location row in the context panel', () => {
   it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
     const value = await location()
     expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
-    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAttribute('title', 'Open this area on the Areas page')
-    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAttribute('title', 'Open this cell on the Cells page')
+    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAccessibleDescription('Open this area on the Areas page')
+    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAccessibleDescription('Open this cell on the Cells page')
     const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
     expect(labels).not.toContain('Area (resolved)')
     expect(labels).not.toContain('Location Source')

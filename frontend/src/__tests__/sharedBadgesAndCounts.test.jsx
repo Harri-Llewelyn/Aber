@@ -16,7 +16,7 @@ describe('Badge', () => {
     const { container } = render(<Badge tone="success" size="sm" title="Hover" icon={<i data-testid="ic" />}>ok</Badge>)
     const el = container.querySelector('.badge')
     expect(el.className).toContain('badge-sm')
-    expect(el.getAttribute('title')).toBe('Hover')
+    expect(el).toHaveAccessibleDescription('Hover')
     expect(el.querySelector('[data-testid="ic"]')).not.toBeNull()
   })
 
@@ -57,7 +57,7 @@ describe('ArchivedBadge', () => {
     const { container } = render(<ArchivedBadge size="sm" title="Out of commission" />)
     const el = container.querySelector('.badge')
     expect(el.className).toContain('badge-sm')
-    expect(el.getAttribute('title')).toBe('Out of commission')
+    expect(el).toHaveAccessibleDescription('Out of commission')
   })
 })
 
