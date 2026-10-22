@@ -7,6 +7,7 @@ import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYT
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
+import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
 import {
@@ -2830,21 +2831,15 @@ const apiMethods = {
       return { metric_uuid: item.id || '', ...item };
     }
 
+    // Ingestion's rules for one DDATA payload against this one version: { findings, notChecked,
+    // absent } or { error }. A metric the payload leaves out is never a finding (report by exception).
     if (path === '/api/v1/schemas/validate') {
       const { schema_uuid, payload } = body;
-      const { data, error } = await supabase.from('schemas').select('*').eq('id', schema_uuid);
+      const { data, error } = await supabase.from('schemas').select('schema_definition').eq('id', schema_uuid);
       if (error || !data || data.length === 0) {
-        return { valid: false, error: 'Target schema definition not found' };
+        return { error: 'Target schema definition not found' };
       }
-      const schemaDef = data[0].schema_definition;
-      if (schemaDef?.required && Array.isArray(schemaDef.required)) {
-        for (const req of schemaDef.required) {
-          if (payload[req] === undefined || payload[req] === null) {
-            return { valid: false, error: `Missing required field: ${req}` };
-          }
-        }
-      }
-      return { valid: true, message: 'All required fields are present.' };
+      return judgePayload(data[0].schema_definition, payload);
     }
 
     // Both are RPCs rather than table writes: `version` is computed from the parent and `publish`
