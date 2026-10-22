@@ -85,7 +85,8 @@ COPY ingestion/cold_archive.py .
 
 # The area-plan sweep, for the same reason: a CLI the area-plan-sweep CronJob runs as
 # `python -m area_plan_sweep`. It imports capture_worker.py for the storage client that carries the
-# ingestion key.
+# ingestion key. Check 122 of scripts/check-docs-drift.mjs fails on a module the chart runs from this
+# image, or one it imports, that no COPY line names.
 COPY ingestion/area_plan_sweep.py .
 
 # Compile the Sparkplug B protobuf definition
