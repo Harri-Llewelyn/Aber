@@ -1201,8 +1201,9 @@ paths:
       description: |
         One transaction: flips the draft to `active`, archives the predecessor, repoints every
         `device_submodels` row, and logs each repoint to the Audit Trail under its device.
-        `devices_rebound` and `submodels_rebound` count the repointed rows; `schema_ids_rebound`
-        is always 0, since the `devices.schema_id` column it counted was removed in 1.3.0.
+        `devices_rebound` and `submodels_rebound` count the repointed rows. `schema_ids_rebound`
+        is always 0, since the `devices.schema_id` column it counted was removed in 1.3.0. It is
+        deprecated, and removed no sooner than 1.7.0.
 
         A device attached to both versions has its redundant old attachment dropped first, or
         the repoint would collide on `uq_device_submodels`.
@@ -1220,7 +1221,16 @@ paths:
           description: The now-active version.
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
+                properties:
+                  schema: { type: object, description: 'The published row as JSON.' }
+                  archived_schema_id: { type: string, format: uuid, nullable: true, description: 'The parent it archived; NULL for a first version.' }
+                  archived_schema_name: { type: string, nullable: true }
+                  devices_rebound: { type: integer, description: 'Attachments repointed from the parent to this version.' }
+                  submodels_rebound: { type: integer, description: 'The same count as `devices_rebound`.' }
+                  schema_ids_rebound: { type: integer, enum: [0], deprecated: true, description: 'Always 0: the `devices.schema_id` column it counted was removed in 1.3.0. Deprecated in 1.6.0, and removed no sooner than 1.7.0. Read `devices_rebound`.' }
+                  duplicate_submodels_removed: { type: integer, description: 'Old-version attachments dropped from a device that already carried this version.' }
         '400': { description: The target is not a draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1281,7 +1291,7 @@ paths:
       summary: Resolved schema attachments
       description: |
         Read-only view, one row per (device, schema): every `device_submodels` row. `source` is
-        always `device_submodels`; it is kept for clients that select it.
+        always `device_submodels`, and is deprecated: it is removed no sooner than 1.7.0.
         Read this rather than `device_submodels` unless you are writing attachments.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -4880,7 +4890,7 @@ components:
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
         submodel_key: { type: string, nullable: true }
-        source: { type: string, enum: [device_submodels], description: 'Always `device_submodels`. Kept for clients that select it.' }
+        source: { type: string, enum: [device_submodels], deprecated: true, description: 'Always `device_submodels`, since a schema is attached in one place. Deprecated in 1.6.0, and removed no sooner than 1.7.0: stop selecting it.' }
 
     TelemetryRow:
       type: object

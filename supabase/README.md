@@ -1442,6 +1442,13 @@ not do:
   but `0199` refuses archiving such an area and making anything Area-Wide in an archived one, so
   the skip is a guard no row reaches.
 
+Two values are kept only for clients that may read them, and their comments now say they are
+deprecated: `device_schemas.source`, always `'device_submodels'` since `0175`, and
+`publish_schema_version()`'s `schema_ids_rebound`, always 0 since 1.3.0. Each is announced in
+1.6.0 and removed no sooner than 1.7.0, under *Deprecation* in
+[`docs/releases.md`](../docs/releases.md#deprecation); `docs/openapi.yaml` marks both
+`deprecated: true`.
+
 `COMMENT ON` only, so a replay restates the same text. The file's self-check reads each comment
 back. `docs/openapi.yaml` and the dashboard's hints say the same about each column.
 

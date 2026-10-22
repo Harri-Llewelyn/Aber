@@ -4,8 +4,9 @@
 -- "read by nothing" (i3X serves both), a flow hash "computed by its bootstrap at enrolment" (the
 -- heartbeat reports it), a broker root "hand-distributed" into every trust store (it follows the
 -- trust bundle), a cell description shown as a help tip on the Site Map (it is a field in the
--- cell's panel), and an area purge skip that 0199's refusals leave no row to reach. COMMENT ON
--- only: no row, privilege or object changes.
+-- cell's panel), and an area purge skip that 0199's refusals leave no row to reach. Two values
+-- kept only for clients, device_schemas.source and publish_schema_version()'s schema_ids_rebound,
+-- are marked deprecated. COMMENT ON only: no row, privilege or object changes.
 --
 -- Reasoning: supabase/README.md, "The column comments say what the code does (0200)". Idempotent.
 
@@ -45,6 +46,18 @@ COMMENT ON COLUMN public.areas.auto_delete_at IS
   'archiving an area while anything is Area-Wide in it, and making anything Area-Wide in an '
   'archived area, so the skip is a guard no row reaches (0200).';
 
+-- Two values kept only for clients that read them, now deprecated: removed no sooner than 1.7.0.
+COMMENT ON VIEW public.device_schemas IS
+  'Every schema attached to a device, one row per (device, schema): its device_submodels rows. '
+  '`source` is always ''device_submodels''. It is deprecated in 1.6.0 and removed no sooner than '
+  '1.7.0, so a client should stop selecting it (0200).';
+
+COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS
+  'Activates a draft version, archives its parent, and atomically repoints every device_submodels '
+  'row from the parent to it. `schema_ids_rebound` is always 0: the devices.schema_id column it '
+  'counted was removed in 1.3.0. It is deprecated in 1.6.0 and removed no sooner than 1.7.0; '
+  '`devices_rebound` is the count to read (0200).';
+
 -- -------------------------------------------------------------------------------------------------
 -- What this file did, and nothing wider. Each comment is read back as the boot left it here; a
 -- later file that restates one runs after this check.
@@ -73,6 +86,13 @@ BEGIN
       RAISE EXCEPTION '0200: %.% does not carry this file''s comment', v_column.table_name, v_column.column_name;
     END IF;
   END LOOP;
+  IF position('(0200)' IN coalesce(obj_description('public.device_schemas'::regclass, 'pg_class'), '')) = 0 THEN
+    RAISE EXCEPTION '0200: the device_schemas view does not carry this file''s comment';
+  END IF;
+  IF position('(0200)' IN coalesce(obj_description(
+       'public.publish_schema_version(uuid)'::regprocedure, 'pg_proc'), '')) = 0 THEN
+    RAISE EXCEPTION '0200: publish_schema_version() does not carry this file''s comment';
+  END IF;
 END
 $check$;
 
