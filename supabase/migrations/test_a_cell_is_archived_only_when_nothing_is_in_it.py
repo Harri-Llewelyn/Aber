@@ -160,8 +160,8 @@ class Base(unittest.TestCase):
                       "UPDATE public.cells SET is_archived = true, archived_at = now() WHERE id = %s;",
                       (cell_id,))
 
-    def _is_archived(self, table, row_id):
-        self.cur.execute(f"SELECT is_archived FROM public.{table} WHERE id = %s;", (row_id,))
+    def _cell_is_archived(self, cell_id):
+        self.cur.execute("SELECT is_archived FROM public.cells WHERE id = %s;", (cell_id,))
         return self.cur.fetchone()[0]
 
 
@@ -175,7 +175,7 @@ class ACellThatHoldsAnythingIsNotArchived(Base):
                 self._archive_refused(
                     cell, rf'^cell "{name}" still holds 1 device\. Move it to another cell, or delete it, '
                           r'then archive the cell\.', role)
-        self.assertFalse(self._is_archived("cells", cell))
+        self.assertFalse(self._cell_is_archived(cell))
 
     def test_an_offline_an_archived_and_a_quarantined_device(self):
         for kind in ("offline", "archived", "quarantined"):
