@@ -4667,8 +4667,12 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   color: var(--text-primary);
 }
 
-.help-prose a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.help-prose a:hover { color: var(--accent-strong); }
+/* Accent text, as every link is, underlined on hover and focus. A link whose text is code keeps the
+   accent: with no resting underline, the colour is what says it is a link. */
+.help-prose a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.help-prose a:hover,
+.help-prose a:focus-visible { text-decoration: underline; }
+.help-prose a code { color: inherit; }
 
 .help-missing { color: var(--text-muted); font-style: italic; }
 
@@ -6247,7 +6251,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   margin-top: 14px;
 }
 
-.gateway-settings-help a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.gateway-settings-help a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.gateway-settings-help a:hover,
+.gateway-settings-help a:focus-visible { text-decoration: underline; }
 
 @media (max-width: 640px) {
   .gateway-settings { grid-template-columns: minmax(0, 1fr); }
