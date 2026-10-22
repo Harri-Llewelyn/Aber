@@ -12,6 +12,7 @@ import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn, severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
@@ -156,7 +157,6 @@ export function PeopleSection({ showToast, currentUserId }) {
             value={roleFilter}
             onChange={e => setRoleFilter(e.target.value)}
             aria-label="Filter people by role"
-            title="Filter by the Role column"
           >
             <option value="">All roles ({listed.length})</option>
             {PERSON_ROLES.map(r => (
@@ -169,7 +169,6 @@ export function PeopleSection({ showToast, currentUserId }) {
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
             aria-label="Filter people by status"
-            title="Filter by the Status column"
           >
             <option value="">Any status ({listed.length})</option>
             {PERSON_STATUSES
@@ -184,25 +183,24 @@ export function PeopleSection({ showToast, currentUserId }) {
           </select>
           {/* Offered only while an account is removed; the count is what it would list. */}
           {removedCount > 0 && (
-            <button
-              type="button"
-              className={`btn btn-sm ${showRemoved ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setShowRemoved(v => !v)}
-              aria-pressed={showRemoved}
-              title="People whose access is removed are left off the list. Their accounts and history stay, and Restore Access gives the role back."
-            >
-              <IconArchive size={13} /> Show removed ({removedCount})
-            </button>
+            <Tooltip text="People whose access is removed are left off the list. Their accounts and history stay.">
+              <button
+                type="button"
+                className={`btn btn-sm ${showRemoved ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setShowRemoved(v => !v)}
+                aria-pressed={showRemoved}
+              >
+                <IconArchive size={13} /> Show removed ({removedCount})
+              </button>
+            </Tooltip>
           )}
           <div className="filter-bar-actions">
             <ClearFilters count={filterCount} onClear={clearFilters} />
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setAdding(true)}
-              title="Add a person with a role. They get an invitation by email, or a password you give them."
-            >
-              <IconPlus size={13} /> Add Person
-            </button>
+            <Tooltip text="They get an invitation by email, or a password you give them.">
+              <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
+                <IconPlus size={13} /> Add Person
+              </button>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -229,7 +227,7 @@ export function PeopleSection({ showToast, currentUserId }) {
             <thead>
               <tr>
                 <SortHeader sort={sort} column="person">Person</SortHeader>
-                <SortHeader sort={sort} column="role">Role</SortHeader>
+                <SortHeader sort={sort} column="role" title="A change of role applies from the person's next request.">Role</SortHeader>
                 <SortHeader sort={sort} column="status">Status</SortHeader>
                 <SortHeader sort={sort} column="last_sign_in">Last signed in</SortHeader>
                 <th className="row-actions">Actions</th>
@@ -250,19 +248,22 @@ export function PeopleSection({ showToast, currentUserId }) {
                       {isSelf && <Badge size="sm" className="badge-follow" title="The account you are signed in with">YOU</Badge>}
                     </td>
                     <td>
-                      <select
-                        className="form-control"
-                        aria-label={`Role for ${p.email || p.user_id}`}
-                        value={p.role || ''}
-                        disabled={!!roleBlocked || savingRole === p.user_id}
-                        title={roleBlocked || 'Change their role. It applies from their next request.'}
-                        onChange={e => changeRole(p, e.target.value)}
-                      >
-                        {!p.role && <option value="" disabled>No role</option>}
-                        {PERSON_ROLES.map(r => (
-                          <option key={r.name} value={r.name} title={r.description}>{r.label}</option>
-                        ))}
-                      </select>
+                      {/* Says why it cannot change, or what the role chosen allows: an option's
+                          own description never reaches a keyboard. */}
+                      <Tooltip text={roleBlocked || PERSON_ROLES.find(r => r.name === p.role)?.description}>
+                        <select
+                          className="form-control"
+                          aria-label={`Role for ${p.email || p.user_id}`}
+                          value={p.role || ''}
+                          disabled={!!roleBlocked || savingRole === p.user_id}
+                          onChange={e => changeRole(p, e.target.value)}
+                        >
+                          {!p.role && <option value="" disabled>No role</option>}
+                          {PERSON_ROLES.map(r => (
+                            <option key={r.name} value={r.name}>{r.label}</option>
+                          ))}
+                        </select>
+                      </Tooltip>
                       {removed && p.role_on_restore && (
                         <div className="cell-meta">{personRoleLabel(p.role_on_restore)} when restored</div>
                       )}
