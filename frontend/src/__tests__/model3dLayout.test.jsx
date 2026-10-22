@@ -9,7 +9,7 @@ import { Model3DUploader, Model3DLabel, MODEL_STORAGE_NOTE } from '../components
 /**
  * Where the Expand button and the model's buttons sit. Expand is in the top-right corner of what
  * it enlarges, wherever that is (one rule, `.expand-corner`); Download, Replace and Remove share
- * the tile's width in equal columns; the public-bucket note is the "Public" marker's tip on the
+ * the section's width in equal columns; the public-bucket note is the "Public" marker's tip on the
  * section label once a model is attached, and is said in full on the empty drop zone. jsdom lays
  * nothing out, so the geometry is read from App.css.
  */
@@ -62,16 +62,16 @@ describe('the Expand button\'s corner', () => {
 })
 
 describe('the attached model\'s buttons', () => {
-  it('share the tile\'s width in equal columns, one per button', () => {
+  it('share the section\'s width in equal columns, one per button', () => {
     expect(prop('.model-file-actions', 'display')).toBe('grid')
     expect(prop('.model-file-actions', 'grid-auto-flow')).toBe('column')
     expect(prop('.model-file-actions', 'grid-auto-columns')).toBe('minmax(0, 1fr)')
     expect(prop('.model-file-actions > .btn', 'justify-content')).toBe('center')
   })
 
-  it('keep their icons and drop their words in a tile too narrow for three, the word kept as the name', () => {
-    expect(prop('.model-tile', 'container')).toBe('model-tile / inline-size')
-    const narrow = APP_CSS.match(/@container model-tile \(max-width: (\d+)px\) \{\s*([^{]+)\{([^}]*)\}/)
+  it('keep their icons and drop their words in a section too narrow for three, the word kept as the name', () => {
+    expect(prop('.model-section', 'container')).toBe('model-section / inline-size')
+    const narrow = APP_CSS.match(/@container model-section \(max-width: (\d+)px\) \{\s*([^{]+)\{([^}]*)\}/)
     expect(narrow).not.toBeNull()
     expect(narrow[2].trim()).toBe('.model-file-actions:has(> :nth-child(3)) .model-file-action-word')
     // Visually hidden, not display:none, so the word is still each button's accessible name.
@@ -113,7 +113,7 @@ describe('the 3D Model label', () => {
     expect(prop('.help-tip.help-tip-text', 'width')).toBe('auto')
   })
 
-  it('leaves the note off the attached model\'s tile: the marker carries it', async () => {
+  it('leaves the note off the attached model\'s section: the marker carries it', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
     render(<Model3DUploader device={DEVICE} canManage showToast={vi.fn()} />)
     await screen.findByRole('link', { name: /Download/ })
@@ -136,7 +136,21 @@ describe('the empty drop zone', () => {
     expect(screen.getByRole('button', { name: /Upload a 3D model/i })).not.toHaveTextContent(/anyone with the link/)
   })
 
-  it('is as tall as the viewer, so the tile keeps its height with and without a model', () => {
-    expect(prop('.model-drop', 'min-height')).toBe(prop('.model-viewer-frame', 'height'))
+  it('is the viewer\'s shape, so the section keeps its height with and without a model', () => {
+    expect(prop('.model-drop', 'aspect-ratio')).toBe(prop('.model-viewer-frame', 'aspect-ratio'))
+  })
+})
+
+/* A 180px viewer in half the drawer was cramped (#1070): it takes the drawer's width now, and its
+   height follows. Expanded, it takes the window's height instead. */
+describe('the viewer', () => {
+  it('fills the section\'s width at 16:9', () => {
+    expect(prop('.model-viewer-frame', 'width')).toBe('100%')
+    expect(prop('.model-viewer-frame', 'aspect-ratio')).toBe('16 / 9')
+    expect(declaration(APP_CSS, '.model-viewer-frame', 'height')).toBeNull()
+  })
+
+  it('drops the ratio when expanded, where the space is the window\'s', () => {
+    expect(prop('.model-viewer-expanded > .model-viewer-frame-full', 'aspect-ratio')).toBe('auto')
   })
 })

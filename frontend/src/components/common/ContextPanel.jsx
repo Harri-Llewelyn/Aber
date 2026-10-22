@@ -41,8 +41,7 @@ export const HelpDrawerContext = createContext(null)
  * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
  * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
  * not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
- * screen reach. An entry `{ beside, fields }` is a group: `beside`, a section of fixed height such
- * as the device's 3D model, on the left of the row, and its `fields` stacked on the right.
+ * screen reach.
  *
  * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `title` is the action's tooltip, the shared one, for what its label does not
@@ -55,7 +54,7 @@ export const HelpDrawerContext = createContext(null)
  * @param {Function} onCopy Toast callback handed to CopyableId.
  *
  * @param {node} beforeActions Sections that are facts about the entity, rendered with the metadata
- * above the actions.
+ * above the actions, and a section of fixed height such as the device's 3D model.
  *
  * @param {node} children Sections that are tools, rendered after the actions so an unknown height
  * cannot push them off the drawer.
@@ -170,22 +169,13 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
             </div>
           )}
 
-          {/* A run of plain fields is one <dl>; a group is a row of its own, its fields a <dl> beside
-              the node. A <dl> holds only dt/dd groups, so the node cannot go inside one. */}
-          {fieldRuns(fields).map((run, r) => Array.isArray(run) ? (
-            <dl key={r} className="context-panel-fields">
-              {run.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
+          {fields.length > 0 && (
+            <dl className="context-panel-fields">
+              {fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
             </dl>
-          ) : (
-            <div key={r} className="context-field-group">
-              <div className="context-field-beside">{run.beside}</div>
-              <dl className="context-panel-fields">
-                {run.fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
-              </dl>
-            </div>
-          ))}
+          )}
 
-          {/* Facts, with the metadata they belong to. */}
+          {/* Facts, with the metadata they belong to, and sections of fixed height. */}
           {beforeActions && <div className="context-panel-facts">{beforeActions}</div>}
 
           {actions.length > 0 && (
@@ -248,17 +238,6 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
       </div>
     </aside>
   )
-}
-
-/** `fields` cut into runs: an array for consecutive plain fields, the entry itself for a group. */
-function fieldRuns(fields) {
-  const runs = []
-  for (const f of fields) {
-    if (f.beside !== undefined) runs.push(f)
-    else if (Array.isArray(runs.at(-1))) runs.at(-1).push(f)
-    else runs.push([f])
-  }
-  return runs
 }
 
 /** One label and its value. */

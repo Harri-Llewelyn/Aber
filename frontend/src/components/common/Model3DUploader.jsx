@@ -25,7 +25,7 @@ export const MODEL_STORAGE_NOTE =
  * so in full to someone who may upload, and with a model attached the section's label
  * (Model3DLabel) carries a "Public" marker whose tip says it. Size is checked here as well as on the
  * bucket, so an oversized file is refused before the upload rather than after. Drawn in the device
- * drawer's model tile (`.model-tile`), beside the device's facts.
+ * drawer's 3D Model section (`.model-section`), the drawer's width, above the actions.
  */
 export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [busy, setBusy] = useState(false)
@@ -158,16 +158,16 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
 
       {path ? (
         <div className="model-file">
-          {/* One line under the viewer. The name is cut short in a narrow tile; Download's tooltip
-              names it whole. */}
+          {/* One line under the viewer. A long name is cut short; Download's tooltip names it
+              whole. */}
           <div className="model-file-name">
             <span className="model-file-name-text">{modelFileName(path)}</span>
             <span className="model-file-size">{size !== null ? formatFileSize(size) : 'size unavailable'}</span>
           </div>
           {/* Outside the `canManage` gate: reading a public-read object is not a write, and
               Operators and Auditors are the roles most likely to open a model. A row of their own,
-              in equal columns across the tile; in a tile too narrow for three words they show their
-              icons only, the word kept as each button's name. */}
+              in equal columns across the section; in a drawer too narrow for three words they show
+              their icons only, the word kept as each button's name. */}
           <div className="model-file-actions">
             {downloadUrl && (
               <Tooltip text={`Save ${modelFileName(path)} to this computer`}>

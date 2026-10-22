@@ -10,6 +10,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
+import { declaration } from '../test/themeColours'
 
 /**
  * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
@@ -1042,9 +1043,9 @@ describe('Context panel layout invariants', () => {
   })
 
   /* The model was the last section, after the actions, and on a 1080 screen it started below the
-     fold (#1061). It is a tile of fixed height in a field group, beside where the device is and what
-     it is, so it comes before the actions. */
-  it('puts the 3D model beside the device\'s location, above the actions', async () => {
+     fold (#1061). A tile beside the device's facts fitted, but cramped it (#1070). It is a section
+     of its own, the drawer's width, after the fields and before the actions. */
+  it('puts the 3D model in a section of its own, after the fields and above the actions', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -1054,55 +1055,33 @@ describe('Context panel layout invariants', () => {
     fireEvent.click(list().getByText('Simulated_CNC_01'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    const group = panel().querySelector('.context-field-group')
-    const tile = group.querySelector('.context-field-beside > .model-tile')
-    expect(within(tile).getByText('3D Model')).toBeInTheDocument()
-    expect(within(tile).getByTestId('model-3d-input')).toBeInTheDocument()
-    const beside = [...group.querySelectorAll('dl > .context-field > dt')].map(dt => dt.textContent)
-    expect(beside).toEqual(['Serving Gateway', 'Location', 'Schema', 'Classification'])
+    // One stack of fields, nothing beside them.
+    const fields = panel().querySelectorAll('.context-panel-body > dl')
+    expect(fields).toHaveLength(1)
+    expect([...fields[0].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual([
+      'Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path',
+      'Serving Gateway', 'Location', 'Schema', 'Classification', 'Description'
+    ])
 
-    // The identifiers before it, Description after it, and nothing after the actions.
-    const runs = [...panel().querySelectorAll('.context-panel-body > dl, .context-panel-body > .context-field-group')]
-    expect(runs.map(r => r.className)).toEqual(['context-panel-fields', 'context-field-group', 'context-panel-fields'])
-    expect([...runs[0].querySelectorAll('dt')].map(dt => dt.textContent))
-      .toEqual(['Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path'])
-    expect([...runs[2].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual(['Description'])
+    const section = panel().querySelector('.context-panel-body > .context-panel-facts > .model-section')
+    expect(within(section).getByText('3D Model')).toBeInTheDocument()
+    expect(within(section).getByTestId('model-3d-input')).toBeInTheDocument()
+
+    // After the fields, before the actions, and nothing after the actions.
     const actions = panel().querySelector('.context-panel-actions')
-    expect(group.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(fields[0].compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(section.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(panel().querySelector('.context-panel-extras')).toBeNull()
   })
-})
 
-describe('A field group', () => {
-  const fields = [
-    { label: 'First', value: 'one' },
-    { beside: <div data-testid="tile">tile</div>, fields: [{ label: 'Second', value: 'two' }, { label: 'Third', value: null }] },
-    { label: 'Fourth', value: 'four' },
-  ]
-
-  it('draws the node beside its fields, between the plain fields either side, in order', () => {
-    render(<ContextPanel open type="DEVICE" title="X" fields={fields} onClose={vi.fn()} />)
-    const body = document.querySelector('.context-panel-body')
-    const runs = [...body.children].filter(el => el.matches('dl, .context-field-group'))
-    expect(runs.map(r => r.className)).toEqual(['context-panel-fields', 'context-field-group', 'context-panel-fields'])
-    expect(runs[1].querySelector('.context-field-beside')).toContainElement(screen.getByTestId('tile'))
-    expect([...document.querySelectorAll('dt')].map(dt => dt.textContent)).toEqual(['First', 'Second', 'Third', 'Fourth'])
-    // A field in a group is drawn as any other: empty is stated.
-    expect(within(runs[1]).getByText('Not set')).toBeInTheDocument()
-  })
-
-  it('keeps the node out of every <dl>, which may hold only dt and dd groups', () => {
-    render(<ContextPanel open type="DEVICE" title="X" fields={fields} onClose={vi.fn()} />)
-    expect(screen.getByTestId('tile').closest('dl')).toBeNull()
-    for (const dl of document.querySelectorAll('dl')) {
-      for (const child of dl.children) expect(child.matches('.context-field')).toBe(true)
+  it('rules the 3D model off as the actions are, as far below the fields', () => {
+    const prop = (selector, name) => declaration(APP_CSS, selector, name)
+    for (const name of ['padding-top', 'border-top']) {
+      expect(prop('.model-section', name)).toBe(prop('.context-panel-actions', name))
     }
-  })
-
-  it('lays the node and the fields side by side, the node the wider', () => {
-    const rule = APP_CSS.match(/\n\.context-field-group \{([\s\S]*?)\n\}/)[1]
-    expect(rule).toMatch(/display:\s*grid/)
-    expect(rule).toMatch(/grid-template-columns:\s*minmax\(0, 11fr\) minmax\(0, 9fr\)/)
+    // The section sits in `.context-panel-facts`, whose margin adds to its own.
+    const px = (selector) => parseInt(prop(selector, 'margin-top'), 10)
+    expect(px('.context-panel-facts') + px('.model-section')).toBe(px('.context-panel-actions'))
   })
 })
 
