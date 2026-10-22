@@ -382,7 +382,7 @@ itself. It reads `X-Forwarded-For` from the right, past `supabaseEnvoy.trustedPr
 
 **Before upgrading**, a site with a proxy of its own in front of Traefik sets `trustedProxyHops: 2`.
 That is a proxy named in Traefik's `forwardedHeaders.trustedIPs`
-([`deploy/k8s/README.md`](../../deploy/k8s/README.md#first-traefik-keeps-each-clients-address)).
+([`help/site/running-the-server.md`](running-the-server.md#first-traefik-keeps-each-clients-address)).
 Without it, every client is the proxy's address, and the whole site shares ten sign-ins a minute.
 A site with no such proxy has nothing to do.
 
@@ -392,7 +392,7 @@ The same limit, ten password sign-ins a minute from each client address, also bi
 limits to that address. Where Traefik cannot keep each client's address, every client arrives as
 one, and the whole site shares those ten. That is a k3s cluster whose Traefik Service is not on
 `externalTrafficPolicy: Local`
-([`deploy/k8s/README.md`](../../deploy/k8s/README.md#first-traefik-keeps-each-clients-address)), and a
+([`help/site/running-the-server.md`](running-the-server.md#first-traefik-keeps-each-clients-address)), and a
 site that set `supabaseAuth.rateLimitHeader: ""` because the address cannot be kept.
 
 **Before upgrading**, apply that step. Where the address still cannot be kept, set
@@ -410,7 +410,7 @@ With `global.scheme: https`, the dashboard, the API, Grafana, Studio and the for
 host for a year, and turns a certificate warning there into an error nobody can click past.
 
 **Before upgrading**, make sure the devices people use trust the site's root certificate
-([`deploy/k8s/README.md`](../../deploy/k8s/README.md#3-distribute-the-root-certificate)). From then on,
+([`help/site/running-the-server.md`](running-the-server.md#3-distribute-the-root-certificate)). From then on,
 install a new root on them before you replace the CA, and do not move the site back to `http`. The
 header follows `global.scheme` and has no key of its own. A site on `http` has nothing to do.
 
@@ -541,7 +541,7 @@ Grafana have since 1.2.0 (#778). A browser that has seen it refuses plain HTTP t
 turns a certificate warning there into an error nobody can click past.
 
 Check that the devices people open Node-RED, i3X or the API documentation from trust the site's root
-certificate ([`deploy/k8s/README.md`](../../deploy/k8s/README.md), *TLS → 3. Distribute the root
+certificate ([`help/site/running-the-server.md`](running-the-server.md), *TLS → 3. Distribute the root
 certificate*). A site that did this for 1.2.0 has nothing more to do, and a site on `http` has
 nothing to do. Node-RED's generated `settings.js` is rewritten once on the new image's first boot;
 the previous file is kept as `settings.js.bak`.
@@ -763,7 +763,7 @@ Browsers now refuse anything a dashboard page loads or connects to that the dash
 not name (#679). The chart builds the policy from the addresses it already gives the dashboard: the
 API (`publicUrls.supabase`), and the Studio and forge doors (`publicUrls.studio`,
 `publicUrls.gitea`). A standard install has nothing to set
-([`deploy/k8s/README.md`](../../deploy/k8s/README.md#what-a-browser-may-load-the-content-security-policy)).
+([`help/site/running-the-server.md`](running-the-server.md#what-a-browser-may-load-the-content-security-policy)).
 
 **If part of a page stays empty after the upgrade**, such as a table, live updates, an area plan or a
 3D model, open the browser's console (F12). A refusal there names the Content Security Policy.

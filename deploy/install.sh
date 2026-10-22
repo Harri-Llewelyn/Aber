@@ -252,7 +252,7 @@ check_existing_install() {
   if command -v helm >/dev/null 2>&1 && helm status aber -n aber >/dev/null 2>&1; then
     die "Aber is already installed on this cluster, but not by this installer: $VALUES does not exist.
 Running it would give every part of Aber new passwords that its databases do not know.
-Upgrade it as the runbook says (deploy/k8s/README.md, Upgrade / uninstall). Or copy its values
+Upgrade it as the runbook says (help/site/running-the-server.md, Upgrade / uninstall). Or copy its values
 file to $VALUES and its site.yaml to $SITE, then run this again."
   fi
 }

@@ -355,7 +355,7 @@ networkPolicy:
 # ---------------------------------------------------------------------------------------------
 # TLS. Requires cert-manager AND `kubectl apply -f deploy/k8s/internal-ca.yaml` FIRST -- the CA is
 # deliberately not chart-managed, because `helm uninstall` must not be able to delete the root
-# private key. See the TLS section of deploy/k8s/README.md.
+# private key. See the TLS section of help/site/running-the-server.md.
 #
 # `global.scheme: https` above is what makes this mandatory rather than optional: every
 # browser-facing URL and every OAuth redirect_uri is composed from it, so advertising https while

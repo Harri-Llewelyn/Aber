@@ -965,7 +965,7 @@ the backup service and the test runner are off in a site's values.
 Both end with the same checks:
 
 - every StatefulSet, Deployment and DaemonSet rolls out, one `kubectl rollout status` at a time
-  (`helm --wait` deadlocks a first install, see [`deploy/k8s/README.md`](../deploy/k8s/README.md#a-from-the-published-chart-no-image-builds));
+  (`helm --wait` deadlocks a first install, see [`help/site/running-the-server.md`](../help/site/running-the-server.md#a-from-the-published-chart-no-image-builds));
 - `helm test` passes;
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
