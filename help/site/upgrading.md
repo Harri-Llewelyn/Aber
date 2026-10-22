@@ -1126,7 +1126,7 @@ is fresh.
 
 - [`releases.md`](../../docs/releases.md): how long a release is supported, what makes a version major, and how
   a site learns that a release matters to it
-- [`remote-gateways.md`](../../docs/remote-gateways.md): the gateway runbook, including issuing a new bundle and
+- [`remote-gateways.md`](../../docs/remote-gateways.md): the gateway design, including issuing a new bundle and
   what that invalidates
 - [`kubernetes-architecture.md`](../../docs/kubernetes-architecture.md): the chart, and how a release is
   published from a single `v*` tag

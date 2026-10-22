@@ -40,7 +40,8 @@
 # every browser sees a warning on all nine subdomains. That matters more than the usual "click
 # through it" because the OAuth handshake happens IN THE BROWSER: a user who learns to dismiss a
 # warning on api.<domain> mid-login has been trained to dismiss exactly the warning that would tell
-# them they are being intercepted. Distribute the root properly -- see the runbook.
+# them they are being intercepted. Distribute the root properly -- see
+# help/site/running-the-server.md, "Distribute the root certificate".
 # =====================================================================================================
 ---
 # NOTE: this is a plain manifest, not a Helm template. Apply it with kubectl.

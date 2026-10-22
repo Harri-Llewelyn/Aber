@@ -1995,10 +1995,11 @@ jobs:
           git -C /tmp/i3x-spec checkout --quiet "$I3X_SUITE_REF"
 
       # Values from the checkout's `npm run setup`, never values-dev.yaml; cert-manager, the
-      # internal CA and the runbook's site.yaml, with NetworkPolicies on as values-prod.yaml.example
-      # has them; then the first administrator signs in through Traefik, the demo accounts are
-      # refused, a pod no policy admits cannot reach the database, and CESMII's i3X suite passes
-      # against https://i3x.<domain>/v1 through Traefik, trusting only the internal CA.
+      # internal CA and the site.yaml of help/site/running-the-server.md, with NetworkPolicies on
+      # as values-prod.yaml.example has them; then the first administrator signs in through
+      # Traefik, the demo accounts are refused, a pod no policy admits cannot reach the database,
+      # and CESMII's i3X suite passes against https://i3x.<domain>/v1 through Traefik, trusting
+      # only the internal CA.
       - name: Install A Site From The Checkout (site-rehearsal install)
         run: >-
           node scripts/site-rehearsal.mjs install --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"

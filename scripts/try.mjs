@@ -144,7 +144,10 @@ async function ensureCluster() {
   console.log(`  context ${CONTEXT}, API on 127.0.0.1:${port}`);
 }
 
-/** The runbook's Traefik setting, as a site applies it: each client's address reaches the stack. */
+/**
+ * The Traefik setting of help/site/running-the-server.md (Install), as a site applies it: each
+ * client's address reaches the stack.
+ */
 async function ensureTraefikConfig() {
   step('Traefik keeps the client address');
   must('kubectl', ['--context', CONTEXT, 'apply', '-f', 'deploy/k8s/traefik-config.yaml'],
