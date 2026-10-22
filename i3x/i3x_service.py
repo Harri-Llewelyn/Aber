@@ -369,8 +369,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         pg,
         "gateways",
         {
-            "select": "id,sparkplug_id,name,cell_id,area_id,location_scope,is_simulated,is_shadow,"
-            "sparkplug_group,status,last_heartbeat",
+            "select": "id,sparkplug_id,name,description,cell_id,area_id,location_scope,"
+            "is_simulated,is_shadow,sparkplug_group,status,last_heartbeat",
             "is_archived": live,
         },
     )
@@ -378,8 +378,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         pg,
         "devices",
         {
-            "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
-            "status,cell_id,location_scope,reported_identity",
+            "select": "id,sparkplug_id,name,description,gateway_id,is_quarantined,"
+            "last_birth_metrics,status,cell_id,location_scope,reported_identity",
             "is_archived": live,
         },
     )
