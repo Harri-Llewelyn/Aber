@@ -135,6 +135,13 @@ useless on the day a few appliances are ordered.
    Two credentials for one gateway would silently compete for a single Sparkplug identity.
 2. **Issues the broker credential** through the credential service beside the broker.
 3. **Marks the gateway `AWAITING_BIRTH`.**
+4. **Registers the appliance's deploy key with the forge.** It creates the gateway's own repository,
+   or adopts the one already there, protects its branches, and registers the public key the
+   appliance sent as that repository's only deploy key. Where the deployment names a platform
+   version, the same key may also read the platform repository. The response carries the clone URL
+   and the forge's host key. The step is **non-fatal**: the token is spent and the credential
+   exists by now, so a failure is logged and the response carries no repository. The appliance then
+   publishes, but has nothing to converge to. A deployment with no forge skips the step.
 
 If step 2 fails, the claim is **released** and the response is `503` with `retryable: true`. The
 same bundle then works again, so a broker restart during commissioning costs a retry, not a new
