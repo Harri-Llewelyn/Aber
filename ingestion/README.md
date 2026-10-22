@@ -669,6 +669,14 @@ Storage API, every file no row, recording, open upload or playback names, once i
 for an hour, and the file a finalise replaced at once. A SQL `DELETE` on `storage.objects` would
 leave the bytes in the storage backend, so nothing does that.
 
+**Area plans no area names go the same way, from a CronJob of their own** (`0199`).
+[`area_plan_sweep.py`](area_plan_sweep.py) runs hourly from this image as the `area-plan-sweep`
+CronJob, with the ingestion key, as `cold_archive.py` does. It asks
+`ingest_unclaimed_area_plan_objects()` for the `area-plans` objects no area has named for an hour,
+such as the plan of an area the nightly purge deleted, and deletes them through the Storage API with
+`capture_worker.py`'s storage client. It is not part of the daemon's sweep: a plan has nothing to
+do with the broker, and a CronJob can be turned off on its own (`areaPlanSweep.enabled`).
+
 **100 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
 working day fits, and it is twice the 50 MiB cap `capture_jobs` puts on a recording, which counts
 the bytes the file holds. That is the constraint that matters, because a capture that terminated

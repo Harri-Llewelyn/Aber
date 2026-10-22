@@ -1029,6 +1029,20 @@ coldArchive:
   #     ports: [{ protocol: TCP, port: 443 }]
   offsiteEgress: []
 
+# The area-plan sweep (ingestion/area_plan_sweep.py): deletes the plans in the area-plans bucket
+# that no area names, such as the plan of an area the nightly purge deleted. Runs from
+# `ingestion.image` under a different command, as the ingestion principal. Off, those plans stay in
+# the bucket, readable by every signed-in role. See supabase/README.md, "A plan no area names is
+# swept from storage (0199)".
+areaPlanSweep:
+  enabled: true
+  # Hourly, at a minute no other default job uses. A plan is deleted once it has gone an hour
+  # unnamed, which spares one the dashboard has uploaded and not yet recorded on its area.
+  schedule: "45 * * * *"
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or
   # TRUNCATE; secrets.ingestWriterPassword is required while this is set. Override to the admin

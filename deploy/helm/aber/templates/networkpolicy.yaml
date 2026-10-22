@@ -116,6 +116,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "cold-archive"       "to" "timescaledb"        "port" 5432 "why" "exports, verifies and drops cold chunks, as ingest_writer")
   (dict "from" "cold-archive"       "to" $gw      "port" 8000 "why" "reads its S3 destination (cold_archive_destination) and the archive.* settings through PostgREST")
   (dict "from" "release-check"      "to" $gw      "port" 8000 "why" "records the day's answer through record_release_check(), as Service_ReleaseCheck")
+  (dict "from" "area-plan-sweep"    "to" $gw      "port" 8000 "why" "lists the plans no area names through PostgREST and deletes them through the Storage API, as the ingestion principal")
 
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")
@@ -160,6 +161,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "storage-policies" (and .Values.initJobs.enabled .Values.supabaseStorage.enabled)
       "timescaledb-maintenance" (and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled)
       "cold-archive" .Values.coldArchive.enabled
+      "area-plan-sweep" .Values.areaPlanSweep.enabled
       "release-check" .Values.releaseCheck.enabled
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
       "test-db-tls" .Values.postgresTls.enabled

@@ -1326,6 +1326,57 @@ value: nothing the stack uses registers itself.
 
 The file's self-check asserts that no dynamically registered client remains.
 
+### A plan no area names is swept from storage (0199)
+
+An area's plan is an object in the `area-plans` bucket that `areas.plan_path` names. The nightly
+`purge_expired_archives` job deletes an expired area in SQL, and SQL cannot remove a stored file
+(see `0190`). So the area's row went and its drawing stayed in the bucket for ever, readable by
+every signed-in role. The dashboard's own removals strand one too, when they fail: Permanent
+Delete, Replace plan and Remove plan each change the row first and swallow a failed object delete.
+
+- **The database says which plans nothing names.** `is_unclaimed_area_plan_object()` is true when
+  no area's `plan_path` names the object, archived areas included.
+  `ingest_unclaimed_area_plan_objects()` lists up to 500 such objects untouched for a given age, for
+  the ingestion principal alone. Both are `SECURITY DEFINER`; `authenticated` executes them,
+  because the bucket's policy calls the first as the caller and the sweep calls the second through
+  PostgREST.
+- **A CronJob of its own deletes them.** `area-plan-sweep` runs `python -m area_plan_sweep` from the
+  ingestion image every hour, as cold-archive runs, with `SUPABASE_INGESTION_KEY`. It asks for the
+  objects an hour old and deletes them through the Storage API, the only way bytes leave a bucket.
+  The hour spares a plan in flight: the dashboard uploads a plan before it writes `plan_path`. Its
+  first run clears what was stranded before `0199`. `areaPlanSweep.enabled` turns it off.
+- **The bucket lets it delete nothing else.** `area_plans_delete_privileged` in
+  `storage-policies.sql` admits the ingestion principal to an object
+  `is_unclaimed_area_plan_object()` answers for, and the file's self-check fails the boot if that
+  arm is missing or another arm admits the principal unconfined. Administrator and
+  Shopfloor_Manager delete as before. The ingestion principal reads by the arm every signed-in role
+  has, which storage-api's delete needs.
+- **The purge job stays SQL.** Once its `DELETE` commits, the plan is unnamed, and the next run
+  takes it.
+
+**An area is archived only when nothing is Area-Wide in it.** The purge skips an expired area a
+device or gateway still names: `devices.area_id` and `gateways.area_id` have no `ON DELETE` action,
+and one refused `DELETE` would abort the whole job, which is one transaction. Only an Area-Wide
+asset names an area. So an archived area an asset named kept its Auto-purge date for ever, and
+nothing said why. `0199` closes the way in rather than explaining the hold:
+
+- **The archive is refused** while any device or gateway is Area-Wide in the area, archived and
+  quarantined ones included (`trg_areas_archived_only_when_nothing_is_area_wide`, on the transition
+  only, as `refuse_archiving_the_last_shadow_gateway()` is). The `restrict_violation` gives the
+  counts, names the gateways, and says to make each one Site-Wide, put it in a cell, or delete it.
+  Cells filed in the area do not count: archiving an area keeps its cells, and what is in them,
+  where they are. An edit to an archived area and its restore pass.
+- **Nothing is made Area-Wide in an archived area**, by insert or update, whoever writes it
+  (`trg_devices_not_area_wide_in_an_archived_area`, `trg_gateways_not_area_wide_in_an_archived_area`).
+  A write that leaves `area_id` as it was passes, and so does moving an asset out.
+- **The purge's skip stays**, as the guard behind the two. No row reaches it now.
+
+No row is changed: the only install holds no archived area. Each trigger acts on its own write, so
+a replay cannot fail. The Areas page disables **Archive Area** with the counts while the area has
+Area-Wide assets. `test_area_plan_sweep.py` holds the listing and the bucket's policies (verbatim, on
+a stand-in table); `test_area_archive_refusal.py` holds the refusals; `ingestion/test_area_plan_sweep_worker.py`
+holds the sweep.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -6479,7 +6530,10 @@ tombstone points at the object — removing one is a decision about the record, 
 
 `area-plans` is readable by every signed-in role because the Site Map is the page an Operator
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
-bucket admits `image/svg+xml` only, and the dashboard never inlines it.
+bucket admits `image/svg+xml` only, and the dashboard never inlines it. A plan no area names is
+deleted by the hourly `area-plan-sweep` CronJob once it has gone an hour unnamed. The sweep runs as
+the ingestion principal, which the bucket admits to such a plan and nothing else (see "A plan no
+area names is swept from storage (0199)").
 
 ### How `storage-init.mjs` creates them
 

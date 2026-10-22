@@ -336,6 +336,14 @@ export const SUITES = {
       'manifest is what ensure_shadow_devices() reads to mint replay lanes, so an error here ' +
       'surfaces much later, as a playback naming devices this stack does not know.',
   },
+  'ingestion/test_area_plan_sweep_worker.py': {
+    lanes: ['unit'],
+    why:
+      'The hourly area-plan sweep (0199): the bucket it deletes from, the batches it asks for, a ' +
+      'refused batch it does not ask for again, and a run without the ingestion key that says so. ' +
+      "Each failure leaves a purged area's drawing of the site in the bucket, readable by every " +
+      'signed-in role, with nothing erroring.',
+  },
   'ingestion/test_stack_capture_cleanup.py': {
     lanes: ['unit'],
     why:
@@ -654,6 +662,26 @@ export const SUITES = {
       'proposal writes the same columns as the picker that refuses the click; and the floor table ' +
       'stays gone, which db-init replaying the whole chain on every boot with no ledger is what ' +
       'makes worth asserting.',
+  },
+  'supabase/migrations/test_area_plan_sweep.py': {
+    lanes: ['db'],
+    why:
+      '0199 -- a plan no area names is swept from storage. Each failure here is silent: a purged ' +
+      "area's drawing of the site left in the bucket for ever, readable by every signed-in role; " +
+      'an upload swept before its area records it, which the page reports as a plan that vanished; ' +
+      'or a policy that lets the sweep delete the plan an area still shows. Runs the area-plans ' +
+      'policies and their self-check verbatim on a stand-in, and needs supabase_admin to stand in ' +
+      'for storage.objects, as test_capture_retention.py does.',
+  },
+  'supabase/migrations/test_area_archive_refusal.py': {
+    lanes: ['db'],
+    why:
+      '0199 -- an area is archived only when nothing is Area-Wide in it, and nothing is made ' +
+      'Area-Wide in an archived one. The nightly purge skips an area an asset names, because the ' +
+      'key has no ON DELETE action and one refused DELETE would abort the whole job, so without ' +
+      'this rule an archived area could keep its Auto-purge date for ever with nothing saying why. ' +
+      'Holds each kind of asset that refuses the archive, the cells that do not, the writes that ' +
+      'pass, and a replay that re-creates no trigger.',
   },
   'supabase/migrations/test_archive_purge_cascade.py': {
     lanes: ['db'],
