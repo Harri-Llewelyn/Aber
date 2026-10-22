@@ -1270,7 +1270,10 @@ help's header before the X, in ContextPanel's `headerActions` slot. No page's dr
   on the screen.
 - **Wide content still scrolls inside its own box.** A table or command wider than the panel
   scrolls sideways in `.help-table-wrap` or `.help-code pre`, expanded or not. The inner shell holds
-  the drawer's width, so nothing on a help page can widen the drawer.
+  the drawer's width, so nothing on a help page can widen the drawer. A code token in a table cell
+  breaks only where its text allows, such as at a space or after a hyphen, never inside a word
+  (`overflow-wrap: normal`). So the tutorial's topic table scrolls when docked. With `anywhere` it
+  fitted, by showing `NBIRTH` as `NBIR` above `TH`.
 - **Help opened over a dialog has no Expand.** It is a `Modal` of size `lg`, and keeps that size.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.

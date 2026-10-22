@@ -5,6 +5,9 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
+import fs from 'node:fs'
+import path from 'node:path'
+import { declaration } from '../test/themeColours'
 import { HelpMarkdown } from '../components/common/HelpMarkdown'
 import { HELP_ROOT, helpCorpus, parseHelp } from '../../helpCorpus.js'
 import { HELP_BLOCKS, HELP_INLINES, resolveLink, slugify } from '../help/syntax'
@@ -91,6 +94,17 @@ describe('the walker draws every construct the parse keeps', () => {
     const cells = wrap.querySelectorAll('tbody td')
     expect(cells[0].querySelector('code').textContent).toBe('x')
     expect(cells[1].className).toBe('help-align-right')
+  })
+
+  // jsdom lays nothing out, so the rule is read from App.css; the line boxes are measured in a browser.
+  it('never breaks a code token in a cell inside a word, and scrolls the table instead', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '..', 'App.css'), 'utf8')
+    expect(declaration(css, '.help-prose td code', 'overflow-wrap')).toBe('normal')
+    for (const selector of ['.help-prose', '.help-prose table', '.help-prose td', '.help-prose code', '.help-prose td code']) {
+      expect(declaration(css, selector, 'overflow-wrap') ?? 'normal', selector).not.toBe('anywhere')
+      expect(declaration(css, selector, 'word-break') ?? 'normal', selector).toBe('normal')
+    }
+    expect(declaration(css, '.help-table-wrap', 'overflow-x')).toBe('auto')
   })
 
   it('draws a fenced block as text, with a Copy button that copies it', async () => {
