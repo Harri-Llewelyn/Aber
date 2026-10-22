@@ -31,6 +31,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -517,6 +518,16 @@ class TestBrowserClients(unittest.TestCase):
                 _, headers = self.call(method, "/v1/info", self.ALLOWED)
                 self.assertEqual((headers["Strict-Transport-Security"], headers["Access-Control-Allow-Origin"]),
                                  ("max-age=31536000", self.ALLOWED))
+
+    def test_the_header_carries_the_lists_own_string_not_the_requests(self):
+        # Built at run time, so it is a different object from the list's equal string.
+        origin = "".join(["https://", "docs.site.example"])
+        got = i3x_service.Handler._allowed_origin(SimpleNamespace(headers={"Origin": origin}))
+        self.assertEqual(got, self.ALLOWED)
+        self.assertIsNot(got, origin)
+        self.assertTrue(any(got is o for o in i3x_service.CORS_ORIGINS))
+        self.assertIsNone(i3x_service.Handler._allowed_origin(SimpleNamespace(headers={"Origin": self.ALLOWED + "\r\nX-Injected: 1"})))
+        self.assertIsNone(i3x_service.Handler._allowed_origin(SimpleNamespace()))
 
     def test_the_list_is_a_json_array_of_origins(self):
         parse = i3x_service.cors_origins
