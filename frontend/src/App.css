@@ -6408,6 +6408,9 @@ ol.gateway-steps {
 
 .validate-finding-metric { color: var(--text-primary); }
 
+/* A metric name or pattern inside a hint keeps the hint's size; `.mono` alone would set 13px. */
+.validate-payload-hint .mono { font-size: inherit; }
+
 .callout-success {
   border-color: var(--success);
   background: color-mix(in srgb, var(--success) 8%, transparent);

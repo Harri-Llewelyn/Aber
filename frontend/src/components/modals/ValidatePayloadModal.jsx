@@ -158,19 +158,20 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
       )}
 
       {notChecked.length > 0 && (
-        <div className="form-hint">
+        <div className="form-hint validate-payload-hint">
           Not checked here: the pattern for{' '}
           {notChecked.map((f, i) => (
             <React.Fragment key={`${f.metric}-${i}`}>
               {i > 0 && ', '}<span className="mono">{f.metric}</span> (<span className="mono">{f.pattern}</span>)
             </React.Fragment>
           ))}
-          . Ingestion checks a pattern with Python&apos;s regular expressions, and this dialog cannot read this one the same way.
+          . Ingestion checks a pattern with Python&apos;s regular expressions, and this dialog cannot
+          read {notChecked.length === 1 ? 'this one' : 'these'} the same way.
         </div>
       )}
 
       {absent.length > 0 && (
-        <div className="form-hint">
+        <div className="form-hint validate-payload-hint">
           Not in this payload: {absent.map((name, i) => (
             <React.Fragment key={name}>{i > 0 && ', '}<span className="mono">{name}</span></React.Fragment>
           ))}. That is normal: a device reports by exception, so a DDATA carries only the metrics that changed.
