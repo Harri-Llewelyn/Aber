@@ -348,6 +348,15 @@ What is staged:
 - A gateway going `STALE` is a clock, not a message, so it stages nothing. The next read carries
   it, and so does the next value staged for a device behind it.
 
+**A device that publishes under another id is kept under its issued one.** A device admitted from
+Quarantine may publish its own Sparkplug id (`reported_identity`) or its Factory+ Instance_UUID,
+while its elementId is its `sparkplug_id`. The MQTT thread maps the topic's device id to the
+`sparkplug_id` from the same rows, in ingestion's order: the issued id, then the device's own id
+behind its edge node (an unbound device's behind any node), then its UUID. A device's own id is
+unique only behind its node, hence the scope. Values, births, deaths and pushes are kept under the
+result. An id the rows do not hold is kept as it arrived, so the first read after a restart, which
+records the rows, is what starts the mapping; until then the historian fill above covers the read.
+
 ## Endpoints
 
 All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
