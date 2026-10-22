@@ -41,6 +41,7 @@ vi.mock('../lib/supabaseClient', () => ({
 import { supabase } from '../lib/supabaseClient'
 import App from '../App'
 import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from '../version'
+import { tooltipOf } from '../test/tooltips'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 const VERSION_SRC = fs.readFileSync(path.resolve(__dirname, '../version.js'), 'utf8')
@@ -152,7 +153,7 @@ describe('the account menu', () => {
 
   it('carries a title explaining what the string is', async () => {
     await openMenu()
-    expect(document.querySelector('.user-popover-version').getAttribute('title')).toBe(versionTitle())
+    expect(tooltipOf(document.querySelector('.user-popover-version'))).toBe(versionTitle())
   })
 
   it('keeps the string selectable, since it is going into a bug report', () => {

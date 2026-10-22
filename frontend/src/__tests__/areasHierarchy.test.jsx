@@ -619,7 +619,7 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     // Every list opens on Active.
     expect(screen.queryByText('Press Hall')).toBeNull()
-    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'archived' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
     const row = rowFor('Press Hall')
     expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Press Hall'))
@@ -932,7 +932,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('counts the lifecycle select and resets it to Active', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
-    const lifecycle = screen.getByTitle('Filter by lifecycle state')
+    const lifecycle = screen.getByRole('combobox', { name: 'Lifecycle' })
     expect(lifecycle).toHaveValue('active')
 
     fireEvent.change(lifecycle, { target: { value: 'archived' } })

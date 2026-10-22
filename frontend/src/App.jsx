@@ -71,6 +71,7 @@ import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { NotificationHistory } from './components/common/NotificationHistory'
 import { SegmentedControl } from './components/common/SegmentedControl'
+import { Tooltip } from './components/common/Tooltip'
 import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
@@ -339,18 +340,19 @@ function UserMenu({
     <div className="user-menu" ref={wrapRef}>
       {/* The address is a rail label, transparent while the rail is collapsed, so the accessible
           name is stated rather than read from it: it leads with the address and the role. */}
-      <button
-        type="button"
-        className={`user-menu-button${open ? ' user-menu-button-open' : ''}${profileOpen ? ' active' : ''}`}
-        onClick={() => setOpen(v => !v)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`Signed in as ${persona} (${userRole}) — open account menu`}
-        title={`Signed in as ${persona} (${userRole}) — open account menu`}
-      >
-        <span className="user-avatar" aria-hidden="true"><IconUser size={14} /></span>
-        <span className="sidebar-item-label user-menu-email">{persona}</span>
-      </button>
+      <Tooltip text={`Signed in as ${persona} (${userRole}) — open account menu`}>
+        <button
+          type="button"
+          className={`user-menu-button${open ? ' user-menu-button-open' : ''}${profileOpen ? ' active' : ''}`}
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={`Signed in as ${persona} (${userRole}) — open account menu`}
+        >
+          <span className="user-avatar" aria-hidden="true"><IconUser size={14} /></span>
+          <span className="sidebar-item-label user-menu-email">{persona}</span>
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="user-popover" role="menu">
@@ -359,37 +361,34 @@ function UserMenu({
             <div className="user-popover-role">{userRole}</div>
             {/* The version sits in the head with the other facts about the session, not among the
                 actions. Shown to every user so whoever hits a fault can name the build. */}
-            <div
-              className={`user-popover-version${VERSION_IS_KNOWN ? '' : ' user-popover-version-unknown'}`}
-              title={versionTitle()}
-            >
-              <IconTag size={11} aria-hidden="true" />
-              {/* Selectable, because the next thing anybody does with this string is paste it into
-                  a bug report -- which is the same reason the Report Bug button is two rows down. */}
-              <span className="mono">{APP_VERSION}</span>
-            </div>
+            <Tooltip text={versionTitle()}>
+              <div className={`user-popover-version${VERSION_IS_KNOWN ? '' : ' user-popover-version-unknown'}`}>
+                <IconTag size={11} aria-hidden="true" />
+                {/* Selectable, because the next thing anybody does with this string is paste it into
+                    a bug report -- which is the same reason the Report Bug button is two rows down. */}
+                <span className="mono">{APP_VERSION}</span>
+              </div>
+            </Tooltip>
             {/* Only when the bundle and the release disagree. `unknown` and `in-step` both render
                 nothing: a build that cannot name itself is not evidence of drift. */}
             {driftLabel && (
-              <div className="user-popover-drift" title={releaseDriftTitle(drift, release)}>
-                {drift === RELEASE_STATES.BEHIND
-                  ? <IconRefreshCw size={11} aria-hidden="true" />
-                  : <IconAlertCircle size={11} aria-hidden="true" />}
-                <span>{driftLabel}</span>
-              </div>
+              <Tooltip text={releaseDriftTitle(drift, release)}>
+                <div className="user-popover-drift">
+                  {drift === RELEASE_STATES.BEHIND
+                    ? <IconRefreshCw size={11} aria-hidden="true" />
+                    : <IconAlertCircle size={11} aria-hidden="true" />}
+                  <span>{driftLabel}</span>
+                </div>
+              </Tooltip>
             )}
             {/* Only when the daily release check found a newer release; never "up to date". */}
             {update && (
-              <a
-                className="user-popover-update"
-                href={update.url}
-                target="_blank"
-                rel="noreferrer"
-                title={`Aber ${update.version} has been released. Open its release notes on GitHub, which say how to upgrade.`}
-              >
-                <IconDownload size={11} aria-hidden="true" />
-                <span>Aber {update.version} is available</span>
-              </a>
+              <Tooltip text="Its release notes on GitHub say how to upgrade.">
+                <a className="user-popover-update" href={update.url} target="_blank" rel="noreferrer">
+                  <IconDownload size={11} aria-hidden="true" />
+                  <span>Aber {update.version} is available</span>
+                </a>
+              </Tooltip>
             )}
           </div>
 
@@ -414,20 +413,20 @@ function UserMenu({
           </div>
 
           {/* The first action: the whole of the person's own page, two clicks from anywhere. */}
-          <button
-            className="user-popover-action"
-            role="menuitem"
-            onClick={() => { setOpen(false); onOpenProfile() }}
-            title="Your account, password, theme and sidebar layout"
-          >
-            <IconUser size={14} /> <span>Profile</span>
-          </button>
+          <Tooltip text="Your account, password, theme and sidebar layout">
+            <button
+              className="user-popover-action"
+              role="menuitem"
+              onClick={() => { setOpen(false); onOpenProfile() }}
+            >
+              <IconUser size={14} /> <span>Profile</span>
+            </button>
+          </Tooltip>
 
           <button
             className="user-popover-action"
             role="menuitem"
             onClick={() => { setOpen(false); onReportBug() }}
-            title="Report an application bug"
           >
             <IconBug size={14} /> <span>Report Bug</span>
           </button>
@@ -437,7 +436,6 @@ function UserMenu({
             className="user-popover-action user-popover-action-danger"
             role="menuitem"
             onClick={() => { setOpen(false); onSignOut() }}
-            title="Sign out of the Supabase session"
           >
             <IconLogOut size={14} /> <span>Sign Out</span>
           </button>
@@ -605,20 +603,21 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
       <header className="topbar">
         {/* A button because it navigates home, to the bare path, so no filter a drill-down set
             comes along. */}
-        <button
-          className="topbar-brand"
-          onClick={() => handleNavClick('site-map')}
-          title="Aber — go to the Site Map page"
-          aria-label="Aber, go to the Site Map page"
-        >
-          <div className="brand-icon"><AberMark size={28} /></div>
-          <div className="brand-text">
-            {/* Titled because .brand-name truncates: it is the region that yields space to the
-                search box and the session controls. */}
-            <div className="brand-name" title="Aber">Aber</div>
-            <div className="brand-sub">The shopfloor data platform</div>
-          </div>
-        </button>
+        {/* The tooltip names the brand too, because .brand-name truncates: it is the region that
+            yields space to the search box and the session controls. */}
+        <Tooltip text="Aber, go to the Site Map page">
+          <button
+            className="topbar-brand"
+            onClick={() => handleNavClick('site-map')}
+            aria-label="Aber, go to the Site Map page"
+          >
+            <div className="brand-icon"><AberMark size={28} /></div>
+            <div className="brand-text">
+              <div className="brand-name">Aber</div>
+              <div className="brand-sub">The shopfloor data platform</div>
+            </div>
+          </button>
+        </Tooltip>
 
         {/* Takes the same `navTabs` the rail does and the same drill-down helpers every other
             surface navigates with, so a pasted device id lands at the address clicking that device
@@ -657,27 +656,29 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
           {/* A discovery aid rather than a preference, so it stays in the bar, and the way to the
               list while single-key shortcuts are off, when `?` is not named. */}
-          <button
-            className="topbar-icon-button"
-            onClick={() => setShowShortcuts(true)}
-            aria-label="Keyboard shortcuts"
-            aria-keyshortcuts={singleKeyShortcuts ? '?' : undefined}
-            title={singleKeyShortcuts ? 'Keyboard shortcuts (?)' : 'Keyboard shortcuts'}
-          >
-            <IconKeyboard size={15} />
-          </button>
+          <Tooltip text={singleKeyShortcuts ? 'Keyboard shortcuts (?)' : 'Keyboard shortcuts'}>
+            <button
+              className="topbar-icon-button"
+              onClick={() => setShowShortcuts(true)}
+              aria-label="Keyboard shortcuts"
+              aria-keyshortcuts={singleKeyShortcuts ? '?' : undefined}
+            >
+              <IconKeyboard size={15} />
+            </button>
+          </Tooltip>
 
           {/* The help control is the bar's last. `aria-expanded` because it toggles a drawer that
               stays open, unlike the shortcuts dialog. */}
-          <button
-            className={`topbar-icon-button${showHelp ? ' topbar-icon-button-active' : ''}`}
-            onClick={() => setShowHelp((v) => !v)}
-            aria-label="Help for this page"
-            aria-expanded={showHelp}
-            title="Help for this page"
-          >
-            <IconHelp size={15} />
-          </button>
+          <Tooltip text="Help for this page">
+            <button
+              className={`topbar-icon-button${showHelp ? ' topbar-icon-button-active' : ''}`}
+              onClick={() => setShowHelp((v) => !v)}
+              aria-label="Help for this page"
+              aria-expanded={showHelp}
+            >
+              <IconHelp size={15} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Rendered only while busy, so there is no inert element to mistake for a stalled bar.
@@ -687,7 +688,6 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             className="topbar-progress"
             role="progressbar"
             aria-label="Loading"
-            title="Working…"
           />
         )}
       </header>

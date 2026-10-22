@@ -61,8 +61,6 @@ export default function config ({ js, react, hooks, globals }) {
     {
       // Not yet swept.
       files: [
-        'frontend/src/App.jsx',
-        'frontend/src/components/auth/AuthShell.jsx',
         'frontend/src/components/common/AlertPill.jsx',
         'frontend/src/components/common/CellPlacementPicker.jsx',
         'frontend/src/components/common/ExpandAllToggle.jsx',
@@ -93,12 +91,6 @@ export default function config ({ js, react, hooks, globals }) {
         'frontend/src/components/modals/TelemetryExportModal.jsx',
         'frontend/src/components/modals/TelemetryModal.jsx',
         'frontend/src/components/modals/ValidatePayloadModal.jsx',
-        'frontend/src/components/tabs/ApprovalsTab.jsx',
-        'frontend/src/components/tabs/AreasTab.jsx',
-        'frontend/src/components/tabs/DirectoryTab.jsx',
-        'frontend/src/components/tabs/ProfileTab.jsx',
-        'frontend/src/components/tabs/SchemasTab.jsx',
-        'frontend/src/components/tabs/SettingsTab.jsx',
       ],
       rules: { 'no-restricted-syntax': 'off' },
     },

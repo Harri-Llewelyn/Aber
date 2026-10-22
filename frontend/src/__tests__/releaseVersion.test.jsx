@@ -59,6 +59,7 @@ vi.mock('../version', () => ({
 
 import { supabase } from '../lib/supabaseClient'
 import App from '../App'
+import { tooltipOf } from '../test/tooltips'
 import {
   RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, availableRelease, RELEASE_CHECK_FRESH_MS,
 } from '../utils/releaseVersion'
@@ -185,7 +186,7 @@ describe('the drift line in the account menu', () => {
   it('carries the title that says what to do about it', async () => {
     deployedRelease('0.2.0')
     await openMenu()
-    const title = document.querySelector('.user-popover-drift').getAttribute('title')
+    const title = tooltipOf(document.querySelector('.user-popover-drift'))
     expect(title).toContain('0.2.0')
     // Both causes, because the reload is what tells them apart.
     expect(title).toMatch(/reload/i)
