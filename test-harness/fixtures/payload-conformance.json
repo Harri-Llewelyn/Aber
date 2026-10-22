@@ -1,0 +1,573 @@
+{
+  "_comment": [
+    "ONE ANSWER FROM TWO IMPLEMENTATIONS OF SCHEMA CONFORMANCE.",
+    "",
+    "What does ingestion find wrong with one DDATA payload, and would a device set to Enforce drop the",
+    "reading? Two places answer it, in two languages:",
+    "",
+    "  ingestion/conformance.py                   modelled_constraints(), constraint_violations(),",
+    "                                             payload_violations(), enforceable_violation()",
+    "  frontend/src/utils/payloadConformance.js   the same four, behind Validate Payload",
+    "",
+    "conformance.py is the source of truth. ingestion/test_payload_conformance.py and",
+    "frontend/src/__tests__/payloadConformanceContract.test.js each assert every case below.",
+    "",
+    "A CASE. `schema_definitions` are every schema attached to one device. `observed` is",
+    "[metric, value_kind, value] as ingestion's DDATA loop builds it: value_kind is double, string or",
+    "bool, and a double is a float, because ingestion casts every integer wire type. `dropped` is",
+    "[metric, code, detail] for a metric the loop skipped. `expected` is payload_violations()'s",
+    "answer, each finding with `enforced`: enforceable_violation()'s answer for it. `raises` names",
+    "the error modelled_constraints() raises instead, and ingestion then judges nothing.",
+    "",
+    "WHERE THE LANGUAGES DIFFER, THE JAVASCRIPT GIVES PYTHON'S ANSWER: True == 1 == 1.0 in an enum,",
+    "repr() and '%g' in a detail, and Python's `re` for a pattern. A pattern the JavaScript cannot",
+    "read as Python does is reported as `pattern_not_checked`, never guessed. `expected_js` holds that",
+    "answer beside Python's, and is present only where the two differ.",
+    "",
+    "Adding a case here is the way to extend the contract: both suites read every case."
+  ],
+  "cases": [
+    {
+      "name": "a conforming payload produces nothing",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Systems/TEMPERATURE", "double", 42.5],
+        ["Controller/EXECUTION", "string", "ACTIVE"],
+        ["Controller/EMERGENCY_STOP", "string", "ARMED"]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a metric the payload leaves out is not a finding: a DDATA carries only what changed",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Systems/TEMPERATURE", "double", 42.5]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a string where the schema declares a number is a type_mismatch",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Systems/TEMPERATURE", "string", "hot"],
+        ["Controller/EXECUTION", "string", "ACTIVE"]
+      ],
+      "expected": [
+        {"metric": "Systems/TEMPERATURE", "code": "type_mismatch", "detail": "schema declares number", "observed_type": "string", "dropped": false, "expected_types": ["number"], "enforced": true}
+      ]
+    },
+    {
+      "name": "a wrong type reports alone, not with the bound and pattern it also fails",
+      "schema_definitions": [
+        {"properties": {"M": {"type": "string", "minimum": 10, "pattern": "^[A-Z]+$", "enum": ["ON"]}}}
+      ],
+      "observed": [
+        ["M", "double", 5]
+      ],
+      "expected": [
+        {"metric": "M", "code": "type_mismatch", "detail": "schema declares string", "observed_type": "double", "dropped": false, "expected_types": ["string"], "enforced": true}
+      ]
+    },
+    {
+      "name": "integer is satisfied by a Sparkplug number, which ingestion casts to float",
+      "schema_definitions": [
+        {"properties": {"M": {"type": "integer"}}}
+      ],
+      "observed": [
+        ["M", "double", 3]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a type list admits every member, and names them all when none matches",
+      "schema_definitions": [
+        {"properties": {"M": {"type": ["number", "null"]}, "N": {"type": ["number", "null"]}}}
+      ],
+      "observed": [
+        ["M", "double", 1.5],
+        ["N", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "N", "code": "type_mismatch", "detail": "schema declares null/number", "observed_type": "string", "dropped": false, "expected_types": ["null", "number"], "enforced": true}
+      ]
+    },
+    {
+      "name": "a boolean is not a number",
+      "schema_definitions": [
+        {"properties": {"M": {"type": "number"}}}
+      ],
+      "observed": [
+        ["M", "bool", true]
+      ],
+      "expected": [
+        {"metric": "M", "code": "type_mismatch", "detail": "schema declares number", "observed_type": "bool", "dropped": false, "expected_types": ["number"], "enforced": true}
+      ]
+    },
+    {
+      "name": "a string off its enum is an enum_mismatch, listing what is permitted",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Controller/EMERGENCY_STOP", "string", "OFF"]
+      ],
+      "expected": [
+        {"metric": "Controller/EMERGENCY_STOP", "code": "enum_mismatch", "detail": "schema permits 'ARMED', 'TRIGGERED'", "observed_type": "string", "dropped": false, "permitted": ["ARMED", "TRIGGERED"], "enforced": true}
+      ]
+    },
+    {
+      "name": "enum [1] admits true and 1.0, as Python's True == 1 == 1.0, and refuses the string '1'",
+      "schema_definitions": [
+        {"properties": {"A": {"enum": [1]}, "B": {"enum": [1]}, "C": {"enum": [1]}, "D": {"enum": [true]}}}
+      ],
+      "observed": [
+        ["A", "bool", true],
+        ["B", "double", 1],
+        ["C", "string", "1"],
+        ["D", "double", 1]
+      ],
+      "expected": [
+        {"metric": "C", "code": "enum_mismatch", "detail": "schema permits 1", "observed_type": "string", "dropped": false, "permitted": [1], "enforced": true}
+      ]
+    },
+    {
+      "name": "an enum keeps the first of two equal values, as a Python frozenset does",
+      "schema_definitions": [
+        {"properties": {"A": {"enum": [1, true, 1.5]}, "B": {"enum": [true, 1]}}}
+      ],
+      "observed": [
+        ["A", "string", "x"],
+        ["B", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "A", "code": "enum_mismatch", "detail": "schema permits 1, 1.5", "observed_type": "string", "dropped": false, "permitted": [1, 1.5], "enforced": true},
+        {"metric": "B", "code": "enum_mismatch", "detail": "schema permits True", "observed_type": "string", "dropped": false, "permitted": [true], "enforced": true}
+      ]
+    },
+    {
+      "name": "an enum mixing strings and numbers is listed in the order of Python's str()",
+      "schema_definitions": [
+        {"properties": {"M": {"enum": ["b", 2, "a", 10]}}}
+      ],
+      "observed": [
+        ["M", "string", "c"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "enum_mismatch", "detail": "schema permits 10, 2, 'a', 'b'", "observed_type": "string", "dropped": false, "permitted": [10, 2, "a", "b"], "enforced": true}
+      ]
+    },
+    {
+      "name": "an enum's strings print as Python's repr()",
+      "schema_definitions": [
+        {"properties": {"M": {"enum": ["it's", "C:\\path", "tab\there"]}}}
+      ],
+      "observed": [
+        ["M", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "enum_mismatch", "detail": "schema permits 'C:\\\\path', \"it's\", 'tab\\there'", "observed_type": "string", "dropped": false, "permitted": ["C:\\path", "it's", "tab\there"], "enforced": true}
+      ]
+    },
+    {
+      "name": "an enum's fractions print as Python's repr()",
+      "schema_definitions": [
+        {"properties": {"M": {"enum": [0.5, 0.00001, 2.25]}}}
+      ],
+      "observed": [
+        ["M", "double", 3]
+      ],
+      "expected": [
+        {"metric": "M", "code": "enum_mismatch", "detail": "schema permits 0.5, 1e-05, 2.25", "observed_type": "double", "dropped": false, "permitted": [0.5, 0.00001, 2.25], "enforced": true}
+      ]
+    },
+    {
+      "name": "an enum of no scalars is no enum",
+      "schema_definitions": [
+        {"properties": {"M": {"enum": [null, {}, [1]]}}}
+      ],
+      "observed": [
+        ["M", "string", "x"]
+      ],
+      "expected": []
+    },
+    {
+      "name": "bounds are read in both directions",
+      "schema_definitions": [
+        {"properties": {"Low": {"type": "number", "minimum": 0, "maximum": 100}, "High": {"type": "number", "minimum": 0, "maximum": 100}}}
+      ],
+      "observed": [
+        ["Low", "double", -1],
+        ["High", "double", 101]
+      ],
+      "expected": [
+        {"metric": "Low", "code": "below_minimum", "detail": "schema sets minimum 0", "observed_type": "double", "dropped": false, "minimum": 0, "enforced": true},
+        {"metric": "High", "code": "above_maximum", "detail": "schema sets maximum 100", "observed_type": "double", "dropped": false, "maximum": 100, "enforced": true}
+      ]
+    },
+    {
+      "name": "a bound is inclusive",
+      "schema_definitions": [
+        {"properties": {"Low": {"minimum": 0, "maximum": 100}, "High": {"minimum": 0, "maximum": 100}}}
+      ],
+      "observed": [
+        ["Low", "double", 0],
+        ["High", "double", 100]
+      ],
+      "expected": []
+    },
+    {
+      "name": "bounds print as Python's '%g'",
+      "schema_definitions": [
+        {"properties": {"Small": {"minimum": 0.0001}, "Large": {"maximum": 1234567}, "Tiny": {"maximum": 0.00001}}}
+      ],
+      "observed": [
+        ["Small", "double", 0],
+        ["Large", "double", 2000000],
+        ["Tiny", "double", 1]
+      ],
+      "expected": [
+        {"metric": "Small", "code": "below_minimum", "detail": "schema sets minimum 0.0001", "observed_type": "double", "dropped": false, "minimum": 0.0001, "enforced": true},
+        {"metric": "Large", "code": "above_maximum", "detail": "schema sets maximum 1.23457e+06", "observed_type": "double", "dropped": false, "maximum": 1234567, "enforced": true},
+        {"metric": "Tiny", "code": "above_maximum", "detail": "schema sets maximum 1e-05", "observed_type": "double", "dropped": false, "maximum": 0.00001, "enforced": true}
+      ]
+    },
+    {
+      "name": "'%g' rounds a tie at the sixth digit to even",
+      "schema_definitions": [
+        {"properties": {"M": {"maximum": 123456.5}}}
+      ],
+      "observed": [
+        ["M", "double", 200000]
+      ],
+      "expected": [
+        {"metric": "M", "code": "above_maximum", "detail": "schema sets maximum 123456", "observed_type": "double", "dropped": false, "maximum": 123456.5, "enforced": true}
+      ]
+    },
+    {
+      "name": "bounds do not apply to a string",
+      "schema_definitions": [
+        {"properties": {"M": {"minimum": 10}}}
+      ],
+      "observed": [
+        ["M", "string", "5"]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a boolean is not a bound",
+      "schema_definitions": [
+        {"properties": {"M": {"minimum": true, "maximum": false}}}
+      ],
+      "observed": [
+        ["M", "double", -5]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a string that fails its pattern is a pattern_mismatch",
+      "schema_definitions": [
+        {"properties": {"M": {"type": "string", "pattern": "^[A-Z]+$"}}}
+      ],
+      "observed": [
+        ["M", "string", "abc"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "pattern_mismatch", "detail": "schema requires a match for ^[A-Z]+$", "observed_type": "string", "dropped": false, "pattern": "^[A-Z]+$", "enforced": true}
+      ]
+    },
+    {
+      "name": "Python's $ also matches before one final newline",
+      "schema_definitions": [
+        {"properties": {"A": {"pattern": "^on$"}, "B": {"pattern": "^on$"}}}
+      ],
+      "observed": [
+        ["A", "string", "on\n"],
+        ["B", "string", "on\n\n"]
+      ],
+      "expected": [
+        {"metric": "B", "code": "pattern_mismatch", "detail": "schema requires a match for ^on$", "observed_type": "string", "dropped": false, "pattern": "^on$", "enforced": true}
+      ]
+    },
+    {
+      "name": "Python's \\d matches any Unicode decimal digit",
+      "schema_definitions": [
+        {"properties": {"A": {"pattern": "^\\d+$"}, "B": {"pattern": "^\\d+$"}}}
+      ],
+      "observed": [
+        ["A", "string", "\u0663\u0664"],
+        ["B", "string", "12a"]
+      ],
+      "expected": [
+        {"metric": "B", "code": "pattern_mismatch", "detail": "schema requires a match for ^\\d+$", "observed_type": "string", "dropped": false, "pattern": "^\\d+$", "enforced": true}
+      ]
+    },
+    {
+      "name": "Python's \\w and \\b are Unicode-wide",
+      "schema_definitions": [
+        {"properties": {"A": {"pattern": "^\\w+$"}, "B": {"pattern": "\\bon\\b"}}}
+      ],
+      "observed": [
+        ["A", "string", "caf\u00e9"],
+        ["B", "string", "\u00e9on"]
+      ],
+      "expected": [
+        {"metric": "B", "code": "pattern_mismatch", "detail": "schema requires a match for \\bon\\b", "observed_type": "string", "dropped": false, "pattern": "\\bon\\b", "enforced": true}
+      ]
+    },
+    {
+      "name": "Python's . matches a carriage return",
+      "schema_definitions": [
+        {"properties": {"M": {"pattern": "^a.b$"}}}
+      ],
+      "observed": [
+        ["M", "string", "a\rb"]
+      ],
+      "expected": []
+    },
+    {
+      "name": "Python's \\s is its own whitespace set",
+      "schema_definitions": [
+        {"properties": {"A": {"pattern": "^\\s$"}, "B": {"pattern": "^\\s$"}}}
+      ],
+      "observed": [
+        ["A", "string", "\u001c"],
+        ["B", "string", "\ufeff"]
+      ],
+      "expected": [
+        {"metric": "B", "code": "pattern_mismatch", "detail": "schema requires a match for ^\\s$", "observed_type": "string", "dropped": false, "pattern": "^\\s$", "enforced": true}
+      ]
+    },
+    {
+      "name": "a { that starts no repeat is a literal in Python",
+      "schema_definitions": [
+        {"properties": {"M": {"pattern": "^a{b$"}}}
+      ],
+      "observed": [
+        ["M", "string", "a{b"]
+      ],
+      "expected": []
+    },
+    {
+      "name": "\\A and \\Z are the ends of the string, newline or not",
+      "schema_definitions": [
+        {"properties": {"M": {"pattern": "\\Aon\\Z"}}}
+      ],
+      "observed": [
+        ["M", "string", "on\n"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "pattern_mismatch", "detail": "schema requires a match for \\Aon\\Z", "observed_type": "string", "dropped": false, "pattern": "\\Aon\\Z", "enforced": true}
+      ]
+    },
+    {
+      "name": "an inline flag compiles in Python and not in a RegExp: the pattern is not checked here",
+      "schema_definitions": [
+        {"properties": {"A": {"pattern": "(?i)^on$"}, "B": {"pattern": "(?i)^on$"}}}
+      ],
+      "observed": [
+        ["A", "string", "ON"],
+        ["B", "string", "off"]
+      ],
+      "expected": [
+        {"metric": "B", "code": "pattern_mismatch", "detail": "schema requires a match for (?i)^on$", "observed_type": "string", "dropped": false, "pattern": "(?i)^on$", "enforced": true}
+      ],
+      "expected_js": [
+        {"metric": "A", "code": "pattern_not_checked", "detail": "schema pattern (?i)^on$ is not checked here: ingestion reads it with Python's re, and this check cannot read it the same way", "observed_type": "string", "dropped": false, "pattern": "(?i)^on$", "enforced": false},
+        {"metric": "B", "code": "pattern_not_checked", "detail": "schema pattern (?i)^on$ is not checked here: ingestion reads it with Python's re, and this check cannot read it the same way", "observed_type": "string", "dropped": false, "pattern": "(?i)^on$", "enforced": false}
+      ]
+    },
+    {
+      "name": "a pattern Python cannot compile is charged to the schema, never enforced, and not checked here",
+      "schema_definitions": [
+        {"properties": {"M": {"pattern": "("}}}
+      ],
+      "observed": [
+        ["M", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "schema_pattern_invalid", "detail": "schema pattern ( is not a valid regular expression", "observed_type": "string", "dropped": false, "pattern": "(", "enforced": false}
+      ],
+      "expected_js": [
+        {"metric": "M", "code": "pattern_not_checked", "detail": "schema pattern ( is not checked here: ingestion reads it with Python's re, and this check cannot read it the same way", "observed_type": "string", "dropped": false, "pattern": "(", "enforced": false}
+      ]
+    },
+    {
+      "name": "a pattern a RegExp would compile and Python refuses is not checked here",
+      "schema_definitions": [
+        {"properties": {"P": {"pattern": "^\\p{L}+$"}, "N": {"pattern": "(?<n>x)"}}}
+      ],
+      "observed": [
+        ["P", "string", "abc"],
+        ["N", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "P", "code": "schema_pattern_invalid", "detail": "schema pattern ^\\p{L}+$ is not a valid regular expression", "observed_type": "string", "dropped": false, "pattern": "^\\p{L}+$", "enforced": false},
+        {"metric": "N", "code": "schema_pattern_invalid", "detail": "schema pattern (?<n>x) is not a valid regular expression", "observed_type": "string", "dropped": false, "pattern": "(?<n>x)", "enforced": false}
+      ],
+      "expected_js": [
+        {"metric": "P", "code": "pattern_not_checked", "detail": "schema pattern ^\\p{L}+$ is not checked here: ingestion reads it with Python's re, and this check cannot read it the same way", "observed_type": "string", "dropped": false, "pattern": "^\\p{L}+$", "enforced": false},
+        {"metric": "N", "code": "pattern_not_checked", "detail": "schema pattern (?<n>x) is not checked here: ingestion reads it with Python's re, and this check cannot read it the same way", "observed_type": "string", "dropped": false, "pattern": "(?<n>x)", "enforced": false}
+      ]
+    },
+    {
+      "name": "an unmodelled metric is recorded, and not dropped while the set is open",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Spindle/SPEED", "double", 1200]
+      ],
+      "expected": [
+        {"metric": "Spindle/SPEED", "code": "unmodelled_metric", "detail": "no attached schema declares this metric", "observed_type": "double", "dropped": false, "enforced": false}
+      ]
+    },
+    {
+      "name": "additionalProperties: false makes an unmodelled metric enforceable",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}, "additionalProperties": false}
+      ],
+      "observed": [
+        ["Spindle/SPEED", "double", 1200]
+      ],
+      "expected": [
+        {"metric": "Spindle/SPEED", "code": "unmodelled_metric", "detail": "no attached schema declares this metric, and one of them closes the set with additionalProperties: false", "observed_type": "double", "dropped": false, "enforced": true}
+      ]
+    },
+    {
+      "name": "one closed schema closes the device's set, and a metric another of its schemas models is modelled",
+      "schema_definitions": [
+        {"properties": {"Axes/X": {"type": "number"}}, "additionalProperties": false},
+        {"properties": {"Spindle/SPEED": {"type": "number"}}}
+      ],
+      "observed": [
+        ["Spindle/SPEED", "double", 1200],
+        ["Coolant/LEVEL", "double", 3]
+      ],
+      "expected": [
+        {"metric": "Coolant/LEVEL", "code": "unmodelled_metric", "detail": "no attached schema declares this metric, and one of them closes the set with additionalProperties: false", "observed_type": "double", "dropped": false, "enforced": true}
+      ]
+    },
+    {
+      "name": "constraints union permissively across schemas: enums join, the widest bound survives",
+      "schema_definitions": [
+        {"properties": {"M": {"enum": [1, 2], "minimum": 0, "maximum": 10}, "N": {"enum": ["a"]}}},
+        {"properties": {"M": {"enum": [3], "minimum": 5, "maximum": 20}, "N": {}}}
+      ],
+      "observed": [
+        ["M", "double", 25],
+        ["N", "string", "z"]
+      ],
+      "expected": [
+        {"metric": "M", "code": "enum_mismatch", "detail": "schema permits 1, 2, 3", "observed_type": "double", "dropped": false, "permitted": [1, 2, 3], "enforced": true},
+        {"metric": "M", "code": "above_maximum", "detail": "schema sets maximum 20", "observed_type": "double", "dropped": false, "maximum": 20, "enforced": true}
+      ]
+    },
+    {
+      "name": "differing patterns widen to unconstrained, and an identical one survives",
+      "schema_definitions": [
+        {"properties": {"P": {"pattern": "^a$"}, "Q": {"pattern": "^a$"}}},
+        {"properties": {"P": {"pattern": "^b$"}, "Q": {"pattern": "^a$"}}}
+      ],
+      "observed": [
+        ["P", "string", "c"],
+        ["Q", "string", "c"]
+      ],
+      "expected": [
+        {"metric": "Q", "code": "pattern_mismatch", "detail": "schema requires a match for ^a$", "observed_type": "string", "dropped": false, "pattern": "^a$", "enforced": true}
+      ]
+    },
+    {
+      "name": "a metric named only in required is modelled with no constraint",
+      "schema_definitions": [
+        {"required": ["R"]}
+      ],
+      "observed": [
+        ["R", "string", "anything"],
+        ["R", "double", 7]
+      ],
+      "expected": []
+    },
+    {
+      "name": "required beside a typed property does not erase its type",
+      "schema_definitions": [
+        {"properties": {"T": {"type": "number"}}, "required": ["T"]}
+      ],
+      "observed": [
+        ["T", "string", "x"]
+      ],
+      "expected": [
+        {"metric": "T", "code": "type_mismatch", "detail": "schema declares number", "observed_type": "string", "dropped": false, "expected_types": ["number"], "enforced": true}
+      ]
+    },
+    {
+      "name": "a property with no type, or whose entry is not an object, is unconstrained",
+      "schema_definitions": [
+        {"properties": {"U": {}, "V": true}}
+      ],
+      "observed": [
+        ["U", "string", "x"],
+        ["V", "double", 1]
+      ],
+      "expected": []
+    },
+    {
+      "name": "malformed definitions contribute nothing",
+      "schema_definitions": [
+        null,
+        "text",
+        {"properties": ["A"]}
+      ],
+      "observed": [
+        ["A", "double", 1]
+      ],
+      "expected": [
+        {"metric": "A", "code": "unmodelled_metric", "detail": "no attached schema declares this metric", "observed_type": "double", "dropped": false, "enforced": false}
+      ]
+    },
+    {
+      "name": "a required that is a string is read one character at a time, as Python iterates it",
+      "schema_definitions": [
+        {"required": "AB"}
+      ],
+      "observed": [
+        ["A", "double", 1],
+        ["AB", "double", 1]
+      ],
+      "expected": [
+        {"metric": "AB", "code": "unmodelled_metric", "detail": "no attached schema declares this metric", "observed_type": "double", "dropped": false, "enforced": false}
+      ]
+    },
+    {
+      "name": "a metric carrying no value is dropped under either policy, and listed first",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string", "enum": ["READY", "ACTIVE", "INTERRUPTED"]}, "Controller/EMERGENCY_STOP": {"type": "string", "enum": ["ARMED", "TRIGGERED"]}}}
+      ],
+      "observed": [
+        ["Systems/TEMPERATURE", "string", "hot"]
+      ],
+      "dropped": [
+        ["Controller/EXECUTION", "no_value", "metric carries no recognised Sparkplug value field"]
+      ],
+      "expected": [
+        {"metric": "Controller/EXECUTION", "code": "no_value", "detail": "metric carries no recognised Sparkplug value field", "dropped": true, "enforced": false},
+        {"metric": "Systems/TEMPERATURE", "code": "type_mismatch", "detail": "schema declares number", "observed_type": "string", "dropped": false, "expected_types": ["number"], "enforced": true}
+      ]
+    },
+    {
+      "name": "a required that is a number cannot be read, and ingestion judges nothing",
+      "schema_definitions": [
+        {"properties": {"M": {}}, "required": 5}
+      ],
+      "observed": [
+        ["M", "double", 1]
+      ],
+      "raises": "TypeError"
+    }
+  ]
+}

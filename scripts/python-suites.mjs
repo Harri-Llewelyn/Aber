@@ -160,7 +160,9 @@ export const SUITES = {
       'application role and which the application cannot prune at all. DDATA arrives ' +
       'continuously, so a regression that writes one row per message does not degrade -- it fills ' +
       'the disk. Archived migration 0005 gave the audit TRIGGER a guard against exactly this; the ' +
-      'RPC these rows go through is not a trigger, so the only guard is in Python.',
+      'RPC these rows go through is not a trigger, so the only guard is in Python. It also holds ' +
+      'the Python half of test-harness/fixtures/payload-conformance.json; the JavaScript half, ' +
+      "Validate Payload's copy of the rules, runs in frontend-build.",
   },
   'ingestion/test_modelled_metrics_contract.py': {
     lanes: ['unit'],

@@ -87,6 +87,14 @@ One more mirror — `modelledMetrics()` — is behaviour rather than a literal, 
 contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
 three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
+`utils/payloadConformance.js`, Validate Payload's copy of `ingestion/conformance.py`, has one too:
+`test-harness/fixtures/payload-conformance.json`, asserted by vitest and by
+`ingestion/test_payload_conformance.py`. Where the languages differ it gives Python's answer:
+Python's equality in an `enum`, `repr()` and `'%g'` in a detail, and a `pattern` translated to
+match as Python's `re` does (`.`, `$`, `\d`, `\w`, `\s` and `\b` all differ). A pattern outside that
+translation is reported as not checked here, never guessed. The translation leaves Unicode
+versions aside: a character newer than one side's tables can still class differently.
+
 ### Permission gating
 
 `hasPermission(uuid)` from `usePermissions`, against `PERMISSION_UUIDS` in `constants.js`. Gating
