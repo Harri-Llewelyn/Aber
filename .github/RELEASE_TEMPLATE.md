@@ -18,7 +18,7 @@
 
   A release `helm upgrade` cannot reach from the previous one moves the floor: a renamed chart, a
   PostgreSQL major, a schema the chain no longer converges. Name the new floor here, and update
-  "The floor" in docs/upgrades.md in the same release.
+  "The floor" in help/site/upgrading.md in the same release.
 -->
 
 ## Deprecated

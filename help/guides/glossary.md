@@ -224,7 +224,7 @@ cannot be changed afterwards.
 
 Aber issues its own certificates for HTTPS and the broker, from a certificate authority (CA) that
 runs inside the server. Browsers and gateways trust those certificates once the CA's *root
-certificate* is installed on them ([runbook, *TLS*](../../deploy/k8s/README.md#tls)).
+certificate* is installed on them ([Running the server, *TLS*](../site/running-the-server.md#tls)).
 
 ### Edge function
 

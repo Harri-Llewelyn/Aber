@@ -965,7 +965,7 @@ the backup service and the test runner are off in a site's values.
 Both end with the same checks:
 
 - every StatefulSet, Deployment and DaemonSet rolls out, one `kubectl rollout status` at a time
-  (`helm --wait` deadlocks a first install, see [`deploy/k8s/README.md`](../deploy/k8s/README.md#a-from-the-published-chart-no-image-builds));
+  (`helm --wait` deadlocks a first install, see [`help/site/running-the-server.md`](../help/site/running-the-server.md#a-from-the-published-chart-no-image-builds));
 - `helm test` passes;
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
@@ -992,7 +992,7 @@ npm run rehearse:install -- --i3x-suite=../i3x-spec/conformance-tests
 the checkout's image and completed: it replays the migration chain onto the last release's database.
 It asserts that every volume claim kept its uid, so no data volume was replaced. A StatefulSet whose
 claim templates changed must have been created again, by the `claim-templates` pre-upgrade hook
-([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
 and own its running pod; one whose claim templates did not change must be the same object. The
 hook's log is printed with the result. That pre-upgrade hook runs under the last release's
 NetworkPolicies and its own. The post-upgrade hook Jobs (`db-init`, `timescaledb-maintenance`,

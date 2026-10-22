@@ -726,7 +726,7 @@ in any built bundle.
 ### The Content-Security-Policy names what a page may load
 
 The chart sends the dashboard's policy from nginx, built from the same addresses as `/config.js`
-([`deploy/k8s/README.md`](../deploy/k8s/README.md#what-a-browser-may-load-the-content-security-policy)
+([`help/site/running-the-server.md`](../help/site/running-the-server.md#what-a-browser-may-load-the-content-security-policy)
 lists each directive). Under it, the browser refuses:
 
 - a request to an origin `/config.js` does not name: a new `fetch`, image or WebSocket elsewhere;

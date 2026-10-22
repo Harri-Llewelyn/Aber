@@ -13,6 +13,12 @@ Everything here is written for someone new to Aber. Pages for people who change 
   first gateway.
 - [Remote gateways](site/remote-gateways.md): set up a gateway on its own hardware, keep it
   running, and fix it when something goes wrong.
+- [Upgrading Aber](site/upgrading.md): move to a new release with one command, and what needs your
+  attention when you do.
+- [Running the server](site/running-the-server.md): install the server by hand, check it, reach it,
+  upgrade or remove it, and the traps to know about.
+- [Keeping Aber secure](site/security.md): who and what may reach Aber, and what an administrator
+  does to keep it that way.
 - [Bringing your own edge node](site/bring-your-own-edge-node.md): what an edge node you chose must do to send data to Aber.
 
 ## Guides
