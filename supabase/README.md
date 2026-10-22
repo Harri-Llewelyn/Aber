@@ -1419,6 +1419,32 @@ Area-Wide assets. `test_area_plan_sweep.py` holds the listing and the bucket's p
 a stand-in table); `test_area_archive_refusal.py` holds the refusals; `ingestion/test_area_plan_sweep_worker.py`
 holds the sweep.
 
+### The column comments say what the code does (0200)
+
+A column's comment is where someone reading the schema looks first. Six said things the code does
+not do:
+
+- **`devices.description` and `gateways.description`** were "read by nothing". i3X serves each as
+  the object's `metadata.description`; it now selects both columns, as it does for cells and areas.
+  Nothing acts on either.
+- **`gateways.flow_hash`** was "computed by its bootstrap at enrolment". `enroll-gateway` never
+  writes it. Ingestion writes the heartbeat's `Flow_Hash` metric on every node-level message that
+  carries one, and on the appliance `flow-sync` records the digest of each flow it deploys. That a
+  local edit is not reflected still holds.
+- **`gateways.cert_expires_at`** said the root is hand-distributed into every trust store, so
+  re-minting it takes the fleet offline at once. Enrolment hands the appliance its root. After
+  that each appliance installs the roots in the trust bundle on the platform playbook's `main` at
+  every convergence, so a gateway behind the platform's root has not converged since it was
+  re-issued.
+- **`cells.description`** was a help tip on the Site Map. It is a field in the cell's panel there,
+  it sits under the name on the Cells page and in the drawer, and i3X serves it.
+- **`areas.auto_delete_at`** said the purge skips an area an Area-Wide asset names. It still does,
+  but `0199` refuses archiving such an area and making anything Area-Wide in an archived one, so
+  the skip is a guard no row reaches.
+
+`COMMENT ON` only, so a replay restates the same text. The file's self-check reads each comment
+back. `docs/openapi.yaml` and the dashboard's hints say the same about each column.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -3134,8 +3160,8 @@ between, for the Unified Namespace bridge to name a reading's place
   the migration that promotes it. The bridge publishes nothing while it is empty.
 - **An area is one part of the site, such as a building**: `public.areas`, with `cells.area_id`
   nullable and `ON DELETE SET NULL`, so deleting an area un-files its cells into the Areas page's
-  queue rather than deleting them. `cells.description` is free text, shown as a
-  help tip beside the cell's name on the map. `areas.icon` is a closed set of keys
+  queue rather than deleting them. `cells.description` is free text, shown under the cell's name
+  on the Cells page and in its panel on the Site Map, and served by i3X. `areas.icon` is a closed set of keys
   (`areas_icon_valid`) mirrored by `frontend/src/utils/areaIcon.jsx`, as `cells.icon` is.
 - **`location_scope` gains `area_wide`**: an area's building management system, with no single
   cell and one area. It
