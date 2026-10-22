@@ -144,7 +144,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | **[`ingestion/`](../ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`help/`](../help/README.md)** | The pages for newcomers: the install guide, the glossary, the dashboard's help for each page, and the [tutorial](../help/guides/tutorial.md), the walkthrough for a blank install (one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it) |
 | **[`i3x/`](../i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](../i3x/README.md#mcp) |
-| **[`deploy/k8s/README.md`](../deploy/k8s/README.md)** | Kubernetes runbook: install, the development loop, upgrade, teardown, hardening, releases |
+| **[`deploy/k8s/README.md`](../deploy/k8s/README.md)** | Kubernetes runbook: prerequisites, the development loop, hardening, releases; its install, upgrade and teardown steps are [`help/site/running-the-server.md`](../help/site/running-the-server.md) |
 | [`deploy/helm/aber/`](../deploy/helm/aber) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |

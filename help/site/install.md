@@ -4,7 +4,7 @@ Aber has two parts. **The server** runs on one Linux machine on your network, un
 **Gateways** connect your machines to it, and you add them from the dashboard once the server is
 running. This guide installs the server, signs you in, and points you at your first gateway.
 
-Every option, and the reason for each step, is in the [runbook](../../deploy/k8s/README.md). The server
+Every option, and the reason for each step, is in [Running the server](running-the-server.md). The server
 is installed from the Helm chart in [`deploy/helm/aber`](../../deploy/helm/aber), and why it is built that
 way is in [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md). Words you may not know are in
 the [glossary](../guides/glossary.md).

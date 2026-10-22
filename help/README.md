@@ -15,6 +15,8 @@ Everything here is written for someone new to Aber. Pages for people who change 
   running, and fix it when something goes wrong.
 - [Upgrading Aber](site/upgrading.md): move to a new release with one command, and what needs your
   attention when you do.
+- [Running the server](site/running-the-server.md): install the server by hand, check it, reach it,
+  upgrade or remove it, and the traps to know about.
 - [Bringing your own edge node](site/bring-your-own-edge-node.md): what an edge node you chose must do to send data to Aber.
 
 ## Guides
