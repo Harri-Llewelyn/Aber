@@ -3165,11 +3165,12 @@ between, for the Unified Namespace bridge to name a reading's place
 
 - **The site is one setting**, `site.name`, not a table. The plant is one campus; a second is
   the migration that promotes it. The bridge publishes nothing while it is empty.
-- **An area is one part of the site, such as a building**: `public.areas`, with `cells.area_id`
-  nullable and `ON DELETE SET NULL`, so deleting an area un-files its cells into the Areas page's
-  queue rather than deleting them. `cells.description` is free text, shown under the cell's name
-  on the Cells page and in its panel on the Site Map, and served by i3X. `areas.icon` is a closed set of keys
-  (`areas_icon_valid`) mirrored by `frontend/src/utils/areaIcon.jsx`, as `cells.icon` is.
+- **An area is one part of the site, such as a hall, a yard or a plant room**: `public.areas`,
+  with `cells.area_id` nullable and `ON DELETE SET NULL`, so deleting an area un-files its cells
+  into the Areas page's queue rather than deleting them. `cells.description` is free text, shown
+  under the cell's name on the Cells page and in its panel on the Site Map, and served by i3X.
+  `areas.icon` is a closed set of keys (`areas_icon_valid`) mirrored by
+  `frontend/src/utils/areaIcon.jsx`, as `cells.icon` is.
 - **`location_scope` gains `area_wide`**: an area's building management system, with no single
   cell and one area. It
   REQUIRES `area_id` and nothing else may store one (`*_area_wide_names_its_area`), for the reason
