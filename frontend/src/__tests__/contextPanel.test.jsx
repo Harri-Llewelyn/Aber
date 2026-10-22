@@ -1037,7 +1037,96 @@ describe('Context panel layout invariants', () => {
     expect(p.queryByText('3D Visual Model')).toBeNull()
     expect(p.queryByText(/Exported as an AAS/)).toBeNull()
     // The AAS fact is not lost -- it moved onto the dropzone it describes.
-    expect(p.getByRole('button', { name: /Upload a 3D model/i }).getAttribute('title'))
+    expect(tooltipOf(p.getByRole('button', { name: /Upload a 3D model/i })))
       .toMatch(/VisualRepresentation submodel/)
+  })
+
+  /* The model was the last section, after the actions, and on a 1080 screen it started below the
+     fold (#1061). It is a tile of fixed height in a field group, beside where the device is and what
+     it is, so it comes before the actions. */
+  it('puts the 3D model beside the device\'s location, above the actions', async () => {
+    render(
+      <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
+    )
+    await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
+
+    fireEvent.click(list().getByText('Simulated_CNC_01'))
+    await waitFor(() => expect(isOpen()).toBe(true))
+
+    const group = panel().querySelector('.context-field-group')
+    const tile = group.querySelector('.context-field-beside > .model-tile')
+    expect(within(tile).getByText('3D Model')).toBeInTheDocument()
+    expect(within(tile).getByTestId('model-3d-input')).toBeInTheDocument()
+    const beside = [...group.querySelectorAll('dl > .context-field > dt')].map(dt => dt.textContent)
+    expect(beside).toEqual(['Serving Gateway', 'Location', 'Schema', 'Classification'])
+
+    // The identifiers before it, Description after it, and nothing after the actions.
+    const runs = [...panel().querySelectorAll('.context-panel-body > dl, .context-panel-body > .context-field-group')]
+    expect(runs.map(r => r.className)).toEqual(['context-panel-fields', 'context-field-group', 'context-panel-fields'])
+    expect([...runs[0].querySelectorAll('dt')].map(dt => dt.textContent))
+      .toEqual(['Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path'])
+    expect([...runs[2].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual(['Description'])
+    const actions = panel().querySelector('.context-panel-actions')
+    expect(group.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(panel().querySelector('.context-panel-extras')).toBeNull()
+  })
+})
+
+describe('A field group', () => {
+  const fields = [
+    { label: 'First', value: 'one' },
+    { beside: <div data-testid="tile">tile</div>, fields: [{ label: 'Second', value: 'two' }, { label: 'Third', value: null }] },
+    { label: 'Fourth', value: 'four' },
+  ]
+
+  it('draws the node beside its fields, between the plain fields either side, in order', () => {
+    render(<ContextPanel open type="DEVICE" title="X" fields={fields} onClose={vi.fn()} />)
+    const body = document.querySelector('.context-panel-body')
+    const runs = [...body.children].filter(el => el.matches('dl, .context-field-group'))
+    expect(runs.map(r => r.className)).toEqual(['context-panel-fields', 'context-field-group', 'context-panel-fields'])
+    expect(runs[1].querySelector('.context-field-beside')).toContainElement(screen.getByTestId('tile'))
+    expect([...document.querySelectorAll('dt')].map(dt => dt.textContent)).toEqual(['First', 'Second', 'Third', 'Fourth'])
+    // A field in a group is drawn as any other: empty is stated.
+    expect(within(runs[1]).getByText('Not set')).toBeInTheDocument()
+  })
+
+  it('keeps the node out of every <dl>, which may hold only dt and dd groups', () => {
+    render(<ContextPanel open type="DEVICE" title="X" fields={fields} onClose={vi.fn()} />)
+    expect(screen.getByTestId('tile').closest('dl')).toBeNull()
+    for (const dl of document.querySelectorAll('dl')) {
+      for (const child of dl.children) expect(child.matches('.context-field')).toBe(true)
+    }
+  })
+
+  it('lays the node and the fields side by side, the node the wider', () => {
+    const rule = APP_CSS.match(/\n\.context-field-group \{([\s\S]*?)\n\}/)[1]
+    expect(rule).toMatch(/display:\s*grid/)
+    expect(rule).toMatch(/grid-template-columns:\s*minmax\(0, 11fr\) minmax\(0, 9fr\)/)
+  })
+})
+
+describe('The actions, two to a row', () => {
+  it('fill two 200px columns where they fit, and one where they do not', () => {
+    const rule = APP_CSS.match(/\n\.context-panel-actions \{([\s\S]*?)\n\}/)[1]
+    expect(rule).toMatch(/display:\s*grid/)
+    expect(rule).toMatch(/grid-template-columns:\s*repeat\(auto-fill, minmax\(200px, 1fr\)\)/)
+  })
+
+  it('give the label, the primary and a danger action the whole row', () => {
+    const span = APP_CSS.match(/\n((?:\.context-panel-actions > [^,{]+,\n)+\.context-panel-actions > [^{]+) \{ grid-column: 1 \/ -1; \}/)
+    expect(span).not.toBeNull()
+    const selectors = span[1].split(',\n').map(s => s.trim())
+    expect(selectors).toEqual([
+      '.context-panel-actions > .context-panel-section-label',
+      '.context-panel-actions > .btn-primary',
+      '.context-panel-actions > .context-action-danger',
+    ])
+  })
+
+  it('wrap a label too long for its column rather than overflowing it', () => {
+    const rule = APP_CSS.match(/\n\.context-action \{([\s\S]*?)\n\}/)[1]
+    expect(rule).toMatch(/white-space:\s*normal/)
+    expect(rule).toMatch(/min-width:\s*0/)
   })
 })

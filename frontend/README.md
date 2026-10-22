@@ -390,6 +390,25 @@ It is also **presentational only** — it renders `fields` and `actions` and kno
 cells, gateways, devices or schemas. Four pages sharing a panel that understood all four would be
 the same component four times over, each conditional branch reachable from exactly one caller.
 
+### What sits where in a drawer
+
+Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gateway's devices), the
+actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
+height is not known, and above the actions it could push Edit Details off the drawer.
+
+- **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
+  up, and one to a row below that. The first primary action and a danger action take the whole row.
+  Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they take 220px.
+- **A section of fixed height can sit among the fields**, as a field group:
+  `{ beside, fields }` draws `beside` on the left and its fields stacked on the right. The device's
+  3D model is one (#1061). As the last tool it started 747px down a drawer body that shows 754px
+  at 1920×1080, so some people did not know a device could have a model. Its tile is the viewer's
+  height whatever the state, so it cannot grow into the actions. Beside Serving Gateway, Location,
+  Schema and Classification, the whole drawer measured 715px there, with nothing to scroll.
+- **The tile is the wider column** (11 to 9), so Download, Replace and Remove keep their words in
+  a 537px drawer. A narrower tile is a container query's business (`.model-tile`): the buttons keep
+  their icons, and each word stays as the button's name, hidden but read.
+
 ### What the modelled-metrics fixture caught, twice
 
 `modelledMetrics()` answers "which metrics does this schema model?" and exists four times, in three

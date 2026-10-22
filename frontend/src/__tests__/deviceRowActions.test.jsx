@@ -153,10 +153,10 @@ describe('device row actions', () => {
   })
 })
 
-// The 3D model is an attachment like a link, in the drawer's 3D Model section; the Configuration
+// The 3D model is an attachment like a link, in the drawer's 3D Model tile; the Configuration
 // modal is read-only and open to every role.
 describe('device 3D model attachment', () => {
-  it('offers the uploader as its own panel section', async () => {
+  it('offers the uploader as its own panel tile', async () => {
     // One upload control fits a narrow column, unlike a list of links.
     await show([device()])
 

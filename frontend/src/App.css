@@ -3967,13 +3967,14 @@ a.chip { text-decoration: none; }
   left: calc(var(--arrow-x, 50%) - 1px);
 }
 
-/* The 3D model preview in the device drawer. One class on all three states (the element, the
-   loading line and the error line) so the panel does not resize as the viewer loads or fails.
-   `--bg-base` rather than the card surface, so a pale model does not disappear into the panel. */
+/* The 3D model preview in the device drawer's model tile. One class on all three states (the
+   element, the loading line and the error line) so the panel does not resize as the viewer loads or
+   fails. `--bg-base` rather than the card surface, so a pale model does not disappear into the
+   panel. The empty drop zone (`.model-drop`) is as tall. */
 .model-viewer-frame {
   display: block;
   width: 100%;
-  height: 200px;
+  height: 180px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-base);
@@ -4035,15 +4036,64 @@ a.chip { text-decoration: none; }
 .plan-card .area-plan { border: 0; border-radius: 0; background: none; }
 .plan-card:has(> a.area-plan-preview:hover) { border-color: var(--border-hover); }
 
-/* The attached model's Download, Replace and Remove: equal columns across the card, two or one to
-   a row in a very narrow drawer. */
-.model-file-actions {
-  flex: 1 1 100%;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: 8px;
+/* The device drawer's model tile: the 3D Model section, beside the device's facts (a ContextPanel
+   field group). A container, so the file's buttons can drop their words in a narrow tile. */
+.model-tile { container: model-tile / inline-size; min-width: 0; }
+.model-tile > .context-panel-section-label { margin-bottom: 6px; }
+
+/* The attached file, under the viewer: its name and size on one line, then its buttons. */
+.model-file { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.model-file-name { display: flex; gap: 6px; min-width: 0; font-size: 11px; color: var(--text-muted); }
+.model-file-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-primary);
 }
-.model-file-actions > .btn { justify-content: center; }
+.model-file-size { flex-shrink: 0; }
+
+/* Download, Replace and Remove: equal columns across the tile, one per button, so a reader's
+   Download alone takes the width. */
+.model-file-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+.model-file-actions > .btn { justify-content: center; gap: 4px; padding: 5px 6px; font-size: 12px; }
+
+/* Too narrow for the three words: the icons stay, and each word is kept as its button's name. */
+@container model-tile (max-width: 249px) {
+  .model-file-actions:has(> :nth-child(3)) .model-file-action-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* No model yet: the drop zone, as tall as the viewer. The border's colour, the ground and the
+   cursor change with dragging and permission, inline. */
+.model-drop {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+  transition: border-color 120ms, background 120ms;
+}
+.model-drop-prompt { margin-top: 2px; font-size: 13px; line-height: 1.4; }
+.model-drop-limits { font-size: 11px; color: var(--text-muted); }
+.model-drop-note { margin-top: 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
 
 /* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
    placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
@@ -4335,6 +4385,20 @@ a.chip { text-decoration: none; }
 
 .context-panel-fields { display: flex; flex-direction: column; gap: 9px; }
 
+/* A field group (ContextPanel's `{ beside, fields }`): a section of fixed height on the left and
+   the group's fields stacked on the right. The left column is the wider, so the device's model
+   tile keeps its three buttons' words in a drawer 537px wide (1080p). Spaced from the fields
+   either side as they are from each other. */
+.context-field-group {
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+  gap: 14px;
+  align-items: start;
+}
+.context-field-beside { min-width: 0; }
+.context-panel-fields + .context-field-group,
+.context-field-group + .context-panel-fields { margin-top: 9px; }
+
 /* Label above value, not beside it. A side-by-side pair inside the drawer gives the value about
    half its width, which is not enough for a UUID or a Sparkplug topic path -- the two things most
    often read here. */
@@ -4383,14 +4447,19 @@ a.chip { text-decoration: none; }
 
 .context-field-empty { color: var(--text-muted); font-style: italic; }
 
+/* Two to a row in a drawer wide enough for two 200px columns, one in a narrower one, in every
+   drawer. The label, the primary action and a danger action take the whole row. */
 .context-panel-actions {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 6px;
 }
+.context-panel-actions > .context-panel-section-label,
+.context-panel-actions > .btn-primary,
+.context-panel-actions > .context-action-danger { grid-column: 1 / -1; }
 
 .context-panel-section-label {
   font-size: 11px;
@@ -4401,12 +4470,16 @@ a.chip { text-decoration: none; }
   margin-bottom: 2px;
 }
 
-/* Full-width and left-aligned: these are a menu of things to do to this entity, and a row of
-   centred pills reads as a toolbar whose items are alternatives to each other. */
+/* The width of their column and left-aligned: these are a menu of things to do to this entity, and
+   a row of centred pills reads as a toolbar whose items are alternatives to each other. A label too
+   long for its column wraps, and the other button in its row stretches to match. */
 .context-action {
   width: 100%;
+  min-width: 0;
   justify-content: flex-start;
   gap: 8px;
+  text-align: left;
+  white-space: normal;
   text-decoration: none;
 }
 
@@ -4445,8 +4518,9 @@ a.chip { text-decoration: none; }
   gap: 6px;
 }
 
-/* Page-supplied TOOLS: the 3D uploader. After the actions, so a section of unknown height cannot
-   push the action list off the bottom of the drawer. */
+/* Page-supplied TOOLS. After the actions, so a section of unknown height cannot push the action
+   list off the bottom of the drawer. A section of fixed height can sit with the fields instead, as
+   the device's 3D model does (`.context-field-group`). */
 .context-panel-extras {
   margin-top: 14px;
   padding-top: 12px;
@@ -5836,6 +5910,22 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .help-tip:hover,
 .help-tip-pinned { color: var(--accent); }
 .help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A tip whose trigger is a word, not the "?": the 3D Model label's "Public". At the label's right,
+   in the label's size but not its capitals. */
+.help-tip.help-tip-text {
+  width: auto;
+  height: auto;
+  gap: 3px;
+  margin-left: auto;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
 
 /* The one tooltip bubble (Tooltip.jsx): HelpTip's, and every tab's in the tab bar, so they always
    look alike. A tab's is in the document while closed, `hidden`, so no `display` here. */
