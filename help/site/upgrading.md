@@ -65,6 +65,17 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
 - **A recording of a deleted gateway or device you want to keep, or Grafana pointed at a Loki of
   your own?** Check them first: see
   [*The upgrade to 1.5.0*](#the-upgrade-to-150-deletes-orphaned-capture-files-and-moves-grafanas-alert-history-to-loki).
+- **A tool that signs people in through an OAuth client it registered itself, or a file in the
+  `area-plans` bucket that no area shows?** Check them first: see
+  [*The upgrade to 1.6.0*](#the-upgrade-to-160-deletes-self-registered-oauth-clients-and-the-plans-no-area-names).
+- **A script that archives cells or areas, or moves equipment, through the API?** Check it first:
+  see [*a cell or area holding equipment cannot be archived*](#from-160-a-cell-or-area-holding-equipment-cannot-be-archived).
+- **A script that reads capture files through the Storage API?** Change it first: see
+  [*a capture file is read only through the audited download*](#from-160-a-capture-file-is-read-only-through-the-audited-download).
+- **A Factory+ client that keeps device addresses from the Directory?** See
+  [*the Directory gives the id a device publishes under*](#from-160-the-directory-gives-the-id-a-device-publishes-under).
+- **Aber's images built on site?** Change the dashboard's build command first: see
+  [*the dashboard's image is built with the help pages*](#from-160-the-dashboards-image-is-built-with-the-help-pages).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -1061,6 +1072,139 @@ Every workload rolls once, as at every release. Beyond that:
   next delivery. To clear them now, issue the Playback gateway's broker credential again when no
   playback is running: **Generate Broker Credential** in its drawer on the Gateways page.
 
+### From 1.6.0, a cell or area holding equipment cannot be archived
+
+A cell is now archived only when nothing is in it. An area is archived only when nothing is
+Area-Wide in it (#1087, #1088). Nothing moves into an archived place either. The dashboard needs
+nothing: **Archive Cell** and **Archive Area** are disabled while something is in the way, and
+their tooltips count it.
+
+A script of your own that makes one of these writes gets HTTP 400:
+
+- **Archiving a cell that holds a device or a gateway.** Every device in the cell counts, archived
+  and quarantined ones included, and so does a device that is in it through its gateway. An archived
+  gateway filed in the cell counts too. The error is `restrict_violation` (SQLSTATE `23001`).
+- **Archiving an area that a device or gateway is Area-Wide in.** Archived and quarantined ones
+  count. Cells filed in the area do not. The error is `restrict_violation` too.
+- **Filing a device or gateway in an archived cell, or making one Area-Wide in an archived area.**
+  The error is `check_violation` (SQLSTATE `23514`).
+- **Assigning a device to an archived gateway.** The error is `check_violation` too.
+
+The error's message counts what is in the way, names the gateways, and says what to do. Move each
+one to another cell, make it Site-Wide, or delete it. Then archive. An archived device or gateway is
+restored, moved and archived again. A quarantined device is approved into another place, or
+rejected. Restoring or editing an archived cell or area still works, and so does moving something
+out of one.
+
+The upgrade moves nothing. A device or gateway already in an archived cell, or Area-Wide in an
+archived area, stays there and can still be edited or moved. The Devices page no longer flags such a
+device. This lists them:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT 'device' AS kind, d.name, c.name AS archived_place FROM public.device_locations l
+     JOIN public.devices d ON d.id = l.device_id JOIN public.cells c ON c.id = l.effective_cell_id WHERE c.is_archived
+   UNION ALL SELECT 'gateway', g.name, c.name FROM public.gateways g JOIN public.cells c ON c.id = g.cell_id WHERE c.is_archived
+   UNION ALL SELECT 'device', d.name, a.name FROM public.devices d JOIN public.areas a ON a.id = d.area_id WHERE a.is_archived
+   UNION ALL SELECT 'gateway', g.name, a.name FROM public.gateways g JOIN public.areas a ON a.id = g.area_id WHERE a.is_archived
+   ORDER BY 3, 1, 2;"
+```
+
+### From 1.6.0, a capture file is read only through the audited download
+
+Up to 1.5.x, an Administrator, a Shopfloor Manager or an Auditor could read any stored capture
+through the Storage API with their own token. The Audit Trail recorded nothing (#994). Now a person
+reads a capture's file only in the 60 seconds after `issue_capture_download()`, which writes a
+`CAPTURE_DOWNLOAD_ISSUED` row naming them. The Capture page's **Download** already does this, so
+the dashboard needs nothing. The ingestion daemon and the playback worker read as before.
+
+A script of your own that reads a capture file does this:
+
+1. Call `POST /rest/v1/rpc/issue_capture_download` with `{"p_storage_path": "<the capture's storage_path>"}`.
+   It answers the path.
+2. Within 60 seconds, sign a link for it (`POST /storage/v1/object/sign/broker-captures/<path>`), or
+   read the file with the same token.
+
+A read or a link signed without that call, or later than that, is refused. `docs/openapi.yaml` has
+the call, under `/rest/v1/rpc/issue_capture_download`.
+
+### From 1.6.0, the Directory gives the id a device publishes under
+
+Some devices never publish under the Sparkplug id Aber issues. A device admitted from Quarantine may
+keep the id it published, and a Factory+ device may publish its Instance_UUID. Up to 1.5.x, the
+Factory+ Directory gave such a device's `address.device_id` as the issued id (#1083). It now gives
+the id in the device's topic, over HTTP and on the Directory's MQTT topic alike. A device that
+publishes the issued id is unchanged.
+
+A lookup at `/v1/address/<group>/<node>/<device>` still finds the device by the issued id, as well as
+by its own id or its Instance_UUID. A Factory+ client that kept such a device's address should read
+it again.
+
+### From 1.6.0, the dashboard's image is built with the help pages
+
+The dashboard's help panel now carries every page in `help/`, so the dashboard's image is built with
+that folder (#770, #771). The release's images need nothing. A site that builds Aber's images
+itself adds one flag to the dashboard's build. That is an arm64 or air-gapped site following
+[*Images you must build*](../../deploy/k8s/README.md#images-you-must-build). Run the build from the
+repository root, with `NS` and `V` set as that section sets them:
+
+```bash
+docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
+                                    --build-arg VITE_APP_VERSION=$V \
+                                    --build-context help=./help \
+                                                -t $NS/frontend:$V frontend
+```
+
+Without `--build-context help=./help`, the build stops with `pull access denied` for `help`.
+
+### From 1.6.0, two values kept for old API clients are deprecated
+
+Both still work in 1.6.x, and each is removed no sooner than 1.7.0 (#1078):
+
+- **`source` on `/rest/v1/device_schemas`** is always `device_submodels`, since a schema is attached
+  in one place. Stop selecting it. `device_id`, `schema_id` and `submodel_key` carry the attachment.
+- **`schema_ids_rebound` in the result of `/rest/v1/rpc/publish_schema_version`** has been 0 since
+  1.3.0. Read `devices_rebound`.
+
+### The upgrade to 1.6.0 deletes self-registered OAuth clients and the plans no area names
+
+Every workload rolls once, as at every release. Beyond that:
+
+- **OAuth clients that registered themselves are deleted** (advisory GHSA-8gq4-28gm-5xmw). Up to
+  1.5.x, anyone holding the publishable key, which every browser is given, could register an OAuth
+  client with the sign-in service. A person who then approved that client on Aber's consent page
+  gave it a token with their whole role. Registration is now off, and no setting turns it on. Migration `0197` deletes every client
+  registered this way, with its consents, authorizations and sessions.
+  - Grafana, Node-RED, Studio and the forge keep signing in: Aber seeds their clients.
+  - A tool of your own that signs people in through a client it registered stops working, and
+    cannot register again. A token it already holds works until it expires, an hour by default
+    (`supabaseAuth.jwtExpiry`), and cannot be refreshed.
+  - db-init's log names each client it deletes. To see before upgrading whether there are any, run
+    this. No rows means there are none:
+
+    ```bash
+    kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+      "SELECT id, client_name, redirect_uris FROM auth.oauth_clients WHERE registration_type = 'dynamic';"
+    ```
+
+- **Area plans that no area names are deleted, within the hour** (#1088). A new CronJob,
+  `area-plan-sweep`, runs every hour at 45 minutes past. It deletes each file in the `area-plans`
+  bucket that no area names, once the file is an hour old. Its first run removes the plans of areas
+  the nightly purge deleted before 1.6.0. It also removes plans that a failed **Replace plan**,
+  **Remove plan** or **Permanent Delete** left behind, and any other file put in the bucket.
+  - To keep one, copy it out before upgrading: a backup with `backup.includeStorage` on holds it. Or
+    set `areaPlanSweep.enabled: false` first. This lists them:
+
+    ```bash
+    kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+      "SELECT o.name, o.updated_at FROM storage.objects o WHERE o.bucket_id = 'area-plans'
+         AND NOT EXISTS (SELECT 1 FROM public.areas a WHERE a.plan_path = o.name) ORDER BY 1;"
+    ```
+
+  - Under NetworkPolicies of your own beyond the chart's, admit `area-plan-sweep` to
+    `supabase-envoy` on port 8000. The chart's own policies already do. Without it, each run fails
+    and deletes nothing.
+
 ---
 
 ## Backups
@@ -1113,6 +1257,7 @@ is fresh.
 | Every migration applied cleanly | `kubectl -n aber logs job/aber-db-init` — it exits non-zero on any failure |
 | The databases' link, the API, the broker, ingestion and the dashboard answer | `helm test aber -n aber` — every test Pod Succeeded; none of them writes anything |
 | The broker kept its 1.3.x document for a rollback (upgrading to 1.4.0) | `kubectl -n aber exec deploy/mosquitto -c mosquitto -- ls -l /mosquitto/data/` — `dynamic-security.json.pre-2.1` is there |
+| Which self-registered OAuth clients were deleted (upgrading to 1.6.0) | `kubectl -n aber logs job/aber-db-init \| grep 'dynamically registered'` — no line means there were none |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
