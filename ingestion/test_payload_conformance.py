@@ -24,7 +24,10 @@ Follows the stubbing approach of test_audit_write_dedup.py and test_declared_met
 daemon's heavy imports are replaced before ingestion.py is loaded, since none of them are reachable
 from the code under test.
 """
+import builtins
+import json
 import os
+import re
 import sys
 import types
 import unittest
@@ -458,6 +461,60 @@ class ConstraintUnionTestCase(unittest.TestCase):
         """
         parsed = ingestion.modelled_constraints([{"properties": {"M": {"minimum": True}}}])
         self.assertIsNone(parsed.metrics["M"].minimum)
+
+
+# =================================================================================================
+# The contract with the dashboard's copy, frontend/src/utils/payloadConformance.js
+# =================================================================================================
+CONTRACT_FIXTURE = os.path.join(
+    os.path.dirname(INGESTION_DIR), "test-harness", "fixtures", "payload-conformance.json")
+
+
+class PayloadConformanceContractTestCase(unittest.TestCase):
+    """
+    The Python half of test-harness/fixtures/payload-conformance.json. The JavaScript half,
+    frontend/src/__tests__/payloadConformanceContract.test.js, asserts the same cases against
+    Validate Payload's copy, which gives these answers wherever the languages differ.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(CONTRACT_FIXTURE, "r", encoding="utf-8") as handle:
+            cls.cases = json.load(handle)["cases"]
+
+    def test_the_fixture_holds_both_language_differences(self):
+        """A contract exercising nothing reports green while the two sides drift freely."""
+        self.assertGreater(len(self.cases), 20)
+        self.assertTrue(any("expected_js" in case for case in self.cases))
+
+    def test_every_code_conformance_emits_has_a_case(self):
+        """A code no case expects is one the dashboard's copy is never held to."""
+        with open(os.path.join(INGESTION_DIR, "conformance.py"), "r", encoding="utf-8") as handle:
+            source = handle.read()
+        emitted = (set(re.findall(r'\(\s*"([a-z]+(?:_[a-z]+)+)",', source))
+                   | set(re.findall(r'"code":\s*"([a-z_]+)"', source)))
+        covered = {v["code"] for case in self.cases for v in case.get("expected", [])}
+        self.assertIn("type_mismatch", emitted)
+        self.assertEqual(emitted - covered, set())
+
+    def test_every_case_matches_the_contract(self):
+        for case in self.cases:
+            with self.subTest(case=case["name"]):
+                if "raises" in case:
+                    with self.assertRaises(getattr(builtins, case["raises"])):
+                        ingestion.modelled_constraints(case["schema_definitions"])
+                    continue
+                modelled = ingestion.modelled_constraints(case["schema_definitions"])
+                # A double reaches the check as a float: ingestion casts every integer wire type.
+                observed = [(name, kind, float(value) if kind == "double" else value)
+                            for name, kind, value in case["observed"]]
+                dropped = [tuple(entry) for entry in case.get("dropped", [])]
+                found = [
+                    {**v, "enforced": ingestion.enforceable_violation(v, modelled.closed)}
+                    for v in ingestion.payload_violations(observed, dropped, modelled)
+                ]
+                self.assertEqual(found, case["expected"])
+
 
 # =================================================================================================
 # record_payload_violations() -- the deduplication that keeps the audit table finite

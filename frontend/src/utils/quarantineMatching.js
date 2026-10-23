@@ -1,26 +1,28 @@
 import { nameSimilarity } from './stringSimilarity'
 import { isNeverSeen } from './deviceProvisioning'
-import { schemasForDevice } from './deviceTags'
+import { schemasForDevice, modelledMetrics } from './deviceTags'
 
 const MIN_NAME_SIMILARITY = 0.5
 const MIN_SCHEMA_OVERLAP = 0.5
 
-function schemaRequiredOverlap(schema, reportedMetrics) {
-  const required = schema?.schema_definition?.required
-  if (!Array.isArray(required) || required.length === 0) return null
+// By the schema's modelled metrics (`properties` and `required` together): `required` means
+// modelled, and a schema the builder made carries no `required` at all.
+function schemaModelledOverlap(schema, reportedMetrics) {
+  const modelled = modelledMetrics(schema)
+  if (!modelled) return null
   const reported = new Set(reportedMetrics || [])
-  const present = required.filter(r => reported.has(r))
-  return { ratio: present.length / required.length, present: present.length, total: required.length }
+  const present = [...modelled].filter(name => reported.has(name))
+  return { ratio: present.length / modelled.size, present: present.length, total: modelled.size }
 }
 
 /**
- * The best required-metric overlap across a candidate's schemas, or null when none declares a
- * `required` list. A tie on the ratio goes to the schema requiring more metrics.
+ * The best modelled-metric overlap across a candidate's schemas, or null when none models any
+ * metric. A tie on the ratio goes to the schema modelling more metrics.
  */
-function bestRequiredOverlap(schemas, reportedMetrics) {
+function bestModelledOverlap(schemas, reportedMetrics) {
   let best = null
   for (const schema of schemas) {
-    const overlap = schemaRequiredOverlap(schema, reportedMetrics)
+    const overlap = schemaModelledOverlap(schema, reportedMetrics)
     if (!overlap) continue
     if (!best || overlap.ratio > best.ratio || (overlap.ratio === best.ratio && overlap.total > best.total)) {
       best = overlap
@@ -43,13 +45,13 @@ export function suggestMatches(quarantineItem, assets, schemas, { limit = 1 } = 
 
   const scored = candidates.map(candidate => {
     const nameSim = nameSimilarity(quarantineItem?.asset_name, candidate.asset_name)
-    const overlap = bestRequiredOverlap(schemasForDevice(candidate, schemas), reportedMetrics)
+    const overlap = bestModelledOverlap(schemasForDevice(candidate, schemas), reportedMetrics)
 
     let score
     let evidence
     if (overlap && overlap.ratio > 0) {
       score = 0.5 + overlap.ratio * 0.5
-      evidence = `${overlap.present}/${overlap.total} required metrics present, ${Math.round(nameSim * 100)}% name match`
+      evidence = `${overlap.present}/${overlap.total} modelled metrics present, ${Math.round(nameSim * 100)}% name match`
     } else {
       score = nameSim * 0.5
       evidence = `${Math.round(nameSim * 100)}% name match`

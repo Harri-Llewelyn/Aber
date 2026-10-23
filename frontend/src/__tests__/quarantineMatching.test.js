@@ -4,19 +4,30 @@ import { schemaIdsForDevice, schemasForDevice } from '../utils/deviceTags'
 
 /**
  * A quarantined device is matched to a pre-created one by its reported metrics against the
- * candidate's schemas. A candidate's schemas are every one attached to it, by either path: the
- * `device_schemas` view (`submodel_schema_ids`) and the deprecated `schema_id` column.
+ * modelled metrics of the candidate's schemas. A candidate's schemas are every one attached to it,
+ * by either path: the `device_schemas` view (`submodel_schema_ids`) and the deprecated `schema_id`
+ * column.
  */
 
-const schema = (id, required) => ({
+// As the builder writes a schema: `properties` only, no `required`.
+const schema = (id, names) => ({
   schema_uuid: id,
   schema_name: id,
-  schema_definition: { type: 'object', required }
+  schema_definition: {
+    type: 'object',
+    properties: Object.fromEntries(names.map(name => [name, { type: 'number' }]))
+  }
 })
 
 const SCHEMAS = [
   schema('sch-spindle', ['Spindle/SPEED', 'Spindle/LOAD']),
   schema('sch-energy', ['Energy/KWH', 'Energy/KW', 'Energy/PF']),
+  // Hand-written: a metric named only under `required` is still modelled.
+  {
+    schema_uuid: 'sch-coolant',
+    schema_name: 'sch-coolant',
+    schema_definition: { properties: { 'Coolant/LEVEL': {} }, required: ['Coolant/LEVEL', 'Coolant/TEMP'] }
+  }
 ]
 
 // Never seen: no first birth, not quarantined, not archived.
@@ -67,7 +78,26 @@ describe('suggestMatches', () => {
       SCHEMAS
     )
     expect(match.overlap).toMatchObject({ present: 3, total: 3 })
-    expect(match.evidence).toMatch(/^3\/3 required metrics present/)
+    expect(match.evidence).toMatch(/^3\/3 modelled metrics present/)
+  })
+
+  it('scores a schema with no required list by the metrics it models', () => {
+    const [match] = suggestMatches(
+      quarantined(['Spindle/SPEED']),
+      [candidate({ submodel_schema_ids: ['sch-spindle'] })],
+      SCHEMAS
+    )
+    expect(match.overlap).toMatchObject({ present: 1, total: 2 })
+    expect(match.score).toBe(0.75)
+  })
+
+  it('counts a metric named only under required, and does not count it twice', () => {
+    const [match] = suggestMatches(
+      quarantined(['Coolant/LEVEL', 'Coolant/TEMP']),
+      [candidate({ submodel_schema_ids: ['sch-coolant'] })],
+      SCHEMAS
+    )
+    expect(match.overlap).toMatchObject({ present: 2, total: 2 })
   })
 
   it('falls back to the name when no schema overlaps', () => {

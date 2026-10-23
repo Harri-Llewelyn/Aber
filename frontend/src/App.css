@@ -6379,6 +6379,38 @@ ol.gateway-steps {
   font-size: 12px;
 }
 
+/* Validate Payload's findings, one per row: the metric and what ingestion does with the reading,
+   then ingestion's code and detail. A metric path has no spaces to break at, so it wraps anywhere. */
+.validate-findings {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.validate-findings > li {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  overflow-wrap: anywhere;
+}
+
+.validate-finding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.validate-finding-metric { color: var(--text-primary); }
+
+/* A metric name or pattern inside a hint keeps the hint's size; `.mono` alone would set 13px. */
+.validate-payload-hint .mono { font-size: inherit; }
+
 .callout-success {
   border-color: var(--success);
   background: color-mix(in srgb, var(--success) 8%, transparent);

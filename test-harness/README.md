@@ -18,7 +18,7 @@ Fixtures and suites that need the assembled stack rather than a module.
 | [`test_stack_exec.py`](test_stack_exec.py) | The broker's verdict on a publish: a timeout is retried, and is never read as a refusal |
 | [`csp-walk.mjs`](csp-walk.mjs) | The dashboard in a headless Chrome under its Content-Security-Policy: every page, an area plan and two 3D models, and each refusal the browser reports |
 | [`restore-rehearsal/`](restore-rehearsal) | The SQL a restore rehearsal seeds, snapshots and asserts |
-| [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages; `sparkplug-json-values.json`, how a JSON-encoded Sparkplug metric reads in ingestion and i3X |
+| [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages; `sparkplug-json-values.json`, how a JSON-encoded Sparkplug metric reads in ingestion and i3X; `payload-conformance.json`, what ingestion finds wrong with one DDATA payload, which the dashboard's Validate Payload answers the same way |
 | [`auth-bootstrap.sql`](auth-bootstrap.sql) | The GoTrue-shaped fixture a stackless Postgres needs before the migrations apply |
 | [`schemas/`](schemas) | The vendored IDTA AAS metamodel schema |
 

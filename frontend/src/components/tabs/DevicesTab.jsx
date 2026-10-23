@@ -1245,7 +1245,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 })()}
               </div>
               {/* The contract every DDATA value is judged against comes first; the quarantine hint
-                  second, since suggestMatches() weights a required-metric overlap above name
+                  second, since suggestMatches() weights a modelled-metric overlap above name
                   similarity. */}
               <div className="form-hint">
                 The contracts this device's metrics are judged against. A metric any of them models
