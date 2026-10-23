@@ -244,6 +244,10 @@ class ADeviceIsRecordedUnderEveryIdItPublishes(unittest.TestCase):
         j = job(device_id=DEV_UUID, reported_identity=OWN_ID)
         self.assertEqual((j.device_uuid, j.device_reported), (None, None))
 
+    def test_a_uuid_is_recognised_as_the_daemon_recognises_one(self):
+        """capture_worker.py cannot import ingestion.py, which imports it, so it holds a copy."""
+        self.assertEqual(capture_worker._UUID_PATTERN.pattern, ingestion.UUID_PATTERN.pattern)
+
     def test_each_id_is_named_once(self):
         for reported in (DEV, DEV_UUID.upper()):
             with self.subTest(reported=reported):
