@@ -392,7 +392,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     devices: n.devices + cellsOf(ar).flatMap(cellDevicesOf).length + areaWideOf(ar).devices.length
   }), { cells: 0, devices: 0 })
 
-  /** A cell as a pin, or nothing when it has no place. */
+  /** A cell in service as a pin (cellsOf() leaves archived ones out), or nothing when it has no place. */
   const cellPin = (c) => {
     if (!isPlaced(c)) return null
     const state = stateOf(cellDevicesOf(c))
@@ -403,13 +403,13 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         key={c.cell_id}
         x={c.plan_x}
         y={c.plan_y}
-        status={c.is_archived ? 'muted' : state.pin}
-        Icon={c.is_archived ? IconArchive : cellIconComponent(c.icon)}
+        status={state.pin}
+        Icon={cellIconComponent(c.icon)}
         label={c.cell_name}
         iconSize={PIN_ICON[columns]}
         selected={selectedCellId === c.cell_id}
         onClick={() => toggleCell(c.cell_id)}
-        title={`${c.cell_name} — ${c.is_archived ? 'archived' : STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s)`}
+        title={`${c.cell_name} — ${STATUS_WORD[state.pin]} — ${gateways.length} gateway(s), ${devices.length} device(s)`}
       />
     )
   }

@@ -98,7 +98,6 @@
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py 6ffd48392a70": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py cf070cf7fb46": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",
   "sqlalchemy-execute-raw-query ingestion/cold_archive.py e34aa5a68323": "Identifiers are composed with psycopg2.sql.Identifier, and the DuckDB query is literal clauses with every value bound; the rule matches any execute of a non-literal.",
-  "sqlalchemy-execute-raw-query supabase/migrations/test_archive_purge_cascade.py 033e8296ceae": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_archiving_is_a_lifecycle.py 0b4adc06fc62": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_archiving_is_a_lifecycle.py e4f8cd614445": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_audit_domain.py 6a996592d38d": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",

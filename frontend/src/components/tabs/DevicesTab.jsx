@@ -496,17 +496,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
 
   // A device an operator needs to act on: quarantined, past its provisioning window with no birth
-  // (24h+), publishing unmodelled metrics, or with a location finding. An archived cell is still a
-  // valid foreign key, so pointing at one is derived rather than enforced.
-  const pointsAtArchivedCell = (a) =>
-    !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
-
+  // (24h+), publishing unmodelled metrics, or with a location finding. No device resolves to an
+  // archived cell: the database refuses the archive while one does.
   const needsAttention = (a) =>
     a.is_quarantined || isProvisioningOverdue(a) || unmodelledFor(a).length > 0 ||
-    // Location findings. Unassigned is the work queue that should drain; a mismatch and an
-    // archived cell are both "this resolved to something, but look at it".
+    // Location findings. Unassigned is the work queue that should drain; a mismatch is "this
+    // resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
-    a.cell_mismatch || pointsAtArchivedCell(a)
+    a.cell_mismatch
 
   // Memoised: the predicate resolves schemas, tags, gateway and cell for every device, and this
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
@@ -784,7 +781,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <option value="unmodelled">Publishing unmodelled metrics</option>
         </select>
 
-        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, in a cell apart from their gateway's, or in an archived cell.">
+        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, or in a cell apart from their gateway's.">
           <button
             className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setAttentionOnly(v => !v)}
@@ -1124,6 +1121,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
                     {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
                   </option>
+                ))}
+                {/* An archived gateway is not offered, and the database refuses one. A device
+                    already on one keeps it (an unchanged gateway passes), so it stays visible. */}
+                {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
+                  <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
                 ))}
               </select>
               {/* Shown always: the question is why Playback cannot be picked, asked while something

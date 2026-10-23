@@ -664,6 +664,15 @@ export const SUITES = {
       'afterwards but an audit row. Asserts the catalogue fact over every child of cells, not ' +
       'just the one that was wrong.',
   },
+  'supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py': {
+    lanes: ['db'],
+    why:
+      '0198. A cell is not archived while any device resolves to it, whatever its lifecycle, or ' +
+      'any gateway is filed in it; nothing is filed in an archived cell and no device is assigned ' +
+      'to an archived gateway, by any writer. Without it an archived cell kept its devices, and ' +
+      'the UNS, i3X and the Site Map each put them somewhere different. Unchanged writes, Restore ' +
+      'and a second boot pass.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:

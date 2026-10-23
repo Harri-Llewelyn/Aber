@@ -16,7 +16,12 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
   const connMethod = 'Sparkplug B'
-  const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
+  // The gateway it arrived through, else the first the picker offers. An archived gateway is never
+  // the default: the picker leaves it out, and the database refuses it.
+  const offered = gateways.filter(g => !g.is_archived)
+  const [gatewayId, setGatewayId] = useState(() =>
+    (offered.some(g => g.gateway_id === item.gateway_id) ? item.gateway_id : null) ||
+    offered.find(g => gatewayAcceptsDevices(g))?.gateway_id || '')
 
   // The location is chosen here because the operator is already looking at the device. The same
   // picker as the Devices form: an empty cell means inherit from the gateway, and forcing a value
@@ -120,7 +125,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
               <option value="">— Unassigned Gateway —</option>
               {/* Disabled rather than absent, as at the Devices form's picker: a replay lane is
                   minted by a playback, never approved onto. */}
-              {gateways.filter(g => !g.is_archived).map(g => (
+              {offered.map(g => (
                 <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
                   {g.gateway_name} — {g.status}
                   {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}

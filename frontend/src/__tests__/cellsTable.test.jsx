@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
+import { tooltipOf } from '../test/tooltips'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -218,6 +219,47 @@ describe('the row and its drawer', () => {
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
     expect(within(panel()).getByText(/Never auto-purged/)).toBeTruthy()
+  })
+
+  /* The database refuses to archive a cell while anything is in it, archived and quarantined
+     devices and archived gateways included. The drawer says so before the click. */
+  it('holds Archive Cell while the cell holds anything, and says how many', async () => {
+    renderCells({}, {
+      devices: [device(), device({ asset_id: 'dev-2', asset_name: 'Press_02', is_archived: true })]
+    })
+    await ready()
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+
+    const archive = within(panel()).getByRole('button', { name: /Archive Cell/ })
+    expect(archive).toBeDisabled()
+    expect(tooltipOf(archive)).toBe(
+      'This cell holds 2 devices and 1 gateway. Move them to another cell, or delete them, then archive the cell.'
+    )
+  })
+
+  it('offers Archive Cell, and no Show Its Devices, on an empty cell', async () => {
+    renderCells({}, { cells: [{ ...CELL, gateways: [], gateway_count: 0 }], devices: [] })
+    await ready()
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+
+    expect(within(panel()).getByRole('button', { name: /Archive Cell/ })).toBeEnabled()
+    expect(within(panel()).queryByText('Show Its Devices')).toBeNull()
+  })
+
+  it('links Show Its Devices to the Devices page on this cell, with every lifecycle', async () => {
+    renderCells({}, {
+      devices: [device(), device({ asset_id: 'dev-q', asset_name: 'Unknown_01', is_quarantined: true })]
+    })
+    await ready()
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+
+    const link = within(panel()).getByRole('link', { name: /Show Its Devices/ })
+    expect(link.getAttribute('href')).toBe('/devices?cell=cell-1&lifecycle=all')
+    // The Devices page's list leaves quarantined devices to its Quarantine table.
+    expect(tooltipOf(link)).toMatch(/1 quarantined device is in its Quarantine table\.$/)
   })
 
   it('shows no Retention field on a cell still in service', async () => {

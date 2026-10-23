@@ -473,14 +473,21 @@ describe('needs attention', () => {
     expect(attentionButton().textContent).toMatch(/\(1\)/)
   })
 
-  it('counts a device filed against its gateway, and one pointing at an archived cell', async () => {
+  it('counts a device filed against its gateway', async () => {
+    await show([
+      device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true })
+    ])
+    expect(attentionButton().textContent).toMatch(/\(1\)/)
+  })
+
+  /* The database refuses to archive a cell while a device resolves to it, so the state this
+     finding described cannot arise, and the list no longer names it. */
+  it('has no archived-cell finding', async () => {
     const cells = [...CELLS, { cell_id: 'cell-old', cell_name: 'Decommissioned Bay', is_archived: true }]
     await show([
-      device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true }),
-      device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'Press_01',
-               cell_id: 'cell-old', effective_cell_id: 'cell-old', location_source: 'explicit' })
+      device({ cell_id: 'cell-old', effective_cell_id: 'cell-old', location_source: 'explicit' })
     ], { cells })
-    expect(attentionButton().textContent).toMatch(/\(2\)/)
+    expect(attentionButton().textContent).toMatch(/\(0\)/)
   })
 
   it('does not count a Site-Wide device: that is an answer, not an omission', async () => {
