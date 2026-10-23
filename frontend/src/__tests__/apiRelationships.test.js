@@ -89,6 +89,15 @@ describe('cell -> gateway -> device relationships', () => {
     }
   });
 
+  // The devices column tells a device that went quiet from one never heard from by this column, so
+  // both the gateways read and the cells read embed it.
+  it('names first_dbirth_at in the device embed of the gateways and cells reads', async () => {
+    await api.get('/api/v1/gateways');
+    await api.get('/api/v1/cells');
+    expect(callFor('gateways').select).toMatch(/devices\([^)]*\bfirst_dbirth_at\b[^)]*\)/);
+    expect(callFor('cells').select).toMatch(/devices\([^)]*\bfirst_dbirth_at\b[^)]*\)/);
+  });
+
   it('flattens each cell to its gateways, and does not fetch devices to do it', async () => {
     state.responses.cells = {
       data: [{

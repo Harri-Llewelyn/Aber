@@ -82,8 +82,10 @@ const DEVICE_EMBED =
   'id, name, description, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
   // `shadow_of` (0060) says this device exists to RECEIVE a replay rather than to report a machine.
   // Selected because the Capture page filters on it: a shadow device is not a capture subject, and
-  // without the column the filter silently matches nothing.
-  'is_archived, gateway_id, cell_id, area_id, location_scope, created_at, model_3d_path, shadow_of';
+  // without the column the filter silently matches nothing. `first_dbirth_at` tells a device that
+  // went quiet from one never heard from (isNeverSeen()), for the devices column's summary.
+  'is_archived, gateway_id, cell_id, area_id, location_scope, created_at, model_3d_path, shadow_of, ' +
+  'first_dbirth_at';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, area_id, location_scope, access_url, status, last_heartbeat, ` +
   // `enrolled_at`, `forge_repository_at` and `forge_archived_at` decide what

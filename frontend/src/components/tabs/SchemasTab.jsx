@@ -32,6 +32,15 @@ import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
+import { isDeviceInService } from '../../utils/inService'
+import { isShadowDevice } from '../../utils/fleetCounts'
+
+/**
+ * The devices a schema's count counts: those in service, quarantined ones aside. So the count is
+ * the length of the list it opens, where the Devices page keeps quarantined devices on its
+ * Quarantine tab.
+ */
+const countsTowards = (d) => isDeviceInService(d) && !d.is_quarantined
 
 /**
  * @param {Function} onSelectSchema Opens the Devices page filtered to a schema.
@@ -81,11 +90,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   useEffect(() => { load() }, [load])
 
   /**
-   * The devices attached to one exact schema version by either path, the rule `schemasForDevice`
-   * applies from the other direction. The list, with the count derived from it.
+   * Every device attached to one exact schema version by either path, the rule `schemasForDevice`
+   * applies from the other direction. Publishing a version moves all of them, archived devices
+   * and replay lanes too.
    */
-  const devicesForSchema = (schemaUuid) =>
+  const attachedTo = (schemaUuid) =>
     devices.filter(d => schemaIdsForDevice(d).includes(schemaUuid))
+
+  const devicesForSchema = (schemaUuid) => attachedTo(schemaUuid).filter(countsTowards)
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
@@ -149,7 +161,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       const moved = result.devices_rebound || 0
       showToast(
         `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
-        (moved > 0 ? ` — ${moved} device binding${moved === 1 ? '' : 's'} moved across` : ''),
+        (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
         'success',
         { to: schemaUrl(published.schema_uuid) }
       )
@@ -173,7 +185,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         (detached > 0
           // Said out loud rather than left to be discovered: a draft can be attached to a machine
           // to try it out, and those attachments go with it.
-          ? ` — ${detached} device attachment${detached === 1 ? '' : 's'} removed with it`
+          ? ` — ${plural(detached, 'device')} detached`
           : ''),
         'success'
       )
@@ -227,7 +239,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // Version sorts by its number. The device count is what the Devices column shows.
   const sortColumns = useMemo(() => {
     const deviceCounts = new Map()
-    for (const d of devices) {
+    for (const d of devices.filter(countsTowards)) {
       for (const id of new Set(schemaIdsForDevice(d))) deviceCounts.set(id, (deviceCounts.get(id) || 0) + 1)
     }
     return {
@@ -272,6 +284,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     ? schemas.find(s => s.parent_schema_id === selectedSchema.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT)
     : null
   const selectedForkBlocked = !canManageSchema || !!selectedDraft
+  const forkAttached = forkTarget ? attachedTo(forkTarget.schema_uuid) : []
 
   return (
     <div className="page-layout page-fill">
@@ -343,7 +356,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                   <SortHeader sort={sort} column="version" title="Lineage position and lifecycle state. Only a draft is editable.">Version</SortHeader>
                   <SortHeader sort={sort} column="change" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
                   <SortHeader sort={sort} column="uuid">Schema UUID</SortHeader>
-                  <SortHeader sort={sort} column="devices">Devices</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices in service using this version, not counting quarantined ones. The link opens the Devices page on them.">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -416,7 +429,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           schema={detailSchema}
           schemas={schemas}
           catalog={catalog}
-          deviceCount={deviceCountFor(detailSchema.schema_uuid)}
+          deviceCount={attachedTo(detailSchema.schema_uuid).length}
           canManage={canManageSchema}
           showToast={showToast}
           onFork={() => { setForkTarget(detailSchema); setDetailSchema(null) }}
@@ -438,8 +451,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             <>
               Discard draft <strong>{discardTarget.schema_name}</strong> (v{discardTarget.version})?
               {' '}Its predecessor stays exactly as it is — active, attached, unarchived — so the
-              lineage returns to the state it was in before the fork. Any device attachments made
-              to try this draft out are removed with it. This cannot be undone.
+              lineage returns to the state it was in before the fork. Any devices attached to try
+              this draft out are detached with it. This cannot be undone.
             </>
           }
           requireTyped={discardTarget.schema_name}
@@ -451,10 +464,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         />
       )}
 
+      {/* Every attachment, not the count's: publishing moves archived devices and replay lanes too. */}
       {forkTarget && (
         <SchemaForkModal
           schema={forkTarget}
-          deviceCount={deviceCountFor(forkTarget.schema_uuid)}
+          deviceCount={forkAttached.length}
+          replayLaneCount={forkAttached.filter(isShadowDevice).length}
+          archivedCount={forkAttached.filter(d => d.is_archived && !isShadowDevice(d)).length}
           onConfirm={handleFork}
           onCancel={() => setForkTarget(null)}
         />
@@ -508,14 +524,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           },
           {
             // The chips answer which devices; the action below opens the Devices page filtered to
-            // this schema, for when the answer is forty of them.
-            label: 'Provisioned Devices',
+            // this schema, for when the answer is forty of them. Both are the column's count.
+            label: 'Devices',
             value: (() => {
-              const attached = devicesForSchema(selectedSchema.schema_uuid)
-              if (attached.length === 0) return null
+              const counted = devicesForSchema(selectedSchema.schema_uuid)
+              if (counted.length === 0) return null
               return (
                 <div className="context-device-list">
-                  {attached.map(d => (
+                  {counted.map(d => (
                     <RouteLink
                       key={d.asset_id}
                       className="chip chip-link"
@@ -531,7 +547,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               )
             })(),
             full: true,
-            help: 'Devices registered against this exact version. Each opens on the Devices page.'
+            help: 'Devices in service using this exact version, not counting quarantined, archived or replay-lane ones. Each opens on the Devices page.'
           },
         ] : []}
         actions={selectedSchema ? [
@@ -558,13 +574,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 : `Create Version v${nextVersion(selectedSchema)}: an editable Draft v${nextVersion(selectedSchema)}, carrying every metric this version models`
           },
           {
-            label: `View ${deviceCountFor(selectedSchema.schema_uuid)} Provisioned Device(s)`,
+            label: `View ${plural(deviceCountFor(selectedSchema.schema_uuid), 'Device')}`,
             icon: <IconCpu size={13} />,
             to: devicesForSchemaUrl(selectedSchema.schema_uuid),
             onClick: () => onSelectSchema?.(selectedSchema.schema_uuid),
             disabled: deviceCountFor(selectedSchema.schema_uuid) === 0,
             title: deviceCountFor(selectedSchema.schema_uuid) === 0
-              ? 'No device is provisioned with this schema version'
+              ? 'No device in service uses this schema version'
               : 'Open the Devices page filtered to this schema'
           },
           {

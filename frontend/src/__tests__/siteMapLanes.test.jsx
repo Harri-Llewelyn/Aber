@@ -110,6 +110,18 @@ describe('The Site Map lanes', () => {
     expect(css('.site-lane.is-open .site-lane-chevron', 'color')).toBe('var(--accent)')
   })
 
+  /* What every place counts (utils/inService.js): an archived device and a replay lane are out of
+     service, the lane even where its row resolved into a lane. A quarantined device is in. */
+  it('counts only the devices in service in a lane', async () => {
+    await renderMap([
+      ...FULL,
+      lanedDevice('dev-old', 'Old AP', 'site_wide', { is_archived: true }),
+      lanedDevice('dev-replay', 'Campus AP replay', 'site_wide', { shadow_of: 'dev-sw' })
+    ])
+    expect(laneButton('Site-Wide').querySelector('.site-lane-counts')).toHaveTextContent(/^0 Gateways · 1 Device$/)
+    expect(laneButton('Unassigned').querySelector('.site-lane-counts')).toHaveTextContent(/^0 Gateways · 1 Device$/)
+  })
+
   it('rings the status dot in the card colour, so an amber dot shows on the amber lane', async () => {
     await renderMap(FULL)
     const dot = laneButton('Unassigned').querySelector('.tile-dot')

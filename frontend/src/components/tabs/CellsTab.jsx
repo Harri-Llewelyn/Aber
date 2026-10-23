@@ -44,7 +44,8 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { plural } from '../../utils/format'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags } from '../../utils/deviceStatus'
+import { inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
@@ -209,8 +210,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     setFormVal(f => ({ ...f, area_id: areaId, plan_x: '', plan_y: '' }))
   }
 
-  const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
-  const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
+  // Every count on this page counts equipment in service, as the Site Map does.
+  const liveGateways = (c) => inServiceGateways(c.gateways)
+  const liveDevices = (c) => inServiceDevices(devicesByCell.get(c.cell_id))
 
   // gatewayNeedsAttention(), not `gatewayLiveStatus(g) !== 'ONLINE'`: PENDING_ENROLLMENT and
   // AWAITING_BIRTH are unfinished tasks, not faults.
@@ -218,8 +220,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     liveGateways(c).some(g => gatewayNeedsAttention(g)) ||
     liveDevices(c).some(a => a.is_quarantined)
 
-  // Either no gateways at all, or gateways serving nothing: usually a provisioning mistake.
-  const cellIsEmpty = (c) => liveGateways(c).length === 0 || liveDevices(c).length === 0
+  // One test for the filter, the badge and the help: nothing in service here at all. A gateway
+  // serving no devices is not empty.
+  const cellIsEmpty = (c) => liveGateways(c).length === 0 && liveDevices(c).length === 0
 
   const matchingCells = cells.filter(c => {
     if (filterMode === 'active'   && c.is_archived) return false
@@ -240,8 +243,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       name: { type: 'text', value: c => c.cell_name },
       area: { type: 'text', value: c => (c.area_id ? areaNames.get(c.area_id) || c.area_id : null) },
       uuid: { type: 'text', value: c => c.cell_id },
-      gateways: { type: 'number', value: c => (c.gateways || []).length },
-      devices: { type: 'number', value: c => (devicesByCell.get(c.cell_id) || []).length }
+      gateways: { type: 'number', value: c => inServiceGateways(c.gateways).length },
+      devices: { type: 'number', value: c => inServiceDevices(devicesByCell.get(c.cell_id)).length }
     }
   }, [areas, devicesByCell])
   const [filteredCells, sort] = useSortableRows(matchingCells, sortColumns)
@@ -276,6 +279,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     selectedCellGateways.length > 0 && plural(selectedCellGateways.length, 'gateway')
   ].filter(Boolean).join(' and ')
   const selectedCellQuarantined = selectedCellDevices.filter(d => d.is_quarantined).length
+  // What the drawer counts: equipment in service, as the table does.
+  const selectedCellLiveGateways = selectedCell ? liveGateways(selectedCell) : []
+  const selectedCellLiveDevices = selectedCell ? liveDevices(selectedCell) : []
 
   return (
     <div className="page-layout page-fill">
@@ -331,7 +337,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               </button>
             </Tooltip>
 
-            <Tooltip text="Cells with no gateways, or gateways serving no devices">
+            <Tooltip text="Cells with no gateway and no device in service">
               <button
                 className={`btn btn-sm ${emptyOnly ? 'btn-primary' : 'btn-ghost'}`}
                 onClick={() => setEmptyOnly(v => !v)}
@@ -379,7 +385,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   <SortHeader sort={sort} column="area" title="The ISA-95 area the cell is in, and whether it has a place on its plan. Edit Details files or places it.">Area</SortHeader>
                   <SortHeader sort={sort} column="uuid">Cell UUID</SortHeader>
                   <SortHeader sort={sort} column="gateways">Assigned Gateways</SortHeader>
-                  <SortHeader sort={sort} column="devices" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly">Devices</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly. Archived ones are listed, not counted.">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -388,9 +394,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   // Devices that RESOLVE to this cell, not those merely reachable through its
                   // gateways -- see groupDevicesByCell.
                   const cellAssets = devicesByCell.get(c.cell_id) || []
-                  const onlineCount = cellAssets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived).length
-                  const offlineCount = cellAssets.filter(a => a.status === 'OFFLINE' && !a.is_archived).length
-                  const isEmpty = cellGateways.length === 0 && cellAssets.length === 0
+                  const isEmpty = cellIsEmpty(c)
 
                   return (
                     <tr
@@ -407,10 +411,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         {c.is_archived && (
                           <ArchivedBadge size="sm" className="badge-follow" title="Archived: out of service, with no devices or gateways in it" />
                         )}
-                        {/* A cell with neither a gateway nor a device is usually half-provisioned,
-                            and saying so stops it reading as a failed load. */}
+                        {/* A cell with nothing in service in it is usually half-provisioned, and
+                            saying so stops it reading as a failed load. */}
                         {isEmpty && !c.is_archived && (
-                          <Badge size="sm" className="badge-follow" title="No gateways and no devices resolve to this cell">Empty</Badge>
+                          <Badge size="sm" className="badge-follow" title="No gateway and no device in service is in this cell">Empty</Badge>
                         )}
                       </td>
                       <td>
@@ -452,28 +456,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         {cellAssets.length === 0 ? (
                           <span className="cell-meta">No devices here</span>
                         ) : (
-                          /* The same shape as Connected Devices on the Gateways page. The Online /
-                             Offline summary is pinned because it is what the column answers; a
-                             quarantined device is pinned because it calls for action. */
-                          <TagList
-                            limit={3}
-                            tags={[
-                              {
-                                key: '__summary__',
-                                priority: true,
-                                className: 'badge badge-sm badge-neutral',
-                                content: `${onlineCount} Online / ${offlineCount} Offline`
-                              },
-                              ...cellAssets.map(a => ({
-                                key: a.asset_id,
-                                label: a.asset_name,
-                                priority: a.is_quarantined,
-                                className: `badge badge-sm ${a.is_archived || a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-success'}`,
-                                title: `${a.asset_name} — ${a.is_archived ? 'ARCHIVED' : a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`,
-                                content: `${a.asset_name}${a.is_quarantined ? ' (quarantined)' : ''}${a.is_archived ? ' (archived)' : ''}`
-                              }))
-                            ]}
-                          />
+                          /* The same column as Devices on the Gateways page. The summary is pinned
+                             because it is what the column answers; a quarantined device is pinned
+                             because it calls for action. */
+                          <TagList limit={3} tags={deviceColumnTags(cellAssets, liveDevices(c))} />
                         )}
                       </td>
                     </tr>
@@ -612,7 +598,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         icon={selectedCell && <CellIcon cell={selectedCell} size={16} />}
         subtitle={selectedCell && (
           <>
-            <Badge size="sm">{plural(selectedCellGateways.length, 'Gateway')} · {plural(selectedCellDevices.length, 'Device')}</Badge>
+            <Badge size="sm">{plural(selectedCellLiveGateways.length, 'Gateway')} · {plural(selectedCellLiveDevices.length, 'Device')}</Badge>
             {selectedCell.is_archived && <ArchivedBadge size="sm" />}
           </>
         )}
@@ -676,9 +662,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           },
           {
             // The count stays on the label: how big is this cell and is it healthy reads at a
-            // glance, and the chips carry the navigation.
-            label: selectedCellDevices.length
-              ? `Devices (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${selectedCellDevices.length} online)`
+            // glance, and the chips carry the navigation. It counts what is in service, as the
+            // Site Map's panel for the same cell does.
+            label: selectedCellLiveDevices.length
+              ? `Devices (${selectedCellLiveDevices.filter(a => a.status !== 'OFFLINE').length}/${selectedCellLiveDevices.length} online)`
               : 'Devices',
             value: selectedCellDevices.length
               ? (
@@ -695,6 +682,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                       >
                         <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
                         <span className="chip-name">{d.asset_name}</span>
+                        {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
                     )
                   })}

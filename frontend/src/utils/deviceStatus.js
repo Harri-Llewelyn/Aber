@@ -123,6 +123,60 @@ export function deviceStatusBadge(device) {
   };
 }
 
+/**
+ * Where a device sits in a devices column's summary (the Gateways and Cells tables): `online`,
+ * `offline` (heard from, then gone quiet), `awaitingBirth` (never heard from), or `quarantined`,
+ * which the summary counts in none of them. The Devices page's status filters draw the same lines.
+ */
+export function deviceSummaryState(device) {
+  const status = deviceLifecycleStatus(device)
+  if (status === DEVICE_STATUS.QUARANTINED) return 'quarantined'
+  if (status === DEVICE_STATUS.ONLINE) return 'online'
+  return isNeverSeen(device) ? 'awaitingBirth' : 'offline'
+}
+
+const SUMMARY_STATE_WORD = {
+  online: 'ONLINE', offline: 'OFFLINE', awaitingBirth: 'AWAITING FIRST BIRTH', quarantined: 'QUARANTINED'
+}
+
+/** How many of `devices` are in each summary state. */
+export function deviceSummaryCounts(devices = []) {
+  const counts = { online: 0, offline: 0, awaitingBirth: 0, quarantined: 0 }
+  for (const device of devices) counts[deviceSummaryState(device)]++
+  return counts
+}
+
+/** The summary's words: Online and Offline always, Awaiting first birth only while a device is. */
+export function deviceSummaryText(devices = []) {
+  const { online, offline, awaitingBirth } = deviceSummaryCounts(devices)
+  return `${online} Online / ${offline} Offline${awaitingBirth ? ` / ${awaitingBirth} Awaiting first birth` : ''}`
+}
+
+/**
+ * A devices column's entries for <TagList>: the summary of `counted`, pinned, then a badge for each
+ * of `devices`. An archived device is listed, marked and muted, and counted by none of the summary.
+ * A quarantined one in service is amber and pinned, because it calls for action.
+ */
+export function deviceColumnTags(devices = [], counted = devices) {
+  return [
+    {
+      key: '__summary__',
+      priority: true,
+      className: 'badge badge-sm badge-neutral',
+      content: deviceSummaryText(counted)
+    },
+    ...devices.map(d => ({
+      key: d.asset_id,
+      // The overflow tooltip reads names; the entries are keyed by UUID.
+      label: d.asset_name,
+      priority: !d.is_archived && !!d.is_quarantined,
+      className: `badge badge-sm ${d.is_archived ? 'badge-neutral' : deviceStatusBadgeClass(deviceLifecycleStatus(d))}`,
+      title: `${d.asset_name} — ${d.is_archived ? 'ARCHIVED' : SUMMARY_STATE_WORD[deviceSummaryState(d)]}`,
+      content: `${d.asset_name}${d.is_quarantined ? ' (quarantined)' : ''}${d.is_archived ? ' (archived)' : ''}`
+    }))
+  ]
+}
+
 /** Hover text explaining what the state means and where it came from. */
 export function deviceStatusTitle(status) {
   if (status === DEVICE_STATUS.ONLINE) {

@@ -512,11 +512,11 @@ describe('the Gateways list', () => {
     await open([live()])
     const headers = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)
     expect(headers()).toContain('Gateway UUID')
-    expect(headers()).toContain('Connected Devices')
+    expect(headers()).toContain('Devices')
 
     fireEvent.click(rowNamed('Host_Gateway_NodeRED').querySelector('td strong'))
     expect(headers()).not.toContain('Gateway UUID')
-    expect(headers()).not.toContain('Connected Devices')
+    expect(headers()).not.toContain('Devices')
     // Every row drops the same cells, so the columns stay aligned.
     expect(rowNamed('Host_Gateway_NodeRED').querySelectorAll('td')).toHaveLength(headers().length)
 

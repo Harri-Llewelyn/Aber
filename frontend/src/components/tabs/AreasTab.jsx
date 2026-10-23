@@ -15,6 +15,7 @@ import {
 } from '../../utils/cellResolution'
 import { isPlaced } from '../../utils/areaPlans'
 import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
+import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
@@ -214,7 +215,26 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
   const unfiled = (cellsByArea.get(null) || []).filter(c => !c.is_archived)
 
-  const deviceCountOf = (areaCells) => areaCells.reduce((n, c) => n + (devicesByCell.get(c.cell_id) || []).length, 0)
+  /**
+   * An area's counts, made as the Site Map's card makes them: its active cells, and the gateways
+   * and devices in service in them or Area-Wide in the area. `wideDevices` is a breakdown of
+   * `devices`, not an addition to it.
+   */
+  const countsByArea = useMemo(() => {
+    const liveGateways = inServiceGateways(gateways)
+    return new Map(areas.map(a => {
+      const activeCells = (cellsByArea.get(a.area_id) || []).filter(c => !c.is_archived)
+      const wide = areaWideInService(a.area_id, assets, gateways)
+      const sum = (of) => activeCells.reduce((n, c) => n + of(c).length, 0)
+      return [a.area_id, {
+        cells: activeCells.length,
+        gateways: sum(c => liveGateways.filter(g => g.cell_id === c.cell_id)) + wide.gateways.length,
+        devices: sum(c => inServiceDevices(devicesByCell.get(c.cell_id))) + wide.devices.length,
+        wideDevices: wide.devices.length
+      }]
+    }))
+  }, [areas, cellsByArea, devicesByCell, assets, gateways])
+  const countsOf = (area) => countsByArea.get(area.area_id) || { cells: 0, gateways: 0, devices: 0, wideDevices: 0 }
   const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
@@ -226,19 +246,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     return String(a.area_id).toLowerCase().includes(q) || a.area_name.toLowerCase().includes(q)
   })
 
-  // The counts the Cells and Devices columns show: active cells, and the devices resolving to them.
-  const sortColumns = useMemo(() => {
-    const activeCells = (a) => (cellsByArea.get(a.area_id) || []).filter(c => !c.is_archived)
-    return {
-      name: { type: 'text', value: a => a.area_name },
-      plan: { type: 'rank', value: a => (a.plan_path ? 0 : 1) },
-      cells: { type: 'number', value: a => activeCells(a).length },
-      devices: {
-        type: 'number',
-        value: a => activeCells(a).reduce((n, c) => n + (devicesByCell.get(c.cell_id) || []).length, 0)
-      }
-    }
-  }, [cellsByArea, devicesByCell])
+  // The counts the Cells and Devices columns show.
+  const sortColumns = useMemo(() => ({
+    name: { type: 'text', value: a => a.area_name },
+    plan: { type: 'rank', value: a => (a.plan_path ? 0 : 1) },
+    cells: { type: 'number', value: a => countsByArea.get(a.area_id)?.cells ?? 0 },
+    devices: { type: 'number', value: a => countsByArea.get(a.area_id)?.devices ?? 0 }
+  }), [countsByArea])
   const [filteredAreas, sort] = useSortableRows(matchingAreas, sortColumns)
 
   // An arrival by id opens the area whatever its state, so a link to an archived one still lands.
@@ -262,10 +276,11 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       to={cellUrl(c.cell_id)}
       onClick={e => e.stopPropagation()}
       onNavigate={() => onSelectCell?.(c.cell_id)}
-      title={`${c.cell_name} — ${(devicesByCell.get(c.cell_id) || []).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
+      title={`${c.cell_name} — ${inServiceDevices(devicesByCell.get(c.cell_id)).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
       <span className="chip-name">{c.cell_name}</span>
+      {c.is_archived && <span className="chip-flag">ARCHIVED</span>}
     </RouteLink>
   )
 
@@ -351,14 +366,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                   <SortHeader sort={sort} column="name" title="Also the area's segment of every topic beneath it in the Unified Namespace.">Area</SortHeader>
                   <SortHeader sort={sort} column="plan" title="Whether the area has an SVG plan for the Site Map to draw. Without one it draws a default outline.">Plan</SortHeader>
                   <SortHeader sort={sort} column="cells">Cells</SortHeader>
-                  <SortHeader sort={sort} column="devices" title="Devices resolving to a cell in this area. Area-Wide counts the assets filed in the area but in no cell.">Devices</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices in service in this area: in its cells, or Area-Wide in it. Area-Wide says how many of them belong to no one cell.">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>
                 {filteredAreas.map(a => {
                   const areaCells = (cellsByArea.get(a.area_id) || []).filter(c => !c.is_archived)
                   const placed = areaCells.filter(isPlaced).length
-                  const wide = areaWideDevices(a.area_id).length + areaWideGateways(a.area_id).length
+                  const counts = countsOf(a)
                   return (
                     <tr
                       key={a.area_id}
@@ -395,9 +410,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                         )}
                       </td>
                       <td>
-                        <span>{deviceCountOf(areaCells)}</span>
-                        {wide > 0 && (
-                          <Badge size="sm" className="badge-follow">+{wide} Area-Wide</Badge>
+                        <span>{counts.devices}</span>
+                        {/* A breakdown of the figure beside it, as on the Site Map's card. */}
+                        {counts.wideDevices > 0 && (
+                          <Badge size="sm" className="badge-follow" title={`${counts.wideDevices} of these ${counts.wideDevices === 1 ? 'belongs' : 'belong'} to the area rather than to a cell in it`}>
+                            {counts.wideDevices} Area-Wide
+                          </Badge>
                         )}
                       </td>
                     </tr>
@@ -508,7 +526,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         title={selectedArea?.area_name || ''}
         icon={selectedArea && <AreaIcon area={selectedArea} size={16} />}
         subtitle={selectedArea && (
-          <Badge size="sm">{plural(selectedCells.length, 'Cell')} · {plural(deviceCountOf(selectedCells), 'Device')}</Badge>
+          <Badge size="sm">
+            {plural(countsOf(selectedArea).cells, 'Cell')} · {plural(countsOf(selectedArea).gateways, 'Gateway')} · {plural(countsOf(selectedArea).devices, 'Device')}
+          </Badge>
         )}
         fields={selectedArea ? [
           { label: 'Area UUID', value: selectedArea.area_id, mono: true, copyable: true },

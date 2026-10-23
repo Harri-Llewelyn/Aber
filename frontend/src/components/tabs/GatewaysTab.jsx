@@ -17,7 +17,8 @@ import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
 } from '../../utils/gatewayType'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags } from '../../utils/deviceStatus'
+import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
@@ -66,6 +67,12 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
+
+/**
+ * The devices a gateway's counts count: all it serves but the archived ones. Replay lanes stay in,
+ * because they are what the Playback gateway serves.
+ */
+const countedDevices = (devices) => inServiceDevices(devices, { replayLanes: true })
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
@@ -325,7 +332,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       location: { type: 'text', value: location },
       status: { type: 'rank', value: g => (g.is_archived ? null : severityRank(gatewayStatusTone(gatewayDisplayStatus(g)))) },
       last_heartbeat: { type: 'time', value: g => g.last_heartbeat },
-      devices: { type: 'number', value: g => (g.is_archived ? null : (g.devices || []).length) }
+      devices: { type: 'number', value: g => (g.is_archived ? null : countedDevices(g.devices).length) }
     }
   }, [cells])
   const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
@@ -349,6 +356,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Resolved fresh every render; a gateway that disappears resolves to null and the drawer closes.
   const selected = gateways.find(g => g.gateway_id === selectedId) || null
   const selectedDevices = selected?.devices || []
+  const selectedCounted = countedDevices(selectedDevices)
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
   const selectedGroupMismatch = gatewayGroupMismatch(selected)
 
@@ -507,14 +515,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices inherit only a cell.">Location</SortHeader>
                    <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
                    <SortHeader sort={sort} column="last_heartbeat" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
-                   {!compact && <SortHeader sort={sort} column="devices">Connected Devices</SortHeader>}
+                   {!compact && <SortHeader sort={sort} column="devices" title="The devices this gateway serves. The summary counts them by state; archived ones are listed, not counted.">Devices</SortHeader>}
                  </tr>
                </thead>
                <tbody>
                  {filteredGateways.map(g => {
                    const gwAssets = g.devices || []
-                   const onlineCount = gwAssets.filter(a => a.status === 'ONLINE' || !a.status).length
-                   const offlineCount = gwAssets.filter(a => a.status === 'OFFLINE').length
                    const liveStatus = gatewayDisplayStatus(g)
                    const type = gatewayType(g)
                    const groupMismatch = gatewayGroupMismatch(g)
@@ -586,29 +592,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                              <span className="cell-meta gateway-cell-italic">No devices assigned</span>
                            ) : (
                              /* Collapsed past three (the TagList limit; the summary counts as one).
-                                The Online / Offline summary is pinned because it is the question
-                                the column answers, and a QUARANTINED device because it calls for
-                                action. */
-                             <TagList
-                               limit={3}
-                               tags={[
-                                 {
-                                   key: '__summary__',
-                                   priority: true,
-                                   className: 'badge badge-sm badge-neutral',
-                                   content: `${onlineCount} Online / ${offlineCount} Offline`
-                                 },
-                                 ...gwAssets.map(a => ({
-                                   key: a.asset_id,
-                                   // The tooltip on "+N" lists names, not the UUIDs these are keyed by.
-                                   label: a.asset_name,
-                                   priority: a.is_quarantined,
-                                   className: `badge badge-sm ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`,
-                                   title: `${a.asset_name} — ${a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`,
-                                   content: `${a.asset_name}${a.is_quarantined ? ' (quarantined)' : ''}`
-                                 }))
-                               ]}
-                             />
+                                The summary is pinned because it is the question the column
+                                answers, and a quarantined device because it calls for action. */
+                             <TagList limit={3} tags={deviceColumnTags(gwAssets, countedDevices(gwAssets))} />
                            )}
                          </td>}
                        </tr>
@@ -1200,7 +1186,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 </div>
               </div>
             )}
-            <div className="context-panel-section-label">Connected Devices ({selectedDevices.length})</div>
+            {/* The count leaves archived devices out, as the row's summary does; they are listed, flagged. */}
+            <div className="context-panel-section-label">Devices ({selectedCounted.length})</div>
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
@@ -1219,6 +1206,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                       >
                         <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
                         <span className="chip-name">{d.asset_name}</span>
+                        {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
                     )
                   })}

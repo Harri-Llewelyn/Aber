@@ -24,7 +24,7 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 ## What the states mean
 
 - **Needs attention**: a gateway in the cell needs attention, or a device in it is quarantined. This is not the same as offline. A gateway created a moment ago and still being set up is not in trouble.
-- **Empty**: the cell has no gateways, or its gateways serve no devices.
+- **Empty**: the cell has no gateway and no device in service. Archived ones do not count. A cell with a gateway and no devices is not empty. The **Empty** filter and the **Empty** badge in the table use the same test.
 - **Unfiled** and **not placed** are jobs to do: a cell in no area, or in an area but with no place on its plan. The banner above the table lists devices that belong to no cell.
 - **Empty is not broken.** A new install has no cells at all, and a cell with nothing in it says "No devices here" rather than showing a blank.
 - Moving a device to another cell does not change its Sparkplug address, so everything pointed at it keeps working.
