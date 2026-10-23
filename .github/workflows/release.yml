@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, without the leading v (e.g. 1.5.1)'
+        description: 'Version to publish, without the leading v (e.g. 1.6.1)'
         required: true
         type: string
       dry_run:
