@@ -83,11 +83,18 @@ COPY ingestion/primary_host.py .
 # does, on demand or from a scheduler.
 COPY ingestion/cold_archive.py .
 
+# The area-plan sweep, for the same reason: a CLI the area-plan-sweep CronJob runs as
+# `python -m area_plan_sweep`. It imports capture_worker.py for the storage client that carries the
+# ingestion key. Check 122 of scripts/check-docs-drift.mjs fails on a module the chart runs from this
+# image, or one it imports, that no COPY line names.
+COPY ingestion/area_plan_sweep.py .
+
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto
 
 # NON-ROOT, numeric so the kubelet can verify runAsNonRoot from the image alone. The daemon, the
-# playback worker and the cold archive write only to /tmp and their volumes; /app stays root's.
+# playback worker, the cold archive and the area-plan sweep write only to /tmp and their volumes;
+# /app stays root's.
 RUN groupadd --gid 10001 ingestion \
  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin ingestion
 USER 10001:10001

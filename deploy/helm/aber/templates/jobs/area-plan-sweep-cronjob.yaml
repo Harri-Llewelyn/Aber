@@ -1,0 +1,86 @@
+{{- if .Values.areaPlanSweep.enabled }}
+{{- $component := "area-plan-sweep" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $gateway := include "aber.supabase.internalUrl" . -}}
+{{/*
+=================================================================================================
+The area-plan sweep: delete the plans in the area-plans bucket that no area names
+(ingestion/area_plan_sweep.py). The nightly purge deletes an expired area in SQL, which cannot
+remove a stored file, so its plan is left behind; so is a plan the dashboard failed to delete.
+
+The ingestion image under a different command, as cold-archive is, and as the ingestion principal:
+ingest_unclaimed_area_plan_objects() answers that principal alone, and the bucket's DELETE policy
+admits it to a plan no area names and nothing else (0199). It reaches the gateway and nothing else:
+PostgREST for the list, the Storage API for the delete.
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-area-plan-sweep" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ .Values.areaPlanSweep.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # The next hour's run is the retry.
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The ingestion image's user.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          # Under a NetworkPolicy a new pod's first connections are refused for about a second,
+          # until the policy controller admits the pod.
+          initContainers:
+            {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_PUBLISHABLE_KEY\" %s/rest/v1/" $gateway) "describe" "supabase-envoy (the plans are listed and deleted through it)" "env" (include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY"))) | nindent 12 }}
+          containers:
+            - name: area-plan-sweep
+              image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
+              imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+              command: ["python", "-m", "area_plan_sweep"]
+              env:
+                - name: LOG_FORMAT
+                  value: "json"
+                - name: SUPABASE_URL
+                  value: {{ $gateway | quote }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 16 }}
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.areaPlanSweep.resources | nindent 16 }}
+              volumeMounts:
+                # Python and its HTTP client take TMPDIR when they need one.
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+{{- end }}

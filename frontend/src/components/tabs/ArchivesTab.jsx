@@ -17,11 +17,11 @@ import { ARCHIVES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
-import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
+import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle, IconLock } from '../common/Icons'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
-import { formatDate, formatDateTime } from '../../utils/format'
+import { formatDate, formatDateTime, plural } from '../../utils/format'
 
 /** The page's singular row type -> the Audit Trail page's handover type. */
 const TRAIL_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
@@ -106,9 +106,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
   }
 
   /**
-   * The manual half of the retention policy: the same destruction the auto-purge timer does, on
-   * demand. A real DELETE: the row leaves the table, the audit trail keeps its history, and the
-   * database writes the tombstone the Retired tab lists.
+   * Permanent Delete: a real DELETE, now. The row leaves the table, the audit trail keeps its
+   * history, and the database writes the tombstone the Retired tab lists. An area's plan is
+   * removed here; when the auto-purge deletes an area, the hourly area-plan sweep removes it.
    */
   const purge = async (item) => {
     try {
@@ -226,7 +226,9 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
                      <td><CopyableId value={a.entity_id} label="entity id" onNotify={showToast} /></td>
                      <td className="cell-meta">{formatDateTime(a.archived_at)}</td>
                      <td>
-                       {a.auto_delete_at ? (
+                       {a.auto_delete_at && a.playbacks > 0 ? (
+                         <PurgeHeld at={a.auto_delete_at} playbacks={a.playbacks} />
+                       ) : a.auto_delete_at ? (
                          <PurgeDate at={a.auto_delete_at} />
                        ) : (
                          <Badge size="sm">Never auto-purged</Badge>
@@ -375,10 +377,10 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
               ? ' Anything still filed into it — gateways and devices alike — is un-filed rather' +
                 ' than deleted, and appears as Unassigned.'
               : '') +
+            // An archived area holds no Area-Wide asset (0199), so nothing refuses its delete.
             (confirmPurge.entity_type === 'area'
               ? ' Its cells are kept and become unfiled' +
-                (confirmPurge.plan_path ? '; its area plan is deleted' : '') +
-                '. It is refused while an Area-Wide asset still names it — move that asset first.'
+                (confirmPurge.plan_path ? '; its area plan is deleted' : '') + '.'
               : '') +
             (confirmPurge.entity_type === 'device'
               ? ' Any replay lane recorded from it is deleted with it. Export a bundle first if' +
@@ -408,6 +410,22 @@ function PurgeDate({ at }) {
         {soon && <IconAlertTriangle size={12} />}
         {soon && <span className="sr-only">Within a week: </span>}
         {formatDate(at)}
+      </span>
+    </Tooltip>
+  )
+}
+
+/**
+ * In place of the date on a gateway a playback names. The record of each playback is kept for
+ * good and names the gateway it was published as, so neither the purge nor Permanent Delete
+ * removes the gateway, and the date would never be kept.
+ */
+function PurgeHeld({ at, playbacks }) {
+  return (
+    <Tooltip text={`Due ${formatDate(at)}, but each playback published as this gateway is kept on record, so neither the auto-purge nor Permanent Delete removes it. Restore it, or leave it archived.`}>
+      <span className="cell-purge-date cell-purge-held">
+        <IconLock size={12} />
+        Held: {plural(playbacks, 'playback')} {playbacks === 1 ? 'names' : 'name'} this gateway
       </span>
     </Tooltip>
   )

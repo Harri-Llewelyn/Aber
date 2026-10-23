@@ -338,7 +338,13 @@ paths:
     patch:
       tags: [Assets]
       summary: Update areas matching a filter
-      description: 'Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.'
+      description: |
+        Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.
+
+        Archiving an area (`is_archived` from false to true) is refused while any device or gateway
+        is `area_wide` in it, archived ones included: the nightly purge could never delete it. Make
+        each one Site-Wide, put it in a cell, or delete it, then archive the area. Cells filed in
+        the area do not block it. Once it is archived, nothing can be made `area_wide` in it.
       parameters:
         - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Prefer'
@@ -350,6 +356,7 @@ paths:
       responses:
         '204': { description: Updated. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '400': { description: 'The archive was refused: a device or gateway is still `area_wide` in the area (`23001`).' }
     delete:
       tags: [Assets]
       summary: Delete areas matching a filter

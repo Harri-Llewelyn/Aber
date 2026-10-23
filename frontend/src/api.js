@@ -1929,6 +1929,17 @@ const apiMethods = {
       if (gatewaysRes.error) throw gatewaysRes.error;
       if (devicesRes.error) throw devicesRes.error;
 
+      // The nightly purge skips a gateway a playback names, whose record is kept for good (0193).
+      // Tolerated: without it the row shows its date, as before.
+      const gatewayIds = (gatewaysRes.data || []).map(g => g.id);
+      const { data: playbackRows } = gatewayIds.length
+        ? await supabase.from('playback_jobs').select('target_gateway_id').in('target_gateway_id', gatewayIds)
+        : { data: [] };
+      const playbacksOf = new Map();
+      for (const p of playbackRows || []) {
+        playbacksOf.set(p.target_gateway_id, (playbacksOf.get(p.target_gateway_id) || 0) + 1);
+      }
+
       const areas = (areasRes.data || []).map(a => ({
         entity_id: a.id,
         name: a.name,
@@ -1959,7 +1970,9 @@ const apiMethods = {
         // The forge's half of the same sentence (0114). Set means the sweep has archived the
         // repository, so restoring has something to reverse — and the deploy key it removed on
         // the way in is not something restoring can give back.
-        forge_archived_at: g.forge_archived_at
+        forge_archived_at: g.forge_archived_at,
+        // How many playbacks name it: the purge never deletes it while any do.
+        playbacks: playbacksOf.get(g.id) || 0
       }));
 
       const devices = (devicesRes.data || []).map(d => ({

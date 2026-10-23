@@ -384,7 +384,10 @@ BEGIN
 END $$;
 
 -- area-plans: private, read by every signed-in role (the Site Map is the Operator's page); writes
--- are the roles that manage areas, confined to <area_id>/ naming an area that exists.
+-- are the roles that manage areas, confined to <area_id>/ naming an area that exists. The area-plan
+-- sweep, a CronJob running as the ingestion principal, deletes an object no area names and nothing
+-- else, which is how the plan of an area the nightly purge deleted leaves the bucket (0199). It
+-- reads by the arm every signed-in role has, which storage-api's delete needs.
 DROP POLICY IF EXISTS "area_plans_read_authenticated" ON storage.objects;
 CREATE POLICY "area_plans_read_authenticated" ON storage.objects
   FOR SELECT TO authenticated
@@ -417,13 +420,16 @@ CREATE POLICY "area_plans_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'area-plans'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+         OR (public.is_ingestion_caller()
+             AND public.is_unclaimed_area_plan_object(storage.objects.name)))
   );
 
 DO $$
 DECLARE
   v_policies integer;
   v_unconfined integer;
+  v_delete text;
 BEGIN
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
@@ -441,5 +447,29 @@ BEGIN
     RAISE EXCEPTION 'area-plans: % write policy/policies do not confine the path to an existing area.', v_unconfined;
   END IF;
 
-  RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/).';
+  -- The ingestion principal in DELETE alone, and every arm of it confined to an object no area names.
+  SELECT coalesce(qual, '') INTO v_delete FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname = 'area_plans_delete_privileged';
+  IF regexp_count(v_delete, 'is_ingestion_caller\(\) AND (public\.)?is_unclaimed_area_plan_object\(') = 0 THEN
+    RAISE EXCEPTION
+      'area-plans: the DELETE policy does not admit the area-plan sweep to a plan no area names. '
+      'The plan of an area the nightly purge deleted then stays in the bucket for ever, readable by '
+      'every signed-in role (0199).';
+  END IF;
+  IF regexp_count(v_delete, 'is_ingestion_caller\(') <>
+     regexp_count(v_delete, 'is_ingestion_caller\(\) AND (public\.)?is_unclaimed_area_plan_object\(')
+     OR EXISTS (
+       SELECT 1 FROM pg_policies
+        WHERE schemaname = 'storage' AND tablename = 'objects'
+          AND policyname LIKE 'area_plans_%' AND cmd <> 'DELETE'
+          AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%is_ingestion_caller%')
+  THEN
+    RAISE EXCEPTION
+      'area-plans: a policy admits the ingestion principal to a plan an area still names. The '
+      'hourly area-plan sweep would then delete the drawing an area shows (0199).';
+  END IF;
+
+  RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/; the '
+    'area-plan sweep deletes only a plan no area names).';
 END $$;

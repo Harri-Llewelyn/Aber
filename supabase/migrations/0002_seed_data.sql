@@ -2675,8 +2675,9 @@ SELECT public.ensure_cron_job(
 -- AREAS LAST, AND ONLY THOSE NOTHING NAMES. `devices.area_id` and `gateways.area_id` have no
 -- ON DELETE action (0097): an Area-Wide asset's area cannot be deleted until the asset moves. A
 -- refused DELETE would abort the whole job -- one transaction -- and take the three deletes above
--- with it, so such an area is skipped this run and stays on the Archived Entities page, which says
--- why. 0124 gave areas the three columns and asserts this job names them after cells.
+-- with it, so such an area is skipped. Since 0199 no row reaches the skip, which stays as the guard:
+-- an area is archived only when nothing is Area-Wide in it, and nothing is made Area-Wide in an
+-- archived one. 0124 gave areas the three columns and asserts this job names them after cells.
 SELECT public.ensure_cron_job(
   'purge_expired_archives',
   '30 3 * * *',

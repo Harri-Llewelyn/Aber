@@ -111,6 +111,9 @@ python ingestion/test_capture_playback.py
 python ingestion/test_capture_worker.py
 # The request the capture stack suites delete their stored file with, and that a refusal raises
 python ingestion/test_stack_capture_cleanup.py
+# The hourly area-plan sweep (0199) -- the bucket it deletes from, its batches, a refused batch it
+# does not ask for again, and a run without the ingestion key that says so
+python ingestion/test_area_plan_sweep_worker.py
 # The startup recovery loop. Nothing orders the daemon after the historian at boot, so a node
 # restart can start ingestion before the
 # historian -- measured at 453ms on a development stack. The daemon then reached its MQTT loop
@@ -469,6 +472,17 @@ python supabase/migrations/test_relocate_devices.py
 # the database, not only by the picker, because an approved proposal writes the same columns; and
 # the retired floor table stays retired across a replay of the whole chain.
 python supabase/migrations/test_area_plans.py
+# A plan no area names is swept from storage (0199). A plan an area names, archived or not, is never
+# listed; one nothing names is listed for the sweep once it is an hour old and not before, which
+# spares an upload in flight; a replaced, a removed and a purged area's plan are each listed; only
+# the ingestion principal asks. The area-plans policies and their self-check run verbatim on a
+# stand-in table. Creates a stand-in storage.objects as supabase_admin, as the capture suite does.
+python supabase/migrations/test_area_plan_sweep.py
+# An area is archived only when nothing is Area-Wide in it (0199): a live, an archived or a
+# quarantined device refuses it, and a gateway, with the counts and the way out; cells filed in it do
+# not; nothing is made Area-Wide in an archived area, while a write that leaves area_id alone passes;
+# and the file replays without re-creating its triggers.
+python supabase/migrations/test_area_archive_refusal.py
 # Deleting a cell un-files what was in it (0112). `gateways.cell_id` was the one child of `cells`
 # that cascaded, so a gateway archived with Permanent Retention was deleted by its CELL's timer.
 # The test asserts the catalogue fact over every child of `cells`, not only the one that was
@@ -484,7 +498,7 @@ python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
-# because the job is one transaction; a replay lane is archived, restored and deleted with its
+# because the job is one transaction (a state 0199 keeps any write from reaching); a replay lane is archived, restored and deleted with its
 # original; a deleted row that was archived leaves a tombstone in retired_entities pointing at the
 # trail's DELETE row, and one that was never archived leaves none; the tombstone table has one
 # SELECT policy and no way in for authenticated; an export reaches the trail as EXPORTED.

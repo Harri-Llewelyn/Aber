@@ -501,17 +501,17 @@ describe('ArchivesTab lists archived areas', () => {
     expect(screen.queryByRole('button', { name: /Export Bundle/i })).toBeNull()
   })
 
-  it('says a deleted area un-files its cells, loses its plan, and is refused by an Area-Wide asset', async () => {
-    /* The three consequences that are decided elsewhere: cells.area_id is SET NULL, the plan goes
-       with the row, and the purge job's DELETE is guarded by the Area-Wide assets that still name
-       the area, so a manual delete meets the same refusal. */
+  it('says a deleted area un-files its cells and loses its plan, and nothing refuses it', async () => {
+    /* The consequences decided elsewhere: cells.area_id is SET NULL and the plan goes with the
+       row. An archived area holds no Area-Wide asset (0199), so the delete meets no refusal and
+       the prompt promises none. */
     await showLifecycle({ archives: [ARCHIVED_AREA] })
     fireEvent.click(purgeButton())
 
     const prompt = await screen.findByText(/Permanently delete the area/i)
     expect(prompt.textContent).toMatch(/cells are kept and become unfiled/i)
     expect(prompt.textContent).toMatch(/area plan is deleted/i)
-    expect(prompt.textContent).toMatch(/Area-Wide asset/i)
+    expect(prompt.textContent).not.toMatch(/refused/i)
     expect(prompt.textContent).toMatch(/tombstone/i)
   })
 
@@ -830,5 +830,36 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
     })
     expect(names()).toEqual(['Boiler', 'Press 2', 'Press 9'])
     expect(address()).toBe('/archives?sort=-auto_purge')
+  })
+})
+
+/**
+ * The nightly purge skips a gateway a playback names (0193), and the record of a playback is kept
+ * for good, so that gateway's Auto-purge date would never be kept. Its row says why instead.
+ */
+describe('ArchivesTab: a gateway a playback holds', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  const held = (playbacks) => ({ ...ARCHIVED_GATEWAY, playbacks })
+
+  it('shows Held and the count in place of the date', async () => {
+    await showLifecycle({ archives: [held(3)] })
+    const note = document.querySelector('.cell-purge-held')
+    expect(note).toHaveTextContent('Held: 3 playbacks name this gateway')
+    expect(note.querySelector('svg')).not.toBeNull()
+    expect(document.querySelector('.cell-purge-date-soon')).toBeNull()
+    expect(tooltipOf(note)).toMatch(/neither the auto-purge nor Permanent Delete removes it/)
+  })
+
+  it('says one playback in the singular', async () => {
+    await showLifecycle({ archives: [held(1)] })
+    expect(document.querySelector('.cell-purge-held')).toHaveTextContent('Held: 1 playback names this gateway')
+  })
+
+  it('shows the date for a gateway no playback names, and Never for one with no timer', async () => {
+    await showLifecycle({ archives: [held(0), { ...held(2), entity_id: 'gwy-2', name: 'Kept_Gateway', auto_delete_at: null }] })
+    expect(document.querySelector('.cell-purge-held')).toBeNull()
+    expect(document.querySelectorAll('.cell-purge-date')).toHaveLength(1)
+    expect(screen.getByText('Never auto-purged')).toBeInTheDocument()
   })
 })

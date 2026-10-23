@@ -1712,6 +1712,11 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--danger-text);
   font-weight: 600;
 }
+/* In place of the date on a record the purge never deletes (a gateway a playback names): no
+   danger colour, because nothing is about to go. The lock icon and the words carry it. */
+.cell-purge-held {
+  color: var(--text-muted);
+}
 
 /* A Backups run row stays short. The outcome under its status and the Holds list cut to one line
    (the run's panel has all of each), and the date and the short columns do not wrap. */

@@ -856,6 +856,8 @@ jobs:
               # The nightly cold archive: blocked, every export fails at 03:15.
               ('cold-archive', 'timescaledb', 5432, 'cold chunk export'),
               ('cold-archive', 'supabase-envoy', 8000, 'the cold archive destination'),
+              # The hourly area-plan sweep: blocked, a purged area's plan stays in the bucket.
+              ('area-plan-sweep', 'supabase-envoy', 8000, 'the area-plan sweep'),
               ('e2e-validate', 'i3x-service', 8090, 'validate.py checks 12-12f'),
               # Enrolment's repository, the sweep and the door's placement: blocked, each skips the forge.
               ('supabase-functions', 'supabase-envoy', 8003, "the forge's API through the forge-api listener"),

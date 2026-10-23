@@ -232,6 +232,10 @@ class ThePurgeJobNamesAreas(LifecycleBase):
                           auto_delete_at="2026-01-02T00:00:00Z")
         unnamed = self.area(is_archived=True, archived_at="2026-01-01T00:00:00Z",
                             auto_delete_at="2026-01-02T00:00:00Z")
+        # No write reaches this state since 0199, which keeps an archived area one nothing names;
+        # the skip is the guard behind it, so the state is built with that rule off.
+        self.cur.execute("ALTER TABLE public.devices DISABLE TRIGGER "
+                         "trg_devices_not_area_wide_in_an_archived_area;")
         self.cur.execute(
             "INSERT INTO public.devices (id, name, location_scope, area_id, status) "
             "VALUES (%s, 'Lifecycle_BMS', 'area_wide', %s, 'OFFLINE');",
