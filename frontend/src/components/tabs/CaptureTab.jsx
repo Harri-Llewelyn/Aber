@@ -11,6 +11,7 @@ import CopyableId from '../common/CopyableId'
 import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { schemasForDevice } from '../../utils/deviceTags'
+import { deviceIdentifiers, deviceIdKey } from '../../utils/sparkplugId'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
@@ -89,8 +90,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // the table to find it.
   const [playAfterUpload, setPlayAfterUpload] = useState(false)
   const [schemas, setSchemas] = useState([])
-  // Every device this site has that is not a replay lane, by wire id: what a playback can stand in
-  // for. Archived and unbound devices count, as ensure_shadow_devices() counts them.
+  // Every id a device this site has answers to, as deviceIdKey() keys it, replay lanes left out:
+  // what a playback can stand in for. Archived and unbound devices count, as
+  // ensure_shadow_devices() counts them.
   const [knownDeviceIds, setKnownDeviceIds] = useState(() => new Set())
 
   const fileRef = useRef(null)
@@ -117,7 +119,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     // since recording one records a recording. The capture gates refuse all of them too.
     setGateways((gws || []).filter(g => !g.is_archived && !g.is_shadow))
     setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id && !d.shadow_of))
-    setKnownDeviceIds(new Set((devs || []).filter(d => !d.shadow_of).map(d => d.sparkplug_id)))
+    setKnownDeviceIds(new Set((devs || []).filter(d => !d.shadow_of)
+      .flatMap(deviceIdentifiers).map(deviceIdKey)))
   }, [])
 
   const loadJobs = useCallback(async () => {
