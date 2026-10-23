@@ -1452,6 +1452,37 @@ deprecated: `device_schemas.source`, always `'device_submodels'` since `0175`, a
 `COMMENT ON` only, so a replay restates the same text. The file's self-check reads each comment
 back. `docs/openapi.yaml` and the dashboard's hints say the same about each column.
 
+### A replay lane stands in for every id its device publishes (0201)
+
+A capture keeps each device under the id on the wire, and the playback worker rewrites that id
+through the job's `device_map`. Not every device publishes its issued `sparkplug_id`. One admitted
+from Quarantine publishes its own id, which ingestion records as `reported_identity`, and one
+addressed by its Factory+ `Instance_UUID` publishes its UUID. `ensure_shadow_devices()` and
+`start_playback_job()` looked a recorded device up by `sparkplug_id` alone. So a capture of either
+was refused as recording a device this stack does not know, and a gateway capture of an edge node
+whose devices publish their own ids was refused the same way.
+
+- **`captured_device_id(gateway, device, id)`** names the device an id a capture recorded belongs
+  to, in the order ingestion resolves a wire id ([`ingestion/README.md`](../ingestion/README.md#resolution-precedence)):
+  the issued `sparkplug_id`, then a device's own `reported_identity`, then its UUID in any letter
+  case. A device's own id is unique only behind one edge node (Sparkplug 3.0.0
+  `tck-id-topic-structure-namespace-duplicate-device-id-across-edge-node`). So it names the
+  capture's own device first, then a device of the capture's gateway, then a device bound to none,
+  and never a device of another gateway. It is `plpgsql`, so the UUID cast runs only after the shape
+  check, and no API role may call it.
+- **`ensure_shadow_devices()`** makes or reuses the lane of the device it resolves, and keys the map
+  by the id the capture recorded, which is what `rewrite_identity()` looks up.
+- **`start_playback_job()`** checks each key's lane against the device it resolves, as it checked
+  the device a `sparkplug_id` named. A key that names no device is still refused.
+
+Nothing else in either function changes. The capture worker records a device under each of these ids
+too (`ingestion/README.md`, *Recording from the dashboard*), and the Capture page counts a recorded
+id as known when any device answers to it. The file's self-check asserts that both functions
+resolve through `captured_device_id()`, that `start_playback_job()` still writes
+`PLAYBACK_STARTED`, and that no API role may call the new function.
+`test_capture_playback_behaviour.py` (`ARecordedIdIsResolvedAsIngestionResolvesIt`) holds each id,
+the edge-node scoping and the job's check.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
