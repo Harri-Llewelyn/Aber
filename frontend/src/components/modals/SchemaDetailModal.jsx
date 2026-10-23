@@ -19,6 +19,19 @@ import { SemanticIdField } from '../common/SemanticIdField'
 import { MetricGroupHeading } from './SchemaBuilderModal'
 import { Tooltip } from '../common/Tooltip'
 
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+/** The keys of a stored property entry that this dialog names but does not edit: all but `type`. */
+const keysBeyondType = (entry) =>
+  isPlainObject(entry) ? Object.keys(entry).filter(k => k !== 'type') : []
+
+/** A metric row's muted list of those keys, after its name. Nothing when the entry has none. */
+function StoredKeys({ entry }) {
+  const keys = keysBeyondType(entry)
+  if (keys.length === 0) return null
+  return <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{keys.join(' · ')}</span>
+}
+
 /**
  * One modal, two modes, decided by the schema's status. Read-only is the default and is the same
  * read-only the database enforces: `prevent_active_schema_mutation()` rejects the write, so an
@@ -34,7 +47,8 @@ export function SchemaDetailModal({
   const editable = isSchemaEditable(schema)
   const status = schemaStatus(schema)
 
-  // Seeded from the schema's current definition: a draft starts as an exact copy of its parent.
+  // The names the stored definition models, from `properties` and `required`. This list is all the
+  // dialog edits; a save keeps the rest of the definition as stored (buildDefinition).
   const [selectedNames, setSelectedNames] = useState(
     () => new Set(modelledMetrics(schema) || [])
   )
@@ -54,8 +68,8 @@ export function SchemaDetailModal({
 
   const lineage = useMemo(() => lineageOf(schemas, schema), [schemas, schema])
 
-  // Metrics the schema models that are no longer in the catalog. Listed rather than dropped:
-  // silently losing one on save would narrow the contract a device is judged against.
+  // Modelled metrics no longer in the active catalog. They have no row to untick, so they are named
+  // here, and a save keeps them with their stored entries.
   const orphanedNames = useMemo(() => {
     const known = new Set(activeCatalog.map(m => m.name))
     return [...selectedNames].filter(n => !known.has(n))
@@ -77,37 +91,53 @@ export function SchemaDetailModal({
     })
   }
 
-  /** The JSON Schema document a draft save writes. Same shape the builder produces. */
-  const buildDefinition = () => {
-    const byName = new Map(activeCatalog.map(m => [m.name, m]))
-    const properties = {}
-    const names = [...selectedNames]
-    names.forEach(name => {
-      const metric = byName.get(name)
-      // An orphaned metric keeps whatever type the existing definition gave it, rather than being
-      // re-derived from a catalog row that no longer exists.
-      properties[name] = metric
-        ? { type: datatypeToJsonSchemaType(metric.datatype) }
-        : (schema?.schema_definition?.properties?.[name] || { type: 'string' })
-    })
-    return { type: 'object', properties, required: names }
-  }
+  const storedProperties = useMemo(() => {
+    const properties = schema?.schema_definition?.properties
+    return isPlainObject(properties) ? properties : {}
+  }, [schema])
+  const storedEntry = (name) => (Object.hasOwn(storedProperties, name) ? storedProperties[name] : undefined)
 
   const modelledNow = modelledMetrics(schema) || new Set()
   const added = [...selectedNames].filter(n => !modelledNow.has(n))
   const removed = [...modelledNow].filter(n => !selectedNames.has(n))
+  const metricsEdited = added.length > 0 || removed.length > 0
+
+  /**
+   * The stored definition with the metric list changed and nothing else. A kept metric keeps its
+   * stored entry, every key included. An added one gets `{ type }` from the catalog, in `properties`
+   * only: `required` means modelled, and the editor never adds to it. A removed one leaves both.
+   */
+  const buildDefinition = () => {
+    const stored = isPlainObject(schema?.schema_definition) ? schema.schema_definition : { type: 'object' }
+    const next = { ...stored }
+    if (isPlainObject(stored.properties) || added.length > 0) {
+      const byName = new Map((catalog || []).map(m => [m.name, m]))
+      next.properties = Object.fromEntries(
+        Object.entries(storedProperties).filter(([name]) => selectedNames.has(name))
+      )
+      for (const name of added) {
+        next.properties[name] = { type: datatypeToJsonSchemaType(byName.get(name)?.datatype) }
+      }
+    }
+    if (Array.isArray(stored.required)) next.required = stored.required.filter(n => selectedNames.has(n))
+    return next
+  }
+
   const semanticNow = storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   const semanticEdited = storedSemanticIdPair(semantic.semanticId, semantic.semanticIdType)
   const dirty =
-    added.length > 0 || removed.length > 0 ||
+    metricsEdited ||
     description !== (schema?.description || '') ||
     changeDescription !== (schema?.change_description || '') ||
     semanticEdited.semanticId !== semanticNow.semanticId ||
     semanticEdited.semanticIdType !== semanticNow.semanticIdType
 
-  /** Everything a draft save writes. api.js sends the type as NULL when the id is blank. */
+  /**
+   * Everything a draft save writes. The definition goes only when the metric list changed; api.js
+   * writes only the keys it is given, and sends the type as NULL when the id is blank.
+   */
   const draftPatch = () => ({
-    schema_definition: buildDefinition(),
+    ...(metricsEdited && { schema_definition: buildDefinition() }),
     description,
     change_description: changeDescription,
     semantic_id: semanticEdited.semanticId,
@@ -329,7 +359,7 @@ export function SchemaDetailModal({
       >
         <label className="form-label">
           Metrics <span className="section-count">{selectedNames.size}</span>
-          {editable && (added.length > 0 || removed.length > 0) && (
+          {editable && metricsEdited && (
             <span style={{ fontWeight: 400, fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
               {added.length > 0 && <span style={{ color: 'var(--success-text)' }}>+{added.length} </span>}
               {removed.length > 0 && <span style={{ color: 'var(--danger)' }}>−{removed.length}</span>}
@@ -367,6 +397,7 @@ export function SchemaDetailModal({
                           aria-label={m.name}
                         />
                         <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+                        <StoredKeys entry={storedEntry(m.name)} />
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
                         <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
                       </label>
@@ -385,6 +416,7 @@ export function SchemaDetailModal({
                 <div key={name} style={{ padding: '7px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <IconCheck size={12} />
                   <span className="mono" style={{ fontSize: '12px' }}>{name}</span>
+                  <StoredKeys entry={storedEntry(name)} />
                 </div>
               ))
             )}
