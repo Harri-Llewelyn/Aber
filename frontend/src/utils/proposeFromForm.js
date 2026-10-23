@@ -34,9 +34,9 @@ export const PROPOSAL_FORMS = {
     },
     // Why each one is out, in the words the form shows the reader.
     withheld: {
-      active_gateway_id: 'The gateway is this device’s data path — an Administrator moves it.',
-      schema_ids: 'The schemas are what this device’s telemetry is judged against — an Administrator changes them.',
-      conformance_policy: 'Conformance policy decides what happens to unmodelled metrics — an Administrator sets it.'
+      active_gateway_id: 'The gateway is this device’s data path — an Administrator or a Shopfloor Manager moves it.',
+      schema_ids: 'The schemas are what this device’s telemetry is judged against — an Administrator or a Shopfloor Manager changes them.',
+      conformance_policy: 'Schema Conformance decides whether a value that breaks the schema is kept or dropped. It cannot be proposed: someone who can edit devices sets it.'
     }
   },
   /* The one form whose fields are already column names: DeviceNameplateModal builds itself from a
@@ -99,8 +99,8 @@ export const PROPOSAL_FORMS = {
       location_scope: 'location_scope'
     },
     withheld: {
-      deployment: 'Deployment says where this gateway’s connector runs — an Administrator changes it.',
-      is_simulated: 'Whether a gateway is simulated is what it IS, not a label — an Administrator changes it.',
+      deployment: 'Deployment says where this gateway’s connector runs — an Administrator or a Shopfloor Manager changes it.',
+      is_simulated: 'Whether a gateway is simulated is what it IS, not a label — an Administrator or a Shopfloor Manager changes it.',
       sparkplug_group: 'The Sparkplug group is half of this gateway’s address — an Administrator or a Shopfloor Manager changes it.'
     }
   }

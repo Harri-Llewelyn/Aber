@@ -117,7 +117,6 @@ describe('cell -> gateway -> device relationships', () => {
     const [cell] = await api.get('/api/v1/cells');
 
     expect(cell.cell_id).toBe('cell-1');
-    expect(cell.gateway_count).toBe(2);
     expect(cell.gateways.map(g => g.gateway_name)).toEqual(['GW One', 'GW Two']);
     // The gateway's own devices ARE the embed -- that is the data path, and it is a plain FK.
     expect(cell.gateways[0].device_count).toBe(2);
@@ -127,6 +126,9 @@ describe('cell -> gateway -> device relationships', () => {
     // can express. Callers group what they hold via groupDevicesByCell().
     expect(cell.devices).toBeUndefined();
     expect(cell.device_count).toBeUndefined();
+    // Nor a count of the embedded rows, which would include archived ones: a page counts what it
+    // shows.
+    expect(cell.gateway_count).toBeUndefined();
     expect(callFor('devices')).toBeUndefined();
     expect(callFor('device_locations')).toBeUndefined();
   });

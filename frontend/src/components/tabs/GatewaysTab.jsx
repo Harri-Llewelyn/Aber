@@ -658,7 +658,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
           />
           <div className="form-hint">
-            Optional, and read by nothing — a note for whoever comes to this next.
+            Optional: a note for whoever comes to this next. Shown here, and served by i3X as the
+            gateway's description; nothing acts on it.
           </div>
         </div>
         {/* One select over the legal states rather than two checkboxes, ahead of Location because
@@ -874,6 +875,48 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               + 'keeps no flow for it and reads no health from it. The engineer who runs the node '
               + 'looks after those.'
           }] : []),
+          // What enrolment and the forge write, so none waits for a health report: each shows
+          // whenever it has a value. Never for a Third-party node, which has no bundle or repository.
+          ...(gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY ? [] : [
+            {
+              label: 'Bundle',
+              value: selected.agent_version || null,
+              help: 'The bundle version the appliance enrolled with, refreshed by every heartbeat '
+                + 'that reports one, so an appliance upgraded in place shows its new version without '
+                + 're-enrolling.'
+            },
+            // Where main is, as the forge reported it on the last push.
+            {
+              label: 'Committed',
+              value: selected.forge_head_sha
+                ? `${selected.forge_head_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_head_at)}`
+                : null,
+              help: 'The head of main in this gateway\'s repository, as the forge reported it on '
+                + 'the last push'
+                + (selected.forge_head_message ? `: "${selected.forge_head_message}"` : '')
+                + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
+                + '. The appliance deploys it on its next tick. Shown from the first push after '
+                + 'the repository got its webhook.'
+            },
+            // What the appliance says it is running, from the head of its own branch. A digest that
+            // differs from the heartbeat's is an edit made in the appliance's editor since the deploy.
+            {
+              label: 'Reported',
+              value: selected.forge_appliance_sha
+                ? [
+                  `${selected.forge_appliance_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_appliance_at)}`,
+                  flowEditedOnAppliance(selected) ? 'edited on the appliance' : null,
+                ].filter(Boolean).join(' · ')
+                : null,
+              danger: flowEditedOnAppliance(selected) === true,
+              help: 'The head of the appliance branch in this gateway\'s repository: the flow and '
+                + 'the deploy record the appliance last pushed, which only its own key can do. '
+                + '"edited on the appliance" means the running flow differs from the one the puller '
+                + 'last deployed: somebody changed it in the appliance\'s editor, and the next '
+                + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
+                + 'between the two branches. Shown once the appliance has pushed to its branch.'
+            },
+          ].filter(f => f.value !== null)),
           // What the appliance reports about itself, once `health_reported_at` is set: a gateway that
           // never reported would show a dozen rows of dashes. Current values only; the trend is in
           // Grafana's Gateway Fleet Health dashboard. Never for a Third-party node, which has none.
@@ -929,12 +972,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               help: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
                 + 'host uptime: a restarted container resets it while the machine stays up.'
             },
-            {
-              label: 'Bundle',
-              value: selected.agent_version || null,
-              help: 'The bundle version the appliance reports. Refreshed on every heartbeat, so an '
-                + 'appliance upgraded in place shows its new version without re-enrolling.'
-            },
             // The drift check: `flow_hash` (what the appliance last deployed) against
             // `forge_head_flow_sha256` (the head of main). Within the grace period of a push it is
             // the puller not having ticked yet; beyond that it is drift, and the appliance's
@@ -952,37 +989,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 + '"differs from main" past that is drift: the appliance refused the commit or '
                 + 'cannot reach the forge, and its flow-sync log says which. An edit made in the '
                 + 'Node-RED editor is not reflected here; the next approved deploy overwrites it.'
-            },
-            // Where main is, as the forge reported it on the last push.
-            {
-              label: 'Committed',
-              value: selected.forge_head_sha
-                ? `${selected.forge_head_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_head_at)}`
-                : null,
-              help: 'The head of main in this gateway\'s repository, as the forge reported it on '
-                + 'the last push'
-                + (selected.forge_head_message ? `: "${selected.forge_head_message}"` : '')
-                + (selected.forge_head_by ? ` by ${selected.forge_head_by}` : '')
-                + '. The appliance deploys it on its next tick. Empty until the first push after '
-                + 'the repository got its webhook.'
-            },
-            // What the appliance says it is running, from the head of its own branch. A digest that
-            // differs from the heartbeat's is an edit made in the appliance's editor since the deploy.
-            {
-              label: 'Reported',
-              value: selected.forge_appliance_sha
-                ? [
-                  `${selected.forge_appliance_sha.slice(0, 12)} · ${formatHeartbeat(selected.forge_appliance_at)}`,
-                  flowEditedOnAppliance(selected) ? 'edited on the appliance' : null,
-                ].filter(Boolean).join(' · ')
-                : null,
-              danger: flowEditedOnAppliance(selected) === true,
-              help: 'The head of the appliance branch in this gateway\'s repository: the flow and '
-                + 'the deploy record the appliance last pushed, which only its own key can do. '
-                + '"edited on the appliance" means the running flow differs from the one the puller '
-                + 'last deployed: somebody changed it in the appliance\'s editor, and the next '
-                + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
-                + 'between the two branches. Empty until the appliance has reported once.'
             },
             // What the last hourly convergence did, from converged.json on the appliance branch: which
             // playbook version this appliance is on, so a fleet mid-rollout reads one gateway at a time.
@@ -1030,7 +1036,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             label: 'Description',
             value: selected.description || null,
             full: true,
-            help: 'Operator note. Free text, read by nothing.'
+            help: "Operator note. Shown here, and served by i3X as the gateway's description; nothing acts on it."
           },
         ] : []}
         actions={selected ? [

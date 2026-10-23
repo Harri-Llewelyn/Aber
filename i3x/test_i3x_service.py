@@ -2610,6 +2610,17 @@ class TestAddressSpaceReads(unittest.TestCase):
         self.assertIn("dev-explicit", objects[CELL_A]["metadata"]["relationships"]["HasChildren"])
         self.assertEqual(space["locations"]["d-explicit"]["effective_area_id"], AREA)
 
+    def test_a_devices_and_a_gateways_description_is_served(self):
+        rows = _seeded_rows()
+        rows["gateways"][0]["description"] = "Panel 4, behind the press"
+        rows["devices"][0]["description"] = "Spindle rebuilt 2026-03"
+        space = i3x_service._read_address_space(ColumnCheckingPostgrest(rows))
+        objects = i3x_service._build_objects(space)
+        self.assertEqual(objects["gwy-1"]["metadata"]["description"], "Panel 4, behind the press")
+        self.assertEqual(objects["dev-explicit"]["metadata"]["description"],
+                         "Spindle rebuilt 2026-03")
+        self.assertIsNone(objects["dev-inherits"]["metadata"]["description"])
+
     def _respond(self, failing, status, body):
         def fake_get(url, **_kwargs):
             if url.endswith("/" + failing):

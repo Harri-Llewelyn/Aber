@@ -4,7 +4,7 @@ A schema says what a kind of device is expected to publish: which metrics, of wh
 
 ## What the controls do
 
-- **Build Schema from Catalog** is the only way to create a schema. Building from the catalog makes sure every metric carries a standard and a semantic id. The device tags, the check for unmodelled metrics and the tag filters all read these.
+- **Build Schema from Catalog** is the only way to create a schema. Building from the catalog means every metric is one this site has adopted, with its catalog name and datatype. It carries its standard and semantic id where it has them. The device tags and the check for unmodelled metrics read the names.
 - The builder's metric list is grouped as on the Metrics page. Once any metrics in a group are ticked, the group's heading says how many. The total is beside **Metrics**.
 - **Search** comes first, and matches the name, the UUID and the change description. **The Status filter** beside it opens on **Current**, which hides versions that a newer one has replaced. The other options are **Active**, **Draft**, **Archived** and **All versions**, and each shows its count. **Clear filters** resets both.
 - **The Metrics page** holds the catalog that schemas are built from: every metric this deployment has adopted, with a search. Before you define something, check there that it does not already exist under another name.

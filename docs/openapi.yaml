@@ -315,7 +315,7 @@ paths:
         - name: name
           in: query
           schema: { type: string }
-          description: 'Filter, e.g. `eq.Building 3`. Names are unique.'
+          description: 'Filter, e.g. `eq.North Shop`. Names are unique.'
       responses:
         '200':
           description: Matching areas.
@@ -1201,8 +1201,9 @@ paths:
       description: |
         One transaction: flips the draft to `active`, archives the predecessor, repoints every
         `device_submodels` row, and logs each repoint to the Audit Trail under its device.
-        `devices_rebound` and `submodels_rebound` count the repointed rows; `schema_ids_rebound`
-        is always 0, since the `devices.schema_id` column it counted was removed in 1.3.0.
+        `devices_rebound` and `submodels_rebound` count the repointed rows. `schema_ids_rebound`
+        is always 0, since the `devices.schema_id` column it counted was removed in 1.3.0. It is
+        deprecated, and removed no sooner than 1.7.0.
 
         A device attached to both versions has its redundant old attachment dropped first, or
         the repoint would collide on `uq_device_submodels`.
@@ -1220,7 +1221,16 @@ paths:
           description: The now-active version.
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
+                properties:
+                  schema: { type: object, description: 'The published row as JSON.' }
+                  archived_schema_id: { type: string, format: uuid, nullable: true, description: 'The parent it archived; NULL for a first version.' }
+                  archived_schema_name: { type: string, nullable: true }
+                  devices_rebound: { type: integer, description: 'Attachments repointed from the parent to this version.' }
+                  submodels_rebound: { type: integer, description: 'The same count as `devices_rebound`.' }
+                  schema_ids_rebound: { type: integer, enum: [0], deprecated: true, description: 'Always 0: the `devices.schema_id` column it counted was removed in 1.3.0. Deprecated in 1.6.0, and removed no sooner than 1.7.0. Read `devices_rebound`.' }
+                  duplicate_submodels_removed: { type: integer, description: 'Old-version attachments dropped from a device that already carried this version.' }
         '400': { description: The target is not a draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1281,7 +1291,7 @@ paths:
       summary: Resolved schema attachments
       description: |
         Read-only view, one row per (device, schema): every `device_submodels` row. `source` is
-        always `device_submodels`; it is kept for clients that select it.
+        always `device_submodels`, and is deprecated: it is removed no sooner than 1.7.0.
         Read this rather than `device_submodels` unless you are writing attachments.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -4582,9 +4592,12 @@ components:
       description: An ISA-95 area — one part of the one site. The level between the site (a setting, `site.name`) and the cells.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        name: { type: string, example: Building 3, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
+        name: { type: string, example: North Shop, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
         description: { type: string, nullable: true }
         icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the area is for.' }
+        is_archived: { type: boolean, default: false }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true, description: 'Retention purge deadline. NULL means permanent retention — the purge honours this, never `archived_at` age.' }
         created_at: { type: string, format: date-time, readOnly: true }
         plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `area-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
         plan_aspect: { type: number, nullable: true, description: 'Width over height of the plan''s viewBox; NULL exactly when `plan_path` is. Cell places are fractions of the plan, so this is what turns them back into a distance.' }
@@ -4596,22 +4609,25 @@ components:
     AreaWrite:
       type: object
       properties:
-        name: { type: string, example: Building 3 }
+        name: { type: string, example: North Shop }
         description: { type: string, nullable: true }
         icon: { type: string, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap] }
         plan_path: { type: string, nullable: true }
         plan_aspect: { type: number, nullable: true }
+        is_archived: { type: boolean, description: 'true is refused while any device or gateway is `area_wide` in the area (see the PATCH). Nothing can be made `area_wide` in an archived area.' }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true }
 
     Cell:
       type: object
-      description: A shopfloor cell zone — an ISA-95 work center.
+      description: A shopfloor cell, the ISA-95 level below an area.
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'The area this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
         plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its area''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `area_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell in the same area. Moving the cell to another area clears it, unless the same write names a new place.' }
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
-        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Site Map when present.' }
+        description: { type: string, nullable: true, description: 'Free text. The Cells page shows it under the name and in the drawer, and the Site Map as a field in the cell''s panel. i3X serves it as the cell object''s description.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -4644,6 +4660,7 @@ components:
           type: string
           example: Sim_Gateway_Cell1_Machining
           description: Display label only. Freely editable and NOT unique; edge nodes are matched on `sparkplug_id`.
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the gateway object''s description; nothing acts on it.' }
         sparkplug_id:
           type: string
           readOnly: true
@@ -4695,7 +4712,7 @@ components:
       type: object
       properties:
         name: { type: string, example: Sim_Gateway_Cell1_Machining }
-        description: { type: string, nullable: true, description: 'Operator note. Free text, read by nothing.' }
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the gateway object''s description; nothing acts on it.' }
         sparkplug_group:
           type: string
           example: Aber
@@ -4737,14 +4754,16 @@ components:
           type: string
           example: Sim_CNC_Mill_01
           description: Display label only. Freely editable and NOT unique; renaming does not affect ingestion or telemetry history.
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the device object''s description; nothing acts on it. Typed identification belongs in the nameplate.' }
         sparkplug_id:
           type: string
           readOnly: true
           example: dev220000000000400080000
           description: >-
             Immutable Sparkplug B device id, generated from the primary key ('dev' plus 21 hex
-            characters, 24 total). Appears in the MQTT topic and keys telemetry and birth
-            parameters.
+            characters, 24 total). Appears in the MQTT topic of every device that can be set to
+            publish it; one that cannot publishes its own id or its Instance_UUID instead
+            (`identity_source` says which). Keys telemetry and birth parameters either way.
         reported_identity:
           type: string
           nullable: true
@@ -4826,6 +4845,7 @@ components:
       type: object
       properties:
         name: { type: string, example: Sim_CNC_Mill_01 }
+        description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the device object''s description; nothing acts on it.' }
         gateway_id: { type: string, format: uuid, nullable: true }
         cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=area_wide`; must be NULL otherwise.' }
@@ -4880,7 +4900,7 @@ components:
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
         submodel_key: { type: string, nullable: true }
-        source: { type: string, enum: [device_submodels], description: 'Always `device_submodels`. Kept for clients that select it.' }
+        source: { type: string, enum: [device_submodels], deprecated: true, description: 'Always `device_submodels`, since a schema is attached in one place. Deprecated in 1.6.0, and removed no sooner than 1.7.0: stop selecting it.' }
 
     TelemetryRow:
       type: object

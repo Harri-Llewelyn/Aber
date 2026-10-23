@@ -176,6 +176,7 @@ describe('proposing a change from a device', () => {
     const locked = [...document.querySelectorAll('.form-hint-locked')].map(n => n.textContent)
     expect(locked.some(t => /data path/i.test(t)), 'the gateway note').toBe(true)
     expect(locked.some(t => /judged against/i.test(t)), 'the schema note').toBe(true)
+    expect(locked.some(t => /kept or dropped/i.test(t)), 'the conformance note').toBe(true)
     // The controls are still THERE, disabled -- hiding them would make two dialogs out of one.
     expect(document.querySelectorAll('.modal select[disabled]').length).toBeGreaterThanOrEqual(2)
   })

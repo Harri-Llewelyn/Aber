@@ -270,7 +270,7 @@ describe('the Type control in a proposal', () => {
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Playback_Lab'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Propose a Change'))
     expect(typeSelect().disabled).toBe(true)
-    expect(screen.getByText(/connector runs — an Administrator changes it/)).toBeTruthy()
+    expect(screen.getByText(/connector runs — an Administrator or a Shopfloor Manager changes it/)).toBeTruthy()
   })
 
   it('stays live for someone who may manage gateways', async () => {

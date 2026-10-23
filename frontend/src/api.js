@@ -2003,8 +2003,7 @@ const apiMethods = {
         ...a,
         area_id: a.id,
         area_name: a.name,
-        cells: (a.cells || []).map(c => ({ ...c, cell_id: c.id, cell_name: c.name })),
-        cell_count: (a.cells || []).length
+        cells: (a.cells || []).map(c => ({ ...c, cell_id: c.id, cell_name: c.name }))
       }));
     }
 
@@ -2029,8 +2028,7 @@ const apiMethods = {
           cell_id: c.id,
           cell_name: c.name,
           access_url: c.grafana_url,
-          gateways,
-          gateway_count: gateways.length
+          gateways
         };
       });
     }
