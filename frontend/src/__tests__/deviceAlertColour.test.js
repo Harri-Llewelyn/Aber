@@ -43,6 +43,14 @@ describe('matching an alert to the device it is about', () => {
     expect(alertForDevice(index, device())?.alert_name).toBe('Thermal Excursion')
   })
 
+  it('resolves a device that publishes under its own id by its issued one', () => {
+    // Grafana labels series as telemetry keys them, by the issued id. The published one is in no
+    // series, so matching on it would leave the alert to the UUID fallback.
+    const index = alertIndex([alert({ entity_id: null })])
+    const vendor = device({ reported_identity: 'Vendor_Press_07', identity_source: 'reported_identity' })
+    expect(alertForDevice(index, vendor)?.alert_name).toBe('Thermal Excursion')
+  })
+
   it('resolves on the row UUID when the alert carries no wire id', () => {
     // `platform_alerts.entity_id` is resolved by the webhook at write time, is nullable, and
     // carries no foreign key, so a purge leaves the alert intact with an id pointing at nothing.

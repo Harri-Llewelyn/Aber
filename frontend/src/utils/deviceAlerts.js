@@ -1,11 +1,11 @@
-import { effectiveSparkplugId } from './sparkplugId';
+import { deviceIds } from './sparkplugId';
 
 /**
  * Matching a firing Grafana alert to the device it is about, shared by the Site Map, Cells,
  * Gateways and Devices. Device-scoped alerts only, filtered on `entity_type`, so a gateway or
  * platform alert can never colour a device chip; the top bar's pill does not filter. Indexed on
- * both `sparkplug_id` (the wire identity Grafana labels series with) and the nullable `entity_id`,
- * so a rename or a re-provision under a new UUID does not lose the alert.
+ * both `sparkplug_id` (the issued id, which telemetry and so Grafana's series are keyed on) and the
+ * nullable `entity_id`, so a rename or a re-provision under a new UUID does not lose the alert.
  */
 
 /** Severity ranking. A device with a critical AND a warning has a critical on it. */
@@ -40,11 +40,11 @@ export function alertIndex(activeAlerts = [], entityType = 'device') {
 }
 
 /**
- * The worst alert firing on `device`, or null. Tries the wire identity first and the row's UUID
- * second, matching how the index is built.
+ * The worst alert firing on `device`, or null. Tries the issued id first and the row's UUID second,
+ * matching how the index is built. Never the published id: no series is labelled with it.
  */
 export function alertForDevice(index, device) {
   if (!index || !device) return null;
-  const wireId = effectiveSparkplugId(device);
-  return (wireId && index.get(wireId)) || (device.asset_id && index.get(device.asset_id)) || null;
+  const { issued } = deviceIds(device);
+  return (issued && index.get(issued)) || (device.asset_id && index.get(device.asset_id)) || null;
 }

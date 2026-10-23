@@ -65,6 +65,9 @@ const device = {
   location_source: 'inherited'
 }
 
+/** What a device admitted from Quarantine under its own Sparkplug id carries. */
+const PUBLISHES_OWN_ID = { reported_identity: 'Vendor_Mill_07', identity_source: 'reported_identity' }
+
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, gateways: [gateway], gateway_count: 1 }
 
 const routeGet = (overrides = {}) => (path) => {
@@ -238,6 +241,41 @@ describe('the device drawer resolves every attached schema', () => {
 /**
  * The destination half. Without this the chips merely filter, and a hop still ends in a click.
  */
+describe('the device drawer names both of a device\'s Sparkplug ids', () => {
+  const ISSUED = 'dev220000000000400080000'
+  const labels = () => [...panel().querySelectorAll('.context-field-label')].map(l => l.textContent)
+  const copy = (name) => within(panel()).getByRole('button', { name })
+  const openWith = async (over) => {
+    api.get.mockImplementation(routeGet({ devices: [{ ...device, ...over }] }))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await openRow('Sim_CNC_Mill_01')
+  }
+
+  it('shows the issued id, and under it the id the device publishes under', async () => {
+    await openWith(PUBLISHES_OWN_ID)
+    expect(copy(`Copy sparkplug device id ${ISSUED}`)).toBeInTheDocument()
+    expect(copy('Copy published id Vendor_Mill_07')).toBeInTheDocument()
+    expect(labels().indexOf('Published ID')).toBe(labels().indexOf('Sparkplug Device ID') + 1)
+    // The topic is the one the device publishes on.
+    expect(copy('Copy sparkplug topic path spBv1.0/+/DDATA/gwy120000000000400080000/Vendor_Mill_07'))
+      .toBeInTheDocument()
+  })
+
+  it('shows the UUID as the Published ID for a device addressed by its Instance_UUID', async () => {
+    const uuid = '22000000-0000-4000-8000-000000000001'
+    await openWith({ asset_id: uuid, id: uuid, identity_source: 'instance_uuid' })
+    expect(copy(`Copy sparkplug device id ${ISSUED}`)).toBeInTheDocument()
+    expect(copy(`Copy published id ${uuid}`)).toBeInTheDocument()
+  })
+
+  it('shows no Published ID once the device publishes its issued id', async () => {
+    await openWith({ ...PUBLISHES_OWN_ID, identity_source: 'sparkplug_id' })
+    expect(labels()).not.toContain('Published ID')
+    expect(copy(`Copy sparkplug topic path spBv1.0/+/DDATA/gwy120000000000400080000/${ISSUED}`))
+      .toBeInTheDocument()
+  })
+})
+
 describe('useArrivalSelection', () => {
   const rows = [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }]
   const byId = (row, term) => row.id === term
@@ -340,6 +378,22 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
 
   it('Devices, by sparkplug id -- which is what an alert row carries', async () => {
     window.history.replaceState(null, '', deviceUrl('dev220000000000400080000'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await waitFor(() => expect(isOpen()).toBe(true))
+  })
+
+  // A device admitted from Quarantine under its own id. The alert webhook resolves it, and so names
+  // it in the link, by the issued id.
+  it('Devices, one that publishes under its own id, by its issued id', async () => {
+    api.get.mockImplementation(routeGet({ devices: [{ ...device, ...PUBLISHES_OWN_ID }] }))
+    window.history.replaceState(null, '', deviceUrl('dev220000000000400080000'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await waitFor(() => expect(isOpen()).toBe(true))
+  })
+
+  it('Devices, one that publishes under its own id, by that id', async () => {
+    api.get.mockImplementation(routeGet({ devices: [{ ...device, ...PUBLISHES_OWN_ID }] }))
+    window.history.replaceState(null, '', deviceUrl('Vendor_Mill_07'))
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })

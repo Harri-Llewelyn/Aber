@@ -3,7 +3,8 @@ import {
   deviceSparkplugId,
   gatewaySparkplugId,
   isSparkplugId,
-  effectiveSparkplugId,
+  deviceIds,
+  deviceIdentifiers,
   sparkplugGroupProblem,
   SPARKPLUG_ID_LENGTH
 } from '../utils/sparkplugId';
@@ -44,27 +45,70 @@ describe('sparkplug wire identifiers', () => {
     expect(isSparkplugId(null)).toBe(false);
   });
 
-  describe('effectiveSparkplugId', () => {
-    it('prefers what the device actually published over the id it was issued', () => {
-      // A vendor device with a factory-preset id cannot be made to publish an issued one.
-      expect(effectiveSparkplugId({
-        id: UUID,
-        sparkplug_id: 'devccd1994488054c11ae66e',
-        reported_identity: 'devaaaaaaaaaaaaaaaaaaaaa'
-      })).toBe('devaaaaaaaaaaaaaaaaaaaaa');
+  describe('deviceIds', () => {
+    const ISSUED = 'devccd1994488054c11ae66e';
+
+    it('gives a device that publishes its own id both, the issued one first', () => {
+      // A vendor device with a factory-preset id cannot be made to publish an issued one. Its
+      // readings are still stored under the issued id.
+      expect(deviceIds({
+        id: UUID, sparkplug_id: ISSUED,
+        reported_identity: 'Vendor_Press_07', identity_source: 'reported_identity'
+      })).toEqual({ issued: ISSUED, published: 'Vendor_Press_07' });
     });
 
-    it('falls back to the stored issued id', () => {
-      expect(effectiveSparkplugId({ id: UUID, sparkplug_id: 'devccd1994488054c11ae66e' }))
-        .toBe('devccd1994488054c11ae66e');
+    it('gives a device addressed by its Factory+ Instance_UUID its UUID as the published id', () => {
+      expect(deviceIds({ id: UUID, sparkplug_id: ISSUED, identity_source: 'instance_uuid' }))
+        .toEqual({ issued: ISSUED, published: UUID });
     });
 
-    it('derives from the UUID when the row was fetched without the column', () => {
-      expect(effectiveSparkplugId({ id: UUID })).toBe('devccd1994488054c11ae66e');
+    it('drops an id the device once reported when it now publishes its issued one', () => {
+      expect(deviceIds({
+        id: UUID, sparkplug_id: ISSUED,
+        reported_identity: 'Vendor_Press_07', identity_source: 'sparkplug_id'
+      })).toEqual({ issued: ISSUED, published: null });
+    });
+
+    it('falls back to the reported id for a device not born since the source was recorded', () => {
+      expect(deviceIds({ id: UUID, sparkplug_id: ISSUED, reported_identity: 'Vendor_Press_07' }))
+        .toEqual({ issued: ISSUED, published: 'Vendor_Press_07' });
+      expect(deviceIds({ id: UUID, sparkplug_id: ISSUED, identity_source: null }))
+        .toEqual({ issued: ISSUED, published: null });
+    });
+
+    it('gives no published id when the reported one is the issued one', () => {
+      // A device re-quarantined behind the wrong gateway records the id it published, its own.
+      expect(deviceIds({ id: UUID, sparkplug_id: ISSUED, reported_identity: ISSUED }).published)
+        .toBeNull();
+    });
+
+    it('derives the issued id from the UUID when the row was fetched without the column', () => {
+      expect(deviceIds({ id: UUID }).issued).toBe(ISSUED);
+      expect(deviceIds({ asset_id: UUID }).issued).toBe(ISSUED);
     });
 
     it('is empty for a missing device', () => {
-      expect(effectiveSparkplugId(null)).toBe('');
+      expect(deviceIds(null)).toEqual({ issued: '', published: null });
+    });
+  });
+
+  describe('deviceIdentifiers', () => {
+    it('names a device by its UUID, its issued id and the id it publishes under', () => {
+      expect(deviceIdentifiers({
+        asset_id: UUID, sparkplug_id: 'devccd1994488054c11ae66e',
+        reported_identity: 'Vendor_Press_07', identity_source: 'reported_identity'
+      })).toEqual([UUID, 'devccd1994488054c11ae66e', 'Vendor_Press_07']);
+    });
+
+    it('keeps an id the device reported once, which a link may still carry', () => {
+      expect(deviceIdentifiers({
+        asset_id: UUID, sparkplug_id: 'devccd1994488054c11ae66e',
+        reported_identity: 'Vendor_Press_07', identity_source: 'sparkplug_id'
+      })).toContain('Vendor_Press_07');
+    });
+
+    it('is empty for a missing device', () => {
+      expect(deviceIdentifiers(undefined)).toEqual([]);
     });
   });
 });

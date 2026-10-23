@@ -230,6 +230,34 @@ class TheProjection(unittest.TestCase):
         entry = documents()["device"]["devices"][1]
         self.assertTrue(entry["quarantined"])
 
+    def test_a_device_publishing_its_own_id_is_addressed_by_that_id(self):
+        """A consumer meeting its traffic looks it up by the id in the topic, not the issued one."""
+        row = dict(DEVICE_ROWS[0], reported_identity="VND-7731-AX", identity_source="reported_identity")
+        entry = documents(devices=[row])["device"]["devices"][0]
+        self.assertEqual(entry["address"]["device_id"], "VND-7731-AX")
+
+    def test_the_published_id_follows_how_ingestion_last_resolved_the_device(self):
+        uuid, issued = DEVICE_ROWS[0]["id"], DEVICE_ROWS[0]["sparkplug_id"]
+        cases = (
+            ({"identity_source": "instance_uuid"}, uuid),
+            # It reported its own id once and now publishes its issued one.
+            ({"reported_identity": "VND-7731-AX", "identity_source": "sparkplug_id"}, issued),
+            # No birth since the source was recorded: the reported id stands.
+            ({"reported_identity": "VND-7731-AX", "identity_source": None}, "VND-7731-AX"),
+            ({"identity_source": None}, issued),
+        )
+        for over, expected in cases:
+            with self.subTest(over=over):
+                entry = documents(devices=[dict(DEVICE_ROWS[0], **over)])["device"]["devices"][0]
+                self.assertEqual(entry["address"]["device_id"], expected)
+
+    def test_it_reads_the_columns_the_published_id_needs(self):
+        supabase = FakeSupabase()
+        directory_publish.directory_documents(supabase)
+        columns = supabase.query_for("devices").columns.split(",")
+        self.assertIn("reported_identity", columns)
+        self.assertIn("identity_source", columns)
+
     def test_a_device_with_no_schema_reports_an_empty_list(self):
         self.assertEqual(documents()["device"]["devices"][1]["schemas"], [])
 

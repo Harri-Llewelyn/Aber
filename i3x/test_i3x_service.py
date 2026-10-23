@@ -3652,6 +3652,101 @@ class TestQualityOnTheStagingPath(_QualityCase):
             self.assertTrue(any("dev-one/Axes/X/POSITION" in batch for batch in self.staged))
 
 
+class TestADevicePublishingItsOwnIdIsServedUnderItsIssuedOne(_QualityCase):
+    """
+    A device admitted from Quarantine under its own Sparkplug id publishes under that id, while its
+    elementId is the issued `sparkplug_id`. The MQTT side maps the topic's device id to the issued
+    one before it records a value, a birth or death, or a push, as ingestion resolves it: the issued
+    id, then the device's own id behind its edge node (or behind none), then its Instance_UUID.
+    """
+
+    UUID = "2b000000-0000-4000-8000-000000000001"
+
+    def rows(self):
+        rows = _quality_rows({"status": "ONLINE"}, {"status": "ONLINE", "last_heartbeat": _iso_ago(5)})
+        for row in rows["devices"]:
+            if row["sparkplug_id"] == "dev-one":
+                row["reported_identity"] = "VND-ONE"
+            if row["sparkplug_id"] == "dev-bare":
+                row["reported_identity"] = "VND-BARE"
+        rows["devices"].append({"id": self.UUID, "sparkplug_id": "dev-uuid", "name": "Addressed by UUID",
+                                "gateway_id": "g1", "status": "ONLINE"})
+        rows["device_locations"].append(
+            {"device_id": self.UUID, "effective_cell_id": CELL_A, "effective_area_id": None})
+        return rows
+
+    def ddata(self, device, value=13.0, node="gwy-1"):
+        return _spb("DDATA", node=node, device=device,
+                    metrics=[{"name": "Axes/X/POSITION", "value": value}])
+
+    def test_a_value_published_under_its_own_id_is_read_under_the_issued_one(self):
+        rows = self.rows()
+        self.directory(rows)
+        i3x_service.on_message(None, None, self.ddata("VND-ONE"))
+        got = self.read(rows, "dev-one/Axes/X/POSITION")["dev-one/Axes/X/POSITION"]
+        self.assertEqual((got["value"], got["quality"]), (13.0, "Good"))
+        # And it moves on: the read is not frozen at the first value held.
+        i3x_service.on_message(None, None, self.ddata("VND-ONE", 14.0))
+        self.assertEqual(self.read(rows, "dev-one/Axes/X/POSITION")["dev-one/Axes/X/POSITION"]["value"],
+                         14.0)
+        self.assertEqual(i3x_service.metrics_for("VND-ONE"), {})
+
+    def test_a_subscription_to_the_device_receives_it(self):
+        self.directory(self.rows())
+        self.watch("dev-one")
+        i3x_service.on_message(None, None, self.ddata("VND-ONE"))
+        staged = self.last_staged()
+        self.assertEqual(set(staged), {"dev-one", "dev-one/Axes/X/POSITION"})
+        self.assertEqual(staged["dev-one/Axes/X/POSITION"]["value"], 13.0)
+
+    def test_a_death_and_a_birth_under_its_own_id_move_the_devices_liveness(self):
+        rows = self.rows()
+        self.directory(rows)
+        i3x_service.on_message(None, None, _spb("DDEATH", device="VND-ONE"))
+        self.assertEqual(self.read(rows, "dev-one")["dev-one"]["quality"], "Uncertain")
+        i3x_service.on_message(None, None, _spb("DBIRTH", device="VND-ONE"))
+        self.assertEqual(self.read(rows, "dev-one")["dev-one"]["quality"], "Good")
+        self.assertNotIn("VND-ONE", i3x_service._devices_heard)
+
+    def test_its_own_id_is_its_only_behind_its_own_edge_node(self):
+        self.directory(self.rows())
+        i3x_service.on_message(None, None, self.ddata("VND-ONE", node="gwy-other"))
+        self.assertEqual(i3x_service.metrics_for("dev-one")["Axes/X/POSITION"]["value"], 12.5)
+        self.assertEqual(i3x_service.metrics_for("VND-ONE")["Axes/X/POSITION"]["value"], 13.0)
+
+    def test_an_unbound_devices_own_id_is_its_behind_any_node(self):
+        self.directory(self.rows())
+        i3x_service.on_message(None, None, self.ddata("VND-BARE", node="gwy-other"))
+        self.assertEqual(i3x_service.metrics_for("dev-bare")["Axes/X/POSITION"]["value"], 13.0)
+
+    def test_an_instance_uuid_in_the_topic_is_the_device_it_names(self):
+        self.directory(self.rows())
+        i3x_service.on_message(None, None, self.ddata(self.UUID.upper()))
+        self.assertEqual(i3x_service.metrics_for("dev-uuid")["Axes/X/POSITION"]["value"], 13.0)
+
+    def test_an_issued_id_wins_over_another_devices_own_id(self):
+        rows = self.rows()
+        for row in rows["devices"]:
+            if row["sparkplug_id"] == "dev-two":
+                row["reported_identity"] = "dev-one"
+        self.directory(rows)
+        i3x_service.on_message(None, None, self.ddata("dev-one"))
+        self.assertEqual(i3x_service.metrics_for("dev-one")["Axes/X/POSITION"]["value"], 13.0)
+        self.assertEqual(i3x_service.metrics_for("dev-two"), {})
+
+    def test_an_id_the_directory_does_not_hold_is_kept_as_it_arrived(self):
+        self.directory(self.rows())
+        i3x_service.on_message(None, None, self.ddata("never-registered"))
+        self.assertEqual(i3x_service.metrics_for("never-registered")["Axes/X/POSITION"]["value"], 13.0)
+
+    def test_a_birth_under_its_own_id_types_the_issued_ids_metrics(self):
+        self.directory(self.rows())
+        i3x_service.on_message(None, None, _spb(
+            "DBIRTH", device="VND-ONE", metrics=[{"name": "Vendor/COUNT", "value": 5, "datatype": 3}]))
+        self.assertEqual(i3x_service._birth_datatypes()["dev-one"]["Vendor/COUNT"], 3)
+        self.assertNotIn("VND-ONE", i3x_service._birth_datatypes())
+
+
 class TestCurrentValuesAreFilledFromTheHistorian(_QualityCase):
     """
     A value read fills what the MQTT cache lacks for a device from `telemetry_latest`, read as the
@@ -4931,6 +5026,16 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertIn("CONTROL_METRIC_PREFIXES", mine)
         self.assertIn("CONTROL_METRIC_PREFIXES", theirs)
         self.assertIn("MAX_ALIASES_PER_NODE", mine)
+
+    def test_the_instance_uuid_shape_agrees_with_ingestion(self):
+        here = Path(__file__).resolve().parent
+        shape = re.compile(r'^UUID_PATTERN = re\.compile\(\s*r"([^"]+)"', re.M)
+        mine = shape.search((here / "i3x_service.py").read_text(encoding="utf-8"))
+        theirs = shape.search((INGESTION_DIR / "ingestion.py").read_text(encoding="utf-8"))
+        self.assertIsNotNone(mine)
+        self.assertIsNotNone(theirs)
+        self.assertEqual(mine.group(1), theirs.group(1),
+                         "UUID_PATTERN has drifted between i3x_service.py and ingestion.py")
 
     def _integer_decoder(self, path):
         """`sparkplug_integer_value` as code (docstring aside) and `SPARKPLUG_SIGNED_INT_BITS` as data."""

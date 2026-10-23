@@ -4128,7 +4128,10 @@ exist — the same rule the semantic-id namespace follows.
 
 Two identity mappings need no new columns, which is why this is an adapter and not a migration:
 `Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
-`(gateways.sparkplug_group, gateways.sparkplug_id)`.
+`(gateways.sparkplug_group, gateways.sparkplug_id)`. A device's `device_id` in that address is the id
+in its topic: its own id (`reported_identity`) or its `Instance_UUID` where `identity_source` says
+ingestion last resolved it by one, else its issued `sparkplug_id`. `/v1/address/{group}/{node}/{device}`
+finds a device by any id ingestion resolves it by: the issued one, the one it reported, or its UUID.
 
 **The Directory also has an MQTT half**, and it is off by default:
 [The Directory on MQTT](../ingestion/README.md#the-directory-on-mqtt) publishes the same projection
