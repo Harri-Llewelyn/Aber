@@ -45,13 +45,14 @@ USER node-red
 # Identity comes from the nodered-userinfo edge function instead. Same arrangement as
 # grafana.ini's [auth.generic_oauth], and the reasoning is spelled out there.
 #
-# THE OVERRIDES lift two packages in Node-RED's own tree to the patches that fix their advisories,
-# each keyed to the major it replaces: axios, and Express's proxy-addr (CVE-2026-90711, critical).
-# Each goes when the pinned base ships that version; the release scan says.
+# THE OVERRIDES lift three packages in Node-RED's own tree to the patches that fix their advisories,
+# each keyed to the major it replaces: axios; axios's follow-redirects (CVE-2026-111755 and
+# CVE-2026-111756, high); and Express's proxy-addr (CVE-2026-90711, critical). Each goes when the
+# pinned base ships that version; the release scan says.
 RUN node -e ' \
       const f = "/usr/src/node-red/package.json"; \
       const p = JSON.parse(require("fs").readFileSync(f)); \
-      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "proxy-addr@^2": "2.0.8" }; \
+      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "follow-redirects@^1": "1.16.1", "proxy-addr@^2": "2.0.8" }; \
       require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n");' \
  && npm install --no-audit --no-fund --no-update-notifier --save \
       passport-oauth2@1.8.0 \
