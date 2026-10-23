@@ -4,7 +4,7 @@ Use this page to record what the broker actually carried, and play it back later
 
 ## What the controls do
 
-- **The Gateways and Devices tabs** choose what the list holds. You record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. There is no capture of the whole broker.
+- **The Gateways and Devices tabs** choose what the list holds. You record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. It records the device under its Sparkplug ID, its Published ID if it has one, and its UUID. There is no capture of the whole broker.
 - **The search box** finds a name or a Sparkplug ID. **The Stored filter** beside it narrows the list to subjects with or without a capture. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
 - **The columns** are the subject, its Sparkplug ID and its Type (Remote, Third-party, Host or Simulated). The last column is the one stored capture, with its messages, size and date. **UPLOADED** marks a file that was not recorded here. **NO BIRTH** marks a capture with no birth certificate in it.
 - **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
@@ -18,7 +18,7 @@ Use this page to record what the broker actually carried, and play it back later
 
 ## What the states mean
 
-A recording is **Queued** until the ingestion service picks it up. Then it is **Recording**, and then it is stored. A recording can also end **failed** or **cancelled**. Either shows here for fifteen minutes, or until you dismiss it. A device that sent nothing during its recording fails it, and its stored capture is kept.
+A recording is **Queued** until the ingestion service picks it up. Then it is **Recording**, and then it is stored. A recording can also end **failed** or **cancelled**. Either shows here for fifteen minutes, or until you dismiss it. A device that sent nothing during its recording fails it, and its stored capture is kept. The failure names the IDs the recording listened for. Compare them with the ID the device publishes under.
 
 A capture holds only the window it ran for. It does not reach back before it was started. It stops at the duration, 100,000 messages or 50 MiB, whichever comes first. If a cap stopped it before the duration was up, the details panel says it was cut short.
 
