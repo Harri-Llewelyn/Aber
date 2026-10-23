@@ -9,6 +9,9 @@ seeded Playback gateway (0002).
   * ensure_shadow_devices() refuses a caller who may not manage captures, a capture that does not
     exist and a capture of a replay lane; it mints each lane on the Playback gateway with the
     origin's policy and schemas, and a later capture of the same device reuses the lane.
+  * A device recorded under its own id or its UUID, in any letter case, gets its lane, and the job
+    takes that map (0201). An own id names the device behind the capture's own gateway, the
+    capture's own device first, or a device bound to none, never one behind another gateway alone.
   * start_playback_job() refuses, by SQLSTATE, a missing capture or gateway, a gateway that is not
     simulated, one that is simulated but not the Playback gateway, an archived one, one holding no
     broker credential, and a second playback onto a target already busy. It clamps the speed.
@@ -296,6 +299,132 @@ class EnsureShadowDevices(Base):
         self.assertEqual(
             str(self._one("SELECT gateway_id FROM public.devices WHERE sparkplug_id = %s;",
                           (mapping[self.device_wire],))[0]), PLAYBACK_GATEWAY)
+
+
+# =================================================================================================
+# A recorded device id, resolved as ingestion resolves the wire id (0201)
+# =================================================================================================
+class ARecordedIdIsResolvedAsIngestionResolvesIt(Base):
+    """
+    A capture keeps each device under the id on the wire, which for a device admitted from
+    Quarantine is its own (reported_identity) and for one addressed by its Instance_UUID is its UUID.
+    An own id is unique only behind one edge node (Sparkplug 3.0.0
+    tck-id-topic-structure-namespace-unique-device-id,
+    tck-id-topic-structure-namespace-duplicate-device-id-across-edge-node).
+    """
+
+    ENSURE = "SELECT public.ensure_shadow_devices(%s);"
+    START = "SELECT public.start_playback_job(%s, %s, %s::jsonb, 1.0);"
+
+    def setUp(self):
+        super().setUp()
+        self.own = f"Press_{uuid.uuid4().hex[:8]}"
+        self.gw, _ = self._gateway()
+        self.device, self.device_wire = self._device(self.gw, name="Behaviour own id")
+        self.by_uuid, _ = self._device(self.gw, name="Behaviour by uuid")
+        # The same own id behind another edge node.
+        self.other_gw, _ = self._gateway()
+        self.twin, _ = self._device(self.other_gw, name="Behaviour twin")
+        for device in (self.device, self.twin):
+            self.cur.execute("UPDATE public.devices SET reported_identity = %s, "
+                             "identity_source = 'reported_identity' WHERE id = %s;",
+                             (self.own, device))
+        self.cur.execute("UPDATE public.devices SET identity_source = 'instance_uuid' "
+                         "WHERE id = %s;", (self.by_uuid,))
+
+    def _capture_of(self, gateway_id, device_ids, device_id=None):
+        """A stored capture of a gateway, or of `device_id` recorded through `gateway_id`."""
+        self.cur.execute(
+            "INSERT INTO public.captures (subject_kind, gateway_id, device_id, subject_sparkplug_id, "
+            "storage_path, size_bytes, message_count, manifest) "
+            "VALUES (%s, %s, %s, 'behaviour', %s, 1, 1, %s::jsonb) RETURNING id;",
+            ("device" if device_id else "gateway", gateway_id, device_id,
+             f"behaviour/{uuid.uuid4()}.json", json.dumps({"device_ids": list(device_ids)})),
+        )
+        return str(self.cur.fetchone()[0])
+
+    def _lanes(self, capture):
+        """The map ensure_shadow_devices() answers, as {recorded id: the device its lane stands for}."""
+        mapping = self._call("Shopfloor_Manager", self.ENSURE, (capture,), keep=True)[0][0]
+        return mapping, {
+            key: str(self._one("SELECT shadow_of FROM public.devices WHERE sparkplug_id = %s;",
+                               (lane,))[0])
+            for key, lane in mapping.items()}
+
+    def test_a_device_recorded_under_its_own_id_gets_its_lane(self):
+        _, stands_for = self._lanes(self._capture_of(self.gw, [self.own]))
+        self.assertEqual(stands_for, {self.own: self.device})
+
+    def test_a_device_recorded_under_its_uuid_gets_its_lane_in_any_letter_case(self):
+        for recorded in (self.by_uuid, self.by_uuid.upper()):
+            with self.subTest(recorded=recorded):
+                self.cur.execute("SAVEPOINT letter_case;")
+                try:
+                    _, stands_for = self._lanes(self._capture_of(self.gw, [recorded]))
+                    self.assertEqual(stands_for, {recorded: self.by_uuid})
+                finally:
+                    self.cur.execute("ROLLBACK TO SAVEPOINT letter_case;")
+
+    def test_every_id_of_one_device_shares_its_lane(self):
+        mapping, stands_for = self._lanes(
+            self._capture_of(self.gw, [self.device_wire, self.own, self.device.upper()]))
+        self.assertEqual(set(stands_for.values()), {self.device})
+        self.assertEqual(len(set(mapping.values())), 1)
+
+    def test_an_own_id_names_the_device_behind_the_captures_gateway(self):
+        _, here = self._lanes(self._capture_of(self.gw, [self.own]))
+        _, there = self._lanes(self._capture_of(self.other_gw, [self.own]))
+        self.assertEqual((here, there), ({self.own: self.device}, {self.own: self.twin}))
+
+    def test_a_device_capture_names_its_own_device_first(self):
+        """Recorded through the twin's gateway, as after the device moved: the subject still wins."""
+        _, stands_for = self._lanes(self._capture_of(self.other_gw, [self.own], device_id=self.device))
+        self.assertEqual(stands_for, {self.own: self.device})
+
+    def test_an_own_id_behind_another_gateway_alone_is_not_known(self):
+        stranger, _ = self._gateway()
+        with self.assertRaises(pg_errors.ForeignKeyViolation) as ctx:
+            self._lanes(self._capture_of(stranger, [self.own]))
+        self.assertIn(self.own, str(ctx.exception))
+
+    def test_a_device_bound_to_no_gateway_is_found_by_its_own_id(self):
+        loose = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO public.devices (id, name, status, reported_identity) "
+                         "VALUES (%s, 'Behaviour unbound', 'OFFLINE', 'Loose_01');", (loose,))
+        _, stands_for = self._lanes(self._capture_of(self.gw, ["Loose_01"]))
+        self.assertEqual(stands_for, {"Loose_01": loose})
+
+    def test_an_id_shaped_like_a_uuid_that_names_nothing_is_unknown_not_an_error(self):
+        for recorded in (str(uuid.uuid4()).upper(), "00000000-0000-4000-8000-00000000000g"):
+            with self.subTest(recorded=recorded):
+                self.cur.execute("SAVEPOINT shape;")
+                try:
+                    with self.assertRaises(pg_errors.ForeignKeyViolation):
+                        self._lanes(self._capture_of(self.gw, [recorded]))
+                finally:
+                    self.cur.execute("ROLLBACK TO SAVEPOINT shape;")
+
+    def test_the_job_takes_the_map_and_checks_each_lane_against_the_device_it_resolves(self):
+        capture = self._capture_of(self.gw, [self.own, self.by_uuid.upper()])
+        mapping, _ = self._lanes(capture)
+        self.cur.execute("SELECT public.record_gateway_credential_issued_by_service(%s);",
+                         (PLAYBACK_GATEWAY,))
+        for role in MANAGERS:
+            with self.subTest(role=role):
+                self.assertIsNotNone(
+                    self._call(role, self.START, (capture, PLAYBACK_GATEWAY, json.dumps(mapping)))[0][0])
+        swapped = {self.own: mapping[self.by_uuid.upper()],
+                   self.by_uuid.upper(): mapping[self.own]}
+        with self.assertRaisesRegex(pg_errors.CheckViolation, "not the device the recording names"):
+            self._call("Shopfloor_Manager", self.START,
+                       (capture, PLAYBACK_GATEWAY, json.dumps(swapped)))
+
+    def test_only_the_gates_may_call_the_resolver(self):
+        for role in ("anon", "authenticated", "service_role"):
+            with self.subTest(role=role):
+                self.assertFalse(self._one(
+                    "SELECT has_function_privilege(%s, "
+                    "'public.captured_device_id(uuid, uuid, text)', 'EXECUTE');", (role,))[0])
 
 
 # =================================================================================================

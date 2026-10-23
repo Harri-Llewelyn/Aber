@@ -6,6 +6,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconPlay, IconShieldAlert } from '../common/Icons'
 import { plural } from '../../utils/format'
+import { deviceIdKey } from '../../utils/sparkplugId'
 
 /**
  * Speeds offered, rather than a free number. Speed divides both the send schedule and the timestamp
@@ -132,8 +133,11 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
   // A lane stands in for a device this site has; one recorded elsewhere has none to stand in for,
-  // and ensure_shadow_devices() refuses the whole capture.
-  const unknown = knownDeviceIds ? (capturedDevices || []).filter(d => !knownDeviceIds.has(d)) : []
+  // and ensure_shadow_devices() refuses the whole capture. A device may be recorded under any id
+  // it publishes: its issued id, its own id or its UUID.
+  const unknown = knownDeviceIds
+    ? (capturedDevices || []).filter(d => !knownDeviceIds.has(deviceIdKey(d)))
+    : []
 
   // playback.enabled off: no worker exists to run a job, so none is queued.
   const deployed = playbackWorkerDeployed()

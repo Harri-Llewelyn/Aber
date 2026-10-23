@@ -25,6 +25,7 @@ Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables 
 
 import io
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -91,6 +92,10 @@ _BIRTH_TYPES = ("NBIRTH",)
 # identity list (IDENTITY_METRICS) and cannot be imported here: it imports this module.
 _IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
+# A device's Instance_UUID on the wire, in any letter case: ingestion.py's UUID_PATTERN.
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
 
 def is_machine_metric(name):
     """False for bdSeq, Node Control/*, Device Control/* and the identity metrics."""
@@ -101,14 +106,24 @@ def is_machine_metric(name):
 class _JobState:
     """The capture in flight. One at a time, enforced by a partial unique index in the database."""
 
-    def __init__(self, job):
+    def __init__(self, job, reported_identity=None, reported_unread=False):
         self.job = job
         self.id = job["id"]
         # The gateway's configured group, from the job. Only the rebirth request uses it, and only
         # when ingestion has not recorded the group the node publishes under.
         self.group = job["sparkplug_group"]
         self.edge_node = job["edge_node_id"]
+        # A device capture's subject, by its issued id. It is also recorded under the other ids
+        # ingestion resolves it by: its own `reported_identity`, and its UUID in any letter case.
         self.device = job.get("device_sparkplug_id")
+        uuid = job.get("device_id") if self.device else None
+        self.device_uuid = uuid.lower() if uuid and _UUID_PATTERN.match(uuid) else None
+        self.device_reported = None
+        if self.device and reported_identity and reported_identity != self.device \
+                and reported_identity.lower() != self.device_uuid:
+            self.device_reported = reported_identity
+        # The device row could not be read when the job started, so its own id is not listened for.
+        self.reported_unread = bool(self.device and reported_unread)
         self.storage_path = job["storage_path"]
         # The subject's folder in the bucket: <subject>/<job id>.json.
         self.subject = self.storage_path.split("/")[0]
@@ -159,6 +174,9 @@ class _JobState:
 
         THE GROUP IS NOT COMPARED. Ingestion accepts an edge node under any group, by its
         sparkplug_id alone (unique site-wide), so a capture records the same traffic.
+
+        A device-level message is the subject's under any id the device publishes behind its own
+        edge node (`is_subject_device()`).
         """
         if len(parts) < 4 or parts[3] != self.edge_node:
             return False
@@ -168,7 +186,24 @@ class _JobState:
             # A node-level message on the subject's own edge node: the birth certificate and the
             # gateway heartbeats that frame it.
             return parts[2] in _NODE_TYPES
-        return parts[4] == self.device
+        return self.is_subject_device(parts[4])
+
+    def is_subject_device(self, segment):
+        """Is this topic device segment one of the ids the subject device publishes under?"""
+        return (segment == self.device or segment == self.device_reported
+                or (self.device_uuid is not None and segment.lower() == self.device_uuid))
+
+    def listened_for(self):
+        """The ids a device capture records its subject under, as the failure messages name them."""
+        ids = ["the issued id %s" % self.device]
+        if self.device_reported:
+            ids.append("its own id %s" % self.device_reported)
+        if self.device_uuid:
+            ids.append("its UUID %s in any letter case" % self.device_uuid)
+        said = ids[0] if len(ids) == 1 else "%s or %s" % (", ".join(ids[:-1]), ids[-1])
+        if self.reported_unread:
+            said += " (its own id, if it has one, could not be read when the recording started)"
+        return said
 
     # ------------------------------------------------------------------------------------------
     def append(self, topic, raw, msg_type):
@@ -227,7 +262,7 @@ class _JobState:
         self.edge_nodes.setdefault(parts[3], None)
         if len(parts) > 4:
             self.devices.setdefault(parts[4], None)
-            if parts[4] == self.device:
+            if self.device and self.is_subject_device(parts[4]):
                 self.device_published = True
         for metric in payload_dict.get("metrics", ()):
             name = metric.get("name")
@@ -395,10 +430,28 @@ def _claim():
     return res.data or None
 
 
+def _reported_identity(device_id):
+    """
+    The id a device reported as its own (None when it has none), and whether the read failed. A
+    failed read is not retried: the capture still records the device under its issued id and UUID.
+    """
+    try:
+        res = _supabase.table("devices").select("reported_identity").eq("id", device_id).execute()
+    except Exception as err:
+        logger.warning("Capture: could not read device %s's own id, so its capture listens only "
+                       "for its issued id and its UUID: %s", device_id, err)
+        return None, True
+    rows = res.data or []
+    return (rows[0].get("reported_identity") if rows else None), False
+
+
 def _begin(job_row):
     """Arm a claimed job, and ask the edge node to say who it is."""
     global _active
-    state = _JobState(job_row)
+    reported, unread = None, False
+    if job_row.get("device_sparkplug_id") and job_row.get("device_id"):
+        reported, unread = _reported_identity(job_row["device_id"])
+    state = _JobState(job_row, reported_identity=reported, reported_unread=unread)
 
     # THE BIRTH CERTIFICATE IS REQUESTED, NOT QUERIED, because nothing stores a raw birth payload:
     # `asset_config` holds birth PARAMETERS and `devices.last_birth_metrics` holds metric NAMES, and
@@ -420,7 +473,8 @@ def _begin(job_row):
 
     logger.info(
         "Capture %s started: %sedge node %s, caps %ds / %d messages / %d bytes%s",
-        state.id, "device %s on " % state.device if state.device else "", state.edge_node,
+        state.id, "device %s (%s) on " % (state.device, state.listened_for()) if state.device else "",
+        state.edge_node,
         state.max_seconds, state.max_messages, state.max_bytes,
         "" if state.rebirth_requested
         else " (the rebirth request could not be published; it may record no birth)",
@@ -447,14 +501,16 @@ def _finish(state, reason, stop=None):
         _settle_failure(state, refusal)
         return
 
+    # A device capture's subject, by the id it was heard under.
+    heard = next((d for d in state.devices if state.is_subject_device(d)), None) \
+        if state.device else None
     head = capture.file_head({
         "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {
             "broker": "%s:%d" % (capture.MQTT_HOST, capture.MQTT_PORT),
             # The topic `capture.py record` would have used, so the file reads the same either way.
-            "topic": "spBv1.0/+/+/%s%s" % (
-                state.edge_node, "/" + state.device if state.device else "/#"),
+            "topic": "spBv1.0/+/+/%s%s" % (state.edge_node, "/" + heard if heard else "/#"),
         },
         # The first message's own clock, or its receipt: the offsets count from that receipt.
         "capture_epoch_ms": state.epoch_ms,
@@ -520,18 +576,19 @@ def _nothing_recorded(state):
         # An empty capture is almost always a credential, ACL or identity problem rather than a
         # quiet fleet, and storing the file anyway would defer that discovery to playback.
         return (
-            "recorded no messages from edge node %s%s, in any Sparkplug group. Either nothing "
+            "recorded no messages from edge node %s, in any Sparkplug group%s. Either nothing "
             "published during the window, or the subject's ids do not match what is on the wire."
-            % (state.edge_node, " for device " + state.device if state.device else "")
+            % (state.edge_node, ", and none from device %s under %s" % (
+                state.device, state.listened_for()) if state.device else "")
         )
     # A device capture keeps its edge node's NBIRTH, which the capture's own rebirth request always
     # produces, so only a message carrying the device's segment shows the device published.
     if state.device and not state.device_published:
         return (
-            "recorded nothing from device %s: only %d message(s) from its edge node %s arrived. The "
-            "device published nothing during the window. Check that it is switched on and "
-            "publishing, then record again. The stored capture of this device is unchanged."
-            % (state.device, state.count, state.edge_node)
+            "recorded nothing from device %s: only %d message(s) from its edge node %s arrived, and "
+            "none under %s. Check that the device is switched on and publishing under one of "
+            "those ids, then record again. The stored capture of this device is unchanged."
+            % (state.device, state.count, state.edge_node, state.listened_for())
         )
     return None
 

@@ -735,8 +735,9 @@ integers OOM-killed it at the end, which stopped ingestion for every gateway whi
 
 **A capture records its edge node under any Sparkplug group**, as ingestion accepts it
 ([Resolution precedence](#resolution-precedence)): `observe()` matches the node's `sparkplug_id`, and
-a device capture also its device id, never the group. A gateway whose node publishes under a group
-other than its row's ingests normally, so its captures must not come back empty.
+a device capture also the ids its device publishes under (below), never the group. A gateway whose
+node publishes under a group other than its row's ingests normally, so its captures must not come
+back empty.
 
 **A capture opens by asking its edge node to rebirth**, because birth certificates cannot be
 queried: `asset_config` holds birth *parameters* and `devices.last_birth_metrics` holds metric
@@ -806,6 +807,22 @@ progress gate says so (`ingest_report_capture_progress()`).
 **A device capture must hold the device.** It records its edge node's `NBIRTH` too, and the rebirth
 request it opens with always produces one. So a device that published nothing during the window
 fails the job, as an empty capture does, and the stored capture of that device is kept.
+
+**A device capture hears its device under every id it publishes.** Not every device publishes its
+issued `sparkplug_id`. One admitted from Quarantine keeps its own id, and one addressed by its
+Factory+ `Instance_UUID` publishes that ([Resolution precedence](#resolution-precedence)). When the
+job starts, the worker reads the device's `reported_identity` through PostgREST, as the ingestion
+principal. `observe()` then keeps a device-level message whose device segment is the issued id, that
+own id, or the device's UUID in any letter case, behind the subject's own edge node only. A device id
+is unique behind one edge node and may repeat behind another (Sparkplug 3.0.0
+`tck-id-topic-structure-namespace-unique-device-id`,
+`tck-id-topic-structure-namespace-duplicate-device-id-across-edge-node`).
+
+- **A failed read** still listens for the issued id and the UUID, and says so in the log.
+- **The file and the manifest keep the id on the wire**, so a replay's device map is keyed by it.
+  `ensure_shadow_devices()` and `start_playback_job()` resolve it as ingestion does (`0201`).
+- **A recording that heard nothing from the device names the ids it listened for**, so an operator
+  can compare them with the traffic. It no longer says the device published nothing.
 
 **The daemon's authority over the bucket is a policy arm, scoped rather than narrowed.** A capture's
 bytes travel over the Storage REST API, so no `SECURITY DEFINER` function can carry them into a
