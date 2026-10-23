@@ -1131,7 +1131,9 @@ export const SUITES = {
       'whose replay is refused having published nothing; Stop during a replay; and each worker ' +
       'restarted during a job, with kubectl. A fixture Host gateway publishes live from the suite. ' +
       'The two restarts skip, saying why, without kubectl and the k3d-aber context, and restarting ' +
-      'ingestion pauses it for the whole stack. Also runs the broker-captures policies on the real ' +
+      'ingestion pauses it for the whole stack. A second fixture gateway publishes one device under its ' +
+      'own id and one under its UUID, and each is recorded with a device capture and replayed onto ' +
+      'its own lane. Also runs the broker-captures policies on the real ' +
       "storage.objects: the daemon's arm, the worker's arm and a device's folder, which the db lane " +
       'can only run on a stand-in. Needs `playback.enabled`, which values-dev.yaml sets.',
   },

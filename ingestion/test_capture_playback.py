@@ -530,6 +530,29 @@ class PlanTests(unittest.TestCase):
         self.assertIn(DEV_A, plan[-2][1])
         self.assertIn(DEV_B, plan[-1][1])
 
+    def test_a_device_recorded_under_the_id_it_publishes_plays_as_its_lane(self):
+        """
+        A capture keeps the id on the wire: a device's own id, or its UUID in whatever case it
+        publishes. The map ensure_shadow_devices() returns is keyed by that id, and the replay
+        publishes each as its lane, with the Asset_ID claim moved with the topic.
+        """
+        own, uuid = "Press_01", "88000000-0000-4000-8000-0000000000AB"
+        claim = [{"name": "Asset_ID", "datatype": 12, "string_value": own}]
+        msgs = [message(0, "NBIRTH", device=None),
+                message(0, "DBIRTH", device=own, metrics=claim),
+                message(0, "DBIRTH", device=uuid),
+                message(10, "DDATA", device=own, metrics=[{"name": "t", "double_value": 1.0}]),
+                message(20, "DDATA", device=uuid, metrics=[{"name": "t", "double_value": 2.0}])]
+        plan = self._plan(capture=capture_file(msgs, born=False),
+                          device_map={own: DEV_A, uuid: DEV_B})
+        topics = [topic for _, topic, _, _ in plan]
+        self.assertEqual(topics, ["spBv1.0/Aber/NBIRTH/%s" % GW,
+                                  "spBv1.0/Aber/DBIRTH/%s/%s" % (GW, DEV_A),
+                                  "spBv1.0/Aber/DBIRTH/%s/%s" % (GW, DEV_B),
+                                  "spBv1.0/Aber/DDATA/%s/%s" % (GW, DEV_A),
+                                  "spBv1.0/Aber/DDATA/%s/%s" % (GW, DEV_B)])
+        self.assertEqual(plan[1][3]["metrics"][0]["string_value"], DEV_A)
+
 
 class MalformedCaptureTests(unittest.TestCase):
     """

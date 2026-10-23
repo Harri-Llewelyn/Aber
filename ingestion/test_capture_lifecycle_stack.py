@@ -19,6 +19,11 @@ edge node publishes from this process:
   6. the ingestion daemon restarted during a recording: the job fails, the stored capture of the
      subject is kept, and the next capture records.
 
+ADeviceIsRecordedAndReplayedUnderTheIdItPublishes has a second fixture Host gateway publish two
+devices under ids other than their issued ones: one under its own id (`reported_identity`), one
+under its UUID in upper case. Each is recorded with a device capture and replayed, and its readings
+must reach the historian under its own replay lane.
+
 TheBucketAdmitsEachWorkerToItsOwnObject runs the broker-captures policies on the real
 storage.objects, as the storage-policies Job applied them: the daemon's arm, the worker's arm, and
 a device's folder. The db lane runs the same policy text on a stand-in table.
@@ -234,47 +239,13 @@ class TwoDeviceEdgeNode(FixtureEdgeNode):
             time.sleep(0.02)
 
 
-class CaptureLifecycleOnTheStack(unittest.TestCase):
+class StackSteps:
     """
-    Eight stages walked in setUpClass, in order. Each test asserts one step; a test whose stage was
-    not reached fails naming the stage that broke, and one whose stage was skipped skips with why.
+    The steps a stack suite here takes through the Capture page's calls. Each reads the class's
+    `session`, `edge`, `metric`, `playback_gateway`, `paths`, `lanes`, `capture_jobs` and
+    `playback_jobs`, which the suite's fixture sets.
     """
 
-    @classmethod
-    def setUpClass(cls):
-        cls.reached, cls.skipped, cls.broken = [], {}, None
-        cls.session = cls.edge = cls.gateway = None
-        cls.devices = {}
-        cls.paths = set()
-        cls.lanes = {}
-        cls.capture_jobs, cls.playback_jobs = [], []
-        cls.metric = "CAPTURE/LIFECYCLE_" + secrets.token_hex(8).upper()
-        cls.addClassCleanup(cls._clean_up)
-        steps = (cls._fixture, cls._gateway_capture, cls._gateway_replay, cls._duration_cap,
-                 cls._unanswered_rebirth, cls._stop_mid_replay, cls._playback_restart,
-                 cls._ingestion_restart)
-        for stage, step in zip(STAGES, steps):
-            try:
-                step()
-            except unittest.SkipTest as skip:
-                print(f"{stage} skipped: {skip}")
-                cls.skipped[stage] = str(skip)
-                continue
-            except Exception as err:  # noqa: BLE001 -- every test needing the stage reports it
-                traceback.print_exc()
-                cls.broken = f"{stage} did not complete: {err}"
-                return
-            cls.reached.append(stage)
-
-    def _needs(self, stage):
-        if stage in self.skipped:
-            self.skipTest(f"{stage} was skipped: {self.skipped[stage]}")
-        if stage not in self.reached:
-            self.fail(self.broken or f"{stage} was not reached")
-
-    # ------------------------------------------------------------------------------------------
-    # Shared steps
-    # ------------------------------------------------------------------------------------------
     @classmethod
     def _rest_one(cls, path):
         status, rows = cls.session.rest(path)
@@ -303,32 +274,6 @@ class CaptureLifecycleOnTheStack(unittest.TestCase):
         status, rows = cls.session.rest(
             f"/captures?select=id,storage_path&subject_kind=eq.device&device_id=eq.{device_id}")
         return rows if status == 200 else None
-
-    @classmethod
-    def _connect_edge(cls, answer_rebirth=True):
-        deadline = time.monotonic() + BROKER_ACCEPT_TIMEOUT
-        while True:
-            edge = TwoDeviceEdgeNode(cls.gateway["sparkplug_group"], cls.gateway["sparkplug_id"],
-                                     [cls.devices["a"], cls.devices["b"]], cls.password, cls.metric,
-                                     answer_rebirth=answer_rebirth)
-            try:
-                rc = edge.connect(MQTT_HOST, MQTT_PORT)
-            except OSError as err:
-                edge.stop()
-                raise AssertionError(f"cannot reach the broker at {MQTT_HOST}:{MQTT_PORT} ({err})")
-            if rc == 0 and edge.subscribed.is_set():
-                edge.start()
-                return edge
-            edge.stop()
-            if time.monotonic() >= deadline:
-                raise AssertionError(f"the broker did not accept the fixture gateway within "
-                                     f"{BROKER_ACCEPT_TIMEOUT}s (CONNACK {rc})")
-            time.sleep(2)
-
-    @classmethod
-    def _replace_edge(cls, answer_rebirth):
-        cls.edge.stop()
-        cls.edge = cls._connect_edge(answer_rebirth=answer_rebirth)
 
     @classmethod
     def _start_capture(cls, kind, subject_id, seconds, note):
@@ -424,6 +369,90 @@ class CaptureLifecycleOnTheStack(unittest.TestCase):
         return job_id
 
     @classmethod
+    def _historian(cls):
+        """Every row carrying the run's metric, as (asset_id, value) in time order."""
+        try:
+            conn = historian()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT asset_id, val_double FROM telemetry WHERE metric_name = %s "
+                                "ORDER BY time", (cls.metric,))
+                    return [(a, float(v)) for a, v in cur.fetchall()]
+            finally:
+                conn.close()
+        except psycopg2.Error as err:
+            print(f"historian poll retrying: {err}")
+            return []
+
+
+class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
+    """
+    Eight stages walked in setUpClass, in order. Each test asserts one step; a test whose stage was
+    not reached fails naming the stage that broke, and one whose stage was skipped skips with why.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.reached, cls.skipped, cls.broken = [], {}, None
+        cls.session = cls.edge = cls.gateway = None
+        cls.devices = {}
+        cls.paths = set()
+        cls.lanes = {}
+        cls.capture_jobs, cls.playback_jobs = [], []
+        cls.metric = "CAPTURE/LIFECYCLE_" + secrets.token_hex(8).upper()
+        cls.addClassCleanup(cls._clean_up)
+        steps = (cls._fixture, cls._gateway_capture, cls._gateway_replay, cls._duration_cap,
+                 cls._unanswered_rebirth, cls._stop_mid_replay, cls._playback_restart,
+                 cls._ingestion_restart)
+        for stage, step in zip(STAGES, steps):
+            try:
+                step()
+            except unittest.SkipTest as skip:
+                print(f"{stage} skipped: {skip}")
+                cls.skipped[stage] = str(skip)
+                continue
+            except Exception as err:  # noqa: BLE001 -- every test needing the stage reports it
+                traceback.print_exc()
+                cls.broken = f"{stage} did not complete: {err}"
+                return
+            cls.reached.append(stage)
+
+    def _needs(self, stage):
+        if stage in self.skipped:
+            self.skipTest(f"{stage} was skipped: {self.skipped[stage]}")
+        if stage not in self.reached:
+            self.fail(self.broken or f"{stage} was not reached")
+
+    # ------------------------------------------------------------------------------------------
+    # Shared steps, besides StackSteps'
+    # ------------------------------------------------------------------------------------------
+    @classmethod
+    def _connect_edge(cls, answer_rebirth=True):
+        deadline = time.monotonic() + BROKER_ACCEPT_TIMEOUT
+        while True:
+            edge = TwoDeviceEdgeNode(cls.gateway["sparkplug_group"], cls.gateway["sparkplug_id"],
+                                     [cls.devices["a"], cls.devices["b"]], cls.password, cls.metric,
+                                     answer_rebirth=answer_rebirth)
+            try:
+                rc = edge.connect(MQTT_HOST, MQTT_PORT)
+            except OSError as err:
+                edge.stop()
+                raise AssertionError(f"cannot reach the broker at {MQTT_HOST}:{MQTT_PORT} ({err})")
+            if rc == 0 and edge.subscribed.is_set():
+                edge.start()
+                return edge
+            edge.stop()
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"the broker did not accept the fixture gateway within "
+                                     f"{BROKER_ACCEPT_TIMEOUT}s (CONNACK {rc})")
+            time.sleep(2)
+
+    @classmethod
+    def _replace_edge(cls, answer_rebirth):
+        cls.edge.stop()
+        cls.edge = cls._connect_edge(answer_rebirth=answer_rebirth)
+
+    @classmethod
     def _playback_gateway_status(cls):
         return cls._rest_one(f"/gateway_status?select=status,live_status,last_heartbeat"
                              f"&id=eq.{cls.playback_gateway['id']}&limit=1")
@@ -450,22 +479,6 @@ class CaptureLifecycleOnTheStack(unittest.TestCase):
     def _await_playback_gateway(cls, status):
         return poll(cls._playback_gateway_status, lambda r: r.get("status") == status,
                     GATEWAY_STATUS_TIMEOUT, 1)
-
-    @classmethod
-    def _historian(cls):
-        """Every row carrying the run's metric, as (asset_id, value) in time order."""
-        try:
-            conn = historian()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT asset_id, val_double FROM telemetry WHERE metric_name = %s "
-                                "ORDER BY time", (cls.metric,))
-                    return [(a, float(v)) for a, v in cur.fetchall()]
-            finally:
-                conn.close()
-        except psycopg2.Error as err:
-            print(f"historian poll retrying: {err}")
-            return []
 
     # ------------------------------------------------------------------------------------------
     # Stage 1: the fixture
@@ -873,6 +886,299 @@ class CaptureLifecycleOnTheStack(unittest.TestCase):
         job = self.next_recording
         self.assertEqual(job.get("status"), "COMPLETED", f"{job.get('status')}: {job.get('error')}")
         self.assertGreater(job.get("messages") or 0, 0)
+
+
+# -------------------------------------------------------------------------------------------------
+# Devices that publish an id other than their issued one
+# -------------------------------------------------------------------------------------------------
+# Pinned, as above, with first hex blocks no other fixture uses.
+PUBLISHED_GATEWAY_ID = "77000000-0000-4000-8000-000000000001"
+OWN_ID_DEVICE_ID = "78000000-0000-4000-8000-000000000001"
+UUID_DEVICE_ID = "7f000000-0000-4000-8000-000000000001"
+PUBLISHED_STAGES = ("the fixture", "its own id", "its UUID")
+PUBLISHED_FIXTURE = "Fixture for ingestion/test_capture_lifecycle_stack.py. Safe to delete."
+
+
+class ADeviceIsRecordedAndReplayedUnderTheIdItPublishes(StackSteps, unittest.TestCase):
+    """
+    The topic's device id is whatever the edge node publishes (Sparkplug 3.0.0
+    tck-id-topic-structure-namespace-unique-device-id). A device admitted from Quarantine publishes
+    its own id, which its row keeps as `reported_identity`, and one addressed by its Factory+
+    Instance_UUID publishes its UUID. One fixture Host gateway publishes one of each, the UUID in
+    upper case. Each is recorded with a device capture, as the Capture page records it, and
+    replayed, and its readings must reach the historian under its own replay lane.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.reached, cls.broken = [], None
+        cls.session = cls.edge = cls.gateway = None
+        cls.devices, cls.recorded = {}, {}
+        cls.paths = set()
+        cls.lanes = {}
+        cls.capture_jobs, cls.playback_jobs = [], []
+        cls.metric = "CAPTURE/PUBLISHED_" + secrets.token_hex(8).upper()
+        # New each run, so the daemon holds no answer for it from an earlier one.
+        cls.own_id = "PUBLISHED_" + secrets.token_hex(4).upper()
+        cls.wire = {"own": cls.own_id, "uuid": UUID_DEVICE_ID.upper()}
+        cls.addClassCleanup(cls._clean_up)
+        steps = (cls._fixture, lambda: cls._record_and_replay("own"),
+                 lambda: cls._record_and_replay("uuid"))
+        for stage, step in zip(PUBLISHED_STAGES, steps):
+            try:
+                step()
+            except Exception as err:  # noqa: BLE001 -- every test needing the stage reports it
+                traceback.print_exc()
+                cls.broken = f"{stage} did not complete: {err}"
+                return
+            cls.reached.append(stage)
+
+    def _needs(self, stage):
+        if stage not in self.reached:
+            self.fail(self.broken or f"{stage} was not reached")
+
+    # ------------------------------------------------------------------------------------------
+    # Stage 1: a gateway whose devices publish their own id and their UUID
+    # ------------------------------------------------------------------------------------------
+    @classmethod
+    def _fixture(cls):
+        cls.session = Session(sign_in())
+        cls.gateway = cls.session.upsert("gateways", {
+            "id": PUBLISHED_GATEWAY_ID, "name": "CAPTURE_PUBLISHED_Gateway", "deployment": "host",
+            "description": PUBLISHED_FIXTURE,
+        })
+        for key, device_id, name in (("own", OWN_ID_DEVICE_ID, "CAPTURE_PUBLISHED_Own_Id"),
+                                     ("uuid", UUID_DEVICE_ID, "CAPTURE_PUBLISHED_By_Uuid")):
+            cls.devices[key] = cls.session.upsert("devices", {
+                "id": device_id, "name": name, "gateway_id": PUBLISHED_GATEWAY_ID,
+                "description": PUBLISHED_FIXTURE,
+            })
+            if cls.devices[key]["conformance_policy"] != "audit":
+                raise AssertionError(f"fixture device {name} is not under audit")
+        # The row as an approval from Quarantine leaves it, written before the edge node connects
+        # so the daemon never meets the own id unregistered and quarantines a second row.
+        conn = owner_connection()
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for device_id, reported in ((OWN_ID_DEVICE_ID, cls.own_id), (UUID_DEVICE_ID, None)):
+                cur.execute("UPDATE public.devices SET reported_identity = %s WHERE id = %s",
+                            (reported, device_id))
+        conn.close()
+
+        status, rows = cls.session.rest(
+            "/gateways?select=id,name,sparkplug_id&is_shadow=eq.true&is_archived=eq.false&limit=1")
+        if status != 200 or not rows:
+            raise AssertionError(f"no live Playback gateway ({status})")
+        cls.playback_gateway = rows[0]
+        status, body = _request(
+            f"{SUPABASE_URL}/functions/v1/gateway-credential", method="POST",
+            body={"gateway_id": PUBLISHED_GATEWAY_ID},
+            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {cls.session.token}",
+                     "Content-Type": "application/json"},
+        )
+        if status != 200 or not (body or {}).get("password"):
+            raise AssertionError(f"could not issue the fixture gateway's credential: {status} {body}")
+        cls.edge = cls._connect_edge(body["password"])
+
+        def born():
+            status, rows = cls.session.rest(
+                f"/devices?select=id,last_birth_metrics,identity_source,is_quarantined"
+                f"&id=in.({OWN_ID_DEVICE_ID},{UUID_DEVICE_ID})")
+            return rows if status == 200 else []
+        # Its birth recorded, and the id it was resolved by: two writes, in either order.
+        def resolved(rows):
+            return len(rows) == 2 and all(cls.metric in (x.get("last_birth_metrics") or [])
+                                          and x.get("identity_source") for x in rows)
+        cls.born = poll(born, resolved, LIVE_BIRTH_TIMEOUT, 2)
+        if not resolved(cls.born):
+            raise AssertionError(f"the daemon did not resolve both fixture devices' DBIRTH by the "
+                                 f"id each publishes within {LIVE_BIRTH_TIMEOUT}s: {cls.born}")
+
+    @classmethod
+    def _connect_edge(cls, password):
+        devices = [{"sparkplug_id": cls.wire[key], "name": cls.devices[key]["name"]}
+                   for key in ("own", "uuid")]
+        deadline = time.monotonic() + BROKER_ACCEPT_TIMEOUT
+        while True:
+            edge = TwoDeviceEdgeNode(cls.gateway["sparkplug_group"], cls.gateway["sparkplug_id"],
+                                     devices, password, cls.metric)
+            try:
+                rc = edge.connect(MQTT_HOST, MQTT_PORT)
+            except OSError as err:
+                edge.stop()
+                raise AssertionError(f"cannot reach the broker at {MQTT_HOST}:{MQTT_PORT} ({err})")
+            if rc == 0 and edge.subscribed.is_set():
+                edge.start()
+                return edge
+            edge.stop()
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"the broker did not accept the fixture gateway within "
+                                     f"{BROKER_ACCEPT_TIMEOUT}s (CONNACK {rc})")
+            time.sleep(2)
+
+    # ------------------------------------------------------------------------------------------
+    # Stages 2 and 3: a device capture of each, and its replay
+    # ------------------------------------------------------------------------------------------
+    @classmethod
+    def _record_and_replay(cls, key):
+        wire = cls.wire[key]
+        job = cls._record_until_stopped("device", cls.devices[key]["id"], f"capture of {wire}")
+        if job.get("status") != "COMPLETED":
+            raise AssertionError(f"the capture of the device publishing {wire} is "
+                                 f"{job.get('status')}: {job.get('error')}")
+        row = cls._capture_row(job["capture_id"])
+        _, doc = cls._download_json(row["storage_path"])
+
+        cls._ensure_worker_credential()
+        mapping = cls._lanes_for(row["id"])
+        if wire not in mapping:
+            raise AssertionError(f"the lanes were made for {sorted(mapping)}, not {wire}")
+        playback_id = cls._start_playback(row["id"], mapping)
+        timeout = JOB_TIMEOUT + doc.get("duration_ms", 0) / 1000
+        replay = cls._playback_job(playback_id, lambda j: j.get("status") in TERMINAL, timeout, 2)
+        if replay.get("status") not in TERMINAL:
+            raise AssertionError(f"the replay of {wire} did not finish within {timeout:.0f}s: "
+                                 f"{replay}")
+        expected = [reading(m, cls.metric) for m in replayed(doc["messages"])
+                    if msg_type(m) == "DDATA"]
+        lane = mapping[wire]
+        poll(cls._historian, lambda rows: sum(1 for a, _ in rows if a == lane) >= len(expected),
+             HISTORIAN_TIMEOUT, 3)
+        time.sleep(HISTORIAN_SETTLE)
+        cls.recorded[key] = {"job": job, "row": row, "doc": doc, "lane": lane, "replay": replay,
+                             "expected": expected, "rows": cls._historian()}
+
+    # ------------------------------------------------------------------------------------------
+    # Cleanup, in the order the foreign keys want; also after a stage that broke
+    # ------------------------------------------------------------------------------------------
+    @classmethod
+    def _clean_up(cls):
+        if cls.edge is not None:
+            cls.edge.stop()
+        session = cls.session
+        if session is None:
+            return
+        devices = f"{OWN_ID_DEVICE_ID},{UUID_DEVICE_ID}"
+        captures = f"/captures?or=(gateway_id.eq.{PUBLISHED_GATEWAY_ID},device_id.in.({devices}))"
+
+        def attempt(what, action):
+            try:
+                action()
+            except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
+                print(f"cleanup warning: {what}: {err}")
+
+        def settle():
+            """A job left in flight blocks every capture, or every playback, on the stack."""
+            for job_id in cls.capture_jobs:
+                if cls._rest_one(f"/capture_jobs?select=status&id=eq.{job_id}").get("status") in (
+                        "PENDING", "RECORDING"):
+                    session.rpc("request_capture_stop", {"p_job_id": job_id})
+                    cls._capture_job(job_id, lambda j: j.get("status") in TERMINAL or not j,
+                                     FINISH_TIMEOUT)
+            for job_id in cls.playback_jobs:
+                if cls._rest_one(f"/playback_jobs?select=status&id=eq.{job_id}").get("status") in (
+                        "PENDING", "RUNNING"):
+                    session.rpc("request_playback_stop", {"p_job_id": job_id})
+                    cls._playback_job(job_id, lambda j: j.get("status") in TERMINAL or not j,
+                                      JOB_TIMEOUT)
+
+        attempt("settling jobs", settle)
+        lanes = sorted(set(cls.lanes.values()))
+        lane_ids, capture_ids = [], []
+
+        def read_ids():
+            if lanes:
+                status, rows = session.rest(f"/devices?select=id&sparkplug_id=in.({','.join(lanes)})")
+                lane_ids.extend(r["id"] for r in (rows or []) if status == 200)
+            status, rows = session.rest(captures.replace("/captures?", "/captures?select=id&"))
+            capture_ids.extend(r["id"] for r in (rows or []) if status == 200)
+        attempt("reading the lanes and captures", read_ids)
+        for lane in lanes:
+            attempt(f"the lane {lane}", lambda lane=lane: session.rest(
+                f"/devices?sparkplug_id=eq.{lane}", method="DELETE"))
+        attempt("the captures", lambda: session.rest(captures, method="DELETE"))
+        for path in sorted(cls.paths):
+            attempt(f"the stored file {path}", lambda path=path: session.remove(path))
+        for device_id in (OWN_ID_DEVICE_ID, UUID_DEVICE_ID):
+            attempt(f"the device {device_id}", lambda d=device_id: session.rest(
+                f"/devices?id=eq.{d}", method="DELETE"))
+        attempt("the gateway", lambda: session.rest(f"/gateways?id=eq.{PUBLISHED_GATEWAY_ID}",
+                                                    method="DELETE"))
+        if cls.gateway:
+            def account():
+                result = delete_broker_account(cls.gateway["sparkplug_id"])
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+            attempt("the broker account", account)
+
+        def telemetry():
+            conn = historian()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM telemetry WHERE metric_name = %s", (cls.metric,))
+            conn.close()
+        attempt("the historian rows", telemetry)
+
+        def audit():
+            conn = owner_connection()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
+                            ([PUBLISHED_GATEWAY_ID, OWN_ID_DEVICE_ID, UUID_DEVICE_ID, *lane_ids,
+                              *capture_ids, *cls.capture_jobs, *cls.playback_jobs],))
+            conn.close()
+        attempt("the audit rows", audit)
+
+    # ==========================================================================================
+    # The fixture
+    # ==========================================================================================
+    def test_the_daemon_resolved_each_device_by_the_id_it_publishes(self):
+        self._needs("the fixture")
+        sources = {row["id"]: (row["identity_source"], row["is_quarantined"]) for row in self.born}
+        self.assertEqual(sources, {OWN_ID_DEVICE_ID: ("reported_identity", False),
+                                   UUID_DEVICE_ID: ("instance_uuid", False)})
+
+    # ==========================================================================================
+    # The captures
+    # ==========================================================================================
+    def assert_recorded_under(self, key):
+        recorded, wire = self.recorded[key], self.wire[key]
+        self.assertEqual(recorded["row"]["manifest"].get("device_ids"), [wire])
+        segments = {(msg_type(m), m["topic"].split("/")[4] if m["topic"].count("/") >= 4 else None)
+                    for m in recorded["doc"]["messages"]}
+        for expected in (("NBIRTH", None), ("DBIRTH", wire), ("DDATA", wire)):
+            self.assertIn(expected, segments, f"the capture holds no {expected}")
+        self.assertEqual({s for _, s in segments if s}, {wire},
+                         "the capture holds another device's traffic")
+
+    def test_a_device_publishing_its_own_id_is_recorded_under_it(self):
+        self._needs("its own id")
+        self.assert_recorded_under("own")
+
+    def test_a_device_publishing_its_uuid_is_recorded_under_it(self):
+        self._needs("its UUID")
+        self.assert_recorded_under("uuid")
+
+    # ==========================================================================================
+    # The replays
+    # ==========================================================================================
+    def assert_replayed_onto_its_lane(self, key):
+        recorded = self.recorded[key]
+        self.assertEqual(recorded["replay"]["status"], "COMPLETED", recorded["replay"].get("error"))
+        lane = self._rest_one(f"/devices?select=shadow_of&sparkplug_id=eq.{recorded['lane']}")
+        self.assertEqual(lane.get("shadow_of"), self.devices[key]["id"],
+                         "the replay lane does not stand in for the recorded device")
+        self.assertTrue(recorded["expected"], "the capture holds no reading in session")
+        self.assertEqual([v for a, v in recorded["rows"] if a == recorded["lane"]],
+                         recorded["expected"])
+
+    def test_the_own_id_capture_replays_onto_its_devices_lane(self):
+        self._needs("its own id")
+        self.assert_replayed_onto_its_lane("own")
+
+    def test_the_uuid_capture_replays_onto_its_devices_lane(self):
+        self._needs("its UUID")
+        self.assert_replayed_onto_its_lane("uuid")
 
 
 # -------------------------------------------------------------------------------------------------

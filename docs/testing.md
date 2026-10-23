@@ -369,7 +369,9 @@ python supabase/migrations/test_playback_stop_and_sweep.py
 python supabase/migrations/test_playback_credential_delivery.py
 # What the capture and playback gates do when called, matched on SQLSTATE rather than on their
 # source or wording. ensure_shadow_devices() refuses a caller, a missing capture and a capture of a
-# lane, mints each lane with its origin's policy and schemas, and reuses it. start_playback_job()
+# lane, mints each lane with its origin's policy and schemas, and reuses it. A device recorded
+# under its own id or its UUID gets its lane, its own id resolved behind the capture's gateway
+# only (0201). start_playback_job()
 # refuses a missing capture or gateway, a real gateway, a simulator, an archived or credential-less
 # Playback gateway and a busy target, and clamps the speed. The manifest keeps 50 names and the true
 # count. Both startup sweeps fail only what is in flight and answer only their own worker. RLS and

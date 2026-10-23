@@ -207,6 +207,54 @@ describe('a file from another site', () => {
   })
 })
 
+/**
+ * A device admitted from Quarantine publishes its own id, and one addressed by its Instance_UUID
+ * publishes its UUID, in whatever letter case. A capture records the id on the wire, and
+ * ensure_shadow_devices() resolves it as ingestion does, so the page counts it as known.
+ */
+describe('a device recorded under the id it publishes', () => {
+  const UUID = '27000000-0000-4000-8000-000000000001'
+  const OWN = {
+    id: '28000000-0000-4000-8000-000000000001', name: 'Vendor Press', gateway_id: 'gw-1',
+    sparkplug_id: 'dev280000000000400080000', reported_identity: 'Vendor_Press_07',
+    identity_source: 'reported_identity', is_archived: false
+  }
+  const BY_UUID = {
+    id: UUID, name: 'Factory+ Lathe', gateway_id: 'gw-1', sparkplug_id: 'dev270000000000400080000',
+    identity_source: 'instance_uuid', is_archived: false
+  }
+  const RECORDED = ['Vendor_Press_07', UUID.toUpperCase()]
+
+  beforeEach(() => {
+    api.get.mockImplementation(path =>
+      Promise.resolve(path.includes('gateways') ? [GATEWAY] : [OWN, BY_UUID]))
+  })
+
+  it('offers its replay lanes rather than calling it a device this site does not have', async () => {
+    const panel = await openPanel({ ...CAPTURE, manifest: { ...CAPTURE.manifest, device_ids: RECORDED } })
+    fireEvent.click(within(panel).getByRole('button', { name: /Play back/ }))
+    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByRole('button', { name: 'Prepare replay lanes (2)' })).toBeInTheDocument()
+    expect(screen.queryByText(/Every recorded device must exist/)).toBeNull()
+  })
+
+  it('is not refused on the "Play a file…" path', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    dropOnCard(fileOf({
+      aber_capture_version: 1,
+      capture_epoch_ms: 1700000000000,
+      messages: [
+        { offset_ms: 0, topic: 'spBv1.0/Aber/NBIRTH/gwy120000000000400080000', payload: {} },
+        ...RECORDED.map(id => ({ offset_ms: 10, topic: `spBv1.0/Aber/DDATA/gwy120000000000400080000/${id}`, payload: {} }))
+      ],
+      identities: { edge_nodes: ['gwy120000000000400080000'], devices: RECORDED }
+    }))
+    expect(await screen.findByLabelText('File it against')).toBeInTheDocument()
+    expect(screen.queryByText(/this site does not have/, { ignore: '[role=tooltip]' })).toBeNull()
+  })
+})
+
 describe('the upload dialog and the stored captures', () => {
   const GOOD = {
     aber_capture_version: 1,

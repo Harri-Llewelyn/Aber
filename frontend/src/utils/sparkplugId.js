@@ -68,6 +68,15 @@ export function deviceIdentifiers(device) {
 }
 
 /**
+ * A device id as a lookup key: a UUID in lower case, since ingestion resolves a UUID in any letter
+ * case, and any other id as it is. For matching an id a capture recorded against
+ * deviceIdentifiers().
+ */
+export function deviceIdKey(id) {
+  return isUuid(id) ? id.toLowerCase() : id;
+}
+
+/**
  * The characters a Sparkplug group may not contain. A group is one level of the topic,
  * spBv1.0/<group>/<type>/<node>, so a separator or a wildcard would address something else.
  * Mirrors gateways_sparkplug_group_format, with the empty string (check-mirror-drift.mjs, 1b).

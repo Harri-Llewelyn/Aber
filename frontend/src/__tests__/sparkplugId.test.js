@@ -5,6 +5,7 @@ import {
   isSparkplugId,
   deviceIds,
   deviceIdentifiers,
+  deviceIdKey,
   sparkplugGroupProblem,
   SPARKPLUG_ID_LENGTH
 } from '../utils/sparkplugId';
@@ -109,6 +110,19 @@ describe('sparkplug wire identifiers', () => {
 
     it('is empty for a missing device', () => {
       expect(deviceIdentifiers(undefined)).toEqual([]);
+    });
+  });
+
+  // A capture records the id on the wire, which may be a device's UUID in either letter case.
+  describe('deviceIdKey', () => {
+    it('keys a UUID in lower case, so a capture of one in upper case finds its device', () => {
+      expect(deviceIdKey(UUID.toUpperCase())).toBe(UUID);
+      expect(new Set(deviceIdentifiers({ asset_id: UUID }).map(deviceIdKey)).has(deviceIdKey(UUID.toUpperCase()))).toBe(true);
+    });
+
+    it('keeps any other id as it is, since an own id is matched exactly', () => {
+      expect(deviceIdKey('Vendor_Press_07')).toBe('Vendor_Press_07');
+      expect(deviceIdKey('devccd1994488054c11ae66e')).toBe('devccd1994488054c11ae66e');
     });
   });
 });

@@ -5,6 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconShieldAlert, IconUpload } from '../common/Icons'
 import { plural } from '../../utils/format'
+import { deviceIdKey } from '../../utils/sparkplugId'
 
 /**
  * Take a capture file and file it against a subject. A capture is stored per subject, so the dialog
@@ -50,9 +51,10 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
 
   const subject = subjects.find(s => `${s.kind}:${s.id}` === subjectKey) || null
   const manifest = parsed ? captureManifest(parsed) : null
-  // A replay lane stands in for a device that exists here; one with no original cannot be made.
+  // A replay lane stands in for a device that exists here, under any id it publishes; one with no
+  // original cannot be made.
   const unknownDevices = forPlayback && manifest && knownDeviceIds
-    ? manifest.device_ids.filter(id => !knownDeviceIds.has(id))
+    ? manifest.device_ids.filter(id => !knownDeviceIds.has(deviceIdKey(id)))
     : []
   const ready = !!parsed && !!subject && unknownDevices.length === 0
 
