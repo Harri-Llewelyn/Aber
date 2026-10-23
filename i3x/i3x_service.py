@@ -170,6 +170,10 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 CONTROL_METRIC_PREFIXES = ("Node Control/", "Device Control/")
+# MIRRORED FROM ingestion.py: a topic's device id of this shape may be a Factory+ Instance_UUID.
+UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 def is_plumbing_metric(name: str) -> bool:
@@ -375,7 +379,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "devices",
         {
             "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
-            "status,cell_id,location_scope",
+            "status,cell_id,location_scope,reported_identity",
             "is_archived": live,
         },
     )
@@ -498,13 +502,17 @@ def _device_type(schemas: List[dict]) -> tuple:
 
 
 def _birth_datatypes() -> Dict[str, Dict[str, int]]:
-    """Each device's metric datatypes as its DBIRTH declared them, since this process started."""
-    by_device: Dict[str, Dict[str, int]] = {}
+    """
+    Each device's metric datatypes as its DBIRTH declared them since this process started, by
+    issued id. Copied out under the alias lock, then mapped, which takes the liveness lock.
+    """
     with _alias_lock:
-        for names in _name_datatypes.values():
-            for device_id, typed in names.items():
-                if device_id:
-                    by_device.setdefault(device_id, {}).update(typed)
+        declared = [(key[1], device_id, dict(typed))
+                    for key, names in _name_datatypes.items()
+                    for device_id, typed in names.items() if device_id]
+    by_device: Dict[str, Dict[str, int]] = {}
+    for node, device_id, typed in declared:
+        by_device.setdefault(issued_device_id(node, device_id), {}).update(typed)
     return by_device
 
 
@@ -698,6 +706,12 @@ _devices_heard: "OrderedDict[str, dict]" = OrderedDict()
 # Only what quality needs; `_read_at` is when they were read.
 _directory_devices: "OrderedDict[str, dict]" = OrderedDict()
 _directory_gateways: "OrderedDict[str, dict]" = OrderedDict()
+# A device's own id, as it publishes it -> its issued `sparkplug_id`. Keyed (edge node, id), since
+# an id a device chose is unique only behind its own node; an unbound device's node is "", which
+# matches behind any node, as ingestion accepts it. From the same rows as `_directory_devices`.
+_directory_reported: "OrderedDict[tuple, str]" = OrderedDict()
+# Instance_UUID (`devices.id`, lower case) -> issued `sparkplug_id`. Unique site-wide, so no node.
+_directory_uuids: "OrderedDict[str, str]" = OrderedDict()
 
 
 def _remember(table: "OrderedDict[str, dict]", key: str, entry: dict) -> None:
@@ -711,7 +725,8 @@ def _remember(table: "OrderedDict[str, dict]", key: str, entry: dict) -> None:
 def _liveness_clear() -> None:
     """Forget every observation and row. For tests."""
     with _liveness_lock:
-        for table in (_gateways_heard, _devices_heard, _directory_devices, _directory_gateways):
+        for table in (_gateways_heard, _devices_heard, _directory_devices, _directory_gateways,
+                      _directory_reported, _directory_uuids):
             table.clear()
 
 
@@ -725,11 +740,34 @@ def _record_directory(devices: List[dict], gateways: List[dict], read_at: float)
                 "sparkplug_group": g.get("sparkplug_group"), "_read_at": read_at,
             })
         for d in devices:
+            node = gateway_sids.get(d.get("gateway_id"))
             _remember(_directory_devices, d["sparkplug_id"], {
                 "sparkplug_id": d["sparkplug_id"], "status": d.get("status"),
                 "is_quarantined": d.get("is_quarantined"),
-                "_gateway_sparkplug_id": gateway_sids.get(d.get("gateway_id")), "_read_at": read_at,
+                "_gateway_sparkplug_id": node, "_read_at": read_at,
             })
+            reported = d.get("reported_identity")
+            # A device bound to a gateway this read cannot see has no node to scope its id to.
+            if reported and reported != d["sparkplug_id"] and (node or not d.get("gateway_id")):
+                _remember(_directory_reported, (node or "", reported), d["sparkplug_id"])
+            if d.get("id") and UUID_PATTERN.match(d["id"]):
+                _remember(_directory_uuids, d["id"].lower(), d["sparkplug_id"])
+
+
+def issued_device_id(node: str, device_id: str) -> str:
+    """
+    The issued `sparkplug_id` of the device a topic names behind `node`, in ingestion's order
+    (`_resolve_device_row()`): the issued id itself, the device's own id behind this node or behind
+    none, then its Instance_UUID. An id the directory rows do not hold comes back unchanged.
+    """
+    with _liveness_lock:
+        if device_id in _directory_devices:
+            return device_id
+        issued = (_directory_reported.get((node or "", device_id))
+                  or _directory_reported.get(("", device_id)))
+        if issued is None and UUID_PATTERN.match(device_id):
+            issued = _directory_uuids.get(device_id.lower())
+    return issued or device_id
 
 
 def _hear_gateway(node: str, group: str, status: str, at: float) -> None:
@@ -3093,15 +3131,19 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             return
         if not device_id:
             return
+        # Values, liveness and pushes are kept under the issued id, the device's elementId. The
+        # alias and datatype tables stay keyed on the topic's own id, as a birth declares them.
+        sparkplug_id = issued_device_id(edge_node_id, device_id)
         if msg_type == "DDEATH":
-            _on_device_death(device_id, edge_node_id)
+            _on_device_death(sparkplug_id, edge_node_id)
             return
         if msg_type == "DBIRTH":
             register_birth_aliases(group_id, edge_node_id, metrics, device_id=device_id)
         if msg_type not in ("DBIRTH", "DDATA"):
             return
         # Before the values are staged, so a birth's VQTs carry the device's new status.
-        _hear_device(device_id, edge_node_id, "ONLINE" if msg_type == "DBIRTH" else None, time.time())
+        _hear_device(sparkplug_id, edge_node_id, "ONLINE" if msg_type == "DBIRTH" else None,
+                     time.time())
 
         named = {}
         for metric in metrics:
@@ -3113,11 +3155,11 @@ def on_message(client, userdata, msg):  # noqa: ARG001
             if metric.get("field") in UNSERVED_VALUE_FIELDS:
                 continue
             value = metric_value(group_id, edge_node_id, device_id, name, metric)
-            record_value(device_id, name, value, metric["timestamp"])
+            record_value(sparkplug_id, name, value, metric["timestamp"])
             named[name] = {"value": value, "timestamp": metric["timestamp"]}
         # A birth is staged even with no values: the device's status changed.
-        if (named or msg_type == "DBIRTH") and device_id in _watched_prefixes():
-            _stage_and_push(device_id, metrics_for(device_id), named)
+        if (named or msg_type == "DBIRTH") and sparkplug_id in _watched_prefixes():
+            _stage_and_push(sparkplug_id, metrics_for(sparkplug_id), named)
     except Exception:  # noqa: BLE001
         logger.exception("failed to handle %s", msg.topic)
 

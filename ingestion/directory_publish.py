@@ -131,10 +131,27 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 LOCAL_SCHEMA_NOTE = "Locally minted schema identifiers, not registered Factory+ Schema_UUIDs."
 LOCAL_SERVICE_NOTE = "Stack service endpoints, not registered Factory+ Service_UUIDs."
 
+# The same list as DEVICE_COLUMNS in the edge function (check-mirror-drift.mjs, 10).
 _DEVICE_COLUMNS = (
-    "id,name,sparkplug_id,status,is_quarantined,gateway_id,"
+    "id,name,sparkplug_id,reported_identity,identity_source,status,is_quarantined,gateway_id,"
     "gateways(sparkplug_id,sparkplug_group)"
 )
+
+
+def _published_device_id(row):
+    """
+    The device id in a device's topic: its own id or its Instance_UUID where ingestion last resolved
+    it by one (`identity_source`), else its issued `sparkplug_id`. With no source recorded, a
+    `reported_identity` stands. MIRRORS `publishedDeviceId()` in the edge function.
+    """
+    source = row.get("identity_source")
+    if source == "sparkplug_id":
+        published = None
+    elif source == "instance_uuid":
+        published = row.get("id")
+    else:
+        published = row.get("reported_identity")
+    return str(published or row.get("sparkplug_id") or "")
 
 
 def _device_entry(row):
@@ -146,6 +163,7 @@ def _device_entry(row):
     address, so a subscriber destructuring the object never has to special-case the shape; and a
     QUARANTINED device is present, flagged, because it exists on the wire and a consumer meeting its
     traffic needs to be able to look it up. The flag is what says why its telemetry is not stored.
+    The address's `device_id` is the id the device publishes under, for the same consumer.
     """
     gateway = row.get("gateways") or {}
     return {
@@ -154,7 +172,7 @@ def _device_entry(row):
         "address": {
             "group_id": gateway.get("sparkplug_group") or "",
             "node_id": gateway.get("sparkplug_id") or "",
-            "device_id": row.get("sparkplug_id") or "",
+            "device_id": _published_device_id(row),
         },
         "online": row.get("status") == "ONLINE",
         "quarantined": bool(row.get("is_quarantined")),

@@ -487,7 +487,14 @@ python supabase/migrations/test_area_archive_refusal.py
 # that cascaded, so a gateway archived with Permanent Retention was deleted by its CELL's timer.
 # The test asserts the catalogue fact over every child of `cells`, not only the one that was
 # wrong, and that the un-filing is recorded against the gateway rather than lost with the cell.
+# Since 0198 only a live cell can hold anything, so the fixture deletes one.
 python supabase/migrations/test_archive_purge_cascade.py
+# A cell is archived only when nothing is in it (0198): refused while any device resolves to it,
+# live, offline, archived, quarantined or through its gateway, or while any gateway is filed in
+# it; nothing is filed in an archived cell, and no device is assigned to an archived gateway, by a
+# PATCH, relocate_devices() or an approval from Quarantine. Unchanged writes, Restore and a second
+# boot pass. Every test rolls back.
+python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
@@ -900,9 +907,9 @@ in one afternoon and each move made both documents wrong until somebody noticed.
 becomes conservative, which is the failure worth having — `npm test` prints the exact number, and it
 is the only place that can be right on every branch at once.
 
-Three suites have a second half elsewhere, and both halves must move together:
-`test_modelled_metrics_contract.py` and `test_rbe_telemetry.py` each pair with a JavaScript suite in
-the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
+Four suites have a second half elsewhere, and both halves must move together:
+`test_modelled_metrics_contract.py`, `test_payload_conformance.py` and `test_rbe_telemetry.py` each
+pair with a JavaScript suite in the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
 checks 12 and 17 compare its answers about a seeded plant with the Directory's, and its quality and

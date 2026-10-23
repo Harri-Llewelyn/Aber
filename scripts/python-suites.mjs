@@ -160,7 +160,9 @@ export const SUITES = {
       'application role and which the application cannot prune at all. DDATA arrives ' +
       'continuously, so a regression that writes one row per message does not degrade -- it fills ' +
       'the disk. Archived migration 0005 gave the audit TRIGGER a guard against exactly this; the ' +
-      'RPC these rows go through is not a trigger, so the only guard is in Python.',
+      'RPC these rows go through is not a trigger, so the only guard is in Python. It also holds ' +
+      'the Python half of test-harness/fixtures/payload-conformance.json; the JavaScript half, ' +
+      "Validate Payload's copy of the rules, runs in frontend-build.",
   },
   'ingestion/test_modelled_metrics_contract.py': {
     lanes: ['unit'],
@@ -691,6 +693,15 @@ export const SUITES = {
       '-- a gateway marked Permanent was deleted by its CELL\'s timer, with nothing to read ' +
       'afterwards but an audit row. Asserts the catalogue fact over every child of cells, not ' +
       'just the one that was wrong.',
+  },
+  'supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py': {
+    lanes: ['db'],
+    why:
+      '0198. A cell is not archived while any device resolves to it, whatever its lifecycle, or ' +
+      'any gateway is filed in it; nothing is filed in an archived cell and no device is assigned ' +
+      'to an archived gateway, by any writer. Without it an archived cell kept its devices, and ' +
+      'the UNS, i3X and the Site Map each put them somewhere different. Unchanged writes, Restore ' +
+      'and a second boot pass.',
   },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],

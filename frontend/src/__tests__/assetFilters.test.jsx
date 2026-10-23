@@ -5,7 +5,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
-import { devicesForSchemaUrl } from '../routes'
+import { devicesForSchemaUrl, devicesInCellUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
@@ -144,6 +144,25 @@ describe('DevicesTab filters', () => {
     expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeTruthy()
   })
 
+  it('lists every device in a cell, archived ones included, when handed one from the Cells page', async () => {
+    // Show Its Devices links here: an archived device still holds its cell, and the Active
+    // default would hide it.
+    const inCell = (d, cellId) => ({ ...d, effective_cell_id: cellId })
+    api.get.mockImplementation(routeGet({
+      devices: [
+        inCell(healthyDevice, 'cell-1'),
+        inCell({ ...offlineDevice, is_archived: true }, 'cell-1'),
+        inCell(neverBornDevice, 'cell-2')
+      ]
+    }))
+    window.history.replaceState({}, '', devicesInCellUrl('cell-1'))
+    renderDevices()
+
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    expect(screen.getByText('CNC_02')).toBeTruthy()
+    expect(screen.queryByText('Robot_03')).toBeNull()
+  })
+
   it('reads the schema filter from the ?schema= query parameter', async () => {
     window.history.replaceState({}, '', '/devices?schema=schema-cnc')
     api.get.mockImplementation(routeGet())
@@ -151,6 +170,41 @@ describe('DevicesTab filters', () => {
 
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     expect(screen.queryByText('Robot_03')).toBeNull()
+  })
+
+  /* A device admitted from Quarantine under its own Sparkplug id. Ingestion stores its readings,
+     and Grafana labels its alerts, under the issued id; its topic carries the published one. */
+  const publishesOwnId = {
+    ...healthyDevice,
+    asset_id: 'aaaaaaaa-0000-4000-8000-000000000005', asset_name: 'Press_04',
+    sparkplug_id: 'devaaaaaaaa000040008004', reported_identity: 'VND-7731-AX',
+    identity_source: 'reported_identity'
+  }
+  const rowOf = (name) => deviceTableRows().find(r => within(r).queryByText(name))
+
+  it('finds a device by the id it publishes under, and by its issued one', async () => {
+    for (const term of ['VND-7731', 'devaaaaaaaa000040008004']) {
+      window.history.replaceState({}, '', `/devices?search=${term}`)
+      api.get.mockImplementation(routeGet({ devices: [healthyDevice, publishesOwnId] }))
+      const { unmount } = renderDevices()
+      await waitFor(() => expect(rowOf('Press_04')).toBeTruthy())
+      expect(rowOf('CNC_01')).toBeUndefined()
+      unmount()
+    }
+  })
+
+  it('shows the Out of vocabulary finding of a device that publishes under its own id', async () => {
+    const catalog = [...CATALOG, {
+      metric_uuid: 'm4', name: 'Controller/EXECUTION', datatype: 12, deprecated: false,
+      permitted_values: ['READY', 'ACTIVE', 'STOPPED']
+    }]
+    const telemetry = [
+      { asset_id: 'devaaaaaaaa000040008004', metric_name: 'Controller/EXECUTION', val_string: 'RUNNING' }
+    ]
+    api.get.mockImplementation(routeGet({ devices: [healthyDevice, publishesOwnId], catalog, telemetry }))
+    renderDevices()
+    await waitFor(() => expect(rowOf('Press_04')?.textContent).toContain('Out of vocabulary'))
+    expect(rowOf('CNC_01').textContent).not.toContain('Out of vocabulary')
   })
 
   it('filters by operational status', async () => {

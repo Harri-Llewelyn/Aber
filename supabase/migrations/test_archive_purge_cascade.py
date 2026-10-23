@@ -14,11 +14,16 @@ been given a retention it was not kept on.
 The tests below pin the repair three ways, because a schema fact, a behaviour and a scheduled job
 are three things that can drift apart: no child of `cells` cascades, an actual delete leaves the
 children with their own timers, and the job still deletes children first.
+
+Since 0198 an archived cell holds nothing (test_a_cell_is_archived_only_when_nothing_is_in_it.py),
+so the purge no longer meets a cell with children. The API's DELETE on a live cell still does, and
+the fixture is that cell.
 """
 import os
 import unittest
 
 import psycopg2
+from psycopg2 import errors as pg_errors
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", os.getenv("DB_PORT", "54322"))
@@ -32,9 +37,6 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 CELL = "7c000000-0000-4000-8000-000000000001"
 GATEWAY = "7a100000-0000-4000-8000-000000000001"
 DEVICE = "7d200000-0000-4000-8000-000000000001"
-
-DUE = "now() - interval '1 day'"
-
 
 def connect():
     conn = psycopg2.connect(host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
@@ -51,8 +53,8 @@ def cleanup(cur):
 
 class PurgeCascadeTests(unittest.TestCase):
     """
-    One archived cell whose timer has expired, holding a gateway and a device that are NOT due:
-    the shape `purge_expired_archives` meets on the night a cell's retention runs out.
+    One live cell holding an archived gateway and a live device, deleted through the API's DELETE:
+    the one path that still meets a cell with something in it.
     """
 
     def setUp(self):
@@ -60,26 +62,25 @@ class PurgeCascadeTests(unittest.TestCase):
         self.cur = self.conn.cursor()
         cleanup(self.cur)
         self.cur.execute(
-            f"""
-            INSERT INTO public.cells (id, name, is_archived, archived_at, auto_delete_at)
-                 VALUES (%s, 'Purge Test Cell', true, now(), {DUE});
-            """,
+            "INSERT INTO public.cells (id, name) VALUES (%s, 'Purge Test Cell');",
             (CELL,),
         )
-        # Permanent Retention, which is what the dialog calls a NULL timer, and the case the
-        # cascade contradicted most directly.
+        # Filed, then archived with Permanent Retention, which is what the dialog calls a NULL
+        # timer, and the case the cascade contradicted most directly.
         self.cur.execute(
-            """
-            INSERT INTO public.gateways (id, name, cell_id, deployment, is_archived, archived_at,
-                                         auto_delete_at)
-                 VALUES (%s, 'Purge Test Gateway', %s, 'remote', true, now(), NULL);
-            """,
+            "INSERT INTO public.gateways (id, name, cell_id, deployment) "
+            "VALUES (%s, 'Purge Test Gateway', %s, 'remote');",
             (GATEWAY, CELL),
         )
-        # Not archived at all: a live device filed into a cell somebody archived months ago.
+        # Not archived at all, and filed in the cell explicitly.
         self.cur.execute(
             "INSERT INTO public.devices (id, name, gateway_id, cell_id) VALUES (%s, 'Purge Test Device', %s, %s);",
             (DEVICE, GATEWAY, CELL),
+        )
+        self.cur.execute(
+            "UPDATE public.gateways SET is_archived = true, archived_at = now(), auto_delete_at = NULL "
+            "WHERE id = %s;",
+            (GATEWAY,),
         )
         self.conn.commit()
 
@@ -90,13 +91,16 @@ class PurgeCascadeTests(unittest.TestCase):
         self.conn.close()
 
     def delete_the_cell(self):
-        """The purge statement, narrowed to this suite's row so a shared database is untouched."""
-        self.cur.execute(
-            "DELETE FROM public.cells WHERE id = %s AND is_archived "
-            "AND auto_delete_at IS NOT NULL AND auto_delete_at <= now();",
-            (CELL,),
-        )
-        self.assertEqual(self.cur.rowcount, 1, "the fixture cell was not due; the rest proves nothing")
+        """The API's DELETE, narrowed to this suite's row so a shared database is untouched."""
+        self.cur.execute("DELETE FROM public.cells WHERE id = %s;", (CELL,))
+        self.assertEqual(self.cur.rowcount, 1, "the fixture cell was not deleted; the rest proves nothing")
+
+    def test_the_purge_cannot_meet_this_cell(self):
+        # The archive is refused while the cell holds anything, so no timer can reach it.
+        self.cur.execute("SAVEPOINT archive;")
+        with self.assertRaises(pg_errors.RestrictViolation):
+            self.cur.execute("UPDATE public.cells SET is_archived = true WHERE id = %s;", (CELL,))
+        self.cur.execute("ROLLBACK TO SAVEPOINT archive;")
 
     def test_no_child_of_cells_is_deleted_with_it(self):
         # THE CATALOGUE FACT, asserted over every referencing constraint rather than the one that

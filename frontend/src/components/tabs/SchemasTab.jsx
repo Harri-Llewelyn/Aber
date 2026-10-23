@@ -572,7 +572,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             onClick: () => setShowValidateModal(true),
             disabled: !selectedSchema.schema_definition,
             title: selectedSchema.schema_definition
-              ? `Test a sample telemetry payload against ${schemaVersionLabel(selectedSchema)} of ${selectedSchema.schema_name}`
+              ? `Judge one DDATA payload against ${schemaVersionLabel(selectedSchema)} of ${selectedSchema.schema_name}, by ingestion's Schema Conformance rules`
               : 'This version has no definition to validate against'
           },
           {

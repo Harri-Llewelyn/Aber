@@ -1326,6 +1326,48 @@ value: nothing the stack uses registers itself.
 
 The file's self-check asserts that no dynamically registered client remains.
 
+### A cell is archived only when nothing is in it (0198)
+
+Archiving a cell checked nothing, in the dashboard or here. Its devices stayed in it, because
+`device_locations` never reads `cells.is_archived`, and each part of Aber then put them somewhere
+different. The UNS kept publishing them under the archived cell's name, i3X moved them up to the
+cell's area (a cell-scoped gateway up to the site), and the Site Map showed them nowhere.
+
+- **A cell holding anything is not archived.** `trg_cells_archived_only_when_empty` refuses the
+  archive while any device resolves to the cell (`device_locations.effective_cell_id`) or any
+  gateway is filed in it. Every device counts, whatever its lifecycle: live, offline, archived,
+  quarantined, and one in the cell through its gateway. So does an archived gateway, because a
+  device that first births behind a live gateway inherits its cell. A device behind a simulated
+  gateway or the Playback gateway resolves to no cell and does not count. The refusal is
+  `restrict_violation`, as `refuse_archiving_the_last_shadow_gateway()`'s is. It counts both kinds
+  and names the gateways, since the Gateways page has no cell filter. Its HINT says how to clear
+  each kind of device.
+- **On the transition only.** Restoring a cell, editing an archived one, a whole-row PATCH that
+  re-sends `is_archived = true` and the purge all pass.
+- **Nothing is filed in an archived cell.** `refuse_filing_in_an_archived_cell()` refuses a device
+  or gateway INSERTed or UPDATEd with a `cell_id` naming an archived cell, whoever writes it: a
+  PATCH, `relocate_devices()`, `approve_proposal()` or `approve_quarantined_device()`. A write that
+  leaves `cell_id` unchanged passes, and so does NULL, so a deleted cell's `ON DELETE SET NULL`
+  still un-files what was in it.
+- **No device is assigned to an archived gateway.** `refuse_assigning_to_an_archived_gateway()`
+  refuses a device written with a `gateway_id` naming an archived gateway, approval from Quarantine
+  included. An unchanged `gateway_id` passes, so archiving a gateway leaves its devices as they
+  are. Ingestion cannot meet it: a device first seen behind an archived edge node is registered
+  with no gateway, and the operator picks one at approval.
+- **The two move-in refusals take `FOR SHARE` on the cell or gateway** they check. A move and an
+  archive of the same row in flight at once then wait for each other, so both cannot commit. Both
+  are `check_violation`, as `reject_archived_schema_assignment()`'s is.
+- **Every role is held, the owner included.** All three functions are `SECURITY DEFINER`, so the
+  counts and the row locks do not depend on what the writer may read.
+
+No row changes. The one install held nothing in an archived cell, so nothing is cleaned up. A
+database that does keeps those rows: each trigger acts only on its own write, so a replay cannot
+fail, and a device already there can still be edited or moved out. The file's self-check asserts
+that the four triggers exist and that no API role may call their functions.
+`test_a_cell_is_archived_only_when_nothing_is_in_it.py` holds each refusal, what still passes, and a
+replay over a used database. `test_archive_purge_cascade.py` now deletes a live cell, the one path
+that still meets a cell with something in it.
+
 ### A plan no area names is swept from storage (0199)
 
 An area's plan is an object in the `area-plans` bucket that `areas.plan_path` names. The nightly
@@ -4137,7 +4179,10 @@ exist — the same rule the semantic-id namespace follows.
 
 Two identity mappings need no new columns, which is why this is an adapter and not a migration:
 `Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
-`(gateways.sparkplug_group, gateways.sparkplug_id)`.
+`(gateways.sparkplug_group, gateways.sparkplug_id)`. A device's `device_id` in that address is the id
+in its topic: its own id (`reported_identity`) or its `Instance_UUID` where `identity_source` says
+ingestion last resolved it by one, else its issued `sparkplug_id`. `/v1/address/{group}/{node}/{device}`
+finds a device by any id ingestion resolves it by: the issued one, the one it reported, or its UUID.
 
 **The Directory also has an MQTT half**, and it is off by default:
 [The Directory on MQTT](../ingestion/README.md#the-directory-on-mqtt) publishes the same projection

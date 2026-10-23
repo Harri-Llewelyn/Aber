@@ -266,7 +266,15 @@ paths:
     patch:
       tags: [Assets]
       summary: Update cells matching a filter
-      description: 'Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.'
+      description: |
+        Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.
+
+        Archiving (`is_archived` from false to true) is refused while any device resolves to the
+        cell or any gateway is filed in it. Every device counts, whatever its lifecycle: archived,
+        quarantined, offline, and those in the cell through their gateway (read
+        `device_locations.effective_cell_id`). So does an archived gateway. The error counts both
+        and names the gateways. Move them to another cell, or delete them, first. Restoring a cell,
+        and editing an archived one, are not refused.
       parameters:
         - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Prefer'
@@ -277,13 +285,14 @@ paths:
             schema: { $ref: '#/components/schemas/CellWrite' }
       responses:
         '204': { description: Updated. }
+        '400': { description: 'The archive was refused: the cell still holds a device or a gateway (`23001`).' }
         '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Assets]
       summary: Delete cells matching a filter
       description: |
-        Cascades to the cell's gateways. Devices referencing the cell have `cell_id` set to
-        NULL, never deleted — a device is not a child of its location. Prefer archiving.
+        Un-files what was in the cell: gateways and devices referencing it have `cell_id` set to
+        NULL, never deleted — neither is a child of its location. Prefer archiving.
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
       responses:
@@ -4622,7 +4631,7 @@ components:
         plan_y: { type: number, nullable: true }
         description: { type: string, nullable: true }
         grafana_url: { type: string, nullable: true }
-        is_archived: { type: boolean }
+        is_archived: { type: boolean, description: 'true is refused while any device or gateway is in the cell (see the PATCH). No device or gateway can be filed in an archived cell.' }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true }
 
@@ -5665,7 +5674,7 @@ components:
       properties:
         group_id: { type: string, example: Aber, description: 'Empty when the device is bound to no gateway.' }
         node_id: { type: string, example: gwy120000000000400080000 }
-        device_id: { type: string, example: dev220000000000400080000 }
+        device_id: { type: string, example: dev220000000000400080000, description: 'The id in the device''s topic: its issued `sparkplug_id`, or the id it publishes under in its place (its own, or its Instance_UUID).' }
 
     DirectoryDevice:
       type: object

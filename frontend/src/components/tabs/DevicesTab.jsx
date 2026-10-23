@@ -13,7 +13,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
-import { effectiveSparkplugId } from '../../utils/sparkplugId'
+import { deviceIds, deviceIdentifiers } from '../../utils/sparkplugId'
 import { ActionButton } from '../common/ActionButton'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { ClearFilters } from '../common/ClearFilters'
@@ -141,7 +141,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // document edit is a reasonable moment to re-read.
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   // sparkplug_id -> { metric_name: last value }, for the Out-of-vocabulary finding. Keyed on the
-  // WIRE identity, not the row id: telemetry.asset_id is the sparkplug_id.
+  // issued id, as telemetry.asset_id is, never on the id a device publishes under.
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
   const [catalog, setCatalog] = useState([])
   // { device, metricNames } while the telemetry CSV export dialog is open.
@@ -187,9 +187,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     return () => { cancelled = true }
   }, [docRefreshKey])
 
-  /** This device's last reported values, keyed the way telemetry keys them. */
+  /** This device's last reported values, by its issued id. */
   const latestFor = (device) =>
-    latestBySparkplugId.get(effectiveSparkplugId(device)) || null
+    latestBySparkplugId.get(deviceIds(device).issued) || null
 
   /**
    * A device row shaped for the edit form. `schema_ids` is every schema attached to it, so the
@@ -496,17 +496,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
 
   // A device an operator needs to act on: quarantined, past its provisioning window with no birth
-  // (24h+), publishing unmodelled metrics, or with a location finding. An archived cell is still a
-  // valid foreign key, so pointing at one is derived rather than enforced.
-  const pointsAtArchivedCell = (a) =>
-    !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
-
+  // (24h+), publishing unmodelled metrics, or with a location finding. No device resolves to an
+  // archived cell: the database refuses the archive while one does.
   const needsAttention = (a) =>
     a.is_quarantined || isProvisioningOverdue(a) || unmodelledFor(a).length > 0 ||
-    // Location findings. Unassigned is the work queue that should drain; a mismatch and an
-    // archived cell are both "this resolved to something, but look at it".
+    // Location findings. Unassigned is the work queue that should drain; a mismatch is "this
+    // resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
-    a.cell_mismatch || pointsAtArchivedCell(a)
+    a.cell_mismatch
 
   // Memoised: the predicate resolves schemas, tags, gateway and cell for every device, and this
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
@@ -549,9 +546,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
     if (searchQuery) {
       // Searchable by everything an engineer might paste in: the friendly name, the internal
-      // UUID (for log correlation) and the Sparkplug id seen on the wire.
+      // UUID (for log correlation), the issued Sparkplug id and the one the device publishes under.
       const q = searchQuery.toLowerCase()
-      const haystack = [a.asset_name, a.asset_id, effectiveSparkplugId(a)]
+      const haystack = [a.asset_name, ...deviceIdentifiers(a)]
         .filter(Boolean).join(' ').toLowerCase()
       if (!haystack.includes(q)) return false
     }
@@ -580,7 +577,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     },
     type: {
       type: 'text',
-      value: a => deviceTagList(a, schemasForDevice(a, schemas), latestBySparkplugId.get(effectiveSparkplugId(a)) || null, catalog).join(', ')
+      value: a => deviceTagList(a, schemasForDevice(a, schemas), latestBySparkplugId.get(deviceIds(a).issued) || null, catalog).join(', ')
     },
     cell: {
       type: 'text',
@@ -635,7 +632,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   useArrivalSelection(
     searchQuery,
     assets,
-    (a, term) => a.asset_id === term || effectiveSparkplugId(a) === term,
+    (a, term) => deviceIdentifiers(a).includes(term),
     (a) => {
       // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
       if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
@@ -649,6 +646,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // Resolved fresh every render, as the note on selectedId says. A deleted device resolves to null
   // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
+  const selectedIds = deviceIds(selectedDevice)
 
   /* Both device lanes count: `devices` and `device_nameplate` are two kinds of change to one
      machine, keyed by the same id. */
@@ -784,7 +782,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <option value="unmodelled">Publishing unmodelled metrics</option>
         </select>
 
-        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, in a cell apart from their gateway's, or in an archived cell.">
+        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, or in a cell apart from their gateway's.">
           <button
             className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setAttentionOnly(v => !v)}
@@ -1125,6 +1123,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
                   </option>
                 ))}
+                {/* An archived gateway is not offered, and the database refuses one. A device
+                    already on one keeps it (an unchanged gateway passes), so it stays visible. */}
+                {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
+                  <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
+                ))}
               </select>
               {/* Shown always: the question is why Playback cannot be picked, asked while something
                   else is selected. */}
@@ -1242,7 +1245,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 })()}
               </div>
               {/* The contract every DDATA value is judged against comes first; the quarantine hint
-                  second, since suggestMatches() weights a required-metric overlap above name
+                  second, since suggestMatches() weights a modelled-metric overlap above name
                   similarity. */}
               <div className="form-hint">
                 The contracts this device's metrics are judged against. A metric any of them models
@@ -1416,14 +1419,21 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         )}
         fields={selectedDevice ? [
           { label: 'Device UUID', value: selectedDevice.asset_id, mono: true, copyable: true },
-          // The WIRE identity. Distinct from the UUID above and from the editable name: telemetry
-          // is keyed on this, so it is what a trace or an export is actually matched by.
-          { label: 'Sparkplug Device ID', value: effectiveSparkplugId(selectedDevice), mono: true, copyable: true },
+          // Always the issued id, whatever the device publishes under: readings, exports, the AAS
+          // shell and i3X are keyed on it.
+          { label: 'Sparkplug Device ID', value: selectedIds.issued, mono: true, copyable: true },
+          ...(selectedIds.published ? [{
+            label: 'Published ID',
+            value: selectedIds.published,
+            mono: true,
+            copyable: true,
+            help: 'The ID this device publishes under, in place of its Sparkplug Device ID. Aber matches the device by it, and stores its readings under the Sparkplug Device ID.'
+          }] : []),
           {
             // The group comes from the serving gateway, so the topic can be pasted into an MQTT
-            // client.
+            // client. The device segment is the id the device publishes under.
             label: 'Sparkplug Topic Path',
-            value: `spBv1.0/${selectedGateway?.sparkplug_group || '+'}/DDATA/${selectedGateway ? (selectedGateway.sparkplug_id || selectedGateway.gateway_id) : '+'}/${effectiveSparkplugId(selectedDevice)}`,
+            value: `spBv1.0/${selectedGateway?.sparkplug_group || '+'}/DDATA/${selectedGateway ? (selectedGateway.sparkplug_id || selectedGateway.gateway_id) : '+'}/${selectedIds.published || selectedIds.issued}`,
             mono: true,
             copyable: true,
             help: !selectedGateway
