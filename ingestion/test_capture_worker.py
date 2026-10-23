@@ -83,6 +83,9 @@ GWY = "gwy120000000000400080000"
 OTHER_GWY = "gwy999999999999999999999"
 DEV = "dev270000000000400080000"
 OTHER_DEV = "dev990000000000400080000"
+# DEV's row id, whose first 21 hex characters are its issued id, and an id it publishes as its own.
+DEV_UUID = "27000000-0000-4000-8000-000000000001"
+OWN_ID = "Press_01"
 
 
 def row(**over):
@@ -101,8 +104,9 @@ def row(**over):
     return base
 
 
-def job(**over):
-    return capture_worker._JobState(row(**over))
+def job(reported_identity=None, reported_unread=False, **over):
+    return capture_worker._JobState(row(**over), reported_identity=reported_identity,
+                                    reported_unread=reported_unread)
 
 
 def wire(metrics=(("Temperature", 21.5),), seq=None, timestamp=1700000000000):
@@ -192,6 +196,92 @@ class SubjectMatching(unittest.TestCase):
         self.assertTrue(j.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, GWY, DEV))))
         self.assertTrue(j.matches(parts("spBv1.0/%s/NBIRTH/%s" % (OTHER_GROUP, GWY))))
         self.assertFalse(j.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, GWY, OTHER_DEV))))
+
+
+class ADeviceIsRecordedUnderEveryIdItPublishes(unittest.TestCase):
+    """
+    The topic's device segment is whatever the edge node publishes, unique behind that edge node
+    (Sparkplug 3.0.0 tck-id-topic-structure-namespace-unique-device-id) and free to repeat behind
+    another (tck-id-topic-structure-namespace-duplicate-device-id-across-edge-node). Ingestion
+    resolves a device by its issued id, its own reported id, or its UUID, and records which as
+    `identity_source`. A capture that listened for the issued id alone recorded none of a device
+    that publishes another, then said the device had published nothing.
+    """
+
+    def device_job(self, reported=None):
+        return job(device_sparkplug_id=DEV, device_id=DEV_UUID, reported_identity=reported)
+
+    def takes(self, j, segment, node=GWY, kind="DDATA"):
+        return j.matches(parts("spBv1.0/%s/%s/%s/%s" % (GROUP, kind, node, segment)))
+
+    def test_identity_source_sparkplug_id_is_heard_by_the_issued_id(self):
+        self.assertTrue(self.takes(self.device_job(), DEV))
+
+    def test_identity_source_reported_identity_is_heard_by_its_own_id(self):
+        j = self.device_job(reported=OWN_ID)
+        for kind in ("DBIRTH", "DDATA", "DDEATH"):
+            self.assertTrue(self.takes(j, OWN_ID, kind=kind), kind)
+        # A device that has started publishing its issued id keeps its own on the row.
+        self.assertTrue(self.takes(j, DEV))
+
+    def test_identity_source_instance_uuid_is_heard_by_its_uuid_in_any_letter_case(self):
+        j = self.device_job()
+        for segment in (DEV_UUID, DEV_UUID.upper()):
+            self.assertTrue(self.takes(j, segment), segment)
+
+    def test_every_id_is_heard_only_behind_its_own_edge_node(self):
+        j = self.device_job(reported=OWN_ID)
+        for segment in (DEV, OWN_ID, DEV_UUID):
+            self.assertFalse(self.takes(j, segment, node=OTHER_GWY), segment)
+
+    def test_another_devices_ids_are_not_heard(self):
+        """An own id is matched exactly, as ingestion matches reported_identity."""
+        j = self.device_job(reported=OWN_ID)
+        for segment in (OTHER_DEV, "Press_02", OWN_ID.lower(), "99000000-0000-4000-8000-000000000001"):
+            self.assertFalse(self.takes(j, segment), segment)
+
+    def test_a_gateway_capture_has_no_device_ids(self):
+        j = job(device_id=DEV_UUID, reported_identity=OWN_ID)
+        self.assertEqual((j.device_uuid, j.device_reported), (None, None))
+
+    def test_each_id_is_named_once(self):
+        for reported in (DEV, DEV_UUID.upper()):
+            with self.subTest(reported=reported):
+                self.assertEqual(
+                    self.device_job(reported=reported).listened_for(),
+                    "the issued id %s or its UUID %s in any letter case" % (DEV, DEV_UUID))
+
+
+class TheSubjectsOwnIdIsReadWhenTheJobStarts(unittest.TestCase):
+    """The worker reads `reported_identity` as the ingestion principal, before the job is armed."""
+
+    def tearDown(self):
+        capture_worker._active = None
+
+    def begin(self, devices, **over):
+        with patch.object(capture_worker, "_supabase", devices), \
+                patch.object(capture_worker, "_rebirth", lambda group, node: True):
+            return capture_worker._begin(row(**over))
+
+    def test_a_device_capture_reads_its_own_id(self):
+        devices = FakeGateways([{"reported_identity": OWN_ID}])
+        state = self.begin(devices, device_sparkplug_id=DEV, device_id=DEV_UUID)
+        self.assertEqual(devices.reads, [["devices", "reported_identity", ("id", DEV_UUID)]])
+        self.assertTrue(state.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, OWN_ID))))
+        self.assertIs(capture_worker._active, state)
+
+    def test_a_failed_read_still_hears_the_issued_id_and_the_uuid_and_says_so(self):
+        state = self.begin(FakeGateways(error=RuntimeError("connection refused")),
+                           device_sparkplug_id=DEV, device_id=DEV_UUID)
+        for segment, heard in ((DEV, True), (DEV_UUID, True), (OWN_ID, False)):
+            self.assertEqual(
+                state.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, segment))), heard, segment)
+        self.assertIn("could not be read when the recording started", state.listened_for())
+
+    def test_a_gateway_capture_reads_no_device(self):
+        devices = FakeGateways([])
+        self.begin(devices)
+        self.assertEqual(devices.reads, [])
 
 
 class Buffering(unittest.TestCase):
@@ -720,12 +810,14 @@ class FinishBase(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def finish(self, answers=None, upload_error=None, device=None, messages=None, stop=None):
-        j = job(storage_path=JOB_PATH, device_sparkplug_id=device)
+    def finish(self, answers=None, upload_error=None, device=None, messages=None, stop=None,
+               storage=None, **subject):
+        j = job(storage_path=JOB_PATH, device_sparkplug_id=device, **subject)
         for topic, msg_type in messages or [("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), "NDATA")]:
             j.append(topic, wire(), msg_type)
         with patch.object(capture_worker, "_supabase", FakeSupabase(self.log, answers)), \
-                patch.object(capture_worker, "_storage", FakeStorage(self.log, upload_error)):
+                patch.object(capture_worker, "_storage",
+                             storage or FakeStorage(self.log, upload_error)):
             capture_worker._finish(j, "duration cap reached (60s)", stop)
         return j
 
@@ -851,6 +943,42 @@ class ADeviceThatPublishedNothing(FinishBase):
         sibling = ("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, OTHER_DEV), "DDATA")
         self.finish(device=DEV, messages=[self.NBIRTH, sibling])
         self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+
+    def test_the_failure_names_every_id_it_listened_for(self):
+        """So an operator can compare them with the traffic, rather than be told it was silent."""
+        self.finish(device=DEV, device_id=DEV_UUID, reported_identity=OWN_ID, messages=[self.NBIRTH])
+        error = self.rpcs("ingest_fail_capture")[0][2]["p_error"]
+        self.assertIn("recorded nothing from device %s" % DEV, error)
+        self.assertIn("none under the issued id %s, its own id %s or its UUID %s in any letter case"
+                      % (DEV, OWN_ID, DEV_UUID), error)
+        self.assertNotIn("published nothing", error)
+
+    def test_an_empty_device_capture_names_them_too(self):
+        j = job(device_sparkplug_id=DEV, device_id=DEV_UUID, reported_identity=OWN_ID)
+        self.assertIn("none from device %s under the issued id %s, its own id %s or its UUID %s"
+                      % (DEV, DEV, OWN_ID, DEV_UUID), capture_worker._nothing_recorded(j))
+
+    def test_a_device_heard_under_its_own_id_is_stored_under_it(self):
+        """The file and the manifest keep the id on the wire, which the replay's map is keyed by."""
+        storage = KeptStorage(self.log)
+        own = ("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, OWN_ID), "DDATA")
+        self.finish({"ingest_finalise_capture": ["cap-new"]}, device=DEV, device_id=DEV_UUID,
+                    reported_identity=OWN_ID, messages=[self.NBIRTH, own], storage=storage)
+        self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+        self.assertEqual(self.rpcs("ingest_finalise_capture")[0][2]["p_manifest"]["device_ids"],
+                         [OWN_ID])
+        document = json.loads(storage.body)
+        self.assertEqual(document["identities"]["devices"], [OWN_ID])
+        self.assertEqual(document["recorded_from"]["topic"], "spBv1.0/+/+/%s/%s" % (GWY, OWN_ID))
+        self.assertEqual([m["topic"] for m in document["messages"]], [self.NBIRTH[0], own[0]])
+
+
+class KeptStorage(FakeStorage):
+    """FakeStorage that keeps the uploaded file's bytes."""
+
+    def upload(self, path, file, file_options):
+        super().upload(path, file, file_options)
+        self.body = file.read()
 
 
 class TheProgressTick(unittest.TestCase):
