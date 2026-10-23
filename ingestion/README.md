@@ -735,8 +735,9 @@ integers OOM-killed it at the end, which stopped ingestion for every gateway whi
 
 **A capture records its edge node under any Sparkplug group**, as ingestion accepts it
 ([Resolution precedence](#resolution-precedence)): `observe()` matches the node's `sparkplug_id`, and
-a device capture also the ids its device publishes under (below), never the group. A gateway whose node publishes under a group
-other than its row's ingests normally, so its captures must not come back empty.
+a device capture also the ids its device publishes under (below), never the group. A gateway whose
+node publishes under a group other than its row's ingests normally, so its captures must not come
+back empty.
 
 **A capture opens by asking its edge node to rebirth**, because birth certificates cannot be
 queried: `asset_config` holds birth *parameters* and `devices.last_birth_metrics` holds metric
