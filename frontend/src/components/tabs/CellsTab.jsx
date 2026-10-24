@@ -507,7 +507,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           <div className="form-group">
             {/* A grid of buttons, not a select: the choice is visual. */}
             <label className="form-label">Cell Icon</label>
-            <div className="icon-picker" role="radiogroup" aria-label="Cell icon">
+            <div className="icon-picker" role="radiogroup" aria-label="Cell icon" aria-describedby="cell-icon-hint">
               {CELL_ICONS.map(({ key, label, Icon }) => (
                 <button
                   key={key}
@@ -522,6 +522,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 </button>
               ))}
             </div>
+            <div className="form-hint" id="cell-icon-hint">A picture to tell this cell apart on the Site Map and in lists.</div>
           </div>
           {/* Where the cell is: its area, and a place on that area's plan. An area is a row on
               the Areas page; the place is this cell's own. */}
