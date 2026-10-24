@@ -1,16 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supabase-js';
 
 const signOut = vi.fn().mockResolvedValue({ error: null });
 const getUser = vi.fn();
 const getSession = vi.fn();
-vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: { signOut, getUser, getSession } } }));
+vi.mock('../lib/supabaseClient', () => ({
+  SUPABASE_URL: 'http://stack.test',
+  SUPABASE_GATEWAY_KEY: 'sb_publishable_test',
+  supabase: { auth: { signOut, getUser, getSession } }
+}));
 
 const {
-  isInvalidSessionError, isSessionRefusal, isSessionRejected, askAuthServer, clearInvalidSession, describeAuthFailure
+  isInvalidSessionError, isSessionRefusal, isSessionRejected, askAuthServer, authServerRefusesSession,
+  clearInvalidSession, describeAuthFailure
 } = await import('../utils/sessionError');
 
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.unstubAllGlobals());
 
 describe('detecting a session the auth server has forgotten', () => {
   it('recognises the GoTrue message for a missing session row', () => {
@@ -50,6 +56,53 @@ describe("reading an edge function's refusal", () => {
     expect(isSessionRefusal(403, { error: 'Forbidden: Insufficient privileges', details: 'Reading the broker requires Administrator.' })).toBe(false);
     expect(isSessionRefusal(500, ended)).toBe(false);
     expect(isSessionRefusal(undefined, ended)).toBe(false);
+  });
+});
+
+describe("confirming an edge function's refusal with the auth server", () => {
+  const userAnswer = (status) => vi.fn().mockResolvedValue({ ok: status === 200, status, json: async () => ({}) });
+
+  beforeEach(() => getSession.mockResolvedValue({ data: { session: { access_token: 'the-token' } } }));
+
+  it('asks /user with the session token, through plain fetch rather than auth-js', async () => {
+    const fetchMock = userAnswer(403);
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await authServerRefusesSession()).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://stack.test/auth/v1/user');
+    expect(init.headers).toEqual({ apikey: 'sb_publishable_test', Authorization: 'Bearer the-token' });
+    // getUser() would drop a refused session and sign the page out before the strip could show.
+    expect(getUser).not.toHaveBeenCalled();
+  });
+
+  it.each([[401, true], [403, true], [200, false], [503, false]])('calls a %s from the auth server a refusal: %s', async (status, refused) => {
+    vi.stubGlobal('fetch', userAnswer(status));
+    expect(await authServerRefusesSession()).toBe(refused);
+  });
+
+  it('never calls an unreachable auth server a refusal', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    expect(await authServerRefusesSession()).toBe(false);
+  });
+
+  it('asks nothing when supabase-js holds no session', async () => {
+    const fetchMock = userAnswer(403);
+    vi.stubGlobal('fetch', fetchMock);
+    getSession.mockResolvedValue({ data: { session: null } });
+    expect(await authServerRefusesSession()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('shares one request between callers at the same time', async () => {
+    let release;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { release = () => resolve({ ok: false, status: 403 }); }));
+    vi.stubGlobal('fetch', fetchMock);
+    const first = authServerRefusesSession();
+    const second = authServerRefusesSession();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    release();
+    expect(await Promise.all([first, second])).toEqual([true, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

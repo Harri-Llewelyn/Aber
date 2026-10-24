@@ -106,6 +106,7 @@ describe('the tab title', () => {
 
 describe('the strip in the signed-in shell', () => {
   const mockSession = {
+    access_token: 'token',
     user: { id: 'user-admin-123', email: 'admin@aber.local', app_metadata: { role: 'Administrator' } }
   }
 
@@ -149,10 +150,12 @@ describe('the strip in the signed-in shell', () => {
     vi.restoreAllMocks()
   })
 
-  /** Every edge function answers `status` with `body`. */
-  const functionsAnswer = (status, body) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false, status, headers: { get: () => null }, json: async () => body
-  }))
+  /** Every edge function answers `status` with `body`, and the auth server's /user answers `auth`. */
+  const functionsAnswer = (status, body, auth = 403) => vi.stubGlobal('fetch', vi.fn(async (url) => (
+    String(url).endsWith('/auth/v1/user')
+      ? { ok: auth === 200, status: auth, json: async () => ({}) }
+      : { ok: false, status, headers: { get: () => null }, json: async () => body }
+  )))
 
   const signedIn = async () => {
     render(<App />)
@@ -209,8 +212,9 @@ describe('the strip in the signed-in shell', () => {
   })
 
   // The session's auth.sessions row has gone. PostgREST checks only the token's signature and goes
-  // on answering, so only the edge function, which asks the auth server, can tell.
-  it('turns an edge function refusing the session into Sign In Again at once, while every refresh still works', async () => {
+  // on answering, so only the edge function, which asks the auth server, can tell; the page then
+  // asks the auth server itself before saying so.
+  it('turns an edge function refusing the session, once confirmed, into Sign In Again, while every refresh still works', async () => {
     await signedIn()
     functionsAnswer(401, { error: 'Invalid user token', details: 'Session from session_id claim in JWT does not exist' })
     await act(async () => { await api.listBrokerInventory().catch(() => {}) })
@@ -226,9 +230,12 @@ describe('the strip in the signed-in shell', () => {
     expect(screen.getByText(/no longer valid on the server/i)).toBeInTheDocument()
   })
 
-  it('leaves an edge function refusing for another reason to the page that called it', async () => {
+  it('leaves an edge function refusing for another reason, or one the auth server contradicts, to the page that called it', async () => {
     await signedIn()
     functionsAnswer(401, { error: 'Unauthorized', details: 'A signed-in session is required.' })
+    await act(async () => { await api.listBrokerInventory().catch(() => {}) })
+    // The function could not reach the auth server; the auth server says the session is live.
+    functionsAnswer(401, { error: 'Invalid user token', details: 'fetch failed' }, 200)
     await act(async () => { await api.listBrokerInventory().catch(() => {}) })
     functionsAnswer(403, { error: 'Forbidden: Insufficient privileges', details: "Reading the broker's accounts requires Administrator." })
     await act(async () => { await api.listBrokerInventory().catch(() => {}) })

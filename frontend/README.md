@@ -712,12 +712,19 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
   its caller (`auth.getUser()`), so it is the first to learn that a session ended elsewhere, while
   PostgREST goes on answering on the dead token. Every function call's error in `api.js` passes
   through `functionFailure()`. A 401 whose body says the session no longer exists
-  (`isSessionRefusal()` in `utils/sessionError.js`) calls `reportSessionRefused()` and gets the code
-  `SESSION_REFUSED`. The strip then says the session has ended without waiting for the threshold,
-  and no refresh clears it: a refresh that works says nothing about the session, and no refreshed
-  token can arrive. A 401 for a request with no token, a 403 and every other refusal stay with the
-  page that called. Access Control's broker callout reads the code and says the session ended
-  instead of naming what the read needs.
+  (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with the auth server's `/user`
+  (`authServerRefusesSession()`). The functions answer the same "Invalid user token" when they
+  could not reach the auth server at all, and the strip stays until the next sign-in, so the label
+  alone is not enough. Only a 401 or 403 from `/user` calls `reportSessionRefused()` and gives the
+  error the code `SESSION_REFUSED`. A live session, an unreachable server or no answer within 10
+  seconds leaves the error as it was. Refusals that arrive together share one check. The check is a
+  plain fetch, not `getUser()`: auth-js drops a refused session and announces `SIGNED_OUT` before
+  `getUser()` returns, which would swap the page for the sign-in screen with no word of why. The
+  strip then says the session has ended without waiting for the threshold, and no refresh clears
+  it: a refresh that works says nothing about the session, and no refreshed token can arrive. A 401
+  for a request with no token, a 403 and every other refusal stay with the page that called.
+  Access Control's broker callout reads the code and says the session ended instead of naming what
+  the read needs.
 - **Device status is not touched.** The chips still show the stored status; the strip is what says
   it may be stale.
 - **The strip takes its own row**, so it covers nothing. Below 800px a drawer overlays the page

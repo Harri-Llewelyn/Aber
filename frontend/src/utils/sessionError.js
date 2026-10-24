@@ -1,5 +1,5 @@
 import { isAuthSessionMissingError } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_GATEWAY_KEY } from '../lib/supabaseClient';
 
 /**
  * Detecting and recovering from a session the auth server no longer recognises. `getSession()` only
@@ -40,6 +40,42 @@ export function isInvalidSessionError(error) {
 export function isSessionRefusal(status, body) {
   if (status !== 401 || !body || typeof body !== 'object') return false;
   return isInvalidSessionError({ message: body.error || body.msg || body.message, details: body.details });
+}
+
+/** How long a refusal waits for the auth server's own word before it is left as it was. */
+const REFUSAL_CHECK_TIMEOUT_MS = 10000;
+
+let pendingRefusalCheck = null;
+
+/**
+ * Whether the auth server itself refuses the session supabase-js holds: a 401 or 403 from its
+ * `/user`. False for a live session, no session, an unreachable server, a 5xx, or no answer within
+ * REFUSAL_CHECK_TIMEOUT_MS. Callers at the same time share one request.
+ *
+ * A plain fetch, not getUser(): auth-js drops a refused session and announces SIGNED_OUT before
+ * getUser() returns, which would swap the page for the sign-in screen with no word of why.
+ *
+ * @returns {Promise<boolean>}
+ */
+export function authServerRefusesSession() {
+  if (!pendingRefusalCheck) {
+    pendingRefusalCheck = askUserEndpoint().finally(() => { pendingRefusalCheck = null; });
+  }
+  return pendingRefusalCheck;
+}
+
+async function askUserEndpoint() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return false;
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SUPABASE_GATEWAY_KEY, Authorization: `Bearer ${session.access_token}` },
+      signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(REFUSAL_CHECK_TIMEOUT_MS) : undefined
+    });
+    return res.status === 401 || res.status === 403;
+  } catch {
+    return false;
+  }
 }
 
 /**
