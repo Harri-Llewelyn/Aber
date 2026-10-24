@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,10 @@ MACHINE_TOKEN = os.getenv("GITEA_MACHINE_TOKEN", "")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 # The status main requires. Must agree with FLOW_SHAPE_CONTEXT in _shared/forge.ts.
 FLOW_SHAPE_CONTEXT = "aber/flow-shape"
+# Gitea's wording for a read-only key's refused push, as of 28.
+PERMISSION_REFUSAL = "User permission denied for writing"
+# Git's own refusal of a push that is not a fast-forward, before the forge checks anything.
+NOT_A_FAST_FORWARD = re.compile(r"\((?:fetch first|non-fast-forward)\)")
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -515,6 +520,31 @@ class TestTheApplianceItself(ForgeEventsBase):
         result = subprocess.run(["git", *args], cwd=cwd or self.clone, env=env, capture_output=True, text=True)
         return result.returncode, (result.stdout + result.stderr).strip()
 
+    def push_past_moves(self, cwd, branch="main", attempts=5):
+        """
+        Push HEAD to `branch` until something other than a moved branch refuses it. When `branch`
+        moved since the clone, git refuses the push itself; this fetches, rebases onto the remote
+        branch and pushes again, `attempts` pushes at most. Never --force: if the key could write,
+        that would overwrite the branch. Returns git's exit code and output, and what refused it.
+        """
+        for attempt in range(1, attempts + 1):
+            code, out = self.git("push", "--quiet", "origin", f"HEAD:{branch}", cwd=cwd)
+            if code == 0:
+                return code, out, "no refusal"
+            if PERMISSION_REFUSAL in out:
+                return code, out, "the permission refusal"
+            if not NOT_A_FAST_FORWARD.search(out):
+                return code, out, "another refusal, neither the permission check nor a moved branch"
+            if attempt == attempts:
+                break
+            step_code, step_out = self.git("fetch", "--quiet", "origin", branch, cwd=cwd)
+            if step_code == 0:
+                step_code, step_out = self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@aber.invalid",
+                                               "rebase", "--quiet", "FETCH_HEAD", cwd=cwd)
+            if step_code != 0:
+                return code, f"{out}\n{step_out}", f"a moved {branch}, and then a failed fetch or rebase onto it"
+        return code, out, f"a race that outlasted {attempts} pushes, {branch} having moved before each"
+
     def commit(self, message, cwd=None):
         code, out = self.git("-c", f"user.name=gateway {self.sparkplug_id}", "-c", "user.email=appliance@aber.invalid",
                              "commit", "--quiet", "-m", message, cwd=cwd)
@@ -642,10 +672,11 @@ class TestTheApplianceItself(ForgeEventsBase):
                 handle.write("# from an appliance\n")
             self.git("add", "--", "site.yml", cwd=platform_clone)
             self.commit("Widen myself", cwd=platform_clone)
-            code, out = self.git("push", "--quiet", "origin", "HEAD:main", cwd=platform_clone)
+            # A sweep may still be publishing to main after site.yml appears, so the push may first
+            # meet a moved main; the refusal under test is the forge's.
+            code, out, refused_by = self.push_past_moves(platform_clone)
             self.assertNotEqual(code, 0, "the deploy key wrote the platform repository")
-            # Gitea's wording for a read-only key's refused push, as of 28.
-            self.assertIn("User permission denied for writing", out)
+            self.assertIn(PERMISSION_REFUSAL, out, f"expected the forge's permission refusal, got {refused_by}:\n{out}")
 
         # A rewritten appliance branch: append-only means a force-push is refused.
         self.assertEqual(self.git("checkout", "--quiet", "appliance")[0], 0)
