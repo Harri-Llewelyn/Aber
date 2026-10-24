@@ -369,6 +369,28 @@ function startBroker({ withTls, certsDir }) {
   return { name, log, running: /mosquitto version .* running/.test(log) };
 }
 
+/** How long a delivery proof polls for its message, and the bound on the daemon's will, in seconds. */
+const DELIVERY_DEADLINE_S = 10;
+const WILL_BOUND_S = 5;
+const PAUSE = new Int32Array(new SharedArrayBuffer(4));
+const secs = (s) => `${s.toFixed(1)} s`;
+
+/**
+ * Poll `probe` every 100 ms until it returns true or `seconds` pass, the delivery proofs' version of
+ * the loop above. Returns whether it did and how long that took, so a failure says how long it
+ * waited: a busy machine then reads as slow, not as a broken rule. Each probe is a `docker exec`,
+ * so a round takes longer than the pause.
+ */
+function pollFor(probe, seconds) {
+  const start = Date.now();
+  for (;;) {
+    const done = probe();
+    const waited = (Date.now() - start) / 1000;
+    if (done || waited >= seconds) return { done, waited };
+    Atomics.wait(PAUSE, 0, 0, 100);
+  }
+}
+
 const started = [];
 function cleanup() {
   for (const n of started) if (n) docker(['rm', '-f', n]);
@@ -606,23 +628,39 @@ try {
        * payload, not whether the subscriber printed anything: `mosquitto_sub -W` writes `Timed out`
        * to stderr when the window closes empty, so a truthiness test would treat a dropped message
        * as delivered.
+       *
+       * Returns a proof that expect() runs with the answer it wants, because the two wait
+       * differently. A delivery is polled for: nothing says when the subscriber has attached, so
+       * each round publishes again, until the payload arrives or DELIVERY_DEADLINE_S pass. A drop
+       * has no event to wait for, so it keeps the fixed window.
        */
       const MARKER = 'FP-ACL-PROBE';
-      const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#', qos = 0) => {
+      const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#', qos = 0) => (wanted) => {
         const out = `/tmp/acl-${Date.now()}.txt`;
+        const start = Date.now();
         docker(['exec', '-d', r.name, 'sh', '-c',
-          `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -q ${qos} -C 1 -W 5 > ${out} 2>&1`]);
-        docker(['exec', r.name, 'sleep', '2']);
-        docker(['exec', r.name, 'mosquitto_pub', '-u', pubUser, '-P', ACCOUNTS[pubUser],
+          `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -q ${qos} -C 1 `
+          + `-W ${wanted ? DELIVERY_DEADLINE_S + 5 : 5} > ${out} 2>&1`]);
+        const publish = () => docker(['exec', r.name, 'mosquitto_pub', '-u', pubUser, '-P', ACCOUNTS[pubUser],
           '-t', topic, '-m', MARKER]);
+        const arrived = () => (docker(['exec', r.name, 'cat', out]).stdout || '').includes(MARKER);
+        if (wanted) {
+          const { done } = pollFor(() => { publish(); return arrived(); }, DELIVERY_DEADLINE_S);
+          return { got: done, waited: (Date.now() - start) / 1000 };
+        }
+        docker(['exec', r.name, 'sleep', '2']);
+        publish();
         docker(['exec', r.name, 'sleep', '4']);
-        return (docker(['exec', r.name, 'cat', out]).stdout || '').includes(MARKER);
+        return { got: arrived(), waited: (Date.now() - start) / 1000 };
       };
 
-      const expect = (label, got, wanted) => {
+      // `proof` is a delivers() proof, or a boolean already measured.
+      const expect = (label, proof, wanted) => {
+        const { got, waited } = typeof proof === 'function' ? proof(wanted) : { got: proof, waited: null };
         if (got === wanted) ok.push(label);
         else problems.push(
           `${label} -- expected the message to be ${wanted ? 'DELIVERED' : 'DROPPED'}, but it was ${got ? 'delivered' : 'dropped'}`
+          + (waited === null ? '' : ` (waited ${secs(waited)})`)
         );
       };
 
@@ -960,17 +998,20 @@ try {
         // also "exit", and would prove nothing; a message delivered to it first is what makes the
         // session observed rather than assumed.
         //
-        // The window is 60s rather than the 20s below because this assertion reads the subscriber's
-        // exit as the re-issue's doing: a window that closed on its own would look identical, and
-        // the re-issue happens ~7s in. `stillUp` refuses that reading outright.
+        // The window is 60s because this assertion reads the subscriber's exit as the re-issue's
+        // doing: a window that closed on its own would look identical, and on a busy machine the
+        // re-issue can come many seconds in. `stillUp` refuses that reading outright.
         const rotated = '/tmp/rotated.txt';
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -u ${GATEWAY_C} -P ${passwordC1} -t 'spBv1.0/+/NCMD/+' -W 60 > ${rotated} 2>&1; echo EXIT:$? >> ${rotated}`]);
-        docker(['exec', r.name, 'sleep', '2']);
-        docker(['exec', r.name, 'mosquitto_pub',
-          '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
-          '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
-        docker(['exec', r.name, 'sleep', '2']);
+        // The rebirth NCMD is the control, published each round until the subscriber prints it.
+        const holds = (file, text) => (docker(['exec', r.name, 'cat', file]).stdout || '').includes(text);
+        const reached = (file) => pollFor(() => {
+          docker(['exec', r.name, 'mosquitto_pub', '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
+            '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
+          return holds(file, MARKER);
+        }, DELIVERY_DEADLINE_S);
+        const rotationControl = reached(rotated);
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
         const sessionWasLive = beforeRotation.includes(MARKER);
         const stillUp = !beforeRotation.includes('EXIT:');
@@ -985,21 +1026,24 @@ try {
           if (reissued.replaced === true) ok.push('re-issuing an existing gateway reports replaced: true');
           else problems.push('re-issuing an existing gateway reported replaced: false');
 
-          docker(['exec', r.name, 'sleep', '3']);
           if (!sessionWasLive || !stillUp) {
             problems.push(
               !sessionWasLive
-                ? 'the positive control never reached the subscriber, so nothing here proves what '
-                  + 'a re-issue does to a live session'
+                ? `the positive control never reached the subscriber in ${secs(rotationControl.waited)}, so `
+                  + 'nothing here proves what a re-issue does to a live session'
                 : 'the subscriber had already exited before the re-issue, so its exit says nothing '
                   + 'about what the re-issue did'
             );
-          } else if ((docker(['exec', r.name, 'cat', rotated]).stdout || '').includes('EXIT:')) {
-            ok.push('setClientPassword drops the live session (the subscriber exited)');
           } else {
-            problems.push(
-              'a re-issue did NOT drop the live session; the mint dialog tells an operator it does'
-            );
+            const exited = pollFor(() => holds(rotated, 'EXIT:'), DELIVERY_DEADLINE_S);
+            if (exited.done) {
+              ok.push('setClientPassword drops the live session (the subscriber exited)');
+            } else {
+              problems.push(
+                `a re-issue did NOT drop the live session in ${secs(exited.waited)}; the mint dialog tells an `
+                + 'operator it does'
+              );
+            }
           }
 
           if (refusedConnect(pubAsC(passwordC1))) {
@@ -1016,12 +1060,12 @@ try {
         }
 
         // Revocation is disableClient, and its whole point is that a LIVE session is dropped. A
-        // subscriber is left connected with a 20-second window; if it is still there 5 seconds
-        // after the disable, the revocation did not reach the session.
+        // subscriber is proven connected by the same control, and must exit within
+        // DELIVERY_DEADLINE_S of the disable; its 60-second window cannot close first.
         const kicked = '/tmp/kicked.txt';
         docker(['exec', '-d', r.name, 'sh', '-c',
-          `mosquitto_sub -u ${GATEWAY_C} -P ${ACCOUNTS[GATEWAY_C]} -t 'spBv1.0/+/NCMD/+' -W 20 > ${kicked} 2>&1; echo EXIT:$? >> ${kicked}`]);
-        docker(['exec', r.name, 'sleep', '2']);
+          `mosquitto_sub -u ${GATEWAY_C} -P ${ACCOUNTS[GATEWAY_C]} -t 'spBv1.0/+/NCMD/+' -W 60 > ${kicked} 2>&1; echo EXIT:$? >> ${kicked}`]);
+        const kickControl = reached(kicked);
         let disabled;
         try {
           assertOk(send({ command: 'disableClient', username: GATEWAY_C }));
@@ -1030,11 +1074,15 @@ try {
           problems.push(`disableClient ${GATEWAY_C} failed: ${err.message}`);
         }
         if (disabled) {
-          docker(['exec', r.name, 'sleep', '3']);
-          if ((docker(['exec', r.name, 'cat', kicked]).stdout || '').includes('EXIT:')) {
+          const exited = pollFor(() => holds(kicked, 'EXIT:'), DELIVERY_DEADLINE_S);
+          if (!kickControl.done) {
+            problems.push(`the positive control never reached the subscriber in ${secs(kickControl.waited)}, so `
+              + 'nothing here proves what disableClient does to a live session');
+          } else if (exited.done) {
             ok.push('disableClient drops the live session (the subscriber exited)');
           } else {
-            problems.push('disableClient did NOT drop the live session; a revoked gateway would stay connected');
+            problems.push(`disableClient did NOT drop the live session in ${secs(exited.waited)}; a revoked `
+              + 'gateway would stay connected');
           }
           if (refusedConnect(pubAsC(ACCOUNTS[GATEWAY_C]))) {
             ok.push('a disabled client is refused on its next CONNECT');
@@ -1074,21 +1122,36 @@ try {
       // will must reach a gateway watching STATE at once, which is what a buffering gateway acts on.
       {
         const DEATH = 'FP-STATE-DEATH';
+        const ALIVE = 'FP-STATE-ALIVE';
         const watched = '/tmp/state-watch.txt';
+        const daemon = '/tmp/daemon.txt';
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -V mqttv5 -i aber-ingestion-check -q 1 -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} `
           + `-t 'spBv1.0/#' --will-topic '${stateTopic}' --will-payload '${DEATH}' --will-qos 1 --will-retain `
-          + '> /dev/null 2>&1']);
+          + `> ${daemon} 2>&1`]);
         docker(['exec', '-d', r.name, 'sh', '-c',
-          `mosquitto_sub -u ${GATEWAY_A} -P ${ACCOUNTS[GATEWAY_A]} -t 'spBv1.0/STATE/#' -W 20 > ${watched} 2>&1`]);
-        docker(['exec', r.name, 'sleep', '2']);
+          `mosquitto_sub -u ${GATEWAY_A} -P ${ACCOUNTS[GATEWAY_A]} -t 'spBv1.0/STATE/#' -W 60 > ${watched} 2>&1`]);
+        // Both are proven attached before the kill: one STATE message reaches the daemon's
+        // subscription and the watcher's. Then the will is polled for, up to a bound well above the
+        // delay it has, which is none.
+        const read = (file) => docker(['exec', r.name, 'cat', file]).stdout || '';
+        const attached = pollFor(() => {
+          docker(['exec', r.name, 'mosquitto_pub', '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
+            '-t', stateTopic, '-m', ALIVE]);
+          return read(daemon).includes(ALIVE) && read(watched).includes(ALIVE);
+        }, DELIVERY_DEADLINE_S);
         docker(['exec', r.name, 'pkill', '-9', '-f', 'aber-ingestion-check']);
-        docker(['exec', r.name, 'sleep', '1']);
-        if ((docker(['exec', r.name, 'cat', watched]).stdout || '').includes(DEATH)) {
-          ok.push('the daemon\'s will (no Will Delay Interval) reaches a STATE watcher within a second of its connection dying');
+        const will = pollFor(() => read(watched).includes(DEATH), WILL_BOUND_S);
+        if (!attached.done) {
+          problems.push(`the daemon's connection and the STATE watcher had not both received a message after `
+            + `${secs(attached.waited)}, so nothing here proves when the will arrives`);
+        } else if (will.done) {
+          ok.push('the daemon\'s will (no Will Delay Interval) reaches a STATE watcher at once when its connection dies');
+          log(`the death certificate arrived ${secs(will.waited)} after the kill`);
         } else {
-          problems.push('the death certificate did not arrive within a second of the daemon\'s connection dying; '
-            + 'a gateway that buffers on STATE would go on publishing to a host that is gone');
+          problems.push(`the death certificate had not arrived ${secs(will.waited)} after the daemon's connection died; `
+            + 'the will has no delay, so it should arrive at once, and a gateway that buffers on STATE would go on '
+            + 'publishing to a host that is gone');
         }
       }
     }

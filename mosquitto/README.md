@@ -103,8 +103,8 @@ tags, and `renovate.json` proposes the next one.
 - **`disableClient` disconnects a live session** and refuses the next CONNECT; `enableClient`
   admits it again. This is what the ACL file could not do: revocation used to take effect only
   when the appliance next reconnected.
-- **`setClientPassword` disconnects a live session too**, within the three seconds the check
-  allows, and the old password is then refused on CONNECT. A re-issue is as loud as a revocation,
+- **`setClientPassword` disconnects a live session too**, within the ten seconds the check polls
+  for, and the old password is then refused on CONNECT. A re-issue is as loud as a revocation,
   which is the better outcome: the holder goes stale on the dashboard inside the 90s threshold
   rather than failing quietly at some later reconnect. The playback worker is the one holder this
   does not reach — it keeps no session (`ingestion/playback_worker.py` polls), so there is nothing
@@ -157,9 +157,10 @@ tags, and `renovate.json` proposes the next one.
   `check-broker-config.mjs` asserts the argv, and issues and re-issues a gateway through stdin.
 - **The ingestion daemon's will is prompt.** Opened as the daemon opens it (a clean session, a
   retained QoS 1 will with no Will Delay Interval) and killed outright, its death certificate
-  reaches a gateway watching `spBv1.0/STATE/#` within a second. A gateway that buffers on STATE
-  acts on that, so the readings it takes from then on wait on the gateway rather than being sent to
-  a host that is gone ([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)).
+  reaches a gateway watching `spBv1.0/STATE/#` at once: in well under a second when measured, and
+  the check fails it only beyond five, so a busy machine does not read as a delay. A gateway that
+  buffers on STATE acts on that, so the readings it takes from then on wait on the gateway rather
+  than being sent to a host that is gone ([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)).
 - **A connected client may fall 20,000 messages behind** (`max_queued_messages`) before the broker
   drops what follows; Mosquitto's default is 1,000. The default shed the rebirth that follows a
   restart of ingestion: 1.1 % of readings at 500 msg/s, 3.9 % at 1,000. With 20,000 the same
