@@ -372,23 +372,28 @@ function startBroker({ withTls, certsDir }) {
 /** How long a delivery proof polls for its message, and the bound on the daemon's will, in seconds. */
 const DELIVERY_DEADLINE_S = 10;
 const WILL_BOUND_S = 5;
-const PAUSE = new Int32Array(new SharedArrayBuffer(4));
 const secs = (s) => `${s.toFixed(1)} s`;
 
 /**
- * Poll `probe` every 100 ms until it returns true or `seconds` pass, the delivery proofs' version of
- * the loop above. Returns whether it did and how long that took, so a failure says how long it
- * waited: a busy machine then reads as slow, not as a broken rule. Each probe is a `docker exec`,
- * so a round takes longer than the pause.
+ * Run `probe`, a shell condition, inside the broker container every 100 ms until it holds or
+ * `seconds` pass, after `first` if given. One `docker exec` for the whole wait, timed by the
+ * container's clock: a busy machine slows every exec, and a poll paying one per round would spend
+ * its deadline on docker. Returns whether it held and the seconds it took, so a failure says how
+ * long it waited and a slow machine reads as slow, not as a broken rule.
  */
-function pollFor(probe, seconds) {
-  const start = Date.now();
-  for (;;) {
-    const done = probe();
-    const waited = (Date.now() - start) / 1000;
-    if (done || waited >= seconds) return { done, waited };
-    Atomics.wait(PAUSE, 0, 0, 100);
-  }
+function pollInBroker(name, probe, seconds, first = ':') {
+  const r = docker(['exec', name, 'sh', '-c', [
+    first,
+    'now() { cut -d" " -f1 /proc/uptime | tr -d .; }',
+    `start=$(now); end=$((start + ${seconds * 100}))`,
+    `until ${probe}; do`,
+    '  [ "$(now)" -ge "$end" ] && { echo $(($(now) - start)); exit 1; }',
+    '  sleep 0.1',
+    'done',
+    'echo $(($(now) - start))',
+  ].join('\n')]);
+  const centiseconds = Number.parseInt((r.stdout || '').trim().split('\n').pop(), 10);
+  return { done: r.status === 0, waited: Number.isFinite(centiseconds) ? centiseconds / 100 : seconds };
 }
 
 const started = [];
@@ -632,26 +637,25 @@ try {
        * Returns a proof that expect() runs with the answer it wants, because the two wait
        * differently. A delivery is polled for: nothing says when the subscriber has attached, so
        * each round publishes again, until the payload arrives or DELIVERY_DEADLINE_S pass. A drop
-       * has no event to wait for, so it keeps the fixed window.
+       * has no event to wait for, so it keeps the fixed window: 2 s to attach, 4 s to arrive.
        */
       const MARKER = 'FP-ACL-PROBE';
       const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#', qos = 0) => (wanted) => {
         const out = `/tmp/acl-${Date.now()}.txt`;
-        const start = Date.now();
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -q ${qos} -C 1 `
           + `-W ${wanted ? DELIVERY_DEADLINE_S + 5 : 5} > ${out} 2>&1`]);
-        const publish = () => docker(['exec', r.name, 'mosquitto_pub', '-u', pubUser, '-P', ACCOUNTS[pubUser],
-          '-t', topic, '-m', MARKER]);
-        const arrived = () => (docker(['exec', r.name, 'cat', out]).stdout || '').includes(MARKER);
+        const publish = `mosquitto_pub -u ${pubUser} -P ${ACCOUNTS[pubUser]} -t '${topic}' -m ${MARKER}`;
         if (wanted) {
-          const { done } = pollFor(() => { publish(); return arrived(); }, DELIVERY_DEADLINE_S);
-          return { got: done, waited: (Date.now() - start) / 1000 };
+          const { done, waited } = pollInBroker(r.name, `{ ${publish}; grep -q ${MARKER} ${out}; }`, DELIVERY_DEADLINE_S);
+          return { got: done, waited };
         }
+        const start = Date.now();
         docker(['exec', r.name, 'sleep', '2']);
-        publish();
+        docker(['exec', r.name, 'sh', '-c', publish]);
         docker(['exec', r.name, 'sleep', '4']);
-        return { got: arrived(), waited: (Date.now() - start) / 1000 };
+        const got = (docker(['exec', r.name, 'cat', out]).stdout || '').includes(MARKER);
+        return { got, waited: (Date.now() - start) / 1000 };
       };
 
       // `proof` is a delivers() proof, or a boolean already measured.
@@ -1005,12 +1009,9 @@ try {
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -u ${GATEWAY_C} -P ${passwordC1} -t 'spBv1.0/+/NCMD/+' -W 60 > ${rotated} 2>&1; echo EXIT:$? >> ${rotated}`]);
         // The rebirth NCMD is the control, published each round until the subscriber prints it.
-        const holds = (file, text) => (docker(['exec', r.name, 'cat', file]).stdout || '').includes(text);
-        const reached = (file) => pollFor(() => {
-          docker(['exec', r.name, 'mosquitto_pub', '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
-            '-t', `spBv1.0/Aber/NCMD/${GATEWAY_C}`, '-m', MARKER]);
-          return holds(file, MARKER);
-        }, DELIVERY_DEADLINE_S);
+        const ncmd = `mosquitto_pub -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} -t 'spBv1.0/Aber/NCMD/${GATEWAY_C}' -m ${MARKER}`;
+        const reached = (file) => pollInBroker(r.name, `{ ${ncmd}; grep -q ${MARKER} ${file}; }`, DELIVERY_DEADLINE_S);
+        const exits = (file) => pollInBroker(r.name, `grep -q EXIT: ${file}`, DELIVERY_DEADLINE_S);
         const rotationControl = reached(rotated);
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
         const sessionWasLive = beforeRotation.includes(MARKER);
@@ -1035,7 +1036,7 @@ try {
                   + 'about what the re-issue did'
             );
           } else {
-            const exited = pollFor(() => holds(rotated, 'EXIT:'), DELIVERY_DEADLINE_S);
+            const exited = exits(rotated);
             if (exited.done) {
               ok.push('setClientPassword drops the live session (the subscriber exited)');
             } else {
@@ -1074,7 +1075,7 @@ try {
           problems.push(`disableClient ${GATEWAY_C} failed: ${err.message}`);
         }
         if (disabled) {
-          const exited = pollFor(() => holds(kicked, 'EXIT:'), DELIVERY_DEADLINE_S);
+          const exited = exits(kicked);
           if (!kickControl.done) {
             problems.push(`the positive control never reached the subscriber in ${secs(kickControl.waited)}, so `
               + 'nothing here proves what disableClient does to a live session');
@@ -1132,16 +1133,14 @@ try {
         docker(['exec', '-d', r.name, 'sh', '-c',
           `mosquitto_sub -u ${GATEWAY_A} -P ${ACCOUNTS[GATEWAY_A]} -t 'spBv1.0/STATE/#' -W 60 > ${watched} 2>&1`]);
         // Both are proven attached before the kill: one STATE message reaches the daemon's
-        // subscription and the watcher's. Then the will is polled for, up to a bound well above the
-        // delay it has, which is none.
-        const read = (file) => docker(['exec', r.name, 'cat', file]).stdout || '';
-        const attached = pollFor(() => {
-          docker(['exec', r.name, 'mosquitto_pub', '-u', 'aber_ingestion', '-P', ACCOUNTS.aber_ingestion,
-            '-t', stateTopic, '-m', ALIVE]);
-          return read(daemon).includes(ALIVE) && read(watched).includes(ALIVE);
-        }, DELIVERY_DEADLINE_S);
-        docker(['exec', r.name, 'pkill', '-9', '-f', 'aber-ingestion-check']);
-        const will = pollFor(() => read(watched).includes(DEATH), WILL_BOUND_S);
+        // subscription and the watcher's. The kill and the wait for the will are one exec, so the
+        // bound, well above the will's delay of none, counts the broker's time and not docker's.
+        const alive = `mosquitto_pub -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} -t '${stateTopic}' -m ${ALIVE}`;
+        const attached = pollInBroker(r.name,
+          `{ ${alive}; grep -q ${ALIVE} ${daemon} && grep -q ${ALIVE} ${watched}; }`, DELIVERY_DEADLINE_S);
+        // The bracket keeps the pattern from matching this exec's own shell, whose script holds it.
+        const will = pollInBroker(r.name, `grep -q ${DEATH} ${watched}`, WILL_BOUND_S,
+          "pkill -9 -f 'aber-ingestion-chec[k]'");
         if (!attached.done) {
           problems.push(`the daemon's connection and the STATE watcher had not both received a message after `
             + `${secs(attached.waited)}, so nothing here proves when the will arrives`);
