@@ -34,7 +34,7 @@
     },
     {
       "rolename": "ingestion",
-      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. THREE of its grants are not in this file, because each is named by the deployment rather than by this repository and is injected at reconcile time: its write on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group, and the Unified Namespace subtree <root>/# from UNS_MQTT_TOPIC_ROOT (ingestion.unsMqttTopicRoot).",
+      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. THREE of its grants are not in this file, because each is named by the deployment rather than by this repository and is injected at reconcile time: its writes on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, on the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group, and on the Unified Namespace subtree <root>/# from UNS_MQTT_TOPIC_ROOT (ingestion.unsMqttTopicRoot). It reads neither subtree: nothing on the platform reads them as this account.",
       "acls": [
         { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
           "why": "ingestion.py subscribes once to spBv1.0/#. capture.py records as this account unless MQTT_CAPTURE_USER names another." },
