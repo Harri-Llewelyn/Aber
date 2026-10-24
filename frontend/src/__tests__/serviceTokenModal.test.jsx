@@ -39,7 +39,7 @@ describe('isMintableFromPage', () => {
    * a principal created at runtime must be mintable without editing the frontend, and the two
    * environment-key identities must not be.
    */
-  it('admits the MCP principal', () => {
+  it('admits the Read-only API client', () => {
     expect(isMintableFromPage(describePrincipal('b0000000-0000-4000-8000-000000000001'))).toBe(true)
   })
 
@@ -65,7 +65,7 @@ describe('ServiceTokenModal', () => {
   const open = (overrides = {}) => render(
     <ServiceTokenModal
       principal={PRINCIPAL}
-      principalName="MCP read-only client"
+      principalName="Read-only API client"
       onClose={vi.fn()}
       showToast={vi.fn()}
       {...overrides}
@@ -117,7 +117,7 @@ describe('ServiceTokenModal', () => {
     await waitFor(() => expect(screen.getByText(/verify the signature independently/i)).toBeTruthy())
   })
 
-  /** I3X_TOKEN is what `i3x-mcp` reads, so it is said for the MCP identity and for no other. */
+  /** I3X_TOKEN is what `i3x-mcp` reads, so it is said for the Read-only API client and no other. */
   it('names I3X_TOKEN only for the identity whose client reads it', async () => {
     api.mintServiceToken.mockResolvedValue(MINTED)
     const first = open()

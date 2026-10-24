@@ -75,7 +75,7 @@ describe('ServiceTokenInventoryModal', () => {
   // expired and offered no Revoke, and four tests began failing on a date rather than on a change.
   const openWith = (mints, revoked = new Set(), props = {}) => render(
     <ServiceTokenInventoryModal
-      principalName="MCP read-only client"
+      principalName="Read-only API client"
       status={tokenStatus(mints, NOW, revoked)}
       now={NOW}
       onClose={vi.fn()}
@@ -167,7 +167,7 @@ describe('ServiceTokenInventoryModal: sorting by a column (#801)', () => {
 
   const open = () => render(
     <ServiceTokenInventoryModal
-      principalName="MCP read-only client"
+      principalName="Read-only API client"
       status={tokenStatus(TOKENS, NOW, new Set(['pulled']))}
       now={NOW}
       onClose={vi.fn()}

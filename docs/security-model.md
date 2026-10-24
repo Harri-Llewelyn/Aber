@@ -215,8 +215,8 @@ and so is what a new password does not reach ([below it](#a-new-password-does-no
 ## Machine identities
 
 Six identities here are held by software rather than people, and each is narrow by construction:
-`Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
-own** rather than a person's role (`0080`), `Service_ReleaseCheck` holds nothing and reaches one
+`Service_Ingestor`, `Service_Playback` and the Read-only API client hold `telemetry:read` **as a
+grant of their own** rather than a person's role (`0080`), `Service_ReleaseCheck` holds nothing and reaches one
 gate, `record_release_check()` (`0181`), `aber_i3x` reads the broker namespace and
 publishes nothing, and `gateway-credential-service` can issue, re-issue and disable gateway broker
 accounts, list them and serve the broker's root, and nothing else.

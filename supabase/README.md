@@ -2885,7 +2885,7 @@ here rather than left on a checklist.
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
 | `Service_ReleaseCheck` (`0181`) | nothing | Nothing directly. `record_release_check()`, which checks `is_release_check_caller()`; its key is read only with `releaseCheck.enabled` |
-| MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `audit_trail` |
+| Read-only API client (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `audit_trail` |
 | `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Issues or disables one gateway's account at a time, lists the broker's clients and roles, and serves the CA; nothing else |
 
@@ -3899,12 +3899,12 @@ principal** and **keys that name nobody**:
 
 | Key | Expiry | Why |
 | :--- | :--- | :--- |
-| `mint-mcp-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation reaches PostgREST only, so the expiry bounds the rest |
+| `mint-api-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation reaches PostgREST only, so the expiry bounds the rest |
 | `SUPABASE_INGESTION_KEY`, `SUPABASE_PLAYBACK_KEY` | **90 days**, rotatable | They carry a `sub`, so they are the same kind of credential as the row above and are bounded by the same ceiling. `npm run keys:rotate` re-signs them |
 | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. No client holds them: the gateway admits only the publishable and secret keys as an `apikey`, refuses these if presented, and substitutes them upstream — so shortening them means re-signing them for the gateway and every service that verifies them at once |
 
 The ceiling is enforced in both the script and the database, deliberately duplicated, so it cannot
-be removed by editing one file. `mint-mcp-token.mjs` also
+be removed by editing one file. `mint-api-token.mjs` also
 **records before it prints** — the token exists nowhere until stdout, so a failed audit write costs
 a row describing a credential nobody holds, where the other order costs an unrevocable credential in
 the wild with no record of it.
@@ -3994,7 +3994,7 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 **Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
 `supabase-realtime`, the edge runtime (which boots `VERIFY_JWT="false"`) and Studio each verify
 `SUPABASE_JWT_SECRET` for themselves and consult no denylist. That is complete coverage for what
-this is about — the MCP reader and `Service_Ingestor` reach PostgREST and nothing else — but the
+this is about — the Read-only API client and `Service_Ingestor` reach PostgREST and nothing else — but the
 expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
 
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
