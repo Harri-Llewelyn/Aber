@@ -10,10 +10,31 @@ The settings for the whole site are on the **Settings** page, not here.
 
 - **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your role, on the **Access Control** page.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
+- **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.
+- **Copy Key**, on the **Publishable key** row, copies the site's publishable key. Some tools ask for it beside your token. It is public: every browser that opens the dashboard is given it.
 - **Appearance** holds your **Theme** (dark or light), your **Sidebar layout** and your **Single-key shortcuts**. Choose a value, then select **Save** on its row. **Discard** puts back the value you had.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
+
+## Calling the API as yourself
+
+Your access token lets another tool act as you. Use it to try the API in Swagger UI, to browse in i3X Explorer, or in one curl request. You do not type your password into any of them.
+
+1. On the **Account** tab, select **Copy Token** on the **Access token** row.
+2. Paste the token into the tool:
+   - **Swagger UI** (`https://docs.<domain>`): select **Authorize**. Paste the token under **bearerAuth**, without the word "Bearer". Then come back to this page and select **Copy Key**. Paste the key under **apiKeyAuth**.
+   - **i3X Explorer**: set **Authentication** to **Bearer Token**, and paste the token.
+3. When the token stops working, select **Copy Token** again. You get the current one.
+
+What the token can do:
+
+- It acts as you, with your role. Anyone who holds it can do what you can, so keep it to yourself.
+- On a standard install it lasts at most an hour from when it was issued. The row shows the exact time.
+- Signing out does not end it. It keeps working until that time.
+- The dashboard renews its own token before it runs out. It does not renew the copy you made.
+
+A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. An Administrator issues its token on the **Access Control** page.
 
 ## Where your choices are kept
 

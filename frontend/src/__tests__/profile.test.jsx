@@ -2,15 +2,33 @@
  * The Profile page: the person's own account and appearance, laid out as the Settings page's table
  * so the two pages read alike, and saying it applies to the person on any browser. Each Appearance
  * field writes through the callbacks App wires to useUserSettings, the same ones the account menu's
- * toggle and the rail's foot control use.
+ * toggle and the rail's foot control use. Account also copies the person's access token and the
+ * publishable key, for calling the API as themselves.
  */
 import React from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProfileTab, PROFILE_SECTIONS } from '../components/tabs/ProfileTab'
+import { SUPABASE_GATEWAY_KEY as PUBLISHABLE_KEY } from '../config'
 import { MIN_PASSWORD_LENGTH } from '../utils/passwords'
+import { PERSON_ROLES } from '../utils/people'
 import { tabLink, tabLinks } from '../test/tabBar'
+
+vi.mock('../lib/supabaseClient', () => ({
+  SUPABASE_URL: 'https://api.site.test',
+  SUPABASE_GATEWAY_KEY: 'sb_publishable_test',
+  supabase: { auth: { getSession: vi.fn() } },
+}))
+
+import { supabase } from '../lib/supabaseClient'
+
+// Unanswered unless a test answers it, so a test about another row gets no late update from the
+// Access token row's read.
+beforeEach(() => {
+  supabase.auth.getSession.mockReset()
+  supabase.auth.getSession.mockReturnValue(new Promise(() => {}))
+})
 
 const renderProfile = (props = {}) => {
   const handlers = {
@@ -91,6 +109,127 @@ describe('Account', () => {
     const button = within(row('Password')).getByRole('button', { name: /change password/i })
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription('Machine identities have no password to change.')
+  })
+})
+
+/*
+ * The person's own access token, for Swagger UI, i3X Explorer or curl: copied, never shown, and
+ * never the refresh token. Only Date is faked, so the times read the same on any machine while
+ * the promises and timers stay real.
+ */
+describe('Access token and Publishable key', () => {
+  const base64url = (value) => btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  /** A session as supabase-js holds it: a signed JWT whose `exp` is `expires`, and a refresh token. */
+  const sessionUntil = (expires, n = 1) => ({
+    access_token: [
+      base64url({ alg: 'HS256', typ: 'JWT' }),
+      base64url({ sub: 'user-1', role: 'authenticated', email: 'operator@site.test', exp: Math.floor(expires.getTime() / 1000) }),
+      `signature-${n}`,
+    ].join('.'),
+    refresh_token: `refresh-token-${n}`,
+    user: { id: 'user-1', email: 'operator@site.test' },
+  })
+  const answer = (session) => ({ data: { session }, error: null })
+
+  let writeText
+  let original
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 24, 13, 40))
+    writeText = vi.fn().mockResolvedValue(undefined)
+    original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true, writable: true })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    if (original) Object.defineProperty(navigator, 'clipboard', original)
+    else delete navigator.clipboard
+  })
+
+  const tokenRow = () => row('Access token')
+  const keyRow = () => row('Publishable key')
+
+  it("shows when the session's token stops working, and never the token itself", async () => {
+    const session = sessionUntil(new Date(2026, 9, 24, 14, 32))
+    supabase.auth.getSession.mockResolvedValue(answer(session))
+    renderProfile()
+
+    expect(await within(tokenRow()).findByText('Valid until 14:32')).toBeInTheDocument()
+    expect(tokenRow().querySelector('.setting-description')).toHaveTextContent(/acts as you, with your role, until it expires/)
+    expect(tokenRow().querySelector('.setting-description')).toHaveTextContent(/signing out does not end it sooner/)
+    expect(document.body.innerHTML).not.toContain(session.access_token)
+    expect(document.body.innerHTML).not.toContain(session.refresh_token)
+  })
+
+  it('adds the date when the token stops working on another day', async () => {
+    vi.setSystemTime(new Date(2026, 9, 24, 23, 30))
+    supabase.auth.getSession.mockResolvedValue(answer(sessionUntil(new Date(2026, 9, 25, 0, 15))))
+    renderProfile()
+    expect(await within(tokenRow()).findByText('Valid until 25 Oct 2026, 00:15')).toBeInTheDocument()
+  })
+
+  it('copies the access token, never the refresh token, and still does not show it', async () => {
+    const session = sessionUntil(new Date(2026, 9, 24, 14, 32))
+    supabase.auth.getSession.mockResolvedValue(answer(session))
+    renderProfile()
+    await within(tokenRow()).findByText('Valid until 14:32')
+
+    fireEvent.click(within(tokenRow()).getByRole('button', { name: 'Copy Token' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(session.access_token))
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(writeText).not.toHaveBeenCalledWith(session.refresh_token)
+    expect(await within(tokenRow()).findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+    expect(document.body.innerHTML).not.toContain(session.access_token)
+    expect(document.body.innerHTML).not.toContain(session.refresh_token)
+  })
+
+  it('reads the session again on Copy, so a renewed session copies the new token and shows its time', async () => {
+    const first = sessionUntil(new Date(2026, 9, 24, 14, 32), 1)
+    const renewed = sessionUntil(new Date(2026, 9, 24, 15, 35), 2)
+    supabase.auth.getSession.mockResolvedValueOnce(answer(first)).mockResolvedValue(answer(renewed))
+    renderProfile()
+    await within(tokenRow()).findByText('Valid until 14:32')
+
+    fireEvent.click(within(tokenRow()).getByRole('button', { name: 'Copy Token' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(renewed.access_token))
+    expect(writeText).not.toHaveBeenCalledWith(first.access_token)
+    expect(await within(tokenRow()).findByText('Valid until 15:35')).toBeInTheDocument()
+    expect(supabase.auth.getSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('says so, and copies nothing, when there is no session', async () => {
+    supabase.auth.getSession.mockResolvedValue(answer(null))
+    renderProfile()
+    expect(await within(tokenRow()).findByText('—')).toBeInTheDocument()
+
+    fireEvent.click(within(tokenRow()).getByRole('button', { name: 'Copy Token' }))
+
+    expect(await within(tokenRow()).findByRole('status')).toHaveTextContent('There is no session to copy. Sign in again.')
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it('copies the publishable key, saying where it goes and that it is public', async () => {
+    renderProfile()
+    expect(within(keyRow()).getByText(PUBLISHABLE_KEY)).toBeInTheDocument()
+    expect(keyRow().querySelector('.setting-description')).toHaveTextContent(/Authorize asks for it as apiKeyAuth/)
+    expect(keyRow().querySelector('.setting-description')).toHaveTextContent(/public by design/)
+
+    fireEvent.click(within(keyRow()).getByRole('button', { name: 'Copy Key' }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(PUBLISHABLE_KEY))
+    expect(await within(keyRow()).findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+  })
+
+  it('shows both rows to every person role, Auditor included', () => {
+    expect(PERSON_ROLES.map(r => r.name)).toContain('Auditor')
+    for (const { name } of PERSON_ROLES) {
+      renderProfile({ userRole: name })
+      expect(within(tokenRow()).getByRole('button', { name: 'Copy Token' })).toBeInTheDocument()
+      expect(within(keyRow()).getByRole('button', { name: 'Copy Key' })).toBeInTheDocument()
+      cleanup()
+    }
   })
 })
 
