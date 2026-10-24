@@ -124,9 +124,10 @@ export function deviceStatusBadge(device) {
 }
 
 /**
- * Where a device sits in a devices column's summary (the Gateways and Cells tables): `online`,
- * `offline` (heard from, then gone quiet), `awaitingBirth` (never heard from), or `quarantined`,
- * which the summary counts in none of them. The Devices page's status filters draw the same lines.
+ * Where a device sits in a devices column's summary (the Gateways and Cells tables) and in a
+ * panel's devices label: `online`, `offline` (heard from, then gone quiet), `awaitingBirth` (never
+ * heard from), or `quarantined`, which the summary counts in none of them. The Devices page's
+ * status filters draw the same lines.
  */
 export function deviceSummaryState(device) {
   const status = deviceLifecycleStatus(device)
@@ -150,6 +151,22 @@ export function deviceSummaryCounts(devices = []) {
 export function deviceSummaryText(devices = []) {
   const { online, offline, awaitingBirth } = deviceSummaryCounts(devices)
   return `${online} Online / ${offline} Offline${awaitingBirth ? ` / ${awaitingBirth} Awaiting first birth` : ''}`
+}
+
+/**
+ * The label over a panel's device chips (the Cells drawer, the Site Map's cell and area panels):
+ * online by deviceSummaryState(), out of all of `devices`, then the quarantined and those awaiting
+ * a first birth while there are any. The caller passes the devices it counts, those in service.
+ */
+export function devicesOnlineLabel(devices = []) {
+  if (!devices.length) return 'Devices'
+  const { online, quarantined, awaitingBirth } = deviceSummaryCounts(devices)
+  const parts = [
+    `${online}/${devices.length} online`,
+    quarantined && `${quarantined} quarantined`,
+    awaitingBirth && `${awaitingBirth} awaiting first birth`
+  ]
+  return `Devices (${parts.filter(Boolean).join(' · ')})`
 }
 
 /**

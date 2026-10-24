@@ -159,6 +159,27 @@ describe('assigned gateways and devices', () => {
     expect(within(panel()).getByRole('link', { name: /CNC_Old/ })).toHaveTextContent('ARCHIVED')
   })
 
+  /* Online is counted as on the Gateways row and the Site Map's panel for the same cell. A
+     quarantined device arrives stored ONLINE and a missing status is not running, so neither is
+     online; the quarantined and the unborn are named apart. */
+  it('counts online in the drawer by the shared rule, naming the quarantined and the unborn', async () => {
+    const BORN = '2026-10-01T08:00:00Z'
+    renderCells({}, {
+      devices: [
+        device({ first_dbirth_at: BORN }),
+        device({ asset_id: 'dev-q', asset_name: 'Unknown_01', is_quarantined: true }),
+        device({ asset_id: 'dev-n', asset_name: 'CNC_Mill_02', status: null, first_dbirth_at: BORN }),
+        device({ asset_id: 'dev-b', asset_name: 'CNC_Mill_03', status: 'OFFLINE' })
+      ]
+    })
+    await ready()
+    expect(within(rowFor('Assembly Line 1')).getByText('1 Online / 1 Offline / 1 Awaiting first birth')).toBeTruthy()
+
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+    expect(within(panel()).getByText('Devices (1/4 online · 1 quarantined · 1 awaiting first birth)')).toBeTruthy()
+  })
+
   /* One test for the filter, the badge and the help: nothing in service in the cell. A gateway
      with no devices is not empty, and archived equipment does not make a cell full. */
   it('calls a cell Empty only when nothing in service is in it, in the badge and the filter alike', async () => {

@@ -533,6 +533,28 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
   })
 
+  /* Online is counted as on the Gateways row and in the Cells drawer for the same cell. A
+     quarantined device arrives stored ONLINE and a missing status is not running, so neither is
+     online; the quarantined and the unborn are named apart. */
+  it('counts online in the cell and area panels by the shared rule, naming the quarantined and the unborn', async () => {
+    const BORN = '2026-10-01T08:00:00Z'
+    api.get.mockImplementation(routeGet({
+      devices: [
+        { ...device, first_dbirth_at: BORN },
+        { ...device, asset_id: 'dev-q', asset_name: 'Unknown_01', is_quarantined: true },
+        { ...device, asset_id: 'dev-n', asset_name: 'CNC_02', status: null, first_dbirth_at: BORN },
+        { ...device, asset_id: 'dev-b', asset_name: 'CNC_03', status: 'OFFLINE' },
+        { ...bms, first_dbirth_at: BORN }
+      ]
+    }))
+    await renderSiteMap()
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }))
+    expect(within(panel()).getByText('Devices (1/4 online · 1 quarantined · 1 awaiting first birth)')).toBeInTheDocument()
+    // The area's count takes its Area-Wide device too.
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
+    expect(within(panel()).getByText('Devices (2/5 online · 1 quarantined · 1 awaiting first birth)')).toBeInTheDocument()
+  })
+
   it('offers no area selector and says what to do on a plant with no areas', async () => {
     api.get.mockImplementation(routeGet({ areas: [], devices: [device] }))
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
