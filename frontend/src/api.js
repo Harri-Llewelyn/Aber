@@ -3,6 +3,7 @@ import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
+import { inServiceDevices } from './utils/inService';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
@@ -71,7 +72,9 @@ const mapGatewayRow = (g, locations) => {
     gateway_id: g.id,
     gateway_name: g.name,
     devices,
-    device_count: devices.length
+    // Its devices in service (utils/inService.js): `devices` also lists archived ones and replay
+    // lanes, so the Playback gateway's count is 0.
+    device_count: inServiceDevices(devices).length
   };
 };
 

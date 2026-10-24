@@ -150,6 +150,28 @@ describe('cell -> gateway -> device relationships', () => {
     expect(gateway.last_heartbeat).toBe('2026-01-01T00:00:00Z');
   });
 
+  // The Site Map's gateway chip says "N device(s)" from this count, and counts equipment in service
+  // as the rest of the map does. Every state of a device in service is counted, whatever it is.
+  it('counts a gateway\'s devices in service, and lists the archived ones and replay lanes', async () => {
+    const BORN = '2026-10-01T08:00:00Z';
+    state.responses.gateways = {
+      data: [{ id: 'gw-1', name: 'GW One', status: 'ONLINE', devices: [
+        { id: 'dev-1', name: 'CNC_01', status: 'ONLINE', gateway_id: 'gw-1', first_dbirth_at: BORN },
+        { id: 'dev-2', name: 'Unknown_01', status: 'ONLINE', is_quarantined: true, gateway_id: 'gw-1' },
+        { id: 'dev-3', name: 'CNC_02', status: null, gateway_id: 'gw-1', first_dbirth_at: BORN },
+        { id: 'dev-4', name: 'CNC_03', status: 'OFFLINE', gateway_id: 'gw-1', first_dbirth_at: null },
+        { id: 'dev-5', name: 'CNC_Old', status: 'OFFLINE', is_archived: true, gateway_id: 'gw-1' },
+        { id: 'dev-6', name: 'CNC_01_Replay', status: 'OFFLINE', shadow_of: 'dev-1', gateway_id: 'gw-1' }
+      ] }],
+      error: null
+    };
+
+    const [gateway] = await api.get('/api/v1/gateways');
+
+    expect(gateway.device_count).toBe(4);
+    expect(gateway.devices).toHaveLength(6);
+  });
+
   it('derives a device cell from its gateway when it has no explicit one', async () => {
     state.responses.devices = {
       data: [{ id: 'dev-1', name: 'CNC_01', gateway_id: 'gw-1', cell_id: null, gateways: { id: 'gw-1', name: 'GW One', cell_id: 'cell-1' } }],
