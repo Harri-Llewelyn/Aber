@@ -932,7 +932,10 @@ paths:
         500) the oldest batches drop and the next sync answers **206**. They drop too when the
         queues of your token's `sub` pass `I3X_MAX_QUEUED_MIB_PER_PRINCIPAL` (32 MiB), or the
         server's pass `I3X_MAX_QUEUED_MIB` (128 MiB), from the largest queue first. Compute the
-        gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
+        gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`. The batches a sync
+        returned stay queued until you acknowledge them, so they drop first. Dropping one is
+        reported only if your next sync does not acknowledge it: `lastSequenceNumber` omitted,
+        invalid, or lower than that batch's.
 
         **What it delivers is checked against your view first.** Each call reads your address
         space as you (cached per token for `I3X_ADDRESS_SPACE_TTL_SECONDS`). A registered element

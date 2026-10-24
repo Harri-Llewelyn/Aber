@@ -1151,8 +1151,9 @@ i3xService:
   # is deleted. An open SSE stream counts as activity.
   subscriptionTtlSeconds: 300
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
-  # is reported: the next /sync answers 206 and the client backfills from /objects/history.
-  # A count: the bytes the queues hold are bounded by maxQueuedMiB below.
+  # one the client was never sent is reported: the next /sync answers 206 and the client
+  # backfills from /objects/history. So is dropping one a /sync returned, unless the next /sync
+  # acknowledges it. A count: the bytes the queues hold are bounded by maxQueuedMiB below.
   subscriptionQueueLimit: 500
   # The memory the subscription queues may hold, in MiB: for one principal, and on the server.
   # They bound every queue whatever its device's size, which a count cannot: a batch for a
