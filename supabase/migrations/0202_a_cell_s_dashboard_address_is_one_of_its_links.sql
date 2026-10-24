@@ -111,8 +111,8 @@ BEGIN
     INTO v_linked, v_cleared;
 
   IF v_cleared > 0 THEN
-    RAISE NOTICE '0202: % cell dashboard address(es) moved to Attached Links as Dashboard; % of them were already linked.',
-      v_cleared, v_cleared - v_linked;
+    RAISE NOTICE '0202: % cell dashboard address(es) moved to Attached Links, as links named Dashboard: % linked now, % linked already.',
+      v_cleared, v_linked, v_cleared - v_linked;
   END IF;
 
   -- Named on every boot until somebody changes it, as the drop will name it again.

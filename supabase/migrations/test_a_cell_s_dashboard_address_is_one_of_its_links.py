@@ -175,7 +175,8 @@ class AWebAddressMoves(Base):
         self._cell("https://grafana.test/d/counted")
         notices = self._boot()
         self.assertTrue(
-            any("cell dashboard address(es) moved to Attached Links as Dashboard" in n for n in notices),
+            any("cell dashboard address(es) moved to Attached Links, as links named Dashboard" in n
+                for n in notices),
             notices,
         )
 
