@@ -1183,6 +1183,86 @@ class TestByteCeilings(unittest.TestCase):
             self.assertIn(number, detail)
 
 
+class TestOverflowIsWhatTheClientLost(unittest.TestCase):
+    """
+    A batch stays queued until the sync after the one that returned it, so a client that syncs less
+    often than its queue fills has its delivered batches dropped first. Such a drop is reported only
+    when the next sync does not acknowledge it: on the count limit and on both byte ceilings.
+    """
+
+    LIMIT = 3
+
+    def queues(self):
+        """(name, registry, subscription) for each limit, set to hold LIMIT of `stage`'s batches."""
+        registry, _ = make_registry(queue_limit=self.LIMIT)
+        sub = registry.create("c", principal="p")
+        registry.register(sub, [{"elementId": "dev1"}])
+        yield "queue_limit", registry, sub
+        for ceiling in ("max_queued_bytes_per_principal", "max_queued_bytes"):
+            registry, _ = make_registry(queue_limit=10**6)
+            sub = registry.create("c", principal="p")
+            registry.register(sub, [{"elementId": "dev1"}])
+            stage(registry)
+            setattr(registry, ceiling, self.LIMIT * sub.queued_bytes)
+            registry.sync(sub, -1)
+            yield ceiling, registry, sub
+
+    def round(self, registry, sub, ack=None, batches=LIMIT):
+        """Stage `batches`, then sync with `ack`: (the sequence numbers returned, the status)."""
+        for _ in range(batches):
+            stage(registry)
+        got, status = registry.sync(sub, ack)
+        return [b["sequenceNumber"] for b in got], status
+
+    def test_a_client_that_acknowledges_every_sync_is_not_told_it_overflowed(self):
+        for name, registry, sub in self.queues():
+            with self.subTest(name):
+                seen, statuses, ack = [], [], None
+                for _ in range(5):
+                    got, status = self.round(registry, sub, ack)
+                    seen += got
+                    statuses.append(status)
+                    ack = got[-1]
+                self.assertEqual(statuses, [200] * 5)
+                self.assertEqual(seen, list(range(seen[0], seen[0] + 5 * self.LIMIT)))
+
+    def test_a_client_that_does_not_acknowledge_is_told(self):
+        for ack in (None, "3", 1.5, -2):
+            for name, registry, sub in self.queues():
+                with self.subTest(name, ack=ack):
+                    first, _ = self.round(registry, sub)
+                    got, status = self.round(registry, sub, ack)
+                    self.assertEqual(status, 206)
+                    self.assertEqual(got[0], first[-1] + 1)
+
+    def test_a_lost_response_is_told(self):
+        """The next sync acknowledges an older number, so the dropped batches never arrived."""
+        for name, registry, sub in self.queues():
+            with self.subTest(name):
+                first, _ = self.round(registry, sub)
+                lost, status = self.round(registry, sub, first[-1])
+                self.assertEqual(status, 200)
+                got, status = self.round(registry, sub, first[-1])
+                self.assertEqual(status, 206)
+                # The gap the client measures from what it acknowledged is the lost response.
+                self.assertEqual(lost, list(range(first[-1] + 1, got[0])))
+
+    def test_falling_behind_by_more_than_the_queue_is_told(self):
+        for name, registry, sub in self.queues():
+            with self.subTest(name):
+                first, _ = self.round(registry, sub)
+                got, status = self.round(registry, sub, first[-1], batches=self.LIMIT + 1)
+                self.assertEqual(status, 206)
+                self.assertEqual(got[0], first[-1] + 2, "one batch it was never sent dropped")
+
+    def test_minus_one_acknowledges_the_dropped_batches_too(self):
+        for name, registry, sub in self.queues():
+            with self.subTest(name):
+                self.round(registry, sub)
+                self.assertEqual(self.round(registry, sub, -1), ([], 200))
+                self.assertEqual(self.round(registry, sub)[1], 200)
+
+
 class _FakeChannel:
     """Stands in for an SseChannel: `_detach_stream` only ever calls `close()` on it."""
 

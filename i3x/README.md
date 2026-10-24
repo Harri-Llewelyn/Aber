@@ -485,6 +485,16 @@ Five rules are easy to get wrong and each fails quietly:
    A client computes the gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`. A
    queue overflows at its batch count, or when its principal's queues or the server's pass their
    byte ceiling ([Memory](#memory)).
+
+   A batch stays queued until the client acknowledges it on a later `/sync`. So the batches the
+   last sync returned still count against those limits, and they are the first to drop. Dropping
+   one is no loss if the client has it. It is reported only if the next `/sync` does not
+   acknowledge it: `lastSequenceNumber` omitted, invalid, or lower than that batch's, since the
+   response that carried it may never have arrived. `-1` acknowledges every batch. Dropping a batch
+   no sync has returned is always reported. So a client that acknowledges every sync is told of an
+   overflow only when more batches arrive between two syncs than its queue holds. Counting the
+   returned batches as lost told a client receiving 250 batches a second, syncing every second, of
+   an overflow on every sync with no sequence number missing (measured on 2026-10-12).
 3. **One stream per subscription.** There is no fan-out in i3X — a second consumer creates its own
    subscription. Opening a second stream closes the first *cleanly* (a terminating zero-length
    chunk), because the spec says the displaced client sees a close **with no error**.
@@ -928,7 +938,7 @@ On Kubernetes each setting comes from the chart: the tunables from `i3xService.*
 | `MQTT_HOST` / `MQTT_PORT` | set by the chart | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | `mosquitto.tls` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `i3xService.subscriptionTtlSeconds` | `300` | Spec MUST — abandoned subscriptions are deleted |
-| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `i3xService.subscriptionQueueLimit` | `500` | Batches per subscription before 206. A count; the bytes are the next two rows' |
+| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `i3xService.subscriptionQueueLimit` | `500` | Batches per subscription before the oldest drop ([Subscriptions](#subscriptions) says when that is a 206). A count; the bytes are the next two rows' |
 | `I3X_MAX_QUEUED_MIB_PER_PRINCIPAL` | `i3xService.maxQueuedMiBPerPrincipal` | `32` | Estimated MiB one principal's queues may hold; past it, its largest queue drops its oldest batches. See [Memory](#memory) |
 | `I3X_MAX_QUEUED_MIB` | `i3xService.maxQueuedMiB` | `128` | The same for every queue on the server; past it, the largest queue of the principal holding most drops. The chart refuses one at or above the memory limit |
 | `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `i3xService.maxSubscriptionsPerPrincipal` | `20` | Per token `sub`; past it, create answers 429 |
@@ -997,9 +1007,10 @@ apply:
 - **`maxQueuedMiB`, 128 MiB.** Past it, the largest queue of the principal holding the most drops
   its oldest batches.
 
-Either drop is reported like any overflow: the next `/sync` answers 206. The largest queue goes
-first, so a client that does not acknowledge loses its own backlog, and a client that keeps up keeps
-its queue. The batch count, `subscriptionQueueLimit`, still applies to each queue.
+Either drop is reported like any overflow, by rule 2 of [Subscriptions](#subscriptions). The
+largest queue goes first, so a client that does not acknowledge loses its own backlog, and a client
+that keeps up keeps its queue. The batch count, `subscriptionQueueLimit`, still applies to each
+queue.
 
 **Measured on 2026-10-12** in the i3X image (CPython 3.13) with `tracemalloc`. Sparkplug DDATA was
 built the way `test-harness/load_generator.py` builds it, every metric a named double, and fed
@@ -1048,9 +1059,9 @@ callers hold about 45 MiB, and a `/objects` serialises 4.9 MB. 32 MiB per princi
 their ceiling before the server's applies. Raise `maxQueuedMiB` only with
 `resources.limits.memory`: the chart refuses a value at or above the limit.
 
-A queue fills only when its client does not acknowledge. `/sync` without `lastSequenceNumber` keeps
-a subscription alive and its queue full, and a client that stops syncing is reaped after
-`subscriptionTtlSeconds`.
+A queue fills when its client does not acknowledge, or syncs too seldom for the rate it receives.
+`/sync` without `lastSequenceNumber` keeps a subscription alive and its queue full, and a client
+that stops syncing is reaped after `subscriptionTtlSeconds`.
 
 ### Why subscriptions are not made to survive
 

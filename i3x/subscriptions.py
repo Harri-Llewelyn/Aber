@@ -13,7 +13,9 @@ quietly when got wrong (README.md -> "Subscriptions" says how):
      everything at or below it when valid, and MUST clear the WHOLE queue for the sentinel `-1`.
   2. Overflow is reported, not hidden: the OLDEST batches drop and the next `/sync` answers 206, so
      a client can compute the gap and backfill from history. A queue overflows at its batch count,
-     or when the bytes queued for its principal, or on the whole server, pass their ceiling.
+     or when the bytes queued for its principal, or on the whole server, pass their ceiling. A
+     dropped batch a sync had already returned is reported only if the next `/sync` does not
+     acknowledge it.
   3. ONE stream per subscription. Opening a second MUST close the first, cleanly and with no error.
   4. Sync and stream are mutually exclusive: `/sync` MUST error while a stream is open, because the
      stream has already delivered -- and discarded -- the queue the sync caller is acknowledging.
@@ -143,8 +145,13 @@ class Subscription:
         self.stream_open = False
         # Bumped on every create/sync/stream/register. The reaper reads only this.
         self.last_activity = now
-        # Set when a batch is dropped, cleared once the client has been told via a 206.
+        # Set when a dropped batch is a loss to the client (`_drop_oldest`), cleared once the client
+        # has been told via a 206.
         self.overflowed = False
+        # The highest sequence number a sync has returned, and the highest of those dropped since
+        # the last sync (0 for none), which the next sync's acknowledgement settles.
+        self.sent_seq = 0
+        self.dropped_sent_seq = 0
         # Elements withdrawn because the owner can no longer see them, in the order found, held
         # until a `/sync` names them in its 206.
         self.withdrawn: "OrderedDict[str, None]" = OrderedDict()
@@ -426,11 +433,19 @@ class SubscriptionRegistry:
         sub.next_seq += 1
 
     def _drop_oldest(self, sub: Subscription) -> None:
-        self._take(sub)
-        # Latched, not a counter. The client is told once that a gap exists; it computes the exact
-        # extent itself from the sequence numbers, which is more precise than any count this
-        # server could report and cannot drift from the queue's real contents.
-        sub.overflowed = True
+        """
+        Drop the oldest batch, on either limit. One no sync has returned is a loss at once. One a
+        sync has returned is still queued only because the client has not yet acknowledged it, so
+        it is a loss only if the next sync does not (`sync`): that response may never have arrived.
+        """
+        seq = self._take(sub)["sequenceNumber"]
+        if seq > sub.sent_seq:
+            # Latched, not a counter. The client is told once that a gap exists; it computes the
+            # exact extent itself from the sequence numbers, which is more precise than any count
+            # this server could report and cannot drift from the queue's real contents.
+            sub.overflowed = True
+        else:
+            sub.dropped_sent_seq = max(sub.dropped_sent_seq, seq)
 
     def _enforce_byte_ceilings(self, principals: Iterable[str]) -> None:
         """
@@ -501,11 +516,18 @@ class SubscriptionRegistry:
                     "This subscription has an open SSE stream. Close the stream before calling /sync.",
                 )
 
-            if last_sequence_number is not None:
-                self._acknowledge(sub, last_sequence_number)
+            acknowledged = self._acknowledge(sub, last_sequence_number)
+            if sub.dropped_sent_seq:
+                # Returned batches dropped since the last sync: an acknowledgement covering them
+                # shows the client had them, and none or a lower one is a loss (`_drop_oldest`).
+                if acknowledged is None or acknowledged < sub.dropped_sent_seq:
+                    sub.overflowed = True
+                sub.dropped_sent_seq = 0
 
             sub.last_activity = self._clock()
             batches = [dict(b) for b in sub.batches]
+            if batches:
+                sub.sent_seq = batches[-1]["sequenceNumber"]
             status = 200
             if sub.overflowed and batches:
                 # Reported once, on the first sync that can carry it. Latching it until there is
@@ -515,20 +537,25 @@ class SubscriptionRegistry:
                 sub.overflowed = False
             return batches, status
 
-    def _acknowledge(self, sub: Subscription, last_sequence_number) -> None:
+    def _acknowledge(self, sub: Subscription, last_sequence_number) -> Optional[int]:
+        """
+        Clear what `last_sequence_number` acknowledges. Returns the highest sequence number it
+        covers, every one for `-1`, or None when it is omitted or invalid and acknowledges nothing.
+        """
         if not isinstance(last_sequence_number, int) or isinstance(last_sequence_number, bool):
             # "MUST NOT clear the queue if lastSequenceNumber is omitted or is invalid." A string
             # that happens to look like a number is invalid, and silently coercing it would
             # acknowledge data the client never confirmed it processed.
-            return
+            return None
         if last_sequence_number == -1:
             # The documented sentinel for "acknowledge everything pending".
             self._set_queue(sub, deque(), deque())
-            return
+            return MAX_SEQUENCE_NUMBER
         if last_sequence_number < 0:
-            return
+            return None
         while sub.batches and sub.batches[0]["sequenceNumber"] <= last_sequence_number:
             self._take(sub)
+        return last_sequence_number
 
     # -- streaming ---------------------------------------------------------------------------
 
