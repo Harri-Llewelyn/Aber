@@ -6136,6 +6136,16 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* A badge that follows a name in the same cell. */
 .cell-tag { margin-left: 8px; }
 
+/* Two badges side by side in a cell, the second dropping under the first when the column is
+   narrow. Each stays on one line: a pill broken over two lines reads as two badges. */
+.badge-pair {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.badge-pair > .badge { white-space: nowrap; }
+
 /* Badges stacked in a cell: the status badge over the alert badge. */
 .badge-col {
   display: flex;

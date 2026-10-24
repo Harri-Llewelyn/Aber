@@ -369,7 +369,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
   // The account's state, then whether anything is connected as it, from the same read. Nothing
   // about connection when brokerConnections() does not know.
-  const brokerBadge = (bs, sessions = null) => (<>
+  const brokerBadge = (bs, sessions = null) => (<span className="badge-pair">
     <Badge size="sm" tone={brokerStateTone(bs)} title={brokerStateExplanation(bs)}>
       {brokerStateLabel(bs)}
     </Badge>
@@ -377,14 +377,13 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
       <Badge
         size="sm"
         dot
-        className="badge-follow"
         tone={brokerConnectionTone(sessions)}
         title={brokerConnectionExplanation(sessions)}
       >
         {brokerConnectionLabel(sessions)}
       </Badge>
     )}
-  </>)
+  </span>)
 
   // What each tab's Clear filters counts and resets.
   const filterCount = (credentialFilter ? 1 : 0) + (query ? 1 : 0) + (showArchived ? 1 : 0)
