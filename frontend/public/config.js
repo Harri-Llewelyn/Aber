@@ -36,6 +36,10 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // The forge's door as the BROWSER reaches it -- GITEA_ROOT_URL on the server side, host
   // included. The gateway drawer links to a repository under it, and sign-out beacons it.
   VITE_GITEA_URL: '',
+  // The i3X server as a CLIENT reaches it, without /v1: the Issue Token dialog's setups name it.
+  // Blank: a built bundle leaves the address and the setups out; the Vite dev server falls back to
+  // the port npm run dev:forward uses.
+  VITE_I3X_URL: '',
   // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET and CAPTURE_BUCKET).
   // Blank falls through to the defaults in src/api.js, which are the same two names -- so a
   // deployment only sets these if it renamed a bucket.

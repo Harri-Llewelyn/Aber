@@ -727,6 +727,51 @@ jobs:
           echo "  ok: values-prod.yaml.example renders $COUNT objects with its TLS, ingress and"
           echo "      metrics posture intact, and defers the Secret to the external one"
 
+      # The Issue Token dialog's client setups name the i3X server from VITE_I3X_URL. It must be the
+      # host the Ingress routes to i3x-service, and blank where no i3X server is published, or the
+      # dialog hands out an address that goes nowhere.
+      - name: Verify The Dashboard Names The i3X Server The Ingress Routes
+        run: |
+          set -euo pipefail
+          DEV=deploy/helm/aber/values-dev.yaml
+          helm template aber deploy/helm/aber -f "$DEV" > /tmp/i3x-on.yaml
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-prod.yaml.example \
+            --set secrets.existingSecret=ci-render-check --set ingestion.primaryHostId=ci-render-check \
+            --set ingestion.sparkplugGroup=ci-render-check > /tmp/i3x-prod.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set i3xService.enabled=false > /tmp/i3x-off.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set ingress.routes.i3x=false > /tmp/i3x-unrouted.yaml
+          python3 - <<'PY'
+          import re, sys, yaml
+          from urllib.parse import urlsplit
+
+          def read(path):
+              """VITE_I3X_URL from the frontend's config.js, and every host the Ingress routes to i3x-service."""
+              docs = [d for d in yaml.safe_load_all(open(path, encoding='utf-8')) if d]
+              configs = [d['data']['config.js'] for d in docs
+                         if d['kind'] == 'ConfigMap' and 'config.js' in (d.get('data') or {})]
+              found = re.search(r'^\s*VITE_I3X_URL: "(.*)",$', configs[0], re.M) if len(configs) == 1 else None
+              hosts = [rule.get('host') for d in docs if d['kind'] == 'Ingress'
+                       for rule in d['spec'].get('rules') or []
+                       if any(p['backend']['service']['name'] == 'i3x-service' for p in rule['http']['paths'])]
+              return (found.group(1) if found else None), hosts
+
+          errors = []
+          for path, published in (('/tmp/i3x-on.yaml', True), ('/tmp/i3x-prod.yaml', True),
+                                  ('/tmp/i3x-off.yaml', False), ('/tmp/i3x-unrouted.yaml', False)):
+              url, hosts = read(path)
+              if url is None:
+                  errors.append(f"{path}: the frontend's config.js declares no VITE_I3X_URL")
+              elif published and (len(hosts) != 1 or urlsplit(url).hostname != hosts[0] or urlsplit(url).path):
+                  errors.append(f"{path}: VITE_I3X_URL is '{url}', and the Ingress routes {hosts} to i3x-service")
+              elif not published and (url or hosts):
+                  errors.append(f"{path}: no i3X server is published, and VITE_I3X_URL is '{url}' (Ingress {hosts})")
+              else:
+                  print(f"  ok  {path}: VITE_I3X_URL '{url}', Ingress {hosts}")
+          for e in errors:
+              print(f"::error::{e}")
+          sys.exit(1 if errors else 0)
+          PY
+
       # The existingSecret contract from the reading side. check-docs-drift 78 holds
       # values-prod.yaml.example's key list to templates/secret.yaml; this holds secret.yaml to the
       # keys the pods read from an external Secret, both ways, with the optional workloads on. A key

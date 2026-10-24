@@ -30,6 +30,8 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_STUDIO_URL',
   // The forge's door: a link from the gateway drawer, and a sign-out beacon like Studio's.
   'VITE_GITEA_URL',
+  // The i3X server, for the Issue Token dialog's client setups. Blank where none is published.
+  'VITE_I3X_URL',
   // The bucket names, settings for the same reason the URLs are: scripts/storage-init.mjs,
   // values.yaml and storage-policies.sql both read them from the environment, and a
   // literal here was the one consumer a rename left behind.
@@ -69,6 +71,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
   VITE_STUDIO_URL: import.meta.env.VITE_STUDIO_URL,
   VITE_GITEA_URL: import.meta.env.VITE_GITEA_URL,
+  VITE_I3X_URL: import.meta.env.VITE_I3X_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
   VITE_RELEASE_VERSION: import.meta.env.VITE_RELEASE_VERSION,

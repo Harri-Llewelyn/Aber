@@ -533,6 +533,22 @@ by `PasswordShownOnce` and lives in its dialog's state until it closes, as a min
 (`docs/security-model.md`, *People*). The button is disabled for a session with no email address,
 a machine identity, which has no password.
 
+### The Issue Token dialog says how to connect
+
+After a mint, `ServiceTokenModal` shows a **Connect** section when the identity holds
+`telemetry:read`; without it an identity sees nothing through i3X, so a setup would mislead. It
+gives the i3X server's address with `/v1` on it, the authentication (a bearer token), and one setup
+per client from `utils/i3xClientSetups.js`: i3X Explorer, the MCP block that
+`scripts/mint-api-token.mjs --json` prints (`serviceTokenModal.test.jsx` holds the two to the same
+package pin), and a `curl` of `GET /v1/objecttypes`, which needs a token where `/v1/info` does not.
+The setups are built from the minted token in the dialog's state, so they close with it.
+
+The address is `i3xUrl()` in `constants.js`, from `VITE_I3X_URL`. The chart renders it from
+`aber.i3xUrl`, the helper the i3x Ingress host is built from, and blank when `i3xService` or
+`ingress.routes.i3x` is off; CI's *Verify The Dashboard Names The i3X Server The Ingress Routes*
+holds it to that host. Blank in a built bundle leaves the address and every setup out. Only the
+Vite dev server falls back, to `http://localhost:8090`, as `GRAFANA_URL` does.
+
 ### A Third-party gateway's dialog gives every setting its edge node needs
 
 A Third-party gateway (`deployment = 'third_party'`, migration `0196`) is an edge node on its own

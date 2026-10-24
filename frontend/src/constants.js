@@ -223,6 +223,15 @@ export const GITEA_URL = readSetting('VITE_GITEA_URL', 'http://localhost:3003')
   .replace(/\/+$/, '');
 
 /**
+ * The i3X server's origin as a client reaches it, without `/v1`, for the Issue Token dialog's
+ * setups. Blank in a built bundle means no i3X server is published, and the dialog then leaves the
+ * address out rather than name one that goes nowhere. Only the Vite dev server falls back, to the
+ * port `npm run dev:forward` uses, as GRAFANA_URL does. Read per call, so a test can set it.
+ */
+export const i3xUrl = () =>
+  readSetting('VITE_I3X_URL', import.meta.env.DEV ? 'http://localhost:8090' : '').replace(/\/+$/, '');
+
+/**
  * The organisation every gateway repository lives in. Named here and in
  * supabase/functions/_shared/forge.ts, and the two must agree. A repository is
  * `<organisation>/gateway-<sparkplug_id>`.
