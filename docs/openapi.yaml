@@ -3229,14 +3229,15 @@ paths:
       tags: [Edge Functions]
       summary: What the broker holds, read live
       description: |
-        Every account at the broker with its roles and whether it is disabled, and every role with
-        its rules, read from the broker's Dynamic Security plugin through the credential service at
-        the moment of the request. The Access Control page's Broker column, its list of accounts
-        with no gateway row, and its broker principals table are all this read.
+        Every account at the broker with its roles, whether it is disabled and how many live
+        sessions it holds, and every role with its rules, read from the broker's Dynamic Security
+        plugin through the credential service at the moment of the request. The Access Control
+        page's Broker column, its list of accounts with no gateway row, and its broker principals
+        table are all this read.
 
-        **No hash material.** The plugin's `listClients` returns each client's salt and iterations;
-        the credential service drops them before answering, and this function forwards what it
-        returns.
+        **No hash material and no client address.** The plugin's `listClients` returns each
+        client's salt and iterations, and the address of each live session; the credential service
+        drops them before answering, and this function forwards what it returns.
 
         Requires `Administrator`, narrower than issuing: the inventory names every account on the
         broker, including the platform principals and the plugin's own admin.
@@ -3262,6 +3263,14 @@ paths:
                           description: >-
                             A disabled account is refused at CONNECT and had any live session
                             dropped when it was disabled. This is what revocation sets.
+                        connections:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            How many live sessions the broker holds on the account at the read,
+                            counting the credential service's own request on the plugin's admin
+                            account. NULL when the broker's reply carries no session list (before
+                            Mosquitto 2.1).
                   roles:
                     type: array
                     items:
