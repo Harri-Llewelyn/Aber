@@ -19,7 +19,10 @@ RUN rm /usr/local/bin/gosu
 # tar (the package named `tar`) replaces busybox's for --exclude and a second -C. The off-site
 # copy: age encrypts each file to the operator's public key, and the AWS CLI uploads it with a
 # SHA-256 the store checks and HEADs it back. The CLI and its Python are most of the image's size.
-RUN apk add --no-cache nodejs sqlite tar age aws-cli
+# `apk upgrade` first, as the supabase-db image does, so a fix Alpine ships between two base cuts
+# reaches the release.
+RUN apk upgrade --no-cache \
+ && apk add --no-cache nodejs sqlite tar age aws-cli
 
 # The base's postgres user (100:101), the owner group the backup volume is given (fsGroup 101). The
 # forge's and the broker's volumes hold files other uids own at 0600, so the chart runs the service

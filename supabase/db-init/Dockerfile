@@ -34,6 +34,10 @@ FROM supabase/postgres:17.6.1.175
 # (#347). Removed rather than carried.
 RUN rm /usr/local/bin/gosu
 
+# `apk upgrade` takes the base's Alpine packages to the distribution's current fixes, as the
+# supabase-db image does, so a fix Alpine ships between two base cuts reaches the release.
+RUN apk upgrade --no-cache
+
 # TOP LEVEL ONLY. `supabase/migrations/archive/` holds the superseded migrations, kept as reasoning
 # and deliberately never executed -- a recursive copy would replay every one of them. The glob is
 # what keeps them out, and it is the same rule sync-helm-chart-files.mjs applied when this was a

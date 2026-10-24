@@ -45,14 +45,15 @@ USER node-red
 # Identity comes from the nodered-userinfo edge function instead. Same arrangement as
 # grafana.ini's [auth.generic_oauth], and the reasoning is spelled out there.
 #
-# THE OVERRIDES lift three packages in Node-RED's own tree to the patches that fix their advisories,
+# THE OVERRIDES lift five packages in Node-RED's own tree to the patches that fix their advisories,
 # each keyed to the major it replaces: axios; axios's follow-redirects (CVE-2026-111755 and
-# CVE-2026-111756, high); and Express's proxy-addr (CVE-2026-90711, critical). Each goes when the
-# pinned base ships that version; the release scan says.
+# CVE-2026-111756, high); Express's body-parser (CVE-2026-111181, high) and proxy-addr
+# (CVE-2026-90711, critical); and multer (CVE-2026-113872, high). Each goes when the pinned base
+# ships that version; the release scan says.
 RUN node -e ' \
       const f = "/usr/src/node-red/package.json"; \
       const p = JSON.parse(require("fs").readFileSync(f)); \
-      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "follow-redirects@^1": "1.16.1", "proxy-addr@^2": "2.0.8" }; \
+      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "body-parser@^1": "1.20.9", "follow-redirects@^1": "1.16.1", "multer@^2": "2.5.0", "proxy-addr@^2": "2.0.8" }; \
       require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n");' \
  && npm install --no-audit --no-fund --no-update-notifier --save \
       passport-oauth2@1.8.0 \
@@ -60,9 +61,9 @@ RUN node -e ' \
 
 # NPM'S BUNDLED undici AND brace-expansion, replaced by their patch releases (same dependencies,
 # same engines). Node-RED's palette manager runs this npm, and an override cannot reach a bundled
-# tree; npm 11.21.0, the newest, still bundles undici 6.28.0 and brace-expansion 5.0.9. `npm pack`
+# tree; Node-RED 5.0.7 bundles npm 11.19.1, with undici 6.28.0 and brace-expansion 5.0.9. `npm pack`
 # checks each tarball against the registry's integrity. Both lines go when npm bundles the fixes.
-RUN cd /tmp && npm pack --silent undici@6.28.1 brace-expansion@5.0.11 \
+RUN cd /tmp && npm pack --silent undici@6.29.1 brace-expansion@5.0.11 \
  && for p in undici brace-expansion; do \
       d=/usr/src/node-red/node_modules/npm/node_modules/$p; \
       rm -rf "$d" && mkdir -p "$d" && tar -xzf /tmp/$p-*.tgz -C "$d" --strip-components=1; \
