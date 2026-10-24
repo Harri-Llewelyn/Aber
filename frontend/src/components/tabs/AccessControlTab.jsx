@@ -52,6 +52,7 @@ import {
   tokenStatusDetail,
 } from '../../utils/serviceIdentities'
 import { gatewayType, gatewayTypeLabel, gatewayTypeTone } from '../../utils/gatewayType'
+import { classifyRefreshError, FAILURE_SESSION } from '../../lib/connectionState'
 
 /** The plugin's ACL types, as the verbs the page prints beside a topic. */
 const ACL_VERB = {
@@ -133,6 +134,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   // stack whose credential service is down should still show what the platform recorded.
   const [inventory, setInventory] = useState(null)
   const [inventoryError, setInventoryError] = useState(null)
+  // True when the read failed because the session has ended: the strip under the top bar says so
+  // and offers Sign In Again, and the callout must not blame a role or the credential service.
+  const [inventorySessionEnded, setInventorySessionEnded] = useState(false)
   // The search of the tab on show (Broker credentials, Machine identities); a tab change drops it.
   const [search, setSearch] = useUrlState('search')
   // Archived gateways are left off Broker credentials until this is on, as removed people and
@@ -189,6 +193,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
       .catch(e => {
         setInventory(null)
         setInventoryError(e?.message || 'Could not read the broker.')
+        setInventorySessionEnded(classifyRefreshError(e) === FAILURE_SESSION)
         setInventoryLoading(false)
       })
 
@@ -442,7 +447,16 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
             {/* Shown only when the broker could not be read: the Broker column then reads Not read
                 for every row, and this says why once rather than on each. When it WAS read, the
                 column is the statement and no callout is needed. */}
-            {inventoryError && (
+            {inventoryError && inventorySessionEnded && (
+              <div className="callout callout-warning">
+                <IconLock size={14} className="callout-icon" />
+                <div>
+                  <strong>The broker was not read.</strong> Your session has ended, so the Broker
+                  column reads <em>Not read</em> for every row. Sign in again to read it.
+                </div>
+              </div>
+            )}
+            {inventoryError && !inventorySessionEnded && (
               <div className="callout callout-warning">
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div>

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
+import { SESSION_REFUSED } from '../lib/connectionState'
 import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
 import { getAllByTooltip, getByTooltip, tooltipOf } from '../test/tooltips'
 
@@ -140,6 +141,24 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('The broker was not read.')).toBeTruthy())
+    expect(screen.getAllByText('Not read').length).toBeGreaterThan(0)
+    const callout = screen.getByText('The broker was not read.').closest('.callout')
+    expect(callout).toHaveTextContent('the broker credential service is unreachable')
+    expect(callout).toHaveTextContent('Reading it requires an Administrator and a reachable credential service')
+  })
+
+  /** An ended session is not a missing role: the strip offers Sign In Again, and the callout says why. */
+  it('says the session has ended, not what reading needs, when that is why the broker was not read', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockRejectedValue(
+      Object.assign(new Error('Session from session_id claim in JWT does not exist'), { code: SESSION_REFUSED })
+    )
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('The broker was not read.')).toBeTruthy())
+    const callout = screen.getByText('The broker was not read.').closest('.callout')
+    expect(callout).toHaveTextContent('Your session has ended, so the Broker column reads Not read for every row. Sign in again to read it.')
+    expect(callout).not.toHaveTextContent(/Administrator|credential service|session_id/)
     expect(screen.getAllByText('Not read').length).toBeGreaterThan(0)
   })
 

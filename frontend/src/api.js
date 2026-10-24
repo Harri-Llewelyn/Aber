@@ -6,6 +6,8 @@ import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } fr
 import { inServiceDevices } from './utils/inService';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
+import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
+import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
@@ -666,6 +668,37 @@ export function model3dDownloadUrl(path) {
 }
 
 /**
+ * Every edge-function call's error passes through here on its way to the caller. An answer that
+ * the session no longer exists is checked with the auth server first: the functions give the same
+ * answer when they could not reach it, and the strip stays until the next sign-in. Only a confirmed
+ * refusal is reported to lib/connectionState, so the strip offers Sign In Again on whichever page
+ * made the call, and gives the error SESSION_REFUSED as its code so the page can say so instead of
+ * its own reason.
+ *
+ * @param {Error} error What the call throws.
+ *
+ * @param {number|undefined} status The answer's HTTP status.
+ *
+ * @param {unknown} body The answer's parsed body, or null.
+ *
+ * @returns {Promise<Error>} `error`.
+ */
+async function functionFailure(error, status, body) {
+  if (isSessionRefusal(status, body) && await authServerRefusesSession()) {
+    error.code = SESSION_REFUSED;
+    reportSessionRefused();
+  }
+  return error;
+}
+
+/** The body of a failed supabase.functions.invoke() answer, which rides on `error.context`. */
+async function invokeFailureBody(error) {
+  const response = error?.context;
+  if (typeof response?.clone !== 'function') return null;
+  return response.clone().json().catch(() => null);
+}
+
+/**
  * The API surface itself. Exported below as `api`, wrapped so that every call through it is
  * counted by lib/apiActivity. Nothing should import `apiMethods` directly.
  */
@@ -770,7 +803,7 @@ const apiMethods = {
         message = body?.error || message;
         details = body?.details || null;
       } catch { /* non-JSON body */ }
-      const error = new Error(withReference(message, body));
+      const error = await functionFailure(new Error(withReference(message, body)), res.status, body);
       error.status = res.status;
       error.details = details;
       throw error;
@@ -804,7 +837,7 @@ const apiMethods = {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const error = new Error(withReference(body?.error || `The install command could not be minted (${res.status})`, body));
+      const error = await functionFailure(new Error(withReference(body?.error || `The install command could not be minted (${res.status})`, body)), res.status, body);
       error.status = res.status;
       error.details = body?.details || null;
       throw error;
@@ -837,7 +870,7 @@ const apiMethods = {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Error(withReference(`Could not read enrolment readiness (${res.status})`, body));
+      throw await functionFailure(new Error(withReference(`Could not read enrolment readiness (${res.status})`, body)), res.status, body);
     }
     return res.json();
   },
@@ -934,7 +967,7 @@ const apiMethods = {
     try { result = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(withReference(result?.details || result?.error || `The request failed (${res.status})`, result));
+      throw await functionFailure(new Error(withReference(result?.details || result?.error || `The request failed (${res.status})`, result)), res.status, result);
     }
     return result;
   },
@@ -1233,7 +1266,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body));
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body)), res.status, body);
     }
 
     return body;
@@ -1281,7 +1314,7 @@ const apiMethods = {
       // `details` carries the RPC's own message -- "gateway X is a Remote gateway; use an
       // enrolment bundle", "gateway X is archived" -- which is the sentence an operator can act on.
       // `error` alone would flatten all of them to "Cannot mint a credential".
-      throw new Error(withReference(body?.details || body?.error || `Could not mint a credential (${res.status})`, body));
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not mint a credential (${res.status})`, body)), res.status, body);
     }
 
     return body;
@@ -1316,7 +1349,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(withReference(body?.details || body?.error || `Could not mint a token (${res.status})`, body));
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not mint a token (${res.status})`, body)), res.status, body);
     }
 
     return body;
@@ -2946,7 +2979,7 @@ const apiMethods = {
 
       if (!res.ok) {
         const failed = await res.json().catch(() => null);
-        throw new Error(withReference(failed?.error || `Export failed (${res.status})`, failed));
+        throw await functionFailure(new Error(withReference(failed?.error || `Export failed (${res.status})`, failed)), res.status, failed);
       }
 
       let stats = {};
@@ -2977,7 +3010,7 @@ const apiMethods = {
           // The function reports failures as JSON even on the AASX path, so the real message is
           // recoverable rather than being swallowed as an opaque status.
           const failed = await res.json().catch(() => null);
-          throw new Error(withReference(failed?.error || `AAS export failed (${res.status})`, failed));
+          throw await functionFailure(new Error(withReference(failed?.error || `AAS export failed (${res.status})`, failed)), res.status, failed);
         }
 
         // Counts ride in a header because a binary body has nowhere to carry them.
@@ -2988,7 +3021,11 @@ const apiMethods = {
 
       const { data, error } = await supabase.functions.invoke('aas-export', { body });
       if (error) {
-        throw new Error(await edgeFunctionErrorMessage(error, 'AAS export failed'));
+        throw await functionFailure(
+          new Error(await edgeFunctionErrorMessage(error, 'AAS export failed')),
+          error.context?.status,
+          await invokeFailureBody(error)
+        );
       }
       return data;
     }

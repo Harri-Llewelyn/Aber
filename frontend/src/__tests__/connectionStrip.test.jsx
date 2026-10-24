@@ -19,6 +19,8 @@ import {
  */
 
 vi.mock('../lib/supabaseClient', () => ({
+  SUPABASE_URL: 'http://stack.test',
+  SUPABASE_GATEWAY_KEY: 'sb_publishable_test',
   supabase: {
     auth: {
       getSession: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock('../lib/supabaseClient', () => ({
 }))
 
 import { supabase } from '../lib/supabaseClient'
+import { api } from '../api'
 
 const at1402 = new Date(2026, 9, 11, 14, 2, 0).getTime()
 
@@ -103,6 +106,7 @@ describe('the tab title', () => {
 
 describe('the strip in the signed-in shell', () => {
   const mockSession = {
+    access_token: 'token',
     user: { id: 'user-admin-123', email: 'admin@aber.local', app_metadata: { role: 'Administrator' } }
   }
 
@@ -142,8 +146,16 @@ describe('the strip in the signed-in shell', () => {
   afterEach(() => {
     resetConnectionState()
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
+
+  /** Every edge function answers `status` with `body`, and the auth server's /user answers `auth`. */
+  const functionsAnswer = (status, body, auth = 403) => vi.stubGlobal('fetch', vi.fn(async (url) => (
+    String(url).endsWith('/auth/v1/user')
+      ? { ok: auth === 200, status: auth, json: async () => ({}) }
+      : { ok: false, status, headers: { get: () => null }, json: async () => body }
+  )))
 
   const signedIn = async () => {
     render(<App />)
@@ -197,6 +209,39 @@ describe('the strip in the signed-in shell', () => {
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
     expect(screen.getByText(/no longer valid on the server/i)).toBeInTheDocument()
     expect(screen.queryByText('Your session has ended.')).toBeNull()
+  })
+
+  // The session's auth.sessions row has gone. PostgREST checks only the token's signature and goes
+  // on answering, so only the edge function, which asks the auth server, can tell; the page then
+  // asks the auth server itself before saying so.
+  it('turns an edge function refusing the session, once confirmed, into Sign In Again, while every refresh still works', async () => {
+    await signedIn()
+    functionsAnswer(401, { error: 'Invalid user token', details: 'Session from session_id claim in JWT does not exist' })
+    await act(async () => { await api.listBrokerInventory().catch(() => {}) })
+    expect(screen.getByText('Your session has ended.')).toBeInTheDocument()
+    expect(document.title).toBe('Not updating · Aber | Site Map')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+    expect(screen.getByText('Your session has ended.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In Again' }))
+    await waitFor(() => expect(document.title).toBe('Aber | Sign in'))
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(screen.getByText(/no longer valid on the server/i)).toBeInTheDocument()
+  })
+
+  it('leaves an edge function refusing for another reason, or one the auth server contradicts, to the page that called it', async () => {
+    await signedIn()
+    functionsAnswer(401, { error: 'Unauthorized', details: 'A signed-in session is required.' })
+    await act(async () => { await api.listBrokerInventory().catch(() => {}) })
+    // The function could not reach the auth server; the auth server says the session is live.
+    functionsAnswer(401, { error: 'Invalid user token', details: 'fetch failed' }, 200)
+    await act(async () => { await api.listBrokerInventory().catch(() => {}) })
+    functionsAnswer(403, { error: 'Forbidden: Insufficient privileges', details: "Reading the broker's accounts requires Administrator." })
+    await act(async () => { await api.listBrokerInventory().catch(() => {}) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(STALE_AFTER_MS + 5000) })
+    expect(screen.queryByText('Your session has ended.')).toBeNull()
+    expect(document.title).toBe('Aber | Site Map')
   })
 
   // A failure left over from the last session must not greet the next one.

@@ -610,6 +610,13 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
   gives up, so after `AUTH_CHECK_TIMEOUT_MS` (10 seconds) the page opens as it would for an
   unreachable server. It uses the session supabase-js last announced. A refusal that arrives later
   still signs the page out, with the same notice.
+- **Coming back to the tab asks again.** A session that ends while the person is in another window
+  would otherwise go unnoticed until its token expires, up to an hour later.
+  `hooks/useSessionRecheck.js` asks the auth server when the tab becomes visible, at most once a
+  minute (`SESSION_RECHECK_MS`), with the `askAuthServer()` the reload uses. A refusal takes the
+  reload's path: a local sign-out, then the sign-in screen with its notice. An unreachable server
+  signs nobody out, even when an expired token could not be refreshed through it and supabase-js
+  holds no session for the moment.
 
 ### Profile, and the preferences that follow the person
 
@@ -717,6 +724,23 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
   going at its longest interval instead of stopping, so a token the auth client refreshes a moment
   later gets through and clears the strip. The strip lives in the signed-in shell, so it never
   shows over the sign-in page, and the state is reset when the shell mounts and unmounts.
+- **An edge function's refusal shows at once and stays.** Each function asks the auth server about
+  its caller (`auth.getUser()`), so it is the first to learn that a session ended elsewhere, while
+  PostgREST goes on answering on the dead token. Every function call's error in `api.js` passes
+  through `functionFailure()`. A 401 whose body says the session no longer exists
+  (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with the auth server's `/user`
+  (`authServerRefusesSession()`). The functions answer the same "Invalid user token" when they
+  could not reach the auth server at all, and the strip stays until the next sign-in, so the label
+  alone is not enough. Only a 401 or 403 from `/user` calls `reportSessionRefused()` and gives the
+  error the code `SESSION_REFUSED`. A live session, an unreachable server or no answer within 10
+  seconds leaves the error as it was. Refusals that arrive together share one check. The check is a
+  plain fetch, not `getUser()`: auth-js drops a refused session and announces `SIGNED_OUT` before
+  `getUser()` returns, which would swap the page for the sign-in screen with no word of why. The
+  strip then says the session has ended without waiting for the threshold, and no refresh clears
+  it: a refresh that works says nothing about the session, and no refreshed token can arrive. A 401
+  for a request with no token, a 403 and every other refusal stay with the page that called.
+  Access Control's broker callout reads the code and says the session ended instead of naming what
+  the read needs.
 - **Device status is not touched.** The chips still show the stored status; the strip is what says
   it may be stale.
 - **The strip takes its own row**, so it covers nothing. Below 800px a drawer overlays the page
