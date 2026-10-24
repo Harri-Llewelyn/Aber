@@ -3951,9 +3951,10 @@ identities that read one, and shows what stands against each.
 **It also reads the broker (`0102`).** Since the broker's accounts moved to its Dynamic Security
 plugin ([`mosquitto/README.md`](../mosquitto/README.md)), the page holds two columns for each
 gateway: **Credential**, what the platform issued and recorded, and **Broker**, what the broker
-holds at the moment of the read — *Active*, *Disabled* or *No account* — through the
-`broker-inventory` function, which forwards the credential service's `listClients` and `listRoles`
-to an Administrator with every hash stripped. The pair is the point: a gateway issued on the host
+holds at the moment of the read — *Active*, *Disabled* or *No account*, and beside it whether the
+account holds a live session — through the `broker-inventory` function, which forwards the
+credential service's `listClients` and `listRoles` to an Administrator with every hash and every
+client address stripped. The pair is the point: a gateway issued on the host
 reads *No platform record* beside *Active*, and one revoked since reads *Issued* beside *Disabled*.
 The page is four tabs of one card: *Broker credentials*, *Machine identities* (the database
 principals), *Broker accounts* and *Broker roles*. *Broker accounts* is every non-gateway account

@@ -48,6 +48,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - Archived gateways are hidden. Select **Show archived** to list them. While it is on, the state filter also offers **Archived**. **Clear filters** resets the search, the filter and Show archived.
 - **Type** is the kind of gateway: Remote, Third-party, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.
+- Beside Active or Disabled, the **Broker** column says **Connected** or **Not connected**. Connected means something holds a live session on the account. It is read live with the rest of the page, so reload the page to read it again. **Connected (2)** means two sessions at once: a gateway should hold one, so look into it. **Broker accounts** shows the same for Aber's own accounts. The broker's admin account always reads Connected, because the page reads the broker as that account. Where a session connects from is not shown: the broker sees one address for every client outside the cluster.
 - **Generate** issues a broker credential for a Third-party, Host, Simulated or Playback gateway, and shows it. An Administrator can show a Third-party, Host or Simulated gateway's credential again, from the gateway's drawer on the Gateways page.
 - **Bundle** is offered for a Remote gateway. It produces the setup bundle. The gateway creates its own credential when it enrols, so the password never passes through a browser.
 - An archived gateway offers neither, only **Restore to issue**. Its credential was disabled at the broker. Once the gateway is restored, it can be issued a new one.
@@ -82,6 +83,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **No platform record**: the broker holds an account that Aber never recorded issuing. It was usually made on the host by a script. Look into it, because it means a change was made somewhere Aber did not see.
 - **Setup outstanding**: setup was started for a Remote gateway, as an install command or a bundle, and the gateway's machine has not used it yet.
 - **Active**, **Disabled**, **No account** and **Not read** in the **Broker** column are about the broker account itself. **Not read** means the broker could not be reached. That is about this page load, not about the account.
+- **Connected** and **Not connected** beside them say whether anything holds a live session on the account. When the broker could not be read, neither is shown.
 - **ARCHIVED**: taken out of service on purpose, and kept so that its history can still be looked up.
 
 **Withdrawing a machine identity reaches further than revoking its tokens.** Tokens are revoked one at a time. Withdrawing the identity refuses every token that names it. That includes tokens nobody remembered issuing, and tokens issued afterwards. To stop a machine's access, withdraw its identity.
@@ -92,6 +94,6 @@ A machine identity lives on one of two sides, and nothing holds both. A database
 
 ## What this page is not
 
-**It does not show who is connected.** It reads the broker's accounts and roles live, but not its sessions. So an account that is Active is one that may connect, not one that has. When the broker cannot be read, the Broker column says **Not read**, and the two broker tabs say so. Only the database half of the page is left.
+**It does not show where a client connects from.** It counts each broker account's live sessions, but leaves out their addresses. When the broker cannot be read, the Broker column says **Not read**, and the two broker tabs say so. Only the database half of the page is left.
 
 **It does not change your own password.** Use **Change Password** on your **Profile** page. It asks for your current password, then the new one twice. The new one needs at least 12 characters. Someone who has forgotten theirs can use **Forgot your password?** on the sign-in page, if the site has a mail relay. Otherwise an Administrator gives them a new one here, with **Set New Password**.

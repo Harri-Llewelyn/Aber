@@ -5,10 +5,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
 /**
- * What the broker holds, read live for the Access Control page: every account with its roles and
- * whether it is disabled, and every role with its rules. The credential service reads it from the
- * Dynamic Security plugin (`listClients`, `listRoles`) and returns no hash material; this function
- * forwards that read to a signed-in Administrator and nobody else.
+ * What the broker holds, read live for the Access Control page: every account with its roles,
+ * whether it is disabled and how many live sessions it holds, and every role with its rules. The
+ * credential service reads it from the Dynamic Security plugin (`listClients`, `listRoles`) and
+ * returns no hash material and no client address; this function forwards that read unchanged to a
+ * signed-in Administrator and nobody else.
  *
  * Administrator only, narrower than issuing (which admits Shopfloor_Manager): the inventory names
  * every account on the broker, including the platform principals and the plugin's admin, which is

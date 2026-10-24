@@ -390,12 +390,15 @@ export function issueWithControl(send, sparkplugId, password) {
   return { replaced: true };
 }
 
-// A summary the dashboard can render: no hashes, no salts, and the role's ACLs in full.
+// A summary the dashboard can render: no hashes, no salts, and the role's ACLs in full. Each
+// account's live sessions are a count, never their addresses: behind the chart's Service every
+// outside client shows the node's address. null when the reply has no `connections` (before 2.1).
 export function summariseInventory(clientsResponse, rolesResponse) {
   const clients = (clientsResponse?.data?.clients || []).map((c) => ({
     username: c.username,
     roles: roleNamesOf(c),
     disabled: c.disabled === true,
+    connections: Array.isArray(c.connections) ? c.connections.length : null,
   }));
   const roles = (rolesResponse?.data?.roles || []).map((r) => ({
     rolename: r.rolename,

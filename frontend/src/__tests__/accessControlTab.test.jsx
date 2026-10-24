@@ -169,6 +169,92 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
   })
 
+  /**
+   * Whether anything is connected as the account, from the same live read, beside its state. Two
+   * sessions on one account are counted, since one gateway should hold one. The broker sends each
+   * session's address, and the page never receives it: the count is all there is to show.
+   */
+  it('shows whether a gateway\'s broker account is connected, counting more than one session', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned, enrolled])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false, connections: 1 },
+        { username: enrolled.sparkplug_id, roles: ['gateway'], disabled: false, connections: 2 },
+      ],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    const row = async (name) => (await screen.findByText(name)).closest('tr')
+    const one = await row(provisioned.name)
+    expect(within(one).getByText('Active')).toBeTruthy()
+    const connected = within(one).getByText('Connected')
+    expect(connected.className).toContain('badge-success')
+    expect(tooltipOf(connected)).toMatch(/a live session on this account/)
+    expect(tooltipOf(connected)).toMatch(/one address for every client outside the cluster/)
+    const two = within(await row(enrolled.name)).getByText('Connected (2)')
+    expect(tooltipOf(two)).toMatch(/2 live sessions/)
+  })
+
+  /** A disabled account holds no session: its session was dropped with the disable. */
+  it('shows a disabled account with no session as Not connected', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: true, connections: 0 }],
+      roles: [],
+    })
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    const badge = await screen.findByText('Not connected')
+    expect(badge.className).toContain('badge-neutral')
+    expect(within(badge.closest('td')).getByText('Disabled')).toBeTruthy()
+  })
+
+  /**
+   * Unknown is not Not connected. Nothing is said about connection when the broker was not read, for
+   * a gateway the broker holds no account for, or when the broker reports no sessions at all.
+   */
+  it('says nothing about connection when it is not known', async () => {
+    const CONNECTION_LABEL = /^(Not connected|Connected( \(\d+\))?)$/
+    api.listGatewayCredentials.mockResolvedValue([provisioned, enrolled])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
+      roles: [],
+    })
+    const { unmount } = render(<AccessControlTab showToast={vi.fn()} />)
+    await screen.findByText('Active')
+    expect(screen.getByText('No account')).toBeTruthy()
+    expect(screen.queryByText(CONNECTION_LABEL)).toBeNull()
+    unmount()
+
+    api.listBrokerInventory.mockRejectedValue(new Error('the broker credential service is unreachable'))
+    render(<AccessControlTab showToast={vi.fn()} />)
+    await screen.findByText('The broker was not read.')
+    expect(screen.queryByText(CONNECTION_LABEL)).toBeNull()
+  })
+
+  /** The broker's own accounts carry the same count, beside the same state. */
+  it('shows whether each platform account is connected on Broker accounts', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'aber_ingestion', roles: ['ingestion'], disabled: false, connections: 3 },
+        { username: 'aber_i3x', roles: ['i3x'], disabled: false, connections: 0 },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false, connections: 1 },
+      ],
+      roles: [],
+    })
+    await renderTab('Broker accounts')
+
+    const rowOf = async (name) => (await screen.findByRole('button', { name: new RegExp(name) })).closest('tr')
+    expect(within(await rowOf('aber_ingestion')).getByText('Connected (3)')).toBeTruthy()
+    expect(within(await rowOf('aber_i3x')).getByText('Not connected')).toBeTruthy()
+    // An account no gateway claims, still in use, is the case the count is most worth having for.
+    const stray = await rowOf('gwy999999999999999999999')
+    expect(within(stray).getByText('No gateway')).toBeTruthy()
+    expect(within(stray).getByText('Connected')).toBeTruthy()
+  })
+
   /** An account the broker holds that no gateway row claims joins Broker accounts, marked in words. */
   it('lists a broker account with no gateway row among the broker accounts, marked No gateway', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
