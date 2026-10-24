@@ -1,11 +1,15 @@
-import React, { useState } from 'react'
-import { IconUser, IconLock, IconAlertTriangle, IconX } from '../common/Icons'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { IconUser, IconLock, IconAlertTriangle, IconX, IconCopy, IconCheck } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { copyText } from '../common/CopyableId'
 import { useUrlTab } from '../../hooks/useUrlState'
 import { PROFILE_TABS } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
+import { formatClockTime, formatDateTime, NO_VALUE } from '../../utils/format'
+import { supabase } from '../../lib/supabaseClient'
+import { SUPABASE_GATEWAY_KEY } from '../../config'
 import { Tooltip } from '../common/Tooltip'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
@@ -50,6 +54,100 @@ function ProfileRow({ id, label, description, value, actions }) {
   )
 }
 
+const COPIED_MS = 1600
+const COPY_BLOCKED = 'The browser would not copy it. Try again.'
+const NO_SESSION = 'There is no session to copy. Sign in again.'
+
+/**
+ * A Copy button with the help code block's feedback. `read` runs on each press and returns the
+ * text, or throws with the sentence to show; the text itself is never rendered.
+ */
+function CopyAction({ label, read }) {
+  const [state, setState] = useState(null) // null | 'copied' | the sentence saying why not
+  const timer = useRef(null)
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const copy = async () => {
+    let next
+    try {
+      next = (await copyText(await read())) ? 'copied' : COPY_BLOCKED
+    } catch (err) {
+      next = err.message || COPY_BLOCKED
+    }
+    setState(next)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setState(null), COPIED_MS)
+  }
+
+  return (<>
+    <div className="setting-actions">
+      <button type="button" className="btn btn-ghost btn-sm" onClick={copy}>
+        {state === 'copied' ? <><IconCheck size={13} /> Copied</> : <><IconCopy size={13} /> {label}</>}
+      </button>
+    </div>
+    {state && state !== 'copied' && <div className="setting-error" role="status">{state}</div>}
+  </>)
+}
+
+/** The access token supabase-js holds now (renewed first if it had expired), or null. Never the refresh token. */
+async function currentAccessToken() {
+  const { data } = (await supabase.auth.getSession()) ?? {}
+  return data?.session?.access_token ?? null
+}
+
+/** A JWT's `exp` in epoch ms, or null. Unverified: it only labels a token the browser already holds. */
+function tokenExpiry(token) {
+  try {
+    const { exp } = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return Number.isFinite(exp) ? exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+/** "Valid until 14:32", with the date when that is not today. */
+function validUntil(expiresAt) {
+  if (expiresAt === undefined) return 'Loading…'
+  if (expiresAt === null) return NO_VALUE
+  const today = new Date(expiresAt).toDateString() === new Date().toDateString()
+  return `Valid until ${today ? formatClockTime(expiresAt) : formatDateTime(expiresAt)}`
+}
+
+/**
+ * The person's own access token, for calling the API as themselves. The row shows when it stops
+ * working, never the token. Copy reads the session again, so it copies the token supabase-js holds
+ * at that moment, and the time shown becomes that token's.
+ */
+function AccessTokenRow() {
+  // undefined while the session is read, null when there is no token with an `exp`.
+  const [expiresAt, setExpiresAt] = useState(undefined)
+
+  useEffect(() => {
+    let live = true
+    currentAccessToken()
+      .then(token => { if (live) setExpiresAt(tokenExpiry(token)) })
+      .catch(() => { if (live) setExpiresAt(null) })
+    return () => { live = false }
+  }, [])
+
+  const read = useCallback(async () => {
+    const token = await currentAccessToken()
+    setExpiresAt(tokenExpiry(token))
+    if (!token) throw new Error(NO_SESSION)
+    return token
+  }, [])
+
+  return (
+    <ProfileRow
+      id="access-token"
+      label="Access token"
+      description="Paste it into Swagger UI or i3X Explorer to call the API as yourself. It acts as you, with your role, until it expires, and signing out does not end it sooner. Copy again for the current one."
+      value={validUntil(expiresAt)}
+      actions={<CopyAction label="Copy Token" read={read} />}
+    />
+  )
+}
+
 /** The four columns, with their header row even for a tab of one row. */
 function ProfileTable({ children }) {
   return (
@@ -70,7 +168,8 @@ function ProfileTable({ children }) {
 }
 
 /**
- * The signed-in person's own page: who they are signed in as, and how the dashboard looks to them.
+ * The signed-in person's own page: who they are signed in as, the token and key that call the API as
+ * them, and how the dashboard looks to them.
  * Reached from the account menu at the foot of the sidebar, not from the page list. Appearance is
  * the person's `user_settings` row (useUserSettings.js), so it follows them to any browser.
  *
@@ -151,6 +250,17 @@ export function ProfileTab({
                     </Tooltip>
                   </div>
                 )}
+              />
+              <AccessTokenRow />
+              <ProfileRow
+                id="publishable-key"
+                label="Publishable key"
+                description={<>
+                  Swagger UI&apos;s Authorize asks for it as <span className="mono">apiKeyAuth</span>, beside
+                  your token. It is public by design: every browser that opens the dashboard is given it.
+                </>}
+                value={SUPABASE_GATEWAY_KEY}
+                actions={<CopyAction label="Copy Key" read={async () => SUPABASE_GATEWAY_KEY} />}
               />
             </ProfileTable>
           )}
