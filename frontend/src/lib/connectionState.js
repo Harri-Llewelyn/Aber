@@ -1,8 +1,9 @@
 /**
  * Whether the dashboard is still refreshing what it shows. usePolling and useRealtimeTable report
- * every outcome here, and the strip under the top bar and the tab title read the result. Module
- * state rather than React state for the reason lib/apiActivity gives: the reporters are hooks on
- * every page and the reader is one bar. Framework-free, so it can be tested without rendering.
+ * every outcome here, api.js reports an edge function's refusal of the session, and the strip under
+ * the top bar and the tab title read the result. Module state rather than React state for the
+ * reason lib/apiActivity gives: the reporters are hooks on every page and the reader is one bar.
+ * Framework-free, so it can be tested without rendering.
  */
 
 /** How long a failure must last before anything is shown, so one dropped request never flashes. */
@@ -26,6 +27,12 @@ export const CONNECTION_OK = 'ok'
 export const CONNECTION_STALE = 'stale'
 export const CONNECTION_SESSION_ENDED = 'session-ended'
 
+/**
+ * The code api.js gives an edge function's error when the answer said the session no longer exists.
+ * classifyRefreshError() calls it a rejected session.
+ */
+export const SESSION_REFUSED = 'SESSION_REFUSED'
+
 // fetch() rejecting, as Chromium, Firefox, Safari and Node word it. supabase-js turns the rejection
 // into an error whose message is "TypeError: <this>", and api.js sometimes rethrows only the
 // message.
@@ -48,6 +55,8 @@ let refreshFailingSince = null
 let realtimeFailingSince = null
 let lastRefreshAt = null
 let sessionEnded = false
+// When the auth server refused the session, which no refresh clears; see reportSessionRefused.
+let sessionRefusedAt = null
 let timer = null
 const listeners = new Set()
 let snapshot = computeSnapshot(Date.now())
@@ -69,6 +78,7 @@ function failingSinceAt(now) {
 }
 
 function computeSnapshot(now) {
+  if (sessionRefusedAt !== null) return { status: CONNECTION_SESSION_ENDED, failing: true, since: sessionRefusedAt }
   const failingSince = failingSinceAt(now)
   if (failingSince === null) return { status: CONNECTION_OK, failing: false, since: null }
   const shown = now - failingSince >= STALE_AFTER_MS
@@ -124,7 +134,7 @@ export function classifyRefreshError(err) {
       : undefined
   const code = typeof err.code === 'string' ? err.code : ''
 
-  if (status === 401 || SESSION_CODE.test(code)) return FAILURE_SESSION
+  if (status === 401 || SESSION_CODE.test(code) || code === SESSION_REFUSED) return FAILURE_SESSION
   if (status === 0 || status >= 500 || UNREACHABLE_CODE.test(code)) return FAILURE_UNREACHABLE
   if (status === undefined) {
     if (SESSION_MESSAGE.test(message)) return FAILURE_SESSION
@@ -159,6 +169,18 @@ export function reportRefreshFailed(err) {
     markRefreshFailing()
   }
   return kind
+}
+
+/**
+ * The auth server refused the session: an edge function, which asks it on every call, answered
+ * that the session no longer exists. Shown at once, and kept until resetConnectionState():
+ * PostgREST checks only the token's signature, so refreshes go on working on the dead session and
+ * must not clear it, and no refreshed token can arrive, since the session's refresh tokens went
+ * with it.
+ */
+export function reportSessionRefused() {
+  if (sessionRefusedAt === null) sessionRefusedAt = Date.now()
+  reevaluate()
 }
 
 /**
@@ -203,5 +225,6 @@ export function resetConnectionState() {
   realtimeFailingSince = null
   lastRefreshAt = null
   sessionEnded = false
+  sessionRefusedAt = null
   reevaluate()
 }

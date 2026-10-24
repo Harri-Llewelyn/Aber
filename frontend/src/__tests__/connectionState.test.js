@@ -9,9 +9,11 @@ import {
   CONNECTION_OK,
   CONNECTION_STALE,
   CONNECTION_SESSION_ENDED,
+  SESSION_REFUSED,
   classifyRefreshError,
   reportRefreshSucceeded,
   reportRefreshFailed,
+  reportSessionRefused,
   reportRealtimeStatus,
   watchBrowserConnectivity,
   getConnectionSnapshot,
@@ -58,7 +60,8 @@ describe('classifyRefreshError', () => {
     ['a 401 with its status', Object.assign(new Error('Unauthorized'), { status: 401 })],
     ['PostgREST\'s expired token', jwtExpired],
     ['PostgREST\'s undecodable token', { code: 'PGRST301', message: 'JWSError JWSInvalidSignature' }],
-    ['an expired token rethrown as its message', new Error('JWT expired')]
+    ['an expired token rethrown as its message', new Error('JWT expired')],
+    ['an edge function saying the session no longer exists', Object.assign(new Error('Session from session_id claim in JWT does not exist'), { code: SESSION_REFUSED })]
   ])('calls %s a rejected session', (_label, err) => {
     expect(classifyRefreshError(err)).toBe(FAILURE_SESSION)
   })
@@ -371,6 +374,44 @@ describe('the connection state', () => {
       reportRefreshFailed(networkError)
       vi.advanceTimersByTime(STALE_AFTER_MS)
       expect(status()).toBe(CONNECTION_STALE)
+    })
+  })
+
+  // An edge function asked the auth server, which no longer knows the session. PostgREST checks
+  // only the signature, so the page's refreshes keep working on the dead token.
+  describe('a session the auth server refused', () => {
+    it('says the session has ended at once, with no threshold', () => {
+      const seen = []
+      const unsubscribe = subscribeToConnection((s) => seen.push(s.status))
+      reportSessionRefused()
+      expect(getConnectionSnapshot()).toEqual({ status: CONNECTION_SESSION_ENDED, failing: true, since: Date.now() })
+      expect(seen).toEqual([CONNECTION_SESSION_ENDED])
+      unsubscribe()
+    })
+
+    it('stays through refreshes that keep working', () => {
+      reportRefreshSucceeded()
+      reportSessionRefused()
+      for (let poll = 0; poll < 10; poll++) {
+        vi.advanceTimersByTime(30000)
+        reportRefreshSucceeded()
+        reportRealtimeStatus('SUBSCRIBED')
+        expect(status()).toBe(CONNECTION_SESSION_ENDED)
+      }
+    })
+
+    it('outranks a network failure', () => {
+      reportRefreshFailed(networkError)
+      vi.advanceTimersByTime(STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+      reportSessionRefused()
+      expect(status()).toBe(CONNECTION_SESSION_ENDED)
+    })
+
+    it('goes with the session', () => {
+      reportSessionRefused()
+      resetConnectionState()
+      expect(getConnectionSnapshot()).toEqual({ status: CONNECTION_OK, failing: false, since: null })
     })
   })
 

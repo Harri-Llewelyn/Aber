@@ -5,7 +5,8 @@ import { supabase } from '../lib/supabaseClient';
  * Detecting and recovering from a session the auth server no longer recognises. `getSession()` only
  * reads localStorage and PostgREST only checks the JWT signature, so a token whose `auth.sessions`
  * row has gone still reads data. Edge Functions call `auth.getUser()` and fail with "Session from
- * session_id claim in JWT does not exist"; this module turns that into a sign-out.
+ * session_id claim in JWT does not exist"; this module recognises that answer and turns a
+ * rejected session into a sign-out.
  */
 
 const INVALID_SESSION_SIGNATURES = [
@@ -24,6 +25,21 @@ export function isInvalidSessionError(error) {
   const text = (typeof error === 'string' ? error : `${error.message || ''} ${error.details || ''}`)
     .toLowerCase();
   return INVALID_SESSION_SIGNATURES.some(signature => text.includes(signature));
+}
+
+/**
+ * True when an edge function's failed answer says the session no longer exists: a 401 whose JSON
+ * body names it. The functions also answer 401 when no token was sent at all, which this leaves
+ * alone.
+ *
+ * @param {number|undefined} status The answer's HTTP status.
+ *
+ * @param {unknown} body The parsed body: `{ error, details? }` from our functions, `{ msg }` from
+ * the runtime's router.
+ */
+export function isSessionRefusal(status, body) {
+  if (status !== 401 || !body || typeof body !== 'object') return false;
+  return isInvalidSessionError({ message: body.error || body.msg || body.message, details: body.details });
 }
 
 /**

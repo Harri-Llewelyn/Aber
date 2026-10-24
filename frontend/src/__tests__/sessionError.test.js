@@ -4,7 +4,7 @@ import { AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supa
 const signOut = vi.fn().mockResolvedValue({ error: null });
 vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: { signOut } } }));
 
-const { isInvalidSessionError, isSessionRejected, clearInvalidSession, describeAuthFailure } =
+const { isInvalidSessionError, isSessionRefusal, isSessionRejected, clearInvalidSession, describeAuthFailure } =
   await import('../utils/sessionError');
 
 beforeEach(() => vi.clearAllMocks());
@@ -24,6 +24,29 @@ describe('detecting a session the auth server has forgotten', () => {
     expect(isInvalidSessionError('Forbidden: Insufficient privileges')).toBe(false);
     expect(isInvalidSessionError('Missing required parameter: device_id')).toBe(false);
     expect(isInvalidSessionError(null)).toBe(false);
+  });
+});
+
+describe("reading an edge function's refusal", () => {
+  // What every function answers when its auth.getUser() fails, after the auth.sessions row went.
+  const ended = { error: 'Invalid user token', details: 'Session from session_id claim in JWT does not exist' };
+
+  it('recognises a 401 whose body says the session no longer exists', () => {
+    expect(isSessionRefusal(401, ended)).toBe(true);
+    expect(isSessionRefusal(401, { error: 'Invalid user token' })).toBe(true);
+    expect(isSessionRefusal(401, { msg: 'JWT expired' })).toBe(true);
+  });
+
+  it('leaves a 401 that says something else, such as no token at all', () => {
+    expect(isSessionRefusal(401, { error: 'Unauthorized', details: 'A signed-in session is required.' })).toBe(false);
+    expect(isSessionRefusal(401, { error: 'Missing Authorization header' })).toBe(false);
+    expect(isSessionRefusal(401, null)).toBe(false);
+  });
+
+  it('leaves any other status, whatever the body says', () => {
+    expect(isSessionRefusal(403, { error: 'Forbidden: Insufficient privileges', details: 'Reading the broker requires Administrator.' })).toBe(false);
+    expect(isSessionRefusal(500, ended)).toBe(false);
+    expect(isSessionRefusal(undefined, ended)).toBe(false);
   });
 });
 

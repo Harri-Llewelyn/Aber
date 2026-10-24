@@ -701,6 +701,16 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
   going at its longest interval instead of stopping, so a token the auth client refreshes a moment
   later gets through and clears the strip. The strip lives in the signed-in shell, so it never
   shows over the sign-in page, and the state is reset when the shell mounts and unmounts.
+- **An edge function's refusal shows at once and stays.** Each function asks the auth server about
+  its caller (`auth.getUser()`), so it is the first to learn that a session ended elsewhere, while
+  PostgREST goes on answering on the dead token. Every function call's error in `api.js` passes
+  through `functionFailure()`. A 401 whose body says the session no longer exists
+  (`isSessionRefusal()` in `utils/sessionError.js`) calls `reportSessionRefused()` and gets the code
+  `SESSION_REFUSED`. The strip then says the session has ended without waiting for the threshold,
+  and no refresh clears it: a refresh that works says nothing about the session, and no refreshed
+  token can arrive. A 401 for a request with no token, a 403 and every other refusal stay with the
+  page that called. Access Control's broker callout reads the code and says the session ended
+  instead of naming what the read needs.
 - **Device status is not touched.** The chips still show the stored status; the strip is what says
   it may be stale.
 - **The strip takes its own row**, so it covers nothing. Below 800px a drawer overlays the page
