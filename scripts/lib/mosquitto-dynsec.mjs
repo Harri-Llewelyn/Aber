@@ -95,8 +95,9 @@ export function directoryTopicFilter(prefix) {
 }
 
 // Publish on `topic` for one role, and nothing else: the role writes the tree and nothing on the
-// platform reads it as that role. Returns a NEW policy; applying it twice is a no-op. A stored role
-// holding the reads earlier releases granted loses them because reconcile replaces it whole.
+// platform reads it as that role. Returns a NEW policy; applying it twice is a no-op. reconcile
+// replaces a stored role whole, so a broker loses an ACL at the first boot after this stops
+// granting it.
 function withSubtreeGrant(policy, rolename, topic, what) {
   const roles = (policy?.roles || []).map((role) => {
     if (role.rolename !== rolename) return role;

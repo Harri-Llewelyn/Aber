@@ -52,8 +52,9 @@ the Directory or the UNS: either is the whole plant behind one credential, and r
 named after the site's Sparkplug group (`ingestion.sparkplugGroup`, held by `sparkplug.group_id`
 since `0131`), which this repository does not choose. The chart renders one prefix, hands it to
 both this reconcile and the daemon that publishes into it, and `withDirectoryGrant()` gives the
-`ingestion` role the write on `<prefix>/#`, and nothing else. A broker granted one subtree while the daemon writes another
-would drop every Directory publish with no error anywhere, since refusal is silent at QoS 0.
+`ingestion` role the write on `<prefix>/#`, and nothing else. A broker granted one subtree while
+the daemon writes another would drop every Directory publish with no error anywhere, since refusal
+is silent at QoS 0.
 
 **Nor is the Unified Namespace's.** Its root is `ingestion.unsMqttTopicRoot`, `uns` by default,
 which the chart renders once through `aber.unsTopicRoot` for both the daemon and this reconcile,
