@@ -400,15 +400,14 @@ describe('the primary host STATE grant', () => {
 });
 
 describe('the Directory grant is derived from the site, not written in the policy', () => {
-  test('the ingestion role gains all three grants on the prefix subtree', () => {
+  test('the ingestion role gains the write on the prefix subtree, and no read', () => {
+    // The daemon publishes the Directory and never subscribes to it (directory_publish.py).
     const granted = withDirectoryGrant(POLICY, 'Plant-7/Directory/v1');
     const ingestion = granted.roles.find((r) => r.rolename === 'ingestion');
-    for (const acltype of ['publishClientSend', 'subscribePattern', 'publishClientReceive']) {
-      assert.ok(
-        ingestion.acls.some((a) => a.acltype === acltype && a.topic === 'Plant-7/Directory/v1/#' && a.allow),
-        `ingestion is missing ${acltype}`,
-      );
-    }
+    assert.deepEqual(
+      ingestion.acls.filter((a) => a.topic === 'Plant-7/Directory/v1/#'),
+      [{ acltype: 'publishClientSend', topic: 'Plant-7/Directory/v1/#', allow: true }],
+    );
   });
 
   test('the policy file itself names no Directory subtree', () => {
@@ -478,15 +477,14 @@ describe('the Directory grant is derived from the site, not written in the polic
 });
 
 describe('the Unified Namespace grant follows the root the deployment names', () => {
-  test('the ingestion role gains all three grants on <root>/#, and no other subtree', () => {
+  test('the ingestion role gains the write on <root>/#, no read, and no other subtree', () => {
+    // The daemon publishes the UNS and never subscribes to it (uns_publish.py).
     const granted = withUnsGrant(POLICY, 'plant/uns');
     const ingestion = granted.roles.find((r) => r.rolename === 'ingestion');
-    for (const acltype of ['publishClientSend', 'subscribePattern', 'publishClientReceive']) {
-      assert.ok(
-        ingestion.acls.some((a) => a.acltype === acltype && a.topic === 'plant/uns/#' && a.allow),
-        `ingestion is missing ${acltype}`,
-      );
-    }
+    assert.deepEqual(
+      ingestion.acls.filter((a) => a.topic === 'plant/uns/#'),
+      [{ acltype: 'publishClientSend', topic: 'plant/uns/#', allow: true }],
+    );
     assert.ok(!ingestion.acls.some((a) => a.topic === 'uns/#'), 'the literal uns/# grant survived a different root');
   });
 
@@ -524,5 +522,49 @@ describe('the Unified Namespace grant follows the root the deployment names', ()
     const writes = all.roles.find((r) => r.rolename === 'ingestion').acls
       .filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
     for (const topic of ['spBv1.0/STATE/Site-One', 'Plant-7/Directory/v1/#', 'plant/uns/#']) assert.ok(writes.includes(topic), topic);
+  });
+});
+
+describe('an upgraded broker loses the ingestion role\'s reads of the UNS and the Directory', () => {
+  // Every release before 1.7 reconciled all three ACL types onto both subtrees, and the stored
+  // document keeps them. The boot that follows the upgrade must leave only the writes.
+  const UNS = 'plant/uns/#';
+  const DIRECTORY = 'Plant-7/Directory/v1/#';
+  const READS = ['subscribePattern', 'publishClientReceive'];
+  const stored = () => {
+    const ingestion = POLICY.roles.find((r) => r.rolename === 'ingestion');
+    const old = [UNS, DIRECTORY].flatMap((topic) => ['publishClientSend', ...READS]
+      .map((acltype) => ({ acltype, topic, priority: 0, allow: true })));
+    return {
+      clients: [clientFromPasswordEntry(entry(GW_A), rolesFor(null))],
+      roles: [{ ...pluginRole(ingestion), acls: [...pluginRole(ingestion).acls, ...old] }],
+      groups: [],
+    };
+  };
+  const policy = () => withUnsGrant(withDirectoryGrant(withPrimaryHostGrant(POLICY, 'Site-One'), 'Plant-7/Directory/v1'), 'plant/uns');
+  const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion'))];
+  const subtreeAcls = (config) => config.roles.find((r) => r.rolename === 'ingestion').acls
+    .filter((a) => a.topic === UNS || a.topic === DIRECTORY);
+
+  test('the stored fixture holds the reads, so the assertions below can fail', () => {
+    const acls = stored().roles[0].acls;
+    for (const topic of [UNS, DIRECTORY]) {
+      for (const acltype of READS) assert.ok(acls.some((a) => a.topic === topic && a.acltype === acltype), `${acltype} ${topic}`);
+    }
+  });
+
+  test('the reconcile replaces the stored role, leaving one write on each subtree', () => {
+    const { config } = reconcile(stored(), policy(), managed);
+    assert.deepEqual(
+      subtreeAcls(config).map((a) => [a.acltype, a.topic]).sort(),
+      [['publishClientSend', DIRECTORY], ['publishClientSend', UNS]],
+    );
+  });
+
+  test('a second boot on the converged document leaves it as it is', () => {
+    const { config: first } = reconcile(stored(), policy(), managed);
+    const { config: second } = reconcile(first, policy(), managed);
+    assert.deepEqual(subtreeAcls(second), subtreeAcls(first));
+    assert.deepEqual(second.clients.map((c) => c.username).sort(), first.clients.map((c) => c.username).sort());
   });
 });

@@ -205,6 +205,12 @@ const GATEWAY_A = 'gwy100000000000400080000';
 const GATEWAY_B = 'gwy999999999999999999999';
 const GATEWAY_C = 'gwy2a71a14de1b04971bfbb5';
 const ADMIN = 'dynsec-admin';
+/**
+ * This check's own reader of the UNS and the Directory, which no platform principal reads. It and
+ * its role of the same name are in the stored document, and the reconcile keeps both as it keeps
+ * any client and undeclared role, so the delivery assertions can see what the daemon writes.
+ */
+const OBSERVER = 'check-observer';
 
 /**
  * The username each PLATFORM_PRINCIPALS entry boots with, so the reconcile below runs on the list
@@ -223,6 +229,7 @@ const ACCOUNTS = {
   ...Object.fromEntries(Object.values(PRINCIPAL_USERS).map((user) => [user, `${user}-secret-0001`])),
   [GATEWAY_B]: 'gateway-b-secret-0001',
   probe: 'probe-secret-00000001',
+  [OBSERVER]: 'observer-secret-0001',
 };
 
 /**
@@ -393,15 +400,27 @@ try {
 
     // The stored document every boot after the first starts from, as a 1.3.0 site left it: GATEWAY_B
     // holds the shared role and the role generated for it, which the reconcile must retire. `probe`
-    // holds none and must be kept as it is.
+    // holds none and must be kept as it is. The `ingestion` role holds the reads of the UNS and the
+    // Directory that every release before 1.7 reconciled beside each write, which the reconcile must
+    // drop. OBSERVER and its role are this check's own.
     const retired = `gateway-${GATEWAY_B}`;
+    const subtreeAcls = (acltypes) => [UNS_FILTER, DIRECTORY_FILTER]
+      .flatMap((topic) => acltypes.map((acltype) => ({ acltype, topic, allow: true })));
     const stored = {
-      clients: [storedClient(GATEWAY_B, ['gateway', retired]), storedClient('probe', [])],
+      clients: [
+        storedClient(GATEWAY_B, ['gateway', retired]), storedClient('probe', []), storedClient(OBSERVER, [OBSERVER]),
+      ],
       roles: [{
         rolename: retired,
         acls: ['publishClientSend', 'publishClientReceive'].map((acltype) => ({
           acltype, topic: `spBv1.0/+/+/${GATEWAY_B}/#`, allow: true,
         })),
+      }, {
+        rolename: 'ingestion',
+        acls: subtreeAcls(['publishClientSend', 'subscribePattern', 'publishClientReceive']),
+      }, {
+        rolename: OBSERVER,
+        acls: subtreeAcls(['subscribePattern', 'publishClientReceive']),
       }],
       groups: [],
     };
@@ -449,12 +468,26 @@ try {
     } else {
       problems.push(`the reconciled document carries ACL keys the plugin does not define: ${[...new Set(foreign)].join(', ')}`);
     }
-    const ingestionTopics = (doc.roles.find((role) => role.rolename === 'ingestion')?.acls || []).map((a) => a.topic);
+    const ingestionAcls = doc.roles.find((role) => role.rolename === 'ingestion')?.acls || [];
+    const ingestionTopics = ingestionAcls.map((a) => a.topic);
     const unsGranted = ingestionTopics.filter((t) => t === UNS_FILTER).length;
-    if (unsGranted === 3 && !ingestionTopics.some((t) => t === 'uns/#' || t.startsWith('uns/'))) {
+    if (unsGranted === 1 && !ingestionTopics.some((t) => t === 'uns/#' || t.startsWith('uns/'))) {
       ok.push(`the ingestion role's UNS grant is ${UNS_FILTER}, from the root it is given, and no literal uns/# remains`);
     } else {
       problems.push(`the ingestion role's UNS grant does not follow UNS_MQTT_TOPIC_ROOT: ${unsGranted} rule(s) on ${UNS_FILTER}, topics ${ingestionTopics.join(', ')}`);
+    }
+    // The stored role held all three ACL types on both trees, as a 1.6 broker's does.
+    const onSubtree = (filter) => ingestionAcls.filter((a) => a.topic === filter).map((a) => a.acltype).sort().join(', ');
+    if (onSubtree(UNS_FILTER) === 'publishClientSend' && onSubtree(DIRECTORY_FILTER) === 'publishClientSend') {
+      ok.push('the reconcile drops the UNS and Directory reads a stored ingestion role holds, and keeps the write on each');
+    } else {
+      problems.push(`the ingestion role holds [${onSubtree(UNS_FILTER)}] on ${UNS_FILTER} and [${onSubtree(DIRECTORY_FILTER)}] on ${DIRECTORY_FILTER}; it must hold publishClientSend alone on each`);
+    }
+    const observerRole = doc.roles.find((role) => role.rolename === OBSERVER);
+    if (JSON.stringify(rolesOf(OBSERVER)) === JSON.stringify([OBSERVER]) && (observerRole?.acls || []).length === 4) {
+      ok.push('a stored role the policy does not declare is kept, with the client holding it (this check\'s observer)');
+    } else {
+      problems.push(`the reconcile did not keep the check's observer and its role (roles ${rolesOf(OBSERVER).join(', ') || '(none)'}); the UNS and Directory assertions below read through it`);
     }
     if (doc.defaultACLAccess?.publishClientReceive === false && doc.defaultACLAccess?.subscribe === false) {
       ok.push('the document denies by default (defaultACLAccess receive and subscribe are false)');
@@ -693,13 +726,20 @@ try {
 
       // The Directory topic (ingestion/directory_publish.py): one document holding the whole
       // address space, published outside `spBv1.0/`. A topic has no caller, so the role is the
-      // entire access control. The negative assertion is the load-bearing half: a gateway must not
-      // be able to enumerate the site, and reading is silent.
+      // entire access control. The negative assertions are the load-bearing half: nothing on the
+      // platform may enumerate the site, and reading is silent. Only OBSERVER, this check's own,
+      // reads the tree, and its positive control is what makes the negatives observed.
       expect(
         'the ingestion principal MAY publish the Directory (it is the only writer)',
         (delivers('aber_ingestion', DIRECTORY_DOC,
-          'aber_ingestion', DIRECTORY_FILTER)),
+          OBSERVER, DIRECTORY_FILTER)),
         true
+      );
+      expect(
+        'the ingestion principal may NOT read the Directory (it writes it and nothing reads it as that account)',
+        (delivers('aber_ingestion', DIRECTORY_DOC,
+          'aber_ingestion', DIRECTORY_FILTER)),
+        false
       );
       expect(
         'a gateway may NOT read the Directory (it would enumerate every asset on the site)',
@@ -718,13 +758,17 @@ try {
       );
 
       // The Unified Namespace (ingestion/uns_publish.py): every reading in the clear under the
-      // root the deployment names. The same two halves, for the same reason: the daemon is the only
-      // writer, and a gateway reading the tree would read every machine's telemetry with one
-      // credential.
+      // root the deployment names. The same halves, for the same reason: the daemon is the only
+      // writer, and any credential reading the tree would read every machine's telemetry.
       expect(
         `the ingestion principal MAY publish the Unified Namespace under the root it is given (${UNS_ROOT})`,
-        (delivers('aber_ingestion', UNS_DOC, 'aber_ingestion', UNS_FILTER)),
+        (delivers('aber_ingestion', UNS_DOC, OBSERVER, UNS_FILTER)),
         true
+      );
+      expect(
+        'the ingestion principal may NOT read the Unified Namespace (it writes it and nothing reads it as that account)',
+        (delivers('aber_ingestion', UNS_DOC, 'aber_ingestion', UNS_FILTER)),
+        false
       );
       expect(
         'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
@@ -733,7 +777,7 @@ try {
       );
       expect(
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
-        (delivers(GATEWAY_A, `${UNS_ROOT}/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`, 'aber_ingestion', UNS_FILTER)),
+        (delivers(GATEWAY_A, `${UNS_ROOT}/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`, OBSERVER, UNS_FILTER)),
         false
       );
 

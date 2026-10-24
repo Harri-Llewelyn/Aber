@@ -94,17 +94,16 @@ export function directoryTopicFilter(prefix) {
   return `${clean}/#`;
 }
 
-// Publish, subscribe and receive on `topic` for one role. Returns a NEW policy; applying it twice
-// is a no-op.
+// Publish on `topic` for one role, and nothing else: the role writes the tree and nothing on the
+// platform reads it as that role. Returns a NEW policy; applying it twice is a no-op. reconcile
+// replaces a stored role whole, so a broker loses an ACL at the first boot after this stops
+// granting it.
 function withSubtreeGrant(policy, rolename, topic, what) {
-  const acltypes = ['publishClientSend', 'subscribePattern', 'publishClientReceive'];
   const roles = (policy?.roles || []).map((role) => {
     if (role.rolename !== rolename) return role;
     const acls = role.acls || [];
-    const missing = acltypes
-      .filter((acltype) => !acls.some((a) => a.acltype === acltype && a.topic === topic))
-      .map((acltype) => ({ acltype, topic, allow: true }));
-    return missing.length ? { ...role, acls: [...acls, ...missing] } : role;
+    const already = acls.some((a) => a.acltype === 'publishClientSend' && a.topic === topic);
+    return already ? role : { ...role, acls: [...acls, { acltype: 'publishClientSend', topic, allow: true }] };
   });
   if (!roles.some((r) => r.rolename === rolename)) {
     throw new CredentialError(
