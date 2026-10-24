@@ -102,7 +102,7 @@ test('the two kinds default to different lifetimes', () => {
 });
 
 test('asking for more than the ceiling is refused, not clamped', () => {
-  // REFUSED RATHER THAN CLAMPED, matching mint-mcp-token.mjs. Silently issuing something shorter
+  // REFUSED RATHER THAN CLAMPED, matching mint-api-token.mjs. Silently issuing something shorter
   // than asked for is how an operator ends up surprised by an expiry -- which is the failure the
   // ceiling exists to prevent, so satisfying it by that route would be self-defeating.
   assert.throws(

@@ -5,8 +5,8 @@
 //
 // Issue #101. `npm run setup` used to sign these for TEN YEARS, past the 90-day ceiling
 // `service_token_max_days()` (0043) enforces on every other principal-bearing token in the stack --
-// so an operator minting an MCP token by hand was held to 90 days while the two keys shipped with
-// every installation ran until 2036.
+// so an operator minting an API client's token by hand was held to 90 days while the two keys
+// shipped with every installation ran until 2036.
 //
 // -------------------------------------------------------------------------------------------------
 // WHY ROTATION IS CHEAP, WHICH IS THE FACT THE ISSUE ASSUMED AWAY
@@ -33,10 +33,10 @@
 // does not end it retroactively.
 //
 // -------------------------------------------------------------------------------------------------
-// IT RECORDS BEFORE IT WRITES, the order mint-mcp-token.mjs argues for and for the same reason.
+// IT RECORDS BEFORE IT WRITES, the order mint-api-token.mjs argues for and for the same reason.
 // A failure to record costs an audit row for a key nobody adopted, which is harmless. The reverse
 // order costs a live credential with no record of it. Recording is BEST-EFFORT here rather than
-// fatal, and that difference is deliberate: mint-mcp-token hands a token to a person and can
+// fatal, and that difference is deliberate: mint-api-token hands a token to a person and can
 // refuse to print it, whereas this repairs a stack that may well be broken already -- refusing to
 // rotate because the database is unreachable would withhold the fix from the case that needs it.
 // It says loudly what it could not record.

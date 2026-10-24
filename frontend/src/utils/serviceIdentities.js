@@ -89,16 +89,16 @@ export function describeBrokerAccount(username) {
  */
 export const KNOWN_PRINCIPALS = {
   'b0000000-0000-4000-8000-000000000001': {
-    name: 'MCP read-only client',
-    purpose: 'The identity `i3x-mcp` authenticates as. Its token is signed outside GoTrue by '
-      + '`scripts/mint-mcp-token.mjs`, because GOTRUE_JWT_EXP is one hour and this one is pasted '
-      + 'into a desktop config file.',
-    mintedBy: 'scripts/mint-mcp-token.mjs',
+    name: 'Read-only API client',
+    purpose: 'For a tool that reads telemetry and changes nothing: i3X Explorer, an MCP client, '
+      + 'Swagger UI, a script. It holds telemetry:read alone, so it cannot read the Audit Trail or '
+      + 'write anything.',
+    mintedBy: 'scripts/mint-api-token.mjs',
     // The variable `i3x-mcp` reads its token from; said on the token dialog for this identity only.
     tokenEnv: 'I3X_TOKEN',
     // `{id}` is substituted with the principal's own uuid -- the part an operator would otherwise
     // transcribe by hand, which is the error this column exists to remove.
-    mintCommand: 'node scripts/mint-mcp-token.mjs --principal {id}',
+    mintCommand: 'node scripts/mint-api-token.mjs --principal {id}',
   },
   /*
    * The identities `npm run setup` signs keys for, so what this page says about them is what
@@ -112,7 +112,7 @@ export const KNOWN_PRINCIPALS = {
       + 'IS this identity. Its key travels as the Authorization bearer, not as the apikey — the '
       + 'daemon still sends the anon key for the gateway\'s own check.',
     mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
-    // Not mint-mcp-token.mjs: that script would sign a valid token for this principal that no
+    // Not mint-api-token.mjs: that script would sign a valid token for this principal that no
     // worker would ever read, since the daemon takes its key from the environment. Rotation is the
     // only operation that changes what these processes present.
     mintCommand: 'npm run keys:rotate',
@@ -128,7 +128,7 @@ export const KNOWN_PRINCIPALS = {
       + 'storage policy meaningful — it admits this principal for exactly one object, the capture '
       + 'of the job it is currently running.',
     mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
-    // Not mint-mcp-token.mjs, for the same reason as the ingestion identity above.
+    // Not mint-api-token.mjs, for the same reason as the ingestion identity above.
     mintCommand: 'npm run keys:rotate',
     secretKey: 'SUPABASE_PLAYBACK_KEY',
     deployment: 'playback',
@@ -146,8 +146,12 @@ export const KNOWN_PRINCIPALS = {
   },
 }
 
-/** The mint command that signs a token a client will actually present. */
-const MCP_MINT_PREFIX = 'node scripts/mint-mcp-token.mjs'
+/**
+ * The mint command that signs a token a client will actually present. Only the `mintCommand`
+ * values in this file are compared with it: no TOKEN_MINTED row stores the script's name, so a
+ * row is labelled by its principal id alone.
+ */
+const API_MINT_PREFIX = 'node scripts/mint-api-token.mjs'
 
 /**
  * What the page knows about one principal: the registry entry for an id a migration pinned, the
@@ -168,7 +172,7 @@ export function describePrincipal(principalId, row) {
       purpose: row.purpose
         || 'No purpose was recorded when this identity was created from the Access Control page.',
       mintedBy: 'the Access Control page',
-      mintCommand: `${MCP_MINT_PREFIX} --principal {id}`,
+      mintCommand: `${API_MINT_PREFIX} --principal {id}`,
     }
   }
   return {
@@ -184,7 +188,7 @@ export function describePrincipal(principalId, row) {
     // The generic mint command is right for an unknown principal: one nobody has documented is most
     // likely one `create_machine_principal()` made at runtime, and this is how a token for it is
     // issued.
-    mintCommand: `${MCP_MINT_PREFIX} --principal {id}`,
+    mintCommand: `${API_MINT_PREFIX} --principal {id}`,
   }
 }
 
@@ -198,7 +202,7 @@ export function describePrincipal(principalId, row) {
  */
 export function isMintableFromPage(meta) {
   return !!meta && typeof meta.mintCommand === 'string'
-    && meta.mintCommand.startsWith(MCP_MINT_PREFIX)
+    && meta.mintCommand.startsWith(API_MINT_PREFIX)
 }
 
 /**

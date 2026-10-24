@@ -37,7 +37,7 @@
 // valid until 2036.
 //
 // 90 IS NOT AN INVENTION. It mirrors `service_token_max_days()` (0043), which
-// `record_service_token_issued()` and `scripts/mint-mcp-token.mjs` both already enforce -- so the
+// `record_service_token_issued()` and `scripts/mint-api-token.mjs` both already enforce -- so the
 // state this replaces was a rule the platform applied to operators and exempted itself from.
 // =================================================================================================
 import { createHmac, randomUUID } from 'node:crypto';
@@ -91,7 +91,7 @@ export function mintJwt({ role, secret, subject = null, days = null, now = Date.
     throw new Error(`mintJwt: days must be a positive number (got ${days})`);
   }
 
-  // REFUSED RATHER THAN CLAMPED, matching mint-mcp-token.mjs: silently issuing something shorter
+  // REFUSED RATHER THAN CLAMPED, matching mint-api-token.mjs: silently issuing something shorter
   // than asked for is how an operator ends up surprised by an expiry, and this ceiling exists
   // precisely to prevent that class of surprise.
   if (subject && ttlDays > SERVICE_KEY_MAX_DAYS) {

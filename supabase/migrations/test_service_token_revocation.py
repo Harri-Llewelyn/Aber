@@ -217,7 +217,7 @@ class ServiceTokenRevocation(unittest.TestCase):
             self.fail(f"auth_pre_request() refused a request it must serve: {err}")
 
     def _mint(self, cur, jti=None, ttl_days=30):
-        """Record a TOKEN_MINTED row the way mint-mcp-token.mjs does, and return its jti."""
+        """Record a TOKEN_MINTED row the way mint-api-token.mjs does, and return its jti."""
         jti = jti or str(uuid.uuid4())
         expires = datetime.now(timezone.utc) + timedelta(days=ttl_days)
         cur.execute(

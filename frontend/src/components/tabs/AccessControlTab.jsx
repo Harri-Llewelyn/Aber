@@ -777,7 +777,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                                   </button>
                                 </Tooltip>
                               )}
-                              {/* Kept beside it: `mint-mcp-token.mjs` survives as break-glass for a
+                              {/* Kept beside it: `mint-api-token.mjs` survives as break-glass for a
                                   stack whose only Administrator cannot sign in. */}
                               <CopyableId
                                 value={meta.mintCommand.replace('{id}', p.principal_id)}

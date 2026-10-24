@@ -578,6 +578,11 @@ curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
 **It expires in an hour.** A client that persists its connection profile — Explorer does — starts
 401-ing on settings that worked earlier, which reads as a broken server rather than a stale token.
 
+**For a client you keep, issue a token for the Read-only API client instead.** It is a machine
+identity that reads telemetry and changes nothing. Its token lasts 30 days by default, and any
+client of this server can present it: i3X Explorer, an MCP client, Swagger UI, curl or a script.
+[The token](#the-token) says how to issue one.
+
 ### i3X Explorer
 
 [`ace-technologies-inc/i3X-Explorer`](https://github.com/ace-technologies-inc/i3X-Explorer) is a
@@ -587,7 +592,7 @@ generic browse client for any i3X server, and the practical way to eyeball the a
 | :--- | :--- |
 | Server URL | `http://localhost:8090/v1` |
 | Authentication | `Bearer Token` |
-| Token | the `access_token` above |
+| Token | the Read-only API client's token, or the `access_token` above |
 
 **The desktop build works as it is.** Its Electron shell sets `webSecurity: false` to reach any i3X
 server, so it sends no CORS preflight. **The browser build needs its origin allowed.**
@@ -734,32 +739,37 @@ shopfloor sees what an operator can see.
 trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
 the next session, and the symptom is `401`s on a server that was working.
 
-**Issue a service principal's token instead**, in either of two ways:
+**Issue a token for the Read-only API client instead.** It is the machine identity for any client
+that only reads: an MCP client, i3X Explorer, Swagger UI's Try it out, curl, a script. There are
+two ways:
 
-- **On the dashboard**, as an Administrator: Access Control → the principal's **Issue Token**
-  (the Service Token modal). It offers 7, 30 or 90 days, 30 by default, and shows the token once
-  with its `jti`.
+- **On the dashboard**, as an Administrator: Access Control → **Machine identities** → the
+  Read-only API client's **Issue Token** (the Service Token modal). It offers 7, 30 or 90 days, 30
+  by default, and shows the token once with its `jti`.
 - **From a shell** on a machine that can reach the stack:
 
   ```bash
-  node scripts/mint-mcp-token.mjs            # 30 days, prints the token
-  node scripts/mint-mcp-token.mjs --days 90  # 90 is the ceiling, not the default
-  node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
+  node scripts/mint-api-token.mjs            # 30 days, prints the token
+  node scripts/mint-api-token.mjs --days 90  # 90 is the ceiling, not the default
+  node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
   ```
+
+  `scripts/mint-mcp-token.mjs` is the script's old name. It still works until 1.8.0, and says so
+  on stderr.
 
 Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
 the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
 GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
-read-only MCP principal seeded by archived migration 0034. The ceiling is
+Read-only API client, seeded by archived migration 0034. The ceiling is
 `service_token_max_days()`, which the database enforces as well as both issuers.
 
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — archived `0069`
 narrowed the schema and metric-catalog policies to the former — so it writes nothing. What it must
 also not have is `audit_trail:read`: the difference the old choice of `Operator` **over**
-`Auditor` was making is the audit trail's read policy, which admits an Auditor. This client has
-no surface for the Audit Trail and deliberately never will, so that grant would leave a capability
+`Auditor` was making is the audit trail's read policy, which admits an Auditor. i3X has no
+surface for the Audit Trail and deliberately never will, so that grant would leave a capability
 sitting on a long-lived credential that nothing can use and someone might later find.
 
 **It used to hold `Operator` itself, and archived migration `0080` ended that** — a person's role widening whenever

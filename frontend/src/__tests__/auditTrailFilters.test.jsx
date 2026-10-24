@@ -1333,7 +1333,7 @@ describe('Audit Trail — removed tag filter', () => {
   describe('lanes that have no name to be named by', () => {
     const JOB_A = 'aaaaaaaa-1111-4000-8000-000000000001'
     const JOB_B = 'bbbbbbbb-2222-4000-8000-000000000002'
-    const MCP    = 'b0000000-0000-4000-8000-000000000001'
+    const READ_ONLY = 'b0000000-0000-4000-8000-000000000001'
 
     /** Two jobs requested in the SAME minute, which is the case origin alone cannot tell apart. */
     const JOB_EVENTS = [
@@ -1418,7 +1418,7 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('names a pinned service principal from the registry the Access Control page uses', async () => {
       respondWith([{
-        event_id: 24, entity_type: 'service_principals', entity_id: MCP,
+        event_id: 24, entity_type: 'service_principals', entity_id: READ_ONLY,
         event_type: 'TOKEN_MINTED', timestamp: '2026-08-02T13:41:00Z',
         description: 'Action TOKEN_MINTED on service_principals', changed_by: null,
         actor_source: 'user', old_data: null,
@@ -1426,7 +1426,27 @@ describe('Audit Trail — removed tag filter', () => {
       }])
       render(<AuditTrailTab />)
 
-      await waitFor(() => expect(laneLabelled('MCP read-only client')).toBeTruthy())
+      await waitFor(() => expect(laneLabelled('Read-only API client')).toBeTruthy())
+    })
+
+    /* A mint from the shell, as mint-api-token.mjs or its old name mint-mcp-token.mjs records it:
+       no person, and the claimed os_user and host. Neither script writes its own name into the row,
+       so a row from before the rename takes the identity's current name like any other. */
+    it('names a token minted from the shell by its principal, whichever script name minted it', async () => {
+      respondWith([{
+        event_id: 25, entity_type: 'service_principals', entity_id: READ_ONLY,
+        event_type: 'TOKEN_MINTED', timestamp: '2026-08-02T13:42:00Z',
+        description: 'Action TOKEN_MINTED on service_principals', changed_by: null,
+        actor_source: 'service', old_data: null,
+        new_data: {
+          jti: '5b1f0c1e-8a4d-4c55-9a43-0f3e1d2c9b71', ttl_days: 30, roles: [],
+          claimed: { os_user: 'operator', host: 'laptop-7' },
+        },
+      }])
+      render(<AuditTrailTab />)
+
+      await waitFor(() => expect(laneLabelled('Read-only API client')).toBeTruthy())
+      expect(laneLabelled('MCP read-only client')).toBeFalsy()
     })
 
     it('leaves an unregistered principal as its id rather than calling it Undocumented', async () => {

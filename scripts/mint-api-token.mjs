@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 // =================================================================================================
-// Mint the long-lived JWT the MCP client authenticates with.
+// Mint the long-lived JWT a read-only API client authenticates with: i3X Explorer, an MCP client,
+// Swagger UI's Try it out, a script. `scripts/mint-mcp-token.mjs` is the old name, a wrapper until 1.8.
 //
-// `i3x-mcp` reads a STATIC `I3X_TOKEN` out of its host's config file and never refreshes it.
-// `GOTRUE_JWT_EXP` is 3600, so a token copied out of a browser session stops working within the
-// hour -- and it fails as a broken server rather than a stale credential, because `server_info`
-// keeps answering (GET /info is deliberately unauthenticated) while every other tool starts
-// returning 401. That failure names nothing useful, which is why this exists.
+// Each of those keeps a STATIC token in its settings and never refreshes it (`i3x-mcp` reads
+// `I3X_TOKEN` out of its host's config file). `GOTRUE_JWT_EXP` is 3600, so a token copied out of a
+// browser session stops working within the hour -- and it fails as a broken server rather than a
+// stale credential, because GET /info keeps answering (it is deliberately unauthenticated) while
+// every other request starts returning 401. That failure names nothing useful, which is why this
+// exists.
 //
 // WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. The same HS256 secret the whole stack shares, so
 // PostgREST validates it exactly as it validates a GoTrue token -- there is no second trust path.
-// The subject is `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
+// The subject is `b0000000-0000-4000-8000-000000000001`, the Read-only API client seeded by
 // archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off
 // `Operator`): it reads every relation the i3X address space is assembled from and writes nothing,
 // and it cannot read `audit_trail`.
@@ -21,11 +23,12 @@
 // expiry.
 //
 // THE EXPIRY IS A REAL DECISION, NOT A DEFAULT TO IGNORE. This token is pasted into a file on
-// somebody's laptop -- `claude_desktop_config.json`. `revoke_service_token('<jti>')` withdraws it
-// from PostgREST, and so from i3X, which authenticates every request through PostgREST. Storage,
-// realtime and the edge runtime check only the signature and accept it until it expires, so for
-// them the expiry is the only bound: 30 days is the default and 90 the ceiling. Never rotate
-// SUPABASE_JWT_SECRET to withdraw one token; that invalidates every token in the stack.
+// somebody's laptop -- a client's settings, or `claude_desktop_config.json`.
+// `revoke_service_token('<jti>')` withdraws it from PostgREST, and so from i3X, which authenticates
+// every request through PostgREST. Storage, realtime and the edge runtime check only the signature
+// and accept it until it expires, so for them the expiry is the only bound: 30 days is the default
+// and 90 the ceiling. Never rotate SUPABASE_JWT_SECRET to withdraw one token; that invalidates every
+// token in the stack.
 //
 // IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (Machine Identities, supabase/README.md).
 // The token exists nowhere until this process writes it to stdout -- signing is local computation --
@@ -39,16 +42,16 @@
 // and it should not be removable by editing one file.
 //
 // Usage:
-//   node scripts/mint-mcp-token.mjs                    # 30 days, the MCP principal
-//   node scripts/mint-mcp-token.mjs --days 90          # 90 is the ceiling, not the default
-//   node scripts/mint-mcp-token.mjs --principal <uuid> # any service principal
-//   node scripts/mint-mcp-token.mjs --json             # a ready-to-paste mcpServers block
+//   node scripts/mint-api-token.mjs                    # 30 days, the Read-only API client
+//   node scripts/mint-api-token.mjs --days 90          # 90 is the ceiling, not the default
+//   node scripts/mint-api-token.mjs --principal <uuid> # any service principal
+//   node scripts/mint-api-token.mjs --json             # a ready-to-paste mcpServers block
 // =================================================================================================
 import { createHmac, randomUUID } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
 import { missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
 
-/** The principal seeded by archived migration 0034, and the default when --principal is not given. */
+/** The Read-only API client, seeded by archived migration 0034: the default without --principal. */
 const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 
 /**
@@ -70,9 +73,9 @@ const days = daysArg >= 0 ? Number(args[daysArg + 1]) : DEFAULT_DAYS;
 
 const principalArg = args.indexOf('--principal');
 const SUBJECT = principalArg >= 0 ? String(args[principalArg + 1] ?? '') : DEFAULT_SUBJECT;
-// Only the seeded MCP principal is known to be read-only; another may hold write permissions.
+// Only the Read-only API client is known to be read-only; another may hold write permissions.
 const PRINCIPAL_LABEL = SUBJECT === DEFAULT_SUBJECT
-  ? `read-only principal ${SUBJECT} (telemetry:read)`
+  ? `Read-only API client ${SUBJECT} (telemetry:read)`
   : `principal ${SUBJECT}`;
 
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(SUBJECT)) {

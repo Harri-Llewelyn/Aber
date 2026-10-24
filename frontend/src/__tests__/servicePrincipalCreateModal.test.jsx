@@ -70,8 +70,8 @@ describe('describePrincipal with a machine_principals row', () => {
     })
     expect(meta.name).toBe('Line 4 OEE report')
     expect(meta.purpose).toBe('Reads the hourly rollup.')
-    // Still mintable from the page: the token for it is the MCP-shaped one.
-    expect(meta.mintCommand).toMatch(/mint-mcp-token/)
+    // Still mintable from the page: the token for it is the one mint-api-token.mjs signs.
+    expect(meta.mintCommand).toMatch(/mint-api-token/)
   })
 
   it('says so when no purpose was recorded, rather than showing an empty tooltip', () => {
@@ -81,7 +81,17 @@ describe('describePrincipal with a machine_principals row', () => {
 
   it('prefers the registry for an id a migration pinned, whatever the row says', () => {
     const meta = describePrincipal('b0000000-0000-4000-8000-000000000001', { name: 'Overridden' })
-    expect(meta.name).toBe('MCP read-only client')
+    expect(meta.name).toBe('Read-only API client')
+  })
+
+  it('describes the Read-only API client by the clients it is for, within a tooltip', () => {
+    const { purpose, mintCommand } = describePrincipal('b0000000-0000-4000-8000-000000000001')
+    for (const client of ['i3X Explorer', 'an MCP client', 'Swagger UI', 'a script']) {
+      expect(purpose).toContain(client)
+    }
+    expect(purpose).toMatch(/telemetry:read alone/)
+    expect(purpose.split(/\s+/).length).toBeLessThanOrEqual(35)
+    expect(mintCommand).toBe('node scripts/mint-api-token.mjs --principal {id}')
   })
 
   it('falls back to Undocumented machine identity for a row with no name', () => {

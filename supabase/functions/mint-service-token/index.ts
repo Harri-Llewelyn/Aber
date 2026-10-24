@@ -117,7 +117,7 @@ export default async function handler(req: Request): Promise<Response> {
       days = asNumber;
     }
 
-    // Sign. The claim set is mint-mcp-token.mjs's exactly: PostgREST resolves `sub` and `role`, and
+    // Sign. The claim set is mint-api-token.mjs's exactly: PostgREST resolves `sub` and `role`, and
     // the denylist hook reads `jti`, so two mints of one identity must be indistinguishable
     // downstream.
     const jti = crypto.randomUUID();

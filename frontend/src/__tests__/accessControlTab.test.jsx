@@ -75,7 +75,7 @@ const enrolled = {
   enrolled_at: '2026-08-01T09:00:00Z', credential_revoked_at: null, issued_at: null
 }
 
-const MCP_PRINCIPAL = {
+const READ_ONLY_PRINCIPAL = {
   principal_id: 'b0000000-0000-4000-8000-000000000001',
   permissions: ['telemetry:read'],
   created_at: null,
@@ -87,7 +87,7 @@ beforeEach(() => {
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
   // An empty-but-read inventory: the Broker column resolves to "No account" rather than "Not read".
   api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [], read_at: '2026-09-12T00:00:00Z' })
-  api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
+  api.listServicePrincipals.mockResolvedValue([READ_ONLY_PRINCIPAL])
   api.listServiceTokens.mockResolvedValue(new Map())
   // Empty by default, which is both the common case and the reading a caller who cannot see the
   // denylist gets. Tests that care about a withdrawal override it.
@@ -320,12 +320,12 @@ describe('AccessControlTab', () => {
     expect(tabLink('Broker credentials').getAttribute('aria-current')).toBe('page')
 
     fireEvent.click(tabLink('Machine identities'))
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
     expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull()
 
     fireEvent.click(tabLink('Broker roles'))
     expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy()
-    expect(screen.queryByText('MCP read-only client')).toBeNull()
+    expect(screen.queryByText('Read-only API client')).toBeNull()
 
     // The arrow keys move nothing: each tab is a link of its own, and `[` and `]` step between them.
     fireEvent.keyDown(tabLink('Broker roles'), { key: 'ArrowLeft' })
@@ -449,19 +449,19 @@ describe('AccessControlTab', () => {
    * daemons take their key from the environment, so a minted token for them fixes nothing. Asserted
    * per row rather than by counting buttons.
    */
-  it('offers Issue Token for an MCP-style principal and not for the two environment keys', async () => {
+  it('offers Issue Token for the Read-only API client and not for the two environment keys', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      MCP_PRINCIPAL,
+      READ_ONLY_PRINCIPAL,
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
 
     const rowFor = (name) => screen.getByText(name).closest('tr')
-    expect(within(rowFor('MCP read-only client')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
+    expect(within(rowFor('Read-only API client')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
     expect(within(rowFor('Service_Ingestor')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
     expect(within(rowFor('Service_Playback')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
   })
@@ -471,7 +471,7 @@ describe('AccessControlTab', () => {
    * must still be mintable, so the button follows describePrincipal()'s fallback rather than a
    * hardcoded list.
    */
-  it('offers Issue Token for an undocumented principal, because the fallback mint command is the MCP one', async () => {
+  it('offers Issue Token for an undocumented principal, because the fallback mint command is the API one', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
@@ -509,7 +509,7 @@ describe('AccessControlTab', () => {
   it('offers Describe for a named principal and not for a pinned one', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
-      MCP_PRINCIPAL,
+      READ_ONLY_PRINCIPAL,
       {
         principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['telemetry:read'],
         created_at: null, can_sign_in: false, name: 'Line 4 OEE report', purpose: null,
@@ -518,7 +518,7 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
 
-    expect(screen.queryByRole('button', { name: /Describe MCP read-only client/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Describe Read-only API client/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Describe Line 4 OEE report/ }))
     await waitFor(() => expect(screen.getByTestId('describe-modal').textContent).toBe('Line 4 OEE report'))
   })
@@ -565,12 +565,12 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
     screen.getByRole('button', { name: /Issue Token/i }).click()
 
     // The NAME is carried into the modal rather than looked up again there, so asserting it here
     // is asserting that the right row opened the dialog.
-    await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('MCP read-only client'))
+    await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('Read-only API client'))
   })
 
   /**
@@ -580,7 +580,7 @@ describe('AccessControlTab', () => {
   it('opens the token inventory from the count, carrying the rows it counted', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
-      MCP_PRINCIPAL.principal_id,
+      READ_ONLY_PRINCIPAL.principal_id,
       [
         { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
         { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
@@ -594,14 +594,14 @@ describe('AccessControlTab', () => {
     // The STATUS is passed rather than recomputed in the dialog, so asserting the row count here
     // asserts that the list and the link cannot disagree.
     await waitFor(() => expect(screen.getByTestId('inventory-modal').textContent)
-      .toBe('MCP read-only client:2'))
+      .toBe('Read-only API client:2'))
   })
 
   /** The count must not include what has been revoked. */
   it('excludes a revoked token from the active count', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
-      MCP_PRINCIPAL.principal_id,
+      READ_ONLY_PRINCIPAL.principal_id,
       [
         { jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' },
         { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
@@ -619,7 +619,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
     const cell = getByTooltip(/not the same as none existing/i)
     expect(cell.textContent).toBe('—')
     expect(cell.tagName).toBe('SPAN')
@@ -630,7 +630,7 @@ describe('AccessControlTab', () => {
   it('links 0 active when every recorded token has lapsed', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
-      MCP_PRINCIPAL.principal_id,
+      READ_ONLY_PRINCIPAL.principal_id,
       [{ jti: 'a', issued_at: '2026-01-01T00:00:00Z', expires_at: '2026-02-01T00:00:00Z' }],
     ]]))
     await renderTab('Machine identities')
@@ -659,8 +659,8 @@ describe('AccessControlTab', () => {
   it('replaces Issue Token with Reinstate once the identity is withdrawn', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listRevokedServicePrincipals.mockResolvedValue(new Map([[
-      MCP_PRINCIPAL.principal_id,
-      { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
+      READ_ONLY_PRINCIPAL.principal_id,
+      { principal_id: READ_ONLY_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
     ]]))
     await renderTab('Machine identities')
 
@@ -680,7 +680,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
     screen.getByRole('button', { name: /^Withdraw$/i }).click()
     await waitFor(() => expect(screen.getByTestId('identity-modal').textContent)
-      .toBe('withdraw:MCP read-only client'))
+      .toBe('withdraw:Read-only API client'))
   })
 
   it('shows the broker roles and marks which ones can publish', async () => {
@@ -848,7 +848,7 @@ describe('AccessControlTab', () => {
 
   /**
    * The break-glass path stays a copyable command with the principal already in it:
-   * `mint-mcp-token.mjs` works when nobody can sign in to this page.
+   * `mint-api-token.mjs` works when nobody can sign in to this page.
    */
   it('offers the mint command as well as the Issue Token button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -856,7 +856,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(
       screen.getByRole('button', {
-        name: `Copy mint command node scripts/mint-mcp-token.mjs --principal ${MCP_PRINCIPAL.principal_id}`
+        name: `Copy mint command node scripts/mint-api-token.mjs --principal ${READ_ONLY_PRINCIPAL.principal_id}`
       })
     ).toBeTruthy())
     expect(screen.queryByRole('button', { name: /^Mint token$/i })).toBeNull()
@@ -870,7 +870,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     const inDays = (d) => new Date(Date.now() + d * 86400000).toISOString()
     api.listServiceTokens.mockResolvedValue(new Map([
-      [MCP_PRINCIPAL.principal_id, [
+      [READ_ONLY_PRINCIPAL.principal_id, [
         { expires_at: inDays(30), jti: 'a' },
         { expires_at: inDays(12), jti: 'b' },
         { expires_at: inDays(-3), jti: 'expired-and-not-counted' }
@@ -888,9 +888,9 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
     // An empty cell is a fact about the record, not the credential, stated on the dash's tooltip.
-    const row = screen.getByText('MCP read-only client').closest('tr')
+    const row = screen.getByText('Read-only API client').closest('tr')
     expect(getByTooltip(/not the same as none existing/i, row).textContent).toBe('—')
   })
 
@@ -902,9 +902,9 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Read-only API client/i)).toBeTruthy())
     // On the row: the dash itself says an empty cell is a statement about the record.
-    const dash = within(screen.getByText('MCP read-only client').closest('tr')).getByText('—')
+    const dash = within(screen.getByText('Read-only API client').closest('tr')).getByText('—')
     expect(tooltipOf(dash)).toMatch(/not the same as none existing/i)
     expect(tooltipOf(dash)).toMatch(/before this database exists/i)
   })
@@ -932,9 +932,9 @@ describe('AccessControlTab', () => {
     expect(tooltipOf(rotate)).toMatch(/SUPABASE_INGESTION_KEY in the release Secret/)
     expect(tooltipOf(rotate)).toMatch(/ingestion Deployment/)
     expect(tooltipOf(rotate)).not.toMatch(/\.env|containers/)
-    expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
-    // The MCP client is the one that command IS right for, so it keeps it.
-    expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
+    expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-api-token/)).toBeNull()
+    // The Read-only API client is the one that command IS right for, so it keeps it.
+    expect(within(rowOf('Read-only API client')).getByLabelText(/mint-api-token\.mjs --principal/)).toBeTruthy()
   })
 
   /** The release check's key is rotated too, and read by a CronJob at each run, which no rotation restarts. */
@@ -964,9 +964,9 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Read-only API client')).toBeTruthy())
 
-    const copy = screen.getByLabelText(/mint-mcp-token\.mjs --principal/)
+    const copy = screen.getByLabelText(/mint-api-token\.mjs --principal/)
     expect(copy.className).toMatch(/btn-ghost/)
     expect(copy.className).not.toMatch(/copyable-id/)
   })
@@ -980,7 +980,7 @@ describe('AccessControlTab', () => {
     api.listServiceTokens.mockRejectedValue(new Error('permission denied for table audit_trail'))
     await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Read-only API client/i)).toBeTruthy())
     expect(getByTooltip(/No token recorded for this identity/).textContent).toBe('—')
   })
 
@@ -1111,7 +1111,7 @@ describe('AccessControlTab card composition', () => {
   it('draws a token count that opens something as a count-link, with no pill inside', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
-      MCP_PRINCIPAL.principal_id,
+      READ_ONLY_PRINCIPAL.principal_id,
       [{ jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' }],
     ]]))
     await renderTab('Machine identities')
@@ -1127,7 +1127,7 @@ describe('AccessControlTab card composition', () => {
 
     await screen.findByRole('button', { name: /Issue Token/i })
     expect(within(card()).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
-    const row = screen.getByText('MCP read-only client').closest('tr')
+    const row = screen.getByText('Read-only API client').closest('tr')
     const cell = row.querySelector('td.row-actions')
     expect(cell).toBeTruthy()
     for (const b of cell.querySelectorAll('button')) expect(b.className).toContain('btn-sm')
@@ -1177,7 +1177,7 @@ describe('AccessControlTab card composition', () => {
   it('names the machine identity as the noun, never a principal or a service identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
-    await screen.findByText('MCP read-only client')
+    await screen.findByText('Read-only API client')
     expect(document.body.textContent).not.toMatch(/Database principals|service principal|Service identit|machine principal/i)
   })
 })
@@ -1268,14 +1268,14 @@ describe('Access Control: sorting by a column (#801)', () => {
 
   it('sorts machine identities by how many tokens are outstanding, with no token on record last', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    const ingestor = { ...MCP_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000002' }
-    const playback = { ...MCP_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000003' }
-    const report = { ...MCP_PRINCIPAL, principal_id: 'c0000000-0000-4000-8000-000000000009', name: 'Line 4 OEE report' }
-    api.listServicePrincipals.mockResolvedValue([ingestor, MCP_PRINCIPAL, report, playback])
+    const ingestor = { ...READ_ONLY_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000002' }
+    const playback = { ...READ_ONLY_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000003' }
+    const report = { ...READ_ONLY_PRINCIPAL, principal_id: 'c0000000-0000-4000-8000-000000000009', name: 'Line 4 OEE report' }
+    api.listServicePrincipals.mockResolvedValue([ingestor, READ_ONLY_PRINCIPAL, report, playback])
     const live = (jti) => ({ jti, issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' })
     const lapsed = (jti) => ({ jti, issued_at: '2026-01-01T00:00:00Z', expires_at: '2026-02-01T00:00:00Z' })
     api.listServiceTokens.mockResolvedValue(new Map([
-      [MCP_PRINCIPAL.principal_id, [live('a'), live('b')]],
+      [READ_ONLY_PRINCIPAL.principal_id, [live('a'), live('b')]],
       // Three on record and none outstanding: 0 active, which is neither 3 nor a dash.
       [report.principal_id, [lapsed('c'), lapsed('d'), lapsed('e')]],
       [playback.principal_id, [live('f')]],
@@ -1284,11 +1284,11 @@ describe('Access Control: sorting by a column (#801)', () => {
     await screen.findByRole('button', { name: '0 active' })
 
     sortBy('Tokens')
-    expect(firstCells()).toEqual(['Line 4 OEE report', 'Service_Playback', 'MCP read-only client', 'Service_Ingestor'])
+    expect(firstCells()).toEqual(['Line 4 OEE report', 'Service_Playback', 'Read-only API client', 'Service_Ingestor'])
     expect(header('Tokens')).toHaveAttribute('aria-sort', 'ascending')
     expect(address()).toBe('/access-control/identities?sort=tokens')
     sortBy('Tokens')
-    expect(firstCells()).toEqual(['MCP read-only client', 'Service_Playback', 'Line 4 OEE report', 'Service_Ingestor'])
+    expect(firstCells()).toEqual(['Read-only API client', 'Service_Playback', 'Line 4 OEE report', 'Service_Ingestor'])
     expect(header('Tokens')).toHaveAttribute('aria-sort', 'descending')
     expect(address()).toBe('/access-control/identities?sort=-tokens')
   })

@@ -39,7 +39,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 # guard in 0051 is that ONE identity may call this function, so a test that discovered the id at
 # runtime would agree with whatever the schema currently says instead of with what it should say.
 INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
-# The MCP principal (0042) -- any authenticated identity that is not the daemon. Used as the
+# The Read-only API client (0042) -- any authenticated identity that is not the daemon. Used as the
 # stranger in the negative test below.
 OTHER_PRINCIPAL = "b0000000-0000-4000-8000-000000000001"
 
