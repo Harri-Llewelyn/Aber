@@ -68,6 +68,10 @@ class ThirdPartyBase(unittest.TestCase):
 
     def setUp(self):
         self.conn = get_connection()
+        # REPEATABLE READ, so TheAccountItHolds's queue_depth() counts the requests this test
+        # queued and nothing else. Under READ COMMITTED each count sees other sessions' commits:
+        # pg_net's worker deleting a request it has sent would move the count between two reads.
+        self.conn.set_session(isolation_level="REPEATABLE READ")
         self.cur = self.conn.cursor()
         # People, not just role grants: audit_trail.changed_by references auth.users.
         for user_id in (ADMIN_ID, MANAGER_ID):
