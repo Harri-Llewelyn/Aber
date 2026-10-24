@@ -578,14 +578,17 @@ it; this server answers **404 for anything outside `/v1`**, including `/info`. A
 at `http://localhost:8090` fails its version probe and quietly decides the server is pre-1.0,
 after which nothing it sends is in the right shape.
 
-**2. The token is a user access token, not the publishable key.** The publishable key authenticates at the gateway
-and is then rejected by the data layer — `401 The data layer refused this token: a user or service
-access token is required` — because it stands for `anon`. Get one with:
+**2. The token is an access token, not the publishable key.** Use your own, from **Profile → Copy
+Token** in the dashboard, or a machine identity's token from **Access Control**. Neither needs your
+password. The publishable key authenticates at the gateway and is then rejected
+by the data layer — `401 The data layer refused this token: a user or service access token is
+required` — because it stands for `anon`. A script with no dashboard gets one with the password
+grant:
 
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
   -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
-  -d '{"email":"admin@aber.local","password":"aber123"}' \
+  -d '{"email":"<email>","password":"<password>"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 ```
 
