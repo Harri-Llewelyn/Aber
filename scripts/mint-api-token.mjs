@@ -239,9 +239,11 @@ if (asJson) {
 } else {
   console.log(token);
   console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until}`);
+  console.error('# Give it to the client as its bearer token. The Issue Token dialog on Access Control');
+  console.error('# shows a setup for each client.');
   // The revocation and its scope go together: auth_pre_request() is a PostgREST hook, so a revoked
   // token still reaches every service that verifies the signature itself (i3x/README.md, "The token").
-  console.error(`# Paste as I3X_TOKEN. jti ${jti} — revoke it against the API with`);
+  console.error(`# jti ${jti} — revoke it against the API with`);
   console.error(`# SELECT revoke_service_token('${jti}'); storage, realtime and the edge`);
   console.error('# functions verify the signature only and will still accept it until it expires.');
 }

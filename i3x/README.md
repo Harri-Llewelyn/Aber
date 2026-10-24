@@ -564,6 +564,10 @@ the Sparkplug/NCMD command path, where they are audited.
 
 ## Connecting a client
 
+**The dashboard sets a client up for you.** Issue a token on Access Control, and the dialog gives
+this server's address and a setup for i3X Explorer, an MCP client and curl, with the token already
+in each. What follows is for a token from a script, or a client the dialog has no setup for.
+
 Two rules decide whether any i3X client works against this server, and both fail in ways that
 do not name the cause. The addresses below are the dev cluster's, with `npm run dev:forward`
 running: the API on `http://127.0.0.1:54321` and i3X on `http://localhost:8090/v1`. On a
@@ -591,7 +595,8 @@ curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
 **For a client you keep, issue a token for the Read-only API client instead.** It is a machine
 identity that reads telemetry and changes nothing. Its token lasts 30 days by default, and any
 client of this server can present it: i3X Explorer, an MCP client, Swagger UI, curl or a script.
-[The token](#the-token) says how to issue one.
+Issue it on Access Control and copy the setup the dialog gives, or mint one from a shell.
+[The token](#the-token) says how.
 
 ### i3X Explorer
 
@@ -755,7 +760,11 @@ two ways:
 
 - **On the dashboard**, as an Administrator: Access Control → **Machine identities** → the
   Read-only API client's **Issue Token** (the Service Token modal). It offers 7, 30 or 90 days, 30
-  by default, and shows the token once with its `jti`.
+  by default, and shows the token once with its `jti`. For an identity holding `telemetry:read` it
+  also gives this server's `/v1` address (`VITE_I3X_URL`, which the chart renders from the i3X
+  route's host) and a setup per client with the token in it: i3X Explorer, the `--json` block
+  below, and a `curl` of `GET /v1/objecttypes`. With no i3X route it leaves the address and the
+  setups out.
 - **From a shell** on a machine that can reach the stack:
 
   ```bash

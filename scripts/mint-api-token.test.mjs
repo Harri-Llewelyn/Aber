@@ -70,6 +70,9 @@ test('the script records the token, then prints it alone on stdout', async () =>
     assert.equal(stub.calls[0].url, '/rest/v1/rpc/record_service_token_issued');
     assert.equal(stub.calls[0].body.p_jti, claims.jti);
     assert.match(stderr, /Read-only API client b0000000-0000-4000-8000-000000000001 \(telemetry:read\)/);
+    // Neutral about the client: a variable name suits one of them, and the dialog has a setup per client.
+    assert.match(stderr, /Give it to the client as its bearer token\. The Issue Token dialog on Access Control/);
+    assert.ok(!stderr.includes('I3X_TOKEN'), 'the plain output names no client variable');
     assert.ok(!stderr.includes(NOTICE), 'the new name prints no deprecation notice');
   } finally {
     await stub.close();

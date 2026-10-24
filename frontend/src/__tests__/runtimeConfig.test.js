@@ -102,6 +102,34 @@ describe('required settings', () => {
   })
 })
 
+describe('i3xUrl', () => {
+  /** Import constants.js afresh with `injected` as the deployment config. */
+  async function loadConstants(injected) {
+    await loadConfig(injected)
+    return import('../constants.js')
+  }
+
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('reads VITE_I3X_URL from the runtime config, without a trailing slash', async () => {
+    const { i3xUrl } = await loadConstants({ VITE_I3X_URL: 'https://i3x.plant.example/' })
+    expect(i3xUrl()).toBe('https://i3x.plant.example')
+  })
+
+  /** The chart renders it blank where no i3X server is published; the dialog then names none. */
+  it('is blank in a built bundle when the setting is blank', async () => {
+    vi.stubEnv('DEV', false)
+    const { i3xUrl } = await loadConstants({ VITE_I3X_URL: '' })
+    expect(i3xUrl()).toBe('')
+  })
+
+  it('falls back to the dev forward on the Vite dev server, as the Grafana URL does', async () => {
+    vi.stubEnv('DEV', true)
+    const { i3xUrl } = await loadConstants({ VITE_I3X_URL: '' })
+    expect(i3xUrl()).toBe('http://localhost:8090')
+  })
+})
+
 describe('public/config.js placeholder', () => {
   const source = readFileSync(PLACEHOLDER_FILE, 'utf8')
 

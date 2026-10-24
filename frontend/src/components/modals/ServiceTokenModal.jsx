@@ -4,8 +4,10 @@ import { ActionButton } from '../common/ActionButton'
 import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
-import { describePrincipal } from '../../utils/serviceIdentities'
+import { SegmentedControl } from '../common/SegmentedControl'
 import { formatDate } from '../../utils/format'
+import { i3xBaseUrl, i3xClientSetups } from '../../utils/i3xClientSetups'
+import { i3xUrl } from '../../constants'
 import { identityUrl } from '../../routes'
 import { Tooltip } from '../common/Tooltip'
 
@@ -16,6 +18,91 @@ const COPY_REFUSED = 'Could not reach the clipboard — select the value and cop
 /** Mirrors `service_token_max_days()`. The database refuses anything past it; this is the shortlist. */
 const TTL_CHOICES = [7, 30, 90]
 const DEFAULT_TTL = 30
+
+/** What the Connect section's Authentication row says: the scheme, never the publishable key. */
+const AUTHENTICATION = 'Bearer token'
+
+/** One value of the Connect section, read-only, with its copy button. */
+function ConnectValue({ id, label, value, copyLabel, copy, copied }) {
+  return (
+    <div className="form-group">
+      <label className="form-label" htmlFor={id}>{label}</label>
+      <div className="gateway-copy-row">
+        <input id={id} className="form-control mono" readOnly value={value} />
+        <Tooltip text={`Copy ${copyLabel}`}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            onClick={() => copy(id, value)}
+            aria-label={`Copy ${copyLabel}`}
+          >
+            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
+          </button>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * How to connect a client that reads through the i3X server, with the minted token in each setup.
+ * `origin` is VITE_I3X_URL; blank leaves out the address and every setup, since each names it.
+ */
+function ConnectSection({ origin, token, copy, copied }) {
+  const setups = origin ? i3xClientSetups(origin, token) : []
+  const [client, setClient] = useState(setups[0]?.id)
+  const setup = setups.find(s => s.id === client) || setups[0]
+
+  return (
+    <div className="form-group token-connect" role="group" aria-labelledby="svc-token-connect">
+      <div id="svc-token-connect" className="form-label">Connect</div>
+      <div className="form-hint">
+        For a client that reads through the i3X server. Send the token as a bearer token. The
+        publishable key is refused.
+      </div>
+      <div className="gateway-settings">
+        {origin && (
+          <ConnectValue
+            id="svc-connect-server"
+            label="i3X server"
+            value={i3xBaseUrl(origin)}
+            copyLabel="i3X server address"
+            copy={copy}
+            copied={copied}
+          />
+        )}
+        {/* Plain text, no copy button: a client offers it as a choice, such as Explorer's dropdown. */}
+        <div className="form-group">
+          <div className="form-label">Authentication</div>
+          <div className="token-connect-text">{AUTHENTICATION}</div>
+        </div>
+      </div>
+      {setup ? (
+        <>
+          <div className="gateway-block-head">
+            <SegmentedControl
+              label="Client"
+              options={setups.map(s => ({ id: s.id, label: s.label }))}
+              value={setup.id}
+              onChange={setClient}
+            />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(`setup-${setup.id}`, setup.text)}>
+              {copied === `setup-${setup.id}`
+                ? <><IconCheck size={12} /> Copied</>
+                : <><IconCopy size={12} /> Copy Setup</>}
+            </button>
+          </div>
+          <pre className="mono gateway-code gateway-code-wrap">{setup.text}</pre>
+          <div className="form-hint">{setup.hint}</div>
+        </>
+      ) : (
+        <div className="form-hint">
+          This dashboard does not know the site’s i3X server address, so no client setup is shown.
+        </div>
+      )}
+    </div>
+  )
+}
 
 /**
  * Mint a long-lived token for a machine identity and show it once. This exists because revocation
@@ -71,9 +158,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
   const close = useCallback(() => onClose(), [onClose])
 
   const expiresOn = minted ? formatDate(minted.expires_at) : null
-  // The variable a client reads the token from, where one is documented: `i3x-mcp` reads
-  // I3X_TOKEN, and nothing tells the page what any other client calls it.
-  const tokenEnv = describePrincipal(principal.principal_id, principal).tokenEnv
+  // Without telemetry:read an identity sees nothing through i3X, so a setup would only mislead.
+  const readsTelemetry = (principal.permissions || []).includes('telemetry:read')
 
   const confirming = step === 'confirm'
 
@@ -169,10 +255,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
               </Tooltip>
             </div>
             <div className="form-hint">
-              Expires {expiresOn}.{' '}
-              {tokenEnv
-                ? <>Paste it as <span className="mono">{tokenEnv}</span> in the client that will present it.</>
-                : 'Give it to the client that will present it, as its bearer token.'}
+              Expires {expiresOn}. Give it to the client that will present it, as its bearer token.
             </div>
           </div>
 
@@ -209,6 +292,11 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
                 accepting it until {expiresOn}.
               </div>
             </div>
+          )}
+
+          {/* Built from the minted token in this component's state, so the setups go with it. */}
+          {readsTelemetry && (
+            <ConnectSection origin={i3xUrl()} token={minted.token} copy={copy} copied={copied} />
           )}
         </>
       )}

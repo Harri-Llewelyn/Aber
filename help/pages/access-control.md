@@ -60,6 +60,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.
 - A machine identity reaches the database only. A process that speaks MQTT is issued a broker account instead.
 - **Read-only API client** is the identity for a tool that only reads: i3X Explorer, an MCP client, Swagger UI or a script. Issue it a token, and give the tool that token. It reads telemetry, and cannot read the Audit Trail or change anything.
+- After **Issue Token**, the dialog says how to connect, for any identity that reads telemetry. It gives the i3X server's address and a setup for each client, with the token already in it. The setups go when the dialog closes, as the token does.
 - The pencil beside an identity's name changes its name or purpose. What it holds is fixed when it is created, because a wider grant would apply to every token already issued for it.
 - **Holds** is the permissions the identity has, and **Reaches** is what those let it get to. Hover over its name for its purpose. The purpose tells you whether an unfamiliar identity is safe to leave alone, or safe to remove.
 - **Issue Token** signs a long-lived token for the identity. It shows the token once, with its expiry and its token ID. Issuing another **adds** a credential; it does not replace the first.

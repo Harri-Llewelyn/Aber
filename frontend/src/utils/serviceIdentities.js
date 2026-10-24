@@ -94,8 +94,6 @@ export const KNOWN_PRINCIPALS = {
       + 'Swagger UI, a script. It holds telemetry:read alone, so it cannot read the Audit Trail or '
       + 'write anything.',
     mintedBy: 'scripts/mint-api-token.mjs',
-    // The variable `i3x-mcp` reads its token from; said on the token dialog for this identity only.
-    tokenEnv: 'I3X_TOKEN',
     // `{id}` is substituted with the principal's own uuid -- the part an operator would otherwise
     // transcribe by hand, which is the error this column exists to remove.
     mintCommand: 'node scripts/mint-api-token.mjs --principal {id}',

@@ -1,10 +1,16 @@
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 import { ServiceTokenModal } from '../components/modals/ServiceTokenModal'
+import { copyText } from '../components/common/CopyableId'
 import { isMintableFromPage, describePrincipal } from '../utils/serviceIdentities'
 import { api } from '../api'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
 
 vi.mock('../api', () => ({ api: { mintServiceToken: vi.fn() } }))
 
@@ -117,18 +123,114 @@ describe('ServiceTokenModal', () => {
     await waitFor(() => expect(screen.getByText(/verify the signature independently/i)).toBeTruthy())
   })
 
-  /** I3X_TOKEN is what `i3x-mcp` reads, so it is said for the Read-only API client and no other. */
-  it('names I3X_TOKEN only for the identity whose client reads it', async () => {
+  /** Issue Token, then wait for the reveal step. */
+  const mint = async (overrides) => {
     api.mintServiceToken.mockResolvedValue(MINTED)
-    const first = open()
-    screen.getByRole('button', { name: /Issue Token/i }).click()
-    await waitFor(() => expect(screen.getByText('I3X_TOKEN')).toBeTruthy())
-    first.unmount()
-
-    open({ principal: { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [] }, principalName: 'Line 4' })
-    screen.getByRole('button', { name: /Issue Token/i }).click()
+    const view = open(overrides)
+    fireEvent.click(screen.getByRole('button', { name: /Issue Token/i }))
     await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
-    expect(screen.queryByText('I3X_TOKEN')).toBeNull()
+    return view
+  }
+
+  /** The setup on show, after choosing its client. */
+  const setupFor = (client) => {
+    fireEvent.click(screen.getByRole('radio', { name: client }))
+    return document.querySelector('.token-connect pre').textContent
+  }
+
+  describe('Connect', () => {
+    beforeEach(() => { globalThis.__ABER_CONFIG__ = { VITE_I3X_URL: 'https://i3x.plant.example/' } })
+    afterEach(() => {
+      delete globalThis.__ABER_CONFIG__
+      vi.unstubAllEnvs()
+    })
+
+    /** An identity without telemetry:read sees nothing through i3X, so a setup would mislead. */
+    it('shows for an identity with telemetry:read and not for one without', async () => {
+      const first = await mint()
+      expect(screen.getByRole('group', { name: 'Connect' })).toBeTruthy()
+      first.unmount()
+
+      await mint({ principal: { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['proposal:create'] }, principalName: 'Schema sync' })
+      expect(screen.queryByRole('group', { name: 'Connect' })).toBeNull()
+      expect(screen.queryByText(/i3X/)).toBeNull()
+    })
+
+    it('gives the i3X server with /v1 on it, and a bearer token as the authentication', async () => {
+      await mint()
+      expect(screen.getByLabelText('i3X server').value).toBe('https://i3x.plant.example/v1')
+      // Plain text: a client takes the scheme as a choice, so there is nothing to paste.
+      expect(screen.getByText('Bearer token')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /Copy authentication/i })).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy i3X server address' }))
+      await waitFor(() => expect(copyText).toHaveBeenCalledWith('https://i3x.plant.example/v1'))
+    })
+
+    it('puts the minted token and the /v1 address in the setup for every client', async () => {
+      await mint()
+      for (const client of ['i3X Explorer', 'MCP client', 'curl']) {
+        const text = setupFor(client)
+        expect(text, client).toContain(MINTED.token)
+        expect(text, client).toContain('https://i3x.plant.example/v1')
+      }
+      expect(setupFor('i3X Explorer')).toMatch(/Authentication\s+Bearer Token/)
+      expect(document.body.textContent).toContain('global.corsExtraOrigins')
+      // /info answers without a token, so only a request that needs one proves it works.
+      expect(setupFor('curl')).toBe(
+        `curl -H "Authorization: Bearer ${MINTED.token}" https://i3x.plant.example/v1/objecttypes`
+      )
+    })
+
+    it('copies the setup on show', async () => {
+      await mint()
+      const text = setupFor('MCP client')
+      fireEvent.click(screen.getByRole('button', { name: /Copy Setup/ }))
+      await waitFor(() => expect(copyText).toHaveBeenCalledWith(text))
+      await waitFor(() => expect(screen.getByRole('button', { name: /Copied/ })).toBeTruthy())
+    })
+
+    /** The block the script prints, so the dialog and `--json` cannot hand out different clients. */
+    it('gives the MCP block mint-api-token.mjs --json prints', async () => {
+      const script = readFileSync(resolve(HERE, '../../../scripts/mint-api-token.mjs'), 'utf8')
+      const pinned = script.match(/'(i3x-mcp@[^']+)'/)?.[1]
+      const name = script.match(/mcpServers: \{\s*'([^']+)'/)?.[1]
+      expect(pinned).toBeTruthy()
+
+      await mint()
+      expect(JSON.parse(setupFor('MCP client'))).toEqual({
+        mcpServers: {
+          [name]: {
+            command: 'npx',
+            args: ['-y', pinned],
+            env: {
+              I3X_BASE_URL: 'https://i3x.plant.example/v1',
+              I3X_AUTH_SCHEME: 'bearer',
+              I3X_TOKEN: MINTED.token,
+            },
+          },
+        },
+      })
+    })
+
+    it('says to give the token as a bearer token, and names no variable for it', async () => {
+      await mint()
+      expect(screen.getByText(/Give it to the client that will present it, as its bearer token/)).toBeTruthy()
+      expect(screen.queryByText('I3X_TOKEN')).toBeNull()
+    })
+
+    /** A built bundle with no VITE_I3X_URL: an address that goes nowhere is worse than none. */
+    it('leaves out the address and every setup when no i3X URL is configured', async () => {
+      vi.stubEnv('DEV', false)
+      globalThis.__ABER_CONFIG__ = { VITE_I3X_URL: '' }
+      await mint()
+      expect(screen.getByRole('group', { name: 'Connect' })).toBeTruthy()
+      expect(screen.queryByLabelText('i3X server')).toBeNull()
+      expect(screen.queryByRole('radio')).toBeNull()
+      expect(document.body.textContent).not.toContain('/v1')
+      expect(screen.getByText('Bearer token')).toBeTruthy()
+      expect(screen.getByText(/does not know the site’s i3X server address/)).toBeTruthy()
+    })
   })
 
   it('names Studio among the services a revocation does not reach, before and after the mint', async () => {
