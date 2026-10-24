@@ -49,12 +49,14 @@ describe('what a form would change', () => {
     expect(Object.keys(patch)).toEqual(['name'])
   })
 
-  it('translates the cell form’s access_url onto grafana_url', () => {
-    // The one pair a string-matching mapping would silently get wrong.
+  it('never proposes a cell’s deprecated dashboard address', () => {
+    // `cells.grafana_url` is not proposable: a cell's dashboard is one of its Attached Links. A
+    // stale form key, or the column's own name, is dropped rather than refused at the insert.
+    expect(Object.values(PROPOSAL_FORMS.cell.fields)).not.toContain('grafana_url')
     const patch = patchFromForm('cell',
-      { cell_name: 'Cell 1', access_url: 'https://old' },
-      { cell_name: 'Cell 1', access_url: 'https://new' })
-    expect(patch).toEqual({ grafana_url: 'https://new' })
+      { cell_name: 'Cell 1', access_url: 'https://old', grafana_url: 'https://old' },
+      { cell_name: 'Cell 1', access_url: 'https://new', grafana_url: 'https://new' })
+    expect(patch).toEqual({})
   })
 
   it('translates the area form’s area_name onto name', () => {

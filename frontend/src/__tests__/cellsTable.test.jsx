@@ -35,7 +35,8 @@ const device = (overrides = {}) => ({
 const CELL = {
   cell_id: 'cell-1', cell_name: 'Assembly Line 1', icon: 'Factory',
   is_archived: false, gateways: [GATEWAY], gateway_count: 1,
-  access_url: 'http://localhost:3002/d/cell-1'
+  // Deprecated, and still on the row: the cells read selects every column.
+  grafana_url: 'http://localhost:3002/d/cell-1'
 }
 
 const routeGet = ({ cells = [CELL], devices = [device()] } = {}) => (path) => {
@@ -276,6 +277,21 @@ describe('the row and its drawer', () => {
     await waitFor(() => expect(panel()).toBeTruthy())
     expect(within(panel()).getByText('Edit Details')).toBeTruthy()
     expect(within(panel()).getByText('Archive Cell')).toBeTruthy()
+  })
+
+  /* A cell's dashboard is one of its Attached Links. The deprecated column is not shown, and is
+     never what the drawer opens. */
+  it('offers no dashboard of its own: Edit Details is the drawer’s main action', async () => {
+    renderCells()
+    await ready()
+
+    fireEvent.click(within(table()).getByText('Assembly Line 1'))
+    await waitFor(() => expect(panel()).toBeTruthy())
+    expect(within(panel()).queryByText('Open Dashboard')).toBeNull()
+    expect(within(panel()).queryByText('Dashboard URL')).toBeNull()
+    expect(within(panel()).queryByText(CELL.grafana_url)).toBeNull()
+    expect(panel().querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Edit Details')
+    expect(within(panel()).getByText('Attached Links')).toBeTruthy()
   })
 
   /* A retention deadline is not something to find out about by its passing, so the drawer reports
