@@ -33,9 +33,11 @@ info:
 
     ### Authentication
 
-    `Authorization: Bearer <access_token>` — the **user's own** access token from
-    `POST /auth/v1/token?grant_type=password` on the Platform API, or a service principal's
-    token minted for i3X clients.
+    `Authorization: Bearer <access_token>` — your own access token, from **Profile → Copy
+    Token** in the dashboard, or a machine identity's token from **Access Control**. The
+    Read-only API client is the identity for a tool that only reads. A script with no
+    dashboard gets your token from `POST /auth/v1/token?grant_type=password` on the Platform
+    API.
 
     Every request except `GET /info` is authenticated first, by one PostgREST call carrying
     your token, so a revoked or expired token is refused here as it is on the Platform API
@@ -48,9 +50,9 @@ info:
     > key stands for `anon` and is refused with
     > `401 The data layer refused this token: a user or service access token is required`.
 
-    > ℹ️ **Tokens expire after an hour.** A client that persists its connection settings —
-    > Explorer does — will start returning 401 on a profile that worked earlier. Paste a
-    > fresh token.
+    > ℹ️ **Your own token expires within an hour.** A client that persists its connection
+    > settings — Explorer does — will start returning 401 on a profile that worked earlier.
+    > Paste a fresh token, or use a machine identity's, which lasts 7 to 90 days.
 
     ### Row Level Security, including on values
 
@@ -1065,9 +1067,12 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        The **user's** access token from `POST /auth/v1/token?grant_type=password` on the
-        Platform API, or a service principal's minted token. Not the anon key. This server holds
-        no service-role key and refuses to start if one is in its environment.
+        Your own access token, from **Profile → Copy Token** in the dashboard, or a machine
+        identity's token from **Access Control** (the Read-only API client is the one for a
+        read-only tool). Paste it without the word `Bearer`. Your own token acts as you and lasts
+        at most an hour; a machine identity's lasts 7 to 90 days. A script with no dashboard gets
+        one from `POST /auth/v1/token?grant_type=password` on the Platform API. Not the anon key.
+        This server holds no service-role key and refuses to start if one is in its environment.
 
   responses:
     Unauthorized:
