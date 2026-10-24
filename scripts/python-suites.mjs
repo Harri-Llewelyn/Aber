@@ -703,6 +703,14 @@ export const SUITES = {
       'the UNS, i3X and the Site Map each put them somewhere different. Unchanged writes, Restore ' +
       'and a second boot pass.',
   },
+  'supabase/migrations/test_a_cell_s_dashboard_address_is_one_of_its_links.py': {
+    lanes: ['db'],
+    why:
+      '0202 moves each cell\'s grafana_url web address into Attached Links and clears it, on every ' +
+      'boot. Its faults are silent ones: an address linked twice, a Dashboard link somebody deleted ' +
+      'coming back at the next restart, a value that is not a web address cleared without a word, ' +
+      'or an archived cell left out. Also holds that grafana_url is no longer proposable.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:

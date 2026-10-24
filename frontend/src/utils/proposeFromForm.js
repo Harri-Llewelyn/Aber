@@ -75,10 +75,8 @@ export const PROPOSAL_FORMS = {
   cell: {
     kind: 'cells',
     idField: 'cell_id',
-    // `access_url` is the form's name for `cells.grafana_url`, which is what api.js writes too.
     fields: {
       cell_name: 'name',
-      access_url: 'grafana_url',
       icon: 'icon',
       area_id: 'area_id',
       plan_x: 'plan_x',

@@ -45,7 +45,6 @@ import {
   IconLayoutDashboard,
   IconChevronRight,
   IconArchive,
-  IconExternalLink,
   IconShieldAlert,
   IconBot,
   IconAlertTriangle,
@@ -660,22 +659,16 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           : null,
         full: true,
         help: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
-      },
-      { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true }
+      }
     ].filter(Boolean) : [],
     actions: selectedCell ? [
-      selectedCell.access_url && {
-        label: 'Open Dashboard', icon: <IconExternalLink size={13} />, href: selectedCell.access_url, primary: true,
-        title: 'Open Cell Dashboard / Grafana UI'
-      },
       {
-        // The primary when the cell has no dashboard: the panel takes the first one marked.
         label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />, primary: true,
         to: onSelectCell ? cellUrl(selectedCell.cell_id) : tabUrl('cells'),
         onClick: () => onSelectCell ? onSelectCell(selectedCell.cell_id) : onNavigateTab?.('cells'),
         title: 'Edit this cell, or place it on its area plan, on the Cells page'
       }
-    ].filter(Boolean) : []
+    ] : []
   }
 
   const panel = openLaneView ? lanePanel : selectedArea ? areaPanel : cellPanel

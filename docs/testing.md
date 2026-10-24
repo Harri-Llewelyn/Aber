@@ -499,6 +499,13 @@ python supabase/migrations/test_archive_purge_cascade.py
 # PATCH, relocate_devices() or an approval from Quarantine. Unchanged writes, Restore and a second
 # boot pass. Every test rolls back.
 python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
+# A cell's dashboard address is one of its links (0202): each web address in cells.grafana_url
+# becomes a Dashboard link, trimmed, archived cells included, and the column clears; NULL and blank
+# are skipped, and any other value is named in a NOTICE and kept; a cell already linked to the
+# address gets no second link; the clear is audited as the migration; a second boot moves nothing,
+# and a deleted Dashboard link stays deleted; grafana_url is not proposable, and an open proposal
+# naming it is not approved. Each test replays the file and rolls back.
+python supabase/migrations/test_a_cell_s_dashboard_address_is_one_of_its_links.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,

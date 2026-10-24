@@ -50,7 +50,7 @@ const bms = {
 
 const cells = [
   // Placed on A's plan.
-  { cell_id: 'cell-1', cell_name: 'Bay 1', area_id: 'area-a', plan_x: 0.3, plan_y: 0.4, is_archived: false, description: 'Five-axis machining, two shifts', gateways: [gateway], gateway_count: 1 },
+  { cell_id: 'cell-1', cell_name: 'Bay 1', area_id: 'area-a', plan_x: 0.3, plan_y: 0.4, is_archived: false, description: 'Five-axis machining, two shifts', gateways: [gateway], gateway_count: 1, grafana_url: 'https://grafana.test/d/bay-1' },
   // Also in A, and placed well clear of Bay 1: BOTH are pins, which is the point of the one view.
   { cell_id: 'cell-2', cell_name: 'Bay 2', area_id: 'area-a', plan_x: 0.8, plan_y: 0.8, is_archived: false, gateways: [], gateway_count: 0 },
   // In B, with no place on its plan.
@@ -522,9 +522,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // The pin beside it says where; the panel repeats no fractions.
     expect(within(panel).queryByText(/% across/)).toBeNull()
     expect(within(panel).queryByText('Place on plan')).toBeNull()
-    // The cell's own icon on the title; with no dashboard, the Cells page is the one primary.
+    // The cell's own icon on the title, and the Cells page as the one primary. The deprecated
+    // grafana_url the row still carries is neither shown nor opened.
     expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
     expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Open on Cells page')
+    expect(within(panel).queryByText('Open Dashboard')).toBeNull()
+    expect(within(panel).queryByText('Dashboard URL')).toBeNull()
     expect(within(panel).getByText('Line_Gateway')).toBeInTheDocument()
     expect(within(panel).getByText('CNC_01')).toBeInTheDocument()
     expect(within(panel).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
@@ -757,7 +760,8 @@ describe('AreasTab files cells into areas', () => {
 
     expect(api.put).toHaveBeenCalledTimes(1)
     expect(api.put.mock.calls[0][0]).toBe('/api/v1/cells/cell-4')
-    expect(api.put.mock.calls[0][1]).toMatchObject({ area_id: 'area-b' })
+    // Only the name and the area: nothing else is sent back with the move.
+    expect(api.put.mock.calls[0][1]).toEqual({ cell_name: 'Loose End', area_id: 'area-b' })
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Press Hall/), 'success', { to: cellUrl('cell-4') })
   })
 

@@ -43,7 +43,7 @@ A proposal is filed as one kind of change, for the kind of entity it changes. It
 - **Device details**: name, description, connection method, and where it sits (cell, area and location scope). Not its type or its 3D model.
 - **Device nameplate**: the Digital Nameplate. That is manufacturer, product designation and type, serial number, year of construction and date of manufacture. It also covers hardware, firmware and software versions, country of origin and product URI.
 - **Area details**: name, description and icon. The name is also a segment of every `uns/` topic beneath the area.
-- **Cell details**: name, description, Grafana dashboard, icon, and its area and place on the plan.
+- **Cell details**: name, description, icon, and its area and place on the plan.
 - **Gateway details**: name, description, access URL, and where it sits (cell, area and location scope). Not what it is, such as its deployment, and not what Aber observed about its health.
 
 An Administrator or a Shopfloor_Manager decides every kind. A machine identity never does: it may propose, but nothing it can be granted lets it approve.

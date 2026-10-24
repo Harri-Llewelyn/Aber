@@ -2030,7 +2030,6 @@ const apiMethods = {
           ...c,
           cell_id: c.id,
           cell_name: c.name,
-          access_url: c.grafana_url,
           gateways
         };
       });
@@ -2582,7 +2581,7 @@ const apiMethods = {
         readByIds('device_nameplate', '*', 'device_id', deviceIds),
         readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
         readByIds('areas', 'id,name,description,icon', 'id', idsOf('areas')),
-        readByIds('cells', 'id,name,grafana_url,icon,area_id,plan_x,plan_y,description', 'id',
+        readByIds('cells', 'id,name,icon,area_id,plan_x,plan_y,description', 'id',
           idsOf('cells')),
         readByIds('gateways', 'id,name,sparkplug_id,description,cell_id,area_id,location_scope,access_url',
           'id', idsOf('gateways')),
@@ -2741,7 +2740,6 @@ const apiMethods = {
     if (path === '/api/v1/cells') {
       const { data, error } = await supabase.from('cells').insert({
         name: body.cell_name,
-        grafana_url: body.access_url,
         description: emptyToNull(body.description),
         area_id: emptyToNull(body.area_id),
         plan_x: planCoordFrom(body.plan_x),
@@ -3084,7 +3082,6 @@ const apiMethods = {
     if (path.startsWith('/api/v1/cells/')) {
       const { data, error } = await supabase.from('cells').update({
         name: body.cell_name,
-        grafana_url: body.access_url,
         ...(body.icon ? { icon: body.icon } : {}),
         // Only when sent: the Areas page files a cell with a body naming nothing else.
         ...('area_id' in body ? { area_id: emptyToNull(body.area_id) } : {}),

@@ -64,7 +64,6 @@ const KEY_LABELS = {
   plan_y: 'Place on the plan (y)',
   location_scope: 'Location scope',
   model_3d_path: '3D model path',
-  grafana_url: 'Grafana dashboard',
   access_url: 'Access URL',
   icon: 'Icon',
   manufacturer_name: 'Manufacturer',

@@ -1049,6 +1049,7 @@ function edgeFunctionNames() {
     'public.keep_gateway_credential': '0196 keeps the copy of a Third-party gateway\'s password too, so an Administrator can show it again; 0164 kept a Host or Simulated gateway\'s alone',
     'public.issue_gateway_enrollment_token': '0196 refuses a Third-party gateway as it refuses a Host one, because a bundle enrols Aber\'s gateway appliance; the baseline refused Host alone',
     'public.gateway_has_broker_credential': '0196 counts a Third-party gateway\'s CREDENTIAL_ISSUED row as a Host gateway\'s, so archiving it disables its account; the baseline counted Host alone',
+    'public.proposable_columns': '0202 drops cells.grafana_url from the cell lane, since its values moved to Attached Links and the column is deprecated; the baseline admits it. It restates 0176\'s search_path pin, which the redeclaration would otherwise clear',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

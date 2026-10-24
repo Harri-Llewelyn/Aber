@@ -178,7 +178,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const fileCell = async (cell, areaId) => {
     if ((cell.area_id || null) === (areaId || null)) return
     try {
-      await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, access_url: cell.access_url, area_id: areaId || '' })
+      await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, area_id: areaId || '' })
       loadAll()
       const areaName = areas.find(a => a.area_id === areaId)?.area_name
       showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success', { to: cellUrl(cell.cell_id) })

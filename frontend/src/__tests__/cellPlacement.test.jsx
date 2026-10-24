@@ -94,13 +94,21 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(onShowOnSiteMap).toHaveBeenCalledWith('area-1')
   })
 
-  it('titles the panel with the cell\'s icon, Edit Details its one primary without a dashboard', async () => {
+  it('titles the panel with the cell\'s icon, Edit Details its one primary', async () => {
     await renderCells()
     fireEvent.click(screen.getByText('Bay 1'))
     const panel = document.querySelector('.context-panel')
     expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
     expect(panel.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
     expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Edit Details')
+  })
+
+  it('asks for no dashboard address: a cell\'s dashboard is one of its Attached Links', async () => {
+    await renderCells()
+    fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
+    expect(screen.getByLabelText(/Cell Name/)).toBeInTheDocument()
+    expect(screen.queryByText(/Dashboard \/ UI URL/)).toBeNull()
+    expect(screen.queryByPlaceholderText(/localhost:3002/)).toBeNull()
   })
 
   it('shows the plan to click once an area is chosen, and not before', async () => {

@@ -4633,7 +4633,7 @@ components:
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
         description: { type: string, nullable: true, description: 'Free text. The Cells page shows it under the name and in the drawer, and the Site Map as a field in the cell''s panel. i3X serves it as the cell object''s description.' }
         icon: { type: string, default: Factory, enum: [Factory, Bot, Cog, CircuitBoard, Gauge, Building2, Truck, Zap], description: 'Icon key, a closed set (`cells_icon_valid`) rendered by the dashboard from a bundled SVG set. A picture to tell cells apart: nothing classifies by it.' }
-        grafana_url: { type: string, nullable: true }
+        grafana_url: { type: string, nullable: true, deprecated: true, description: 'Deprecated in 1.7.0, and removed no sooner than 1.8.0. Each cell''s `http://` or `https://` address moved to `/rest/v1/links` as a link named `Dashboard` (`entity_type` `cell`, `entity_id` the cell''s id, `link_tag` `other`), and the column was cleared, so it reads NULL. A web address written here moves the same way at the next restart; any other value stays. Not proposable.' }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true, description: 'Retention purge deadline. NULL means permanent retention — the purge honours this, never `archived_at` age.' }
@@ -4652,7 +4652,7 @@ components:
         plan_y: { type: number, nullable: true }
         description: { type: string, nullable: true }
         icon: { type: string, enum: [Factory, Bot, Cog, CircuitBoard, Gauge, Building2, Truck, Zap] }
-        grafana_url: { type: string, nullable: true }
+        grafana_url: { type: string, nullable: true, deprecated: true, description: 'Deprecated in 1.7.0, and removed no sooner than 1.8.0. Each cell''s `http://` or `https://` address moved to `/rest/v1/links` as a link named `Dashboard` (`entity_type` `cell`, `entity_id` the cell''s id, `link_tag` `other`), and the column was cleared, so it reads NULL. A web address written here moves the same way at the next restart; any other value stays. Not proposable.' }
         is_archived: { type: boolean, description: 'true is refused while any device or gateway is in the cell (see the PATCH). No device or gateway can be filed in an archived cell.' }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true }

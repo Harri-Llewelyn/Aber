@@ -54,7 +54,7 @@ const proposal = (id, entity_type, entity_id, patch) => ({
 });
 
 const cellRow = {
-  id: CELL_ID, name: 'Weld Bay', grafana_url: null, icon: 'Factory', area_id: null,
+  id: CELL_ID, name: 'Weld Bay', icon: 'Factory', area_id: null,
   plan_x: null, plan_y: null, description: 'Robot welding'
 };
 const gatewayRow = {

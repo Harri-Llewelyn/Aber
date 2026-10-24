@@ -30,7 +30,6 @@ import {
   IconRefreshCw,
   IconBookOpen,
   IconHistory,
-  IconExternalLink,
   IconRadio,
   IconShieldAlert,
   IconCpu
@@ -66,7 +65,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // constraint and this form all have to agree, and one imported constant is one place they can.
   // `area_id` '' is unfiled and `plan_x`/`plan_y` '' is unplaced;
   // api.js turns each into NULL.
-  const blank = { cell_name: '', access_url: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', plan_x: '', plan_y: '' }
+  const blank = { cell_name: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', plan_x: '', plan_y: '' }
   const [formVal, setFormVal]   = useState(blank)
   // The spacing the database enforces between two cells on one plan; the picker refuses earlier.
   const minSpacingSetting = useSetting(MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING)
@@ -556,10 +555,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               />
             </div>
           )}
-          <div className="form-group">
-            <label className="form-label" htmlFor="cell-access-url">Dashboard / UI URL (Optional)</label>
-            <input id="cell-access-url" className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" />
-          </div>
           {/* The rationale, only when proposing: it is written to an approver who has not stood
               in the cell. */}
           {proposeMode && (
@@ -691,7 +686,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             full: true,
             help: "This cell's gateways' devices, plus any device filed here explicitly."
           },
-          { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
           // The purge timer.
           selectedCell.is_archived && {
             label: 'Retention',
@@ -702,13 +696,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           },
         ].filter(Boolean) : []}
         actions={selectedCell ? [
-          selectedCell.access_url && {
-            label: 'Open Dashboard', icon: <IconExternalLink size={13} />, href: selectedCell.access_url, primary: true,
-            title: 'Open the cell dashboard or UI'
-          },
           {
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
-            // The primary when there is no dashboard to open and the cell is not archived.
+            // The primary while the cell is not archived; Restore Cell is, once it is.
             primary: !selectedCell.is_archived,
             onClick: () => {
               // Seeded with the open proposal's patch when there is one: one open proposal per

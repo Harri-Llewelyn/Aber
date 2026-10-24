@@ -1317,7 +1317,7 @@ nothing was keeping it out of the text.
 technology; the title stays the accessible name. The first action marked `primary` is listed first
 and highlighted; a later one marked `primary` renders as a plain action in its own position. A page
 picks its primary in this order: setup while a gateway is pending; otherwise the destination where
-one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwise Edit Details
+one exists (a gateway's Launch UI); otherwise Restore when archived; otherwise Edit Details
 (Propose a Change in propose mode).
 
 ---
