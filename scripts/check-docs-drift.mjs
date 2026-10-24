@@ -852,6 +852,50 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 130. scan:config's second render has every optional workload on. Each `enabled: false` in
+// values.yaml is turned on by values-prod.yaml.example or named in the overlay that render adds:
+// true, or false where it renders no workload. Every key the overlay sets is in values.yaml, so a
+// renamed switch fails here instead of leaving the overlay setting nothing.
+// -------------------------------------------------------------------------------------------------
+{
+  const OVERLAY = 'scripts/lint/config-scan-every-workload.yaml';
+  // Block mappings only, by indentation: dotted path -> the scalar after the colon, '' for a parent.
+  // Comments, list items and flow mappings are skipped; the switches are none of those.
+  const keyPaths = (text) => {
+    const out = new Map();
+    const stack = [];
+    for (const line of text.split('\n')) {
+      const m = line.match(/^( *)([A-Za-z0-9_]+):(?: (.*))?$/);
+      if (!m) continue;
+      while (stack.length && stack[stack.length - 1].indent >= m[1].length) stack.pop();
+      const value = (m[3] ?? '').replace(/ +#.*$/, '').trim();
+      out.set([...stack.map((s) => s.key), m[2]].join('.'), value);
+      if (!value) stack.push({ indent: m[1].length, key: m[2] });
+    }
+    return out;
+  };
+  const values = keyPaths(read('deploy/helm/aber/values.yaml'));
+  const example = keyPaths(read('deploy/helm/aber/values-prod.yaml.example'));
+  const overlay = keyPaths(read(OVERLAY));
+  const off = [...values].filter(([k, v]) => /(^|\.)enabled$/.test(k) && v === 'false').map(([k]) => k);
+  const bad = [];
+  if (!read('scripts/scan-config.mjs').includes(OVERLAY)) bad.push(`scripts/scan-config.mjs does not render with ${OVERLAY}`);
+  if (off.length < 10) bad.push(`found only ${off.length} \`enabled: false\` in values.yaml; the reader has drifted from the file`);
+  for (const k of off) {
+    if (example.get(k) !== 'true' && !overlay.has(k)) bad.push(`${k} is off in values.yaml and values-prod.yaml.example; turn it on in ${OVERLAY}, or name it false there with why it renders no workload`);
+  }
+  for (const [k, v] of overlay) {
+    if (v && !values.has(k)) bad.push(`${OVERLAY} sets ${k}, which values.yaml does not declare`);
+  }
+  if (bad.length) {
+    fail(`scan:config's every-workload render has drifted from the chart:\n${bad.map((b) => `        ${b}`).join('\n')}`);
+  } else {
+    const stayOff = off.filter((k) => overlay.get(k) === 'false');
+    pass(`scan:config renders every switch values.yaml leaves off: ${off.length - stayOff.length} on in the second render or the example, ${stayOff.length} named as no workload`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 9. Migration filenames carry unique numeric prefixes. db-init applies `/migrations/*.sql` in glob
 // order with no ledger, so the filename is the execution order; two files sharing a prefix run in
 // an order decided by whatever follows the number.
@@ -6527,10 +6571,11 @@ const OPERATOR_PAIRS = [
 // template, because an environment variable overrides grafana.ini silently.
 //
 // Aber's own release check is the one exception a site may opt into. It is held off by default:
-// false in values.yaml, not turned on by a committed values file, rendered only when on, and named
-// as off by default in the runbook. Only its script names api.github.com in the chart, and nothing
-// the browser runs does, so no other part of the stack or the page asks GitHub. It compares
-// versions on the pattern releaseVersion.js uses, so the menu and the check agree on "newer".
+// false in values.yaml, not turned on by a values file a stack deploys from (scan:config's overlay
+// renders it only to scan it), rendered only when on, and named as off by default in the runbook.
+// Only its script names api.github.com in the chart, and nothing the browser runs does, so no
+// other part of the stack or the page asks GitHub. It compares versions on the pattern
+// releaseVersion.js uses, so the menu and the check agree on "newer".
 // -------------------------------------------------------------------------------------------------
 {
   const GRAFANA_INI = 'grafana/grafana.ini';
