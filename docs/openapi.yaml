@@ -4454,7 +4454,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Access token from `POST /auth/v1/token?grant_type=password`.'
+      description: |
+        Your own access token, from **Profile → Copy Token** in the dashboard, or a machine
+        identity's token from **Access Control**. Paste it without the word `Bearer`. Your own
+        token acts as you and lasts at most an hour; a machine identity's lasts 7 to 90 days.
+        A script with no dashboard gets one from `POST /auth/v1/token?grant_type=password`.
     apiKeyAuth:
       type: apiKey
       in: header
