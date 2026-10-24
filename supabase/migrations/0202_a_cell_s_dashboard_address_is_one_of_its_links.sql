@@ -71,9 +71,9 @@ COMMENT ON FUNCTION public.proposable_columns(p_entity_type text) IS
 COMMENT ON COLUMN public.cells.grafana_url IS
   'Deprecated in 1.7.0, and removed no sooner than 1.8.0. Each cell''s http:// or https:// address '
   'moved to its Attached Links (links, entity_type ''cell'', display_name ''Dashboard'') and was '
-  'cleared here, so it reads NULL. db-init moves a web address written here since at its next boot. '
-  'Any other value stays, and db-init''s log names it. Not proposable; the dashboard neither shows '
-  'nor writes it (0202).';
+  'cleared here, so it reads NULL. A web address written here later moves the same way at the next '
+  'boot. Any other value stays, and db-init''s log names it. Not proposable; the dashboard neither '
+  'shows nor writes it (0202).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 2. Each web address moves to Attached Links, and is cleared here
