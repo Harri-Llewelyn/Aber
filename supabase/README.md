@@ -1483,6 +1483,52 @@ resolve through `captured_device_id()`, that `start_playback_job()` still writes
 `test_capture_playback_behaviour.py` (`ARecordedIdIsResolvedAsIngestionResolvesIt`) holds each id,
 the edge-node scoping and the job's check.
 
+### A cell's dashboard address is one of its links (0202)
+
+`cells.grafana_url` is left from the first cells table, when each demonstrator cell had a Grafana
+dashboard. The dashboard called it `access_url`, which is also a real gateway column, and the cell
+form asked for it as **Dashboard / UI URL**. Attached Links (`links`) already holds any number of
+named addresses per cell, so a dashboard is one more. The column is in the documented API, so it
+goes in two steps (*Deprecation* in [`docs/releases.md`](../docs/releases.md#deprecation)):
+deprecated in 1.7.0 by this file, and dropped no sooner than 1.8.0 by a file of its own.
+
+- **Each web address moves.** A value starting `http://` or `https://`, after trimming, becomes a
+  `links` row in the shape the Cells page writes: `entity_type` `'cell'`, `entity_id` the cell's id
+  as text, `display_name` `'Dashboard'`, `link_tag` `'other'`. Archived cells are included, so a
+  restored cell has its link. A cell that already has a link to the same address gets no second
+  one. The scheme test is the Attached Links form's, which accepts nothing else.
+- **Each value moved is cleared, and that is what makes the replay safe.** db-init replays the
+  chain on every boot with no ledger. Kept, the value would meet the move again on every boot, and
+  a Dashboard link somebody deleted would come back at the next restart, since the duplicate check
+  would have nothing left to match. Cleared, a replay finds nothing to move, and a value an API
+  client writes later still reaches Attached Links at the next boot. The cost is that the column
+  reads NULL through 1.7, where the policy asks that both work for a minor. Keeping the value
+  would need a one-time marker, and this chain keeps no ledger by design.
+- **NULL and blank are skipped. Anything else is named and kept.** A value that is not a web
+  address is named in a NOTICE in db-init's log on every boot, and stays in the column. The drop
+  will name it again before it goes.
+- **One statement moves and clears**, with the rows locked, so a link and its cleared value commit
+  together. `links` has no author column and no audit trigger, so a moved link names nobody. The
+  `cells` UPDATE leaves one audit row per cell, as `actor_source` `'migration'`.
+- **`proposable_columns()` drops `grafana_url`.** `approve_proposal()` re-checks every key against
+  it, so an open proposal naming the column is refused and the key named; none was open on the one
+  install. `approve_proposal()` still sets the column from the merged row, which leaves it as it
+  was. The redeclaration restates `0176`'s `search_path` pin.
+
+The dashboard stops showing and writing the column: the cell form's field, the drawer's
+**Dashboard URL** row and **Open Dashboard** on the Cells page and the Site Map are gone, and
+`api.js` no longer maps it onto `access_url`. The Audit Trail still counts a change to it as a
+governance change, because past rows carry it. `docs/openapi.yaml` marks it `deprecated: true`.
+
+The 1.8 drop follows `0175`: guarded by the column's existence, it moves anything written in the
+window with the same statement, drops the column, replaces `approve_proposal()` without it, and
+edits `0001` and `0165` so a replay never brings it back.
+
+The file's self-check asserts that no cell still holds a web address, that the cell lane admits
+every other column and not this one, that the pin holds, and that the column carries this file's
+comment. `test_a_cell_s_dashboard_address_is_one_of_its_links.py` holds the move, what is skipped,
+the duplicate, the audit row, a second boot, a deleted link staying deleted, and the refusals.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
