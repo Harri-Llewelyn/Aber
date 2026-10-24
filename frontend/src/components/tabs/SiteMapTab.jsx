@@ -37,6 +37,7 @@ import {
   deviceChipClass,
   deviceStatusTitle,
   deviceDotColor,
+  devicesOnlineLabel,
   rollupDeviceStatus
 } from '../../utils/deviceStatus'
 import {
@@ -327,11 +328,6 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     )
   }
 
-  /** The label over a panel's device chips, saying how many of them are online. */
-  const devicesLabel = (devices) => devices.length
-    ? `Devices (${devices.filter(a => a.status !== 'OFFLINE').length}/${devices.length} online)`
-    : 'Devices'
-
   // Site-Wide first as stable context, Simulated as what not to trust, Unassigned last as the
   // thing to act on. A gateway's lane is read from its own columns: gateways have no inheritance.
   // The class carries each lane's hue; the tints are the stylesheet's.
@@ -596,7 +592,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           help: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
         },
         {
-          label: devicesLabel(devices),
+          label: devicesOnlineLabel(devices),
           value: devices.length
             ? <div className="context-device-list">{devices.map(d => panelDeviceChip(d, wide.devices.includes(d)))}</div>
             : null,
@@ -658,7 +654,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         full: true
       },
       {
-        label: devicesLabel(cellDevicesOf(selectedCell)),
+        label: devicesOnlineLabel(cellDevicesOf(selectedCell)),
         value: cellDevicesOf(selectedCell).length
           ? <div className="context-device-list">{cellDevicesOf(selectedCell).map(d => panelDeviceChip(d))}</div>
           : null,

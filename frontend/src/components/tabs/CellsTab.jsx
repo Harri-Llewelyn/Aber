@@ -44,7 +44,7 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { plural } from '../../utils/format'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -662,11 +662,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           },
           {
             // The count stays on the label: how big is this cell and is it healthy reads at a
-            // glance, and the chips carry the navigation. It counts what is in service, as the
-            // Site Map's panel for the same cell does.
-            label: selectedCellLiveDevices.length
-              ? `Devices (${selectedCellLiveDevices.filter(a => a.status !== 'OFFLINE').length}/${selectedCellLiveDevices.length} online)`
-              : 'Devices',
+            // glance, and the chips carry the navigation. It counts what is in service, with the
+            // function the Site Map's panel for the same cell uses.
+            label: devicesOnlineLabel(selectedCellLiveDevices),
             value: selectedCellDevices.length
               ? (
                 <div className="context-device-list">

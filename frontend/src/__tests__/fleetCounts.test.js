@@ -14,6 +14,7 @@ import { HEARTBEAT_STALE_MS } from '../utils/gatewayStatus'
 
 const fresh = () => new Date(Date.now() - 1000).toISOString()
 const stale = () => new Date(Date.now() - (HEARTBEAT_STALE_MS + 60_000)).toISOString()
+const BORN = '2026-10-01T08:00:00Z'
 
 /** An online gateway: enrolled, and beating recently. */
 const gateway = (over = {}) => ({
@@ -50,7 +51,7 @@ describe('the shadow predicates', () => {
     expect(isShadowGateway(undefined)).toBe(false)
     expect(isShadowDevice(null)).toBe(false)
     expect(gatewayFleetCounts()).toMatchObject({ total: 0, online: 0, shadow: 0 })
-    expect(deviceFleetCounts()).toMatchObject({ total: 0, online: 0, shadow: 0 })
+    expect(deviceFleetCounts()).toEqual({ total: 0, quarantined: 0, archived: 0, shadow: 0 })
   })
 })
 
@@ -121,40 +122,23 @@ describe('deviceFleetCounts', () => {
       device({ shadow_of: 'dev-real', status: 'OFFLINE' })
     ])
     expect(counts.total).toBe(6)
-    expect(counts.online).toBe(6)
-    expect(counts.offline).toBe(0)
+    expect(counts.quarantined).toBe(0)
     expect(counts.shadow).toBe(1)
   })
 
-  it('keeps quarantined out of online and offline', () => {
-    // These used to overlap: a quarantined device is stored with status OFFLINE, so one pending
-    // device was reported twice on the same screen -- once as a fault, once as a queue entry.
-    const counts = deviceFleetCounts([
-      device(),
-      device({ is_quarantined: true, status: 'OFFLINE' })
-    ])
-    expect(counts.quarantined).toBe(1)
-    expect(counts.offline).toBe(0)
-    expect(counts.online).toBe(1)
-  })
-
-  it('treats a device with no status yet as online', () => {
-    // A row with no status at all is not called a fault: that would report one on every partial row.
-    expect(deviceFleetCounts([device({ status: null })]).online).toBe(1)
-  })
-
-  it('sums its four buckets to the total, with shadow deliberately outside them', () => {
-    const devices = [
-      device(),
-      device({ status: 'OFFLINE' }),
-      device({ is_quarantined: true, status: 'OFFLINE' }),
-      device({ is_archived: true }),
+  /* Online and offline are counted by deviceSummaryCounts() alone: a second rule here, waiting to
+     be read, once called a device with no status online. A quarantined device arrives stored
+     ONLINE. */
+  it('counts the quarantined and returns no online or offline count of its own', () => {
+    const c = deviceFleetCounts([
+      device({ first_dbirth_at: BORN }),
+      device({ is_quarantined: true }),
+      device({ status: null, first_dbirth_at: BORN }),
+      device({ status: 'OFFLINE', first_dbirth_at: null }),
+      device({ is_quarantined: true, is_archived: true }),
       device({ shadow_of: 'dev-real', status: 'OFFLINE' })
-    ]
-    const c = deviceFleetCounts(devices)
-    expect(c.online + c.offline + c.quarantined + c.archived).toBe(c.total)
-    expect(c.total).toBe(4)
-    expect(c.shadow).toBe(1)
+    ])
+    expect(c).toEqual({ total: 5, quarantined: 1, archived: 1, shadow: 1 })
   })
 
   it('agrees with the fleet this stack actually runs', () => {
@@ -168,6 +152,6 @@ describe('deviceFleetCounts', () => {
       device({ name: 'Sim_Tool_Changer_01' }),
       device({ name: 'Sim_BMS_Zone_HVAC (replay)', shadow_of: 'dev-hvac', status: 'OFFLINE' })
     ])
-    expect(`${c.online}/${c.total}`).toBe('6/6')
+    expect(c).toMatchObject({ total: 6, shadow: 1 })
   })
 })

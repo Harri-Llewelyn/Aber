@@ -3,7 +3,7 @@ import {
   isDeviceInService, isGatewayInService, inServiceDevices, inServiceGateways, areaWideInService
 } from '../utils/inService'
 import {
-  deviceSummaryState, deviceSummaryCounts, deviceSummaryText, deviceColumnTags
+  deviceSummaryState, deviceSummaryCounts, deviceSummaryText, deviceColumnTags, devicesOnlineLabel
 } from '../utils/deviceStatus'
 
 /**
@@ -73,6 +73,23 @@ describe('the devices column summary', () => {
     expect(deviceSummaryCounts(rows)).toEqual({ online: 1, offline: 1, awaitingBirth: 0, quarantined: 1 })
     expect(deviceSummaryText(rows)).toBe('1 Online / 1 Offline')
     expect(deviceSummaryText([...rows, device({ status: 'OFFLINE' })])).toBe('1 Online / 1 Offline / 1 Awaiting first birth')
+  })
+
+  /* The label the Cells drawer and the Site Map's panels share. A quarantined device arrives stored
+     ONLINE, and a missing status is not running: neither is online. */
+  it('labels a panel\'s devices online by the same rule, with the quarantined and unborn apart', () => {
+    const rows = [
+      device({ first_dbirth_at: BORN }),
+      device({ asset_id: 'd2', is_quarantined: true }),
+      device({ asset_id: 'd3', status: null, first_dbirth_at: BORN }),
+      device({ asset_id: 'd4', status: 'OFFLINE' })
+    ]
+    expect(deviceSummaryCounts(rows)).toEqual({ online: 1, offline: 1, awaitingBirth: 1, quarantined: 1 })
+    expect(devicesOnlineLabel(rows)).toBe('Devices (1/4 online · 1 quarantined · 1 awaiting first birth)')
+    expect(devicesOnlineLabel(rows.slice(0, 2))).toBe('Devices (1/2 online · 1 quarantined)')
+    expect(devicesOnlineLabel([rows[0], rows[2]])).toBe('Devices (1/2 online)')
+    expect(devicesOnlineLabel([])).toBe('Devices')
+    expect(devicesOnlineLabel()).toBe('Devices')
   })
 
   it('lists an archived device marked and muted, and pins a quarantined one in amber', () => {

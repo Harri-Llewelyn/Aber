@@ -533,6 +533,50 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
   })
 
+  /* Online is counted as on the Gateways row and in the Cells drawer for the same cell. A
+     quarantined device arrives stored ONLINE and a missing status is not running, so neither is
+     online; the quarantined and the unborn are named apart. */
+  it('counts online in the cell and area panels by the shared rule, naming the quarantined and the unborn', async () => {
+    const BORN = '2026-10-01T08:00:00Z'
+    api.get.mockImplementation(routeGet({
+      devices: [
+        { ...device, first_dbirth_at: BORN },
+        { ...device, asset_id: 'dev-q', asset_name: 'Unknown_01', is_quarantined: true },
+        { ...device, asset_id: 'dev-n', asset_name: 'CNC_02', status: null, first_dbirth_at: BORN },
+        { ...device, asset_id: 'dev-b', asset_name: 'CNC_03', status: 'OFFLINE' },
+        { ...bms, first_dbirth_at: BORN }
+      ]
+    }))
+    await renderSiteMap()
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' }))
+    expect(within(panel()).getByText('Devices (1/4 online · 1 quarantined · 1 awaiting first birth)')).toBeInTheDocument()
+    // The area's count takes its Area-Wide device too.
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
+    expect(within(panel()).getByText('Devices (2/5 online · 1 quarantined · 1 awaiting first birth)')).toBeInTheDocument()
+  })
+
+  /* `device_count` is what the gateways read gives: its devices in service (api.js, pinned in
+     apiRelationships.test.js). The embed still lists the archived device and the replay lane. */
+  it('counts a gateway chip\'s devices in service in its tooltip', async () => {
+    const looseGw = {
+      gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,
+      location_scope: 'cell', sparkplug_group: 'Aber', status: 'ONLINE', deployment: 'remote',
+      is_archived: false, last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 4,
+      devices: [
+        { ...device, asset_id: 'dev-l1', status: 'ONLINE' },
+        { ...device, asset_id: 'dev-l2', is_quarantined: true },
+        { ...device, asset_id: 'dev-l3', status: null, first_dbirth_at: '2026-10-01T08:00:00Z' },
+        { ...device, asset_id: 'dev-l4', status: 'OFFLINE' },
+        { ...device, asset_id: 'dev-l5', is_archived: true },
+        { ...device, asset_id: 'dev-l6', shadow_of: 'dev-l1' }
+      ]
+    }
+    api.get.mockImplementation(routeGet({ gateways: [gateway, looseGw] }))
+    await renderSiteMap()
+    fireEvent.click(screen.getByRole('button', { name: /Unassigned/ }))
+    expect(tooltipOf(within(panel()).getByRole('link', { name: /Loose_Gateway/ }))).toContain('— 4 device(s) —')
+  })
+
   it('offers no area selector and says what to do on a plant with no areas', async () => {
     api.get.mockImplementation(routeGet({ areas: [], devices: [device] }))
     render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
