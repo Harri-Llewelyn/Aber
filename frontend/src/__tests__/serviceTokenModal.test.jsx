@@ -159,7 +159,9 @@ describe('ServiceTokenModal', () => {
     it('gives the i3X server with /v1 on it, and a bearer token as the authentication', async () => {
       await mint()
       expect(screen.getByLabelText('i3X server').value).toBe('https://i3x.plant.example/v1')
-      expect(screen.getByLabelText('Authentication').value).toBe('Bearer token')
+      // Plain text: a client takes the scheme as a choice, so there is nothing to paste.
+      expect(screen.getByText('Bearer token')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /Copy authentication/i })).toBeNull()
 
       fireEvent.click(screen.getByRole('button', { name: 'Copy i3X server address' }))
       await waitFor(() => expect(copyText).toHaveBeenCalledWith('https://i3x.plant.example/v1'))
@@ -226,7 +228,7 @@ describe('ServiceTokenModal', () => {
       expect(screen.queryByLabelText('i3X server')).toBeNull()
       expect(screen.queryByRole('radio')).toBeNull()
       expect(document.body.textContent).not.toContain('/v1')
-      expect(screen.getByLabelText('Authentication').value).toBe('Bearer token')
+      expect(screen.getByText('Bearer token')).toBeTruthy()
       expect(screen.getByText(/does not know the site’s i3X server address/)).toBeTruthy()
     })
   })

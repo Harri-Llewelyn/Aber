@@ -71,14 +71,11 @@ function ConnectSection({ origin, token, copy, copied }) {
             copied={copied}
           />
         )}
-        <ConnectValue
-          id="svc-connect-auth"
-          label="Authentication"
-          value={AUTHENTICATION}
-          copyLabel="authentication type"
-          copy={copy}
-          copied={copied}
-        />
+        {/* Plain text, no copy button: a client offers it as a choice, such as Explorer's dropdown. */}
+        <div className="form-group">
+          <div className="form-label">Authentication</div>
+          <div className="token-connect-text">{AUTHENTICATION}</div>
+        </div>
       </div>
       {setup ? (
         <>

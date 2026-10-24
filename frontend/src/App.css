@@ -6291,6 +6291,13 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   padding-top: 14px;
 }
 
+/* A value to read, not copy: on the line the inputs beside it sit on (.form-control's padding). */
+.token-connect-text {
+  padding: 11px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
 /* Numbered steps to carry out somewhere else, such as the Node-RED editor. */
 ol.gateway-steps {
   margin: 6px 0 0;
