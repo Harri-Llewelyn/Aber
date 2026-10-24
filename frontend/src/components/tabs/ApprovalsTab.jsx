@@ -21,6 +21,8 @@ import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { canDecide } from '../../utils/proposalAuthority'
+import { cellIconEntry } from '../../utils/cellIcon'
+import { areaIconEntry } from '../../utils/areaIcon'
 
 /**
  * The Approvals page: one inbox for every change somebody proposed but may not apply.
@@ -111,12 +113,28 @@ export function locationNameMap(cells, areas) {
 }
 
 /**
- * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an id
- * nothing resolves falls back to the uuid rather than being hidden, which is the same rule the
+ * The icon set a proposal's `icon` key is read against, by its kind: cells and areas share four
+ * keys, and each CHECK admits its own eight. Undefined for any other key or kind.
+ */
+const ICON_ENTRY_BY_KIND = { cells: cellIconEntry, areas: areaIconEntry }
+
+function iconLookup(proposal, key) {
+  return key === 'icon' ? ICON_ENTRY_BY_KIND[proposal?.entity_type] : undefined
+}
+
+/**
+ * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an icon
+ * key `iconOf` knows shows its picture and label and keeps the key in the tooltip. Anything
+ * unresolved falls back to the raw value rather than being hidden, which is the same rule the
  * kind and key labels follow -- an archived or deleted cell is a real state, and a reviewer
  * seeing a raw uuid is better served than one seeing a blank.
  */
-function ValueCell({ value, names }) {
+function ValueCell({ value, names, iconOf }) {
+  const picture = iconOf?.(value)
+  if (picture) {
+    const { Icon, label } = picture
+    return <Tooltip text={value}><span className="icon-value"><Icon size={14} aria-hidden="true" />{label}</span></Tooltip>
+  }
   const named = typeof value === 'string' ? names?.get(value) : undefined
   if (named) return <Tooltip text={value}><span>{named}</span></Tooltip>
   return <>{displayValue(value)}</>
@@ -222,11 +240,11 @@ function DiffTable({ proposal, names, replaced }) {
               <td>{keyLabel(r.key)}</td>
               {before && (
                 <td className="cell-meta">
-                  <ValueCell value={open ? r.from : replaced[r.key]} names={names} />
+                  <ValueCell value={open ? r.from : replaced[r.key]} names={names} iconOf={iconLookup(proposal, r.key)} />
                 </td>
               )}
               <td>
-                <strong><ValueCell value={r.to} names={names} /></strong>
+                <strong><ValueCell value={r.to} names={names} iconOf={iconLookup(proposal, r.key)} /></strong>
                 {open && r.unchanged && <Badge size="sm" className="badge-follow">unchanged</Badge>}
               </td>
             </tr>
