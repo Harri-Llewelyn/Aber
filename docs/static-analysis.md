@@ -41,9 +41,28 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 | `lint:py` | Ruff 0.14.0 | Every `.py` | Pyflakes and the pycodestyle errors (`ruff.toml`), not style | none: an inline `# noqa: CODE -- reason` |
 | `lint:deno` | deno lint 2.5.6, and deno check and deno test with the Deno the functions image builds with | `supabase/functions` | Deno's recommended rules except `no-import-prefix`, type errors, and failing `*_test.ts` | none: an inline `// deno-lint-ignore RULE -- reason` |
 | `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref, and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only |
-| `scan:config` | trivy config 0.74.0 | The chart rendered from `values-prod.yaml.example`, and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
+| `scan:config` | trivy config 0.74.0 | The chart rendered twice from `values-prod.yaml.example`, as it stands and with every optional workload on (see below), and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
 | `scan:source` | Semgrep 1.140.0, `p/default` and `p/security-audit` | The tree, except generated files and the chart's Go templates | Injection, unsafe APIs, workflow supply chain, Dockerfile users | `scripts/lint/semgrep-allowlist.json`, by rule, file and the text of the line |
 | `audit:deps` | npm audit, pip-audit 2.9.0 | `frontend/package-lock.json`, `ingestion/` and `i3x/requirements.txt` | Known advisories, HIGH and above for npm and all of them for Python | `scripts/lint/dependency-allowlist.json`, by advisory id |
+
+## The chart scan's two renders
+
+`scan:config` renders the chart twice, both from `values-prod.yaml.example`:
+
+- **As a site deploys it:** the example as it stands.
+- **Every workload on:** the example with `scripts/lint/config-scan-every-workload.yaml` on top.
+  That file turns on each workload the example leaves off: the backup service (with every volume
+  it can archive, and the Role that reads the CA), the release check, the load test, the
+  conformance Jobs, the Alloy log forward and both databases' physical backups.
+
+A finding raised by both renders is one allow-list entry, because its key names the check and the
+resource. A new finding says which render raised it. The backup CronJob gives way to the backup
+service, so only the first render has it.
+
+Check 130 in `scripts/check-docs-drift.mjs` keeps the second render complete. It fails when
+`values.yaml` has an `enabled: false` that the example does not turn on and the overlay does not
+name. So a new optional workload is scanned from its first render. The second render adds about
+15 seconds, and the whole scan takes about half a minute on a laptop.
 
 ## Accepting a finding
 

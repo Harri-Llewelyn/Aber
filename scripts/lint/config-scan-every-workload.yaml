@@ -1,0 +1,63 @@
+# The second render scan:config scans (scripts/scan-config.mjs), layered on
+# deploy/helm/aber/values-prod.yaml.example: every workload, and every part of one, that renders
+# only behind a switch the example leaves off. Rendered to be scanned, never deployed.
+#
+# Check 130 (scripts/check-docs-drift.mjs) holds it to naming every `enabled: false` in values.yaml
+# that the example does not turn on: true, or false with the reason it renders no workload. The
+# backup switches that are not called `enabled` are listed by hand.
+#
+# Any other value is a placeholder the chart refuses to render without.
+
+backup:
+  # Each mounts a PVC into the backup service; the forge and the broker run it as root. The backup
+  # CronJob gives way to the backup service, so the first render is the one that has it.
+  includeStorage: true
+  includeForge: true
+  includeBroker: true
+  ca:
+    # Names the CA's Secret, which renders the Role that lets the backup service read it.
+    secretName: scan-config
+
+backupService:
+  enabled: true
+
+releaseCheck:
+  enabled: true
+
+loadTest:
+  enabled: true
+
+e2e:
+  enabled: true
+
+timescaledb:
+  physicalBackup:
+    enabled: true
+    repo:
+      # An s3 repository renders only with all four. supabaseDb's backup shares it.
+      s3:
+        endpoint: https://s3.scan-config.invalid
+        region: scan-config
+        bucket: scan-config
+        existingSecret: scan-config
+
+supabaseDb:
+  physicalBackup:
+    enabled: true
+
+observability:
+  alloy:
+    logForward:
+      enabled: true
+      # The forward renders only with a destination and, for basic auth, a username and a Secret.
+      url: https://logs.scan-config.invalid/loki/api/v1/push
+      auth:
+        username: scan-config
+        secretName: scan-config
+
+gitea:
+  # Each is one of Gitea's own settings and renders no workload.
+  actions:
+    enabled: false
+  packages:
+    enabled: false
