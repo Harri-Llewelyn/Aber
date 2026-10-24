@@ -93,7 +93,7 @@ function brokerClients() {
     '-o', 'jsonpath={.items[*].metadata.name}',
   ], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean)[0];
   if (!pod) throw new Error('no Running mosquitto pod');
-  const prefix = ['kubectl', '-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--'];
+  const prefix = ['kubectl', '-n', NAMESPACE, 'exec', '-i', pod, '-c', 'mosquitto', '--'];
   const admin = adminCredential();
   const send = controlSender({ host: '127.0.0.1', port: 1883, username: admin.username, password: admin.password }, prefix);
   const clients = assertOk(send({ command: 'listClients', verbose: true }));

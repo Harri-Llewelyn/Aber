@@ -33,7 +33,8 @@ import { tmpdir } from 'node:os';
 
 import { hashArgvForUsername } from './lib/mosquitto-credentials.mjs';
 import {
-  PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, isRefusal, issueWithControl, summariseInventory,
+  PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, controlArgv, controlInput, controlPayload, isRefusal,
+  issueCommand, issueWithControl, summariseInventory,
 } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
@@ -820,12 +821,24 @@ try {
       }
 
       // 6. The control API, driven as the credential service drives it: mosquitto_rr, one command
-      // per request. Run inside the broker container the way the operator CLI and the orphan
-      // sweep run it.
-      const send = controlSender(
-        { host: '127.0.0.1', port: 1883, username: ADMIN, password: ACCOUNTS[ADMIN] },
-        ['docker', 'exec', r.name],
-      );
+      // per request, the admin's password and the command on its stdin. Run inside the broker
+      // container the way the operator CLI and the orphan sweep run it.
+      const connection = { host: '127.0.0.1', port: 1883, username: ADMIN, password: ACCOUNTS[ADMIN] };
+      const passwordC1 = 'gateway-c-secret-0001';
+      const passwordC2 = 'gateway-c-secret-0002';
+      {
+        // The argv is what a process list shows, in the container and on the host, for as long as
+        // a request lasts. The issue below carries a gateway's password in its payload.
+        const payload = controlPayload([issueCommand(GATEWAY_C, passwordC1)]);
+        const argv = controlArgv(connection);
+        const onArgv = [ACCOUNTS[ADMIN], passwordC1, payload].filter((s) => argv.some((arg) => arg.includes(s)));
+        if (onArgv.length === 0 && controlInput(connection, payload) === `${ACCOUNTS[ADMIN]}\n${payload}`) {
+          ok.push('a control request puts neither the admin\'s password nor the command on argv; both go on stdin');
+        } else {
+          problems.push(`a control request's argv carries ${onArgv.length} secret(s): the admin's password and the payload must go on stdin`);
+        }
+      }
+      const send = controlSender(connection, ['docker', 'exec', '-i', r.name]);
       const inventory = () => summariseInventory(
         assertOk(send({ command: 'listClients', verbose: true })),
         assertOk(send({ command: 'listRoles', verbose: true })),
@@ -866,9 +879,8 @@ try {
         }
       }
 
-      // Issue, as the service does; then re-issue with a new password, as a rotation does.
-      const passwordC1 = 'gateway-c-secret-0001';
-      const passwordC2 = 'gateway-c-secret-0002';
+      // Issue, as the service does; then re-issue with a new password, as a rotation does. Both
+      // passwords reach the plugin on stdin, so the logins below prove that route end to end.
       const pubAsC = (password) => docker(['exec', r.name, 'mosquitto_pub', '-u', GATEWAY_C, '-P', password,
         '-t', `spBv1.0/Aber/DDATA/${GATEWAY_C}/dev1`, '-m', 'x']);
       let issued;

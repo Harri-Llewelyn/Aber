@@ -305,18 +305,43 @@ export function parseControlResponse(text) {
   return parsed.responses;
 }
 
-// mosquitto_rr's argument vector for one request. The payload rides on argv with -m: before 2.1,
-// -s (stdin) and -f (file) delivered a payload the plugin answered with "Payload not valid JSON".
-// A password on argv is visible to the container's own process list for the request's duration,
-// the exposure mosquitto_passwd -b has always had.
-export function controlArgv({ host, port, username, password, timeoutSeconds = 5 }, payload) {
+// The shell one request runs under. It reads the password from stdin's first line and gives it to
+// mosquitto_rr as an options file on fd 3, a here-document, which busybox ash backs with a pipe;
+// mosquitto_rr then reads the rest of stdin as the payload (-s). `exec` leaves no shell behind.
+export const CONTROL_SCRIPT = [
+  'IFS= read -r password || { echo "no password on stdin: an exec prefix must pass -i" >&2; exit 2; }',
+  'exec mosquitto_rr -o /dev/fd/3 "$@" 3<<EOF',
+  '-P $password',
+  'EOF',
+].join('\n');
+
+// mosquitto_rr reads an options file a line at a time into 1,024 bytes: '-P ' and 1,020 bytes of
+// password is the longest line it parses whole (measured on 2.1.2).
+const MAX_CONTROL_PASSWORD_BYTES = 1020;
+
+// The command vector for one request, after any exec prefix. It carries neither the password nor
+// the payload, which go on stdin (controlInput), so neither is in a process list on the host or in
+// the container. 2.1 is the floor: 2.0.22 answered a payload sent with -s "Payload not valid JSON".
+export function controlArgv({ host, port, username, timeoutSeconds = 5 }) {
   return [
-    '-h', String(host), '-p', String(port),
-    '-u', String(username), '-P', String(password),
+    'sh', '-c', CONTROL_SCRIPT, 'mosquitto_rr',
+    '-h', String(host), '-p', String(port), '-u', String(username),
     '-t', CONTROL_TOPIC, '-e', CONTROL_RESPONSE_TOPIC,
     '-W', String(timeoutSeconds),
-    '-m', String(payload),
+    '-s',
   ];
+}
+
+// What controlArgv's command reads on stdin: the password on one line, then the payload.
+export function controlInput({ password }, payload) {
+  const secret = String(password ?? '');
+  if (!secret || /[\r\n\0]/.test(secret) || Buffer.byteLength(secret) > MAX_CONTROL_PASSWORD_BYTES) {
+    throw new CredentialError(
+      `the broker admin's password cannot be sent: it must be 1-${MAX_CONTROL_PASSWORD_BYTES} bytes on one line`,
+      'backend_unavailable',
+    );
+  }
+  return `${secret}\n${payload}`;
 }
 
 // The command that issues a gateway's account: a client holding the gateway role. Idempotent through
