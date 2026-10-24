@@ -1205,6 +1205,19 @@ Every workload rolls once, as at every release. Beyond that:
     `supabase-envoy` on port 8000. The chart's own policies already do. Without it, each run fails
     and deletes nothing.
 
+### From 1.7.0, `scripts/mint-mcp-token.mjs` is deprecated
+
+The script that issues a token from a shell is now `scripts/mint-api-token.mjs`. It takes the same
+arguments and prints the same output.
+
+The old name still works in 1.7.x. It prints one line on stderr naming the new script, then runs
+it, so `--json` output still parses. It is removed in 1.8.0. Change any script or runbook that
+calls it before then.
+
+The identity it issues tokens for by default was called **MCP read-only client** on the Access
+Control page. It is now **Read-only API client**. Its id has not changed, so a token already issued
+keeps working.
+
 ---
 
 ## Backups
