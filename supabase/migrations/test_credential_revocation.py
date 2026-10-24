@@ -71,6 +71,10 @@ class RevocationBase(unittest.TestCase):
 
     def setUp(self):
         self.conn = get_connection()
+        # REPEATABLE READ, so queue_depth() counts the requests this test queued and nothing else.
+        # Under READ COMMITTED each count sees other sessions' commits: pg_net's worker deleting a
+        # request it has sent, or pg_cron queuing one, would move the count between two reads.
+        self.conn.set_session(isolation_level="REPEATABLE READ")
         self.cur = self.conn.cursor()
 
     def tearDown(self):
