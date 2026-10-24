@@ -145,6 +145,41 @@ export function brokerStateExplanation(state) {
 }
 
 /**
+ * How many live sessions the broker counted on the account in the same read, or null when that is
+ * not known: the inventory unread, no account, or a broker that reports no sessions. Unknown is
+ * not Not connected, so the page then says nothing about connection.
+ *
+ * @param {object|undefined} client  the inventory's entry for this username, if any
+ * @param {boolean} inventoryRead    whether the inventory was read at all
+ */
+export function brokerConnections(client, inventoryRead) {
+  if (!inventoryRead || !client || !Number.isInteger(client.connections)) return null
+  return client.connections
+}
+
+/** Connected, Connected (N) above one session, or Not connected. */
+export function brokerConnectionLabel(count) {
+  if (count > 1) return `Connected (${count})`
+  return count === 1 ? 'Connected' : 'Not connected'
+}
+
+export function brokerConnectionTone(count) {
+  return count > 0 ? 'success' : 'neutral'
+}
+
+export function brokerConnectionExplanation(count) {
+  if (count > 1) {
+    return `The broker holds ${count} live sessions on this account, read with the page. Each is `
+      + 'a separate connection using its password. For a gateway, more than one is worth looking into.'
+  }
+  return count === 1
+    ? 'The broker holds a live session on this account, read with the page. Where it connects from '
+      + 'is not shown: the broker sees one address for every client outside the cluster.'
+    : 'The broker holds no live session on this account, read with the page. Nothing is connected '
+      + 'as it right now.'
+}
+
+/**
  * Which credential action, if any, the Access Control page offers this gateway: a Remote gateway
  * gets setup, a Host or Third-party one gets a credential, an archived one neither.
  */

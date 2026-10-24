@@ -31,6 +31,10 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
   CREDENTIAL_STATES,
+  brokerConnectionExplanation,
+  brokerConnectionLabel,
+  brokerConnectionTone,
+  brokerConnections,
   brokerState,
   brokerStateExplanation,
   brokerStateLabel,
@@ -368,11 +372,23 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   const [accountRows, accountSort] = useSortableRows(brokerAccounts, ACCOUNT_SORT, { active: section === 'accounts' })
   const [roleRows, roleSort] = useSortableRows(ROLE_ENTRIES, roleSortColumns, { active: section === 'roles' })
 
-  const brokerBadge = (bs) => (
+  // The account's state, then whether anything is connected as it, from the same read. Nothing
+  // about connection when brokerConnections() does not know.
+  const brokerBadge = (bs, sessions = null) => (<span className="badge-pair">
     <Badge size="sm" tone={brokerStateTone(bs)} title={brokerStateExplanation(bs)}>
       {brokerStateLabel(bs)}
     </Badge>
-  )
+    {sessions !== null && (
+      <Badge
+        size="sm"
+        dot
+        tone={brokerConnectionTone(sessions)}
+        title={brokerConnectionExplanation(sessions)}
+      >
+        {brokerConnectionLabel(sessions)}
+      </Badge>
+    )}
+  </span>)
 
   // What each tab's Clear filters counts and resets.
   const filterCount = (credentialFilter ? 1 : 0) + (query ? 1 : 0) + (showArchived ? 1 : 0)
@@ -498,7 +514,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                     <SortHeader sort={credentialSort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
                     <SortHeader sort={credentialSort} column="username" title="The username the gateway authenticates to the broker as.">MQTT username</SortHeader>
                     <SortHeader sort={credentialSort} column="credential" title="What the platform issued and recorded, from the database">Credential</SortHeader>
-                    <SortHeader sort={credentialSort} column="broker" title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</SortHeader>
+                    <SortHeader sort={credentialSort} column="broker" title="What the broker holds right now, and whether anything is connected as it, read live from its Dynamic Security plugin">Broker</SortHeader>
                     <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
@@ -543,7 +559,10 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                         {/* The live broker state beside the recorded one. The pair is the point: a
                             gateway can read No platform record and Active (issued on the host), or
                             Issued and Disabled (revoked at the broker since). */}
-                        <td>{brokerBadge(brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory))}</td>
+                        <td>{brokerBadge(
+                          brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory),
+                          brokerConnections(clientsByUsername.get(g.sparkplug_id), !!inventory)
+                        )}</td>
                         <td className="row-actions">
                           {action === 'mint' && (
                             <Tooltip text="Mint a broker credential and show it once">
@@ -873,7 +892,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                         {c.name && <strong>{c.name}. </strong>}
                         {accountPurpose(c)}
                       </td>
-                      <td>{brokerBadge(brokerState(c, true))}</td>
+                      <td>{brokerBadge(brokerState(c, true), brokerConnections(c, true))}</td>
                     </tr>
                   ))}
                 </tbody>

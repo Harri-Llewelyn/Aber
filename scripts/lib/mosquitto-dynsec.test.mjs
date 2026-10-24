@@ -320,11 +320,27 @@ describe('the control API', () => {
     const roles = { data: { roles: [{ rolename: 'gateway', acls: [{ acltype: 'subscribePattern', topic: 'spBv1.0/#', priority: 0, allow: true }] }] } };
     const summary = summariseInventory(clients, roles);
     assert.deepEqual(summary.clients, [
-      { username: GW_A, roles: ['gateway'], disabled: false },
-      { username: GW_B, roles: [], disabled: true },
+      { username: GW_A, roles: ['gateway'], disabled: false, connections: null },
+      { username: GW_B, roles: [], disabled: true, connections: null },
     ]);
     assert.deepEqual(summary.roles, [{ rolename: 'gateway', acls: [{ acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true }] }]);
     assert.ok(!JSON.stringify(summary).includes('salt'));
+  });
+
+  test('the inventory summary counts each account\'s live sessions and carries no address', () => {
+    // listClients verbose as 2.1.2 answers it: one entry per live session, each with its address.
+    const clients = { data: { clients: [
+      { username: GW_A, roles: [{ rolename: 'gateway' }], groups: [], connections: [{ address: '10.42.0.1' }] },
+      { username: GW_B, roles: [{ rolename: 'gateway' }], groups: [], connections: [{ address: '10.42.0.1' }, { address: '10.42.0.7' }] },
+      { username: 'aber_i3x', roles: [{ rolename: 'i3x' }], groups: [], connections: [] },
+      { username: 'aber_monitor', disabled: true, roles: [{ rolename: 'monitor' }], groups: [], connections: [] },
+    ] } };
+    const summary = summariseInventory(clients, null);
+    assert.deepEqual(summary.clients.map((c) => [c.username, c.connections]), [
+      [GW_A, 1], [GW_B, 2], ['aber_i3x', 0], ['aber_monitor', 0],
+    ]);
+    const text = JSON.stringify(summary);
+    assert.ok(!text.includes('address') && !text.includes('10.42.0'), 'the summary carries an address');
   });
 
   test('rolesFor names the role, or the gateway role', () => {

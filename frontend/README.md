@@ -507,7 +507,11 @@ record and not for the credential: *No credential* would be a claim about the br
 
 The broker read may fail without failing the page. The Broker column then reads *Not read*, which
 is a fact about the page load and not about any account, and the reason is stated once in the
-card. The page does not show sessions: an *Active* account is one that may connect.
+card. Beside the state, the same read counts the account's live sessions: *Connected*,
+*Connected (N)* above one, or *Not connected*, and nothing when the broker was not read, since
+unknown is not *Not connected*. The broker also reports each session's address, and
+`summariseInventory()` drops it: every client outside the cluster reaches the broker under the
+node's address.
 
 People, Broker credentials and Machine identities are searched and filtered in the browser: each
 list is tens of rows, read whole. What is gone is hidden the same way on every tab, behind a **Show

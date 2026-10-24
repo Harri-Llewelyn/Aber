@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { CREDENTIAL_STATES, credentialStateTone, BROKER_STATES, brokerStateTone } from '../utils/credentialState'
+import {
+  CREDENTIAL_STATES, credentialStateTone, BROKER_STATES, brokerStateTone, brokerConnectionTone,
+} from '../utils/credentialState'
 import { COLD_STATES, coldStateTone } from '../utils/coldStorage'
 import { GATEWAY_TYPES, gatewayTypeTone } from '../utils/gatewayType'
 import { TONE_CLASS } from '../components/common/Badge'
@@ -33,6 +35,7 @@ const WRITTEN = new Set(sourceFiles(SRC).flatMap(file =>
 const TONES = new Set([
   ...Object.values(CREDENTIAL_STATES).map(credentialStateTone),
   ...Object.values(BROKER_STATES).map(brokerStateTone),
+  ...[0, 1, 2].map(brokerConnectionTone),
   ...Object.values(COLD_STATES).map(coldStateTone),
   ...Object.values(GATEWAY_TYPES).map(gatewayTypeTone),
   ...[null, ...Object.values(TOKEN_STATES).map(state => ({ state, outstanding: 1 }))].map(tokenStatusTone),

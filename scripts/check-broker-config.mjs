@@ -902,10 +902,17 @@ try {
           problems.push(`listClients returned ${usernames.join(', ')}`);
         }
         const text = JSON.stringify(listed);
-        if (!/salt|iterations/.test(text) && !text.includes(ACCOUNTS[ADMIN])) {
-          ok.push('the inventory summary carries roles and state and no hash material');
+        if (!/salt|iterations|address/.test(text) && !text.includes(ACCOUNTS[ADMIN])) {
+          ok.push('the inventory summary carries roles and state and no hash material or client address');
         } else {
-          problems.push('summariseInventory leaked salt, iterations or a password into the summary');
+          problems.push('summariseInventory leaked salt, iterations, a password or a client address into the summary');
+        }
+        // The plugin answers over a session of the admin's own, so the read counts it.
+        const adminSessions = listed.clients.find((c) => c.username === ADMIN)?.connections;
+        if (adminSessions >= 1) {
+          ok.push('listClients counts the reading admin\'s own session (the page shows the admin Connected)');
+        } else {
+          problems.push(`listClients counted ${adminSessions} session(s) for the admin whose request it was answering`);
         }
         if (listed.roles.some((role) => role.rolename === 'gateway' && role.acls.length > 0)) {
           ok.push('listRoles returns each role with its ACLs');
@@ -974,6 +981,15 @@ try {
         const beforeRotation = docker(['exec', r.name, 'cat', rotated]).stdout || '';
         const sessionWasLive = beforeRotation.includes(MARKER);
         const stillUp = !beforeRotation.includes('EXIT:');
+        // The Access Control page's Connected, read while the session the delivery proved is held.
+        if (sessionWasLive && stillUp) {
+          const held = inventory().clients.find((c) => c.username === GATEWAY_C)?.connections;
+          if (held === 1) {
+            ok.push('listClients counts a live session on the account (the page reads Connected)');
+          } else {
+            problems.push(`listClients counted ${held} session(s) on ${GATEWAY_C} while one was held, proven by delivery`);
+          }
+        }
 
         let reissued;
         try {
@@ -1046,6 +1062,11 @@ try {
             ok.push('listClients reports the disabled account as disabled (what the page shows)');
           } else {
             problems.push('listClients did not report the disabled account as disabled');
+          }
+          if (state?.connections === 0) {
+            ok.push('listClients counts no session once disableClient has dropped it (the page reads Not connected)');
+          } else {
+            problems.push(`listClients counted ${state?.connections} session(s) on ${GATEWAY_C} after disableClient dropped its session`);
           }
           try {
             assertOk(send({ command: 'enableClient', username: GATEWAY_C }));

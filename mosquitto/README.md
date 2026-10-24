@@ -111,6 +111,14 @@ tags, and `renovate.json` proposes the next one.
   for the broker to drop, which is why
   [issue #217](https://github.com/Harri-Llewelyn/Aber/issues/217) is a playback problem and not a
   fleet one.
+- **`listClients` (verbose) and `getClient` list each account's live sessions.** 2.1 gives every
+  account a `connections` array, one entry per session with the address the broker sees, and it is
+  empty once `disableClient` has dropped the session. The admin's own request is one of them while
+  it reads. `summariseInventory()` keeps the count and drops the address, and the Access Control
+  page shows Connected or Not connected from it. The address would mislead: the
+  `mosquitto-external` Service runs on `externalTrafficPolicy: Cluster`, so kube-proxy rewrites
+  every outside client to the node's own pod-network address, as it does for Traefik
+  ([`docs/gateway.md`, *The client's address*](../docs/gateway.md#the-clients-address)).
 - A `$7$` hash written by `mosquitto_passwd -H sha512-pbkdf2` authenticates when transplanted into
   a client's `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the
   platform principals. 2.1's `mosquitto_passwd` defaults to argon2id, which this Alpine build cannot

@@ -320,9 +320,14 @@ class TestInventory(CredentialServiceBase):
         call({"sparkplug_id": TEST_GW})
         payload = inventory()
         text = json.dumps(payload)
-        for leaked in ("salt", "iterations", '"password"'):
+        for leaked in ("salt", "iterations", '"password"', "address"):
             self.assertNotIn(leaked, text, f"the inventory leaked {leaked}")
         self.assertEqual(set(payload), {"clients", "roles", "read_at"})
+        # Each account's live sessions, as a count; the broker's reply also names each session's
+        # address, which the summary drops.
+        for client in payload["clients"]:
+            self.assertIsInstance(client["connections"], int, client["username"])
+            self.assertGreaterEqual(client["connections"], 0, client["username"])
         # The platform principals and the policy's roles are there, with their rules.
         self.assertIn("aber_ingestion", [c["username"] for c in payload["clients"]])
         gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")

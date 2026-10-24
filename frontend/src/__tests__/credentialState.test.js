@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 
 import {
   CREDENTIAL_STATES,
+  brokerConnectionLabel,
+  brokerConnections,
   credentialAction,
   credentialState,
   credentialStateExplanation,
@@ -67,6 +69,24 @@ describe('credentialState', () => {
     // for a host-run gateway to be waiting on.
     expect(credentialState(hostRun({ status: 'PENDING_ENROLLMENT' }), null))
       .toBe(CREDENTIAL_STATES.UNRECORDED)
+  })
+})
+
+describe('brokerConnections', () => {
+  /** The count from the same live read, and null wherever it is not known: unknown is not Not connected. */
+  it('reads the count, and nothing when the read, the account or the count is missing', () => {
+    expect(brokerConnections({ username: 'u', connections: 2 }, true)).toBe(2)
+    expect(brokerConnections({ username: 'u', connections: 0 }, true)).toBe(0)
+    expect(brokerConnections({ username: 'u', connections: 2 }, false)).toBeNull()
+    expect(brokerConnections(undefined, true)).toBeNull()
+    expect(brokerConnections({ username: 'u' }, true)).toBeNull()
+    expect(brokerConnections({ username: 'u', connections: null }, true)).toBeNull()
+  })
+
+  it('names one session Connected and counts more than one', () => {
+    expect(brokerConnectionLabel(0)).toBe('Not connected')
+    expect(brokerConnectionLabel(1)).toBe('Connected')
+    expect(brokerConnectionLabel(2)).toBe('Connected (2)')
   })
 })
 
