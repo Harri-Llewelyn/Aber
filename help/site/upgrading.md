@@ -1218,6 +1218,34 @@ The identity it issues tokens for by default was called **MCP read-only client**
 Control page. It is now **Read-only API client**. Its id has not changed, so a token already issued
 keeps working.
 
+### From 1.7.0, a cell's dashboard address is one of its Attached Links
+
+The cell form no longer has a **Dashboard / UI URL** field. The cell's panel, on the Cells page and
+the Site Map, no longer has **Open Dashboard**.
+
+The upgrade moves each cell's address to the cell's **Attached Links**. It becomes a link named
+**Dashboard**, tagged **Other**. Archived cells are included. A cell that already links to the same
+address gets no second link. To open it, open the cell and choose **Attached Links**.
+
+Only an address that starts `http://` or `https://` moves. Any other value stays on the cell, and
+db-init's log names it at every start. To see before upgrading whether any cell has one, run this.
+No rows means none:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT id, name, grafana_url FROM public.cells
+     WHERE btrim(grafana_url) <> '' AND NOT btrim(grafana_url) ~ '^https?://' ORDER BY name;"
+```
+
+For an API client, `grafana_url` on `/rest/v1/cells` is deprecated (#1090):
+
+- **It reads NULL from 1.7.0.** The upgrade clears each address it moves, so a restart never moves it
+  twice and a deleted **Dashboard** link stays deleted. Read the cell's links from `/rest/v1/links`
+  instead (`entity_type` `cell`, `entity_id` the cell's id).
+- **A web address written to it still reaches Attached Links**, at the next restart.
+- **A change proposal can no longer name it.**
+- **It is removed no sooner than 1.8.0.** Change any script that reads or writes it before then.
+
 ---
 
 ## Backups
