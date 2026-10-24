@@ -13,7 +13,8 @@ import { useApiActivity } from './hooks/useApiActivity'
 import { useConnectionStatus } from './hooks/useConnectionStatus'
 import { CONNECTION_OK } from './lib/connectionState'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
-import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
+import { askAuthServer, clearInvalidSession } from './utils/sessionError'
+import { useSessionRecheck } from './hooks/useSessionRecheck'
 import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
 import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
@@ -803,6 +804,13 @@ export default function App() {
   // PASSWORD_RECOVERY event supabase-js raises after exchanging the link's token for a session.
   const [recovering, setRecovering] = useState(() => window.location.pathname === RESET_PASSWORD_PATH)
 
+  // A session the auth server rejected: a local sign-out, then the sign-in screen with its notice.
+  const endRejectedSession = useCallback(async (error) => {
+    console.warn('[auth] session rejected by the auth server:', error?.message)
+    setAuthNotice(await clearInvalidSession())
+    setSession(null)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     // Only restoreSession ends the first load. supabase-js announces the stored session
@@ -812,12 +820,6 @@ export default function App() {
     // The session supabase-js last announced while restoring, for a check that runs out of time.
     let announced
 
-    const endRejectedSession = async (error) => {
-      console.warn('[auth] stored session rejected by the auth server:', error.message)
-      setAuthNotice(await clearInvalidSession())
-      setSession(null)
-    }
-
     // Restore and validate the stored session, resolving to the session the page may use.
     // getSession() only reads localStorage and PostgREST only checks the JWT signature, so a revoked
     // session would still read data; getUser() asks the auth server.
@@ -825,12 +827,9 @@ export default function App() {
       const { data: { session: stored } } = await supabase.auth.getSession()
       if (!stored) return null
 
-      // getUser() deletes a session the server refused, whatever auth-js calls the error, so the
-      // page keeps only what supabase-js still holds and never puts `stored` back.
-      const check = supabase.auth.getUser().then(async ({ error }) => {
-        const { data: { session: current } } = await supabase.auth.getSession()
-        return { error, current, rejected: !!error && (isSessionRejected(error) || !current) }
-      })
+      // The page keeps only what supabase-js still holds after the check and never puts `stored`
+      // back (see askAuthServer).
+      const check = askAuthServer()
       let timer
       const answer = await Promise.race([
         check,
@@ -897,7 +896,7 @@ export default function App() {
       cancelled = true
       subscription.unsubscribe()
     }
-  }, [])
+  }, [endRejectedSession])
 
   /* The notification history is one person's. It goes whenever the tab is left without a session,
      whether by Sign Out, a sign-out from another tab or a rejected stored session, so the next
@@ -905,6 +904,9 @@ export default function App() {
   useEffect(() => {
     if (!loading && !session) clearStoredHistory()
   }, [loading, session])
+
+  // A session that ended while the tab was out of sight ends here too when it is shown again.
+  useSessionRecheck(!!session, endRejectedSession)
 
   // OAuth consent, checked before the loading and auth branches. GoTrue redirects here from
   // /oauth/authorize because it ships no consent UI. The page reads the session itself and must not

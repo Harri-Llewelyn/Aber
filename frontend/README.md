@@ -594,6 +594,13 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
   gives up, so after `AUTH_CHECK_TIMEOUT_MS` (10 seconds) the page opens as it would for an
   unreachable server. It uses the session supabase-js last announced. A refusal that arrives later
   still signs the page out, with the same notice.
+- **Coming back to the tab asks again.** A session that ends while the person is in another window
+  would otherwise go unnoticed until its token expires, up to an hour later.
+  `hooks/useSessionRecheck.js` asks the auth server when the tab becomes visible, at most once a
+  minute (`SESSION_RECHECK_MS`), with the `askAuthServer()` the reload uses. A refusal takes the
+  reload's path: a local sign-out, then the sign-in screen with its notice. An unreachable server
+  signs nobody out, even when an expired token could not be refreshed through it and supabase-js
+  holds no session for the moment.
 
 ### Profile, and the preferences that follow the person
 

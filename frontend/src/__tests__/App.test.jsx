@@ -198,6 +198,87 @@ describe('App Component', () => {
     })
   })
 
+  describe('when the tab is shown again', () => {
+    // Only Date is faked, so the minute between checks passes without waiting for it.
+    let visibility
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      visibility = 'visible'
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      delete document.visibilityState
+    })
+
+    /** The person spends `ms` in another window, then comes back to this tab. */
+    const awayFor = (ms) => act(async () => {
+      visibility = 'hidden'
+      document.dispatchEvent(new Event('visibilitychange'))
+      vi.setSystemTime(Date.now() + ms)
+      visibility = 'visible'
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    const signedIn = async () => {
+      supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+      render(<App />)
+      await waitFor(() => expect(screen.getByText('Aber')).toBeInTheDocument())
+      // The reload's own check.
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(1)
+    }
+
+    it('asks the auth server at most once a minute', async () => {
+      await signedIn()
+      await awayFor(30000)
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(1)
+
+      await awayFor(31000)
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(2)
+      await awayFor(59000)
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(2)
+      await awayFor(1000)
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(3)
+      expect(screen.getByText('Aber')).toBeInTheDocument()
+      expect(supabase.auth.signOut).not.toHaveBeenCalled()
+    })
+
+    it('ends a session that ended meanwhile the way a reload does, with the notice', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await signedIn()
+      // Signed out in another browser: GoTrue answers session_not_found and auth-js drops the session.
+      supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() })
+      supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
+
+      await awayFor(61000)
+      expect(await screen.findByText(/session is no longer valid on the server/i)).toBeInTheDocument()
+      expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
+      expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    })
+
+    it('signs nobody out when the auth server cannot be reached', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await signedIn()
+      // Back from sleep before the network: the expired token could not be refreshed either.
+      supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) })
+      supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
+
+      await awayFor(61000)
+      expect(supabase.auth.getUser).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('Aber')).toBeInTheDocument()
+      expect(supabase.auth.signOut).not.toHaveBeenCalled()
+      expect(screen.queryByText(/session is no longer valid/i)).not.toBeInTheDocument()
+    })
+
+    it('asks nothing while signed out', async () => {
+      render(<App />)
+      await waitFor(() => expect(screen.getByText('Sign in to Aber')).toBeInTheDocument())
+      await awayFor(61000)
+      expect(supabase.auth.getUser).not.toHaveBeenCalled()
+      expect(screen.queryByText(/session is no longer valid/i)).not.toBeInTheDocument()
+    })
+  })
+
   describe('when the auth server does not answer', () => {
     // Only the timer restoreSession races getUser() against is faked; the page's own intervals and
     // React's scheduling keep running.

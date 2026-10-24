@@ -5,8 +5,8 @@ import { supabase } from '../lib/supabaseClient';
  * Detecting and recovering from a session the auth server no longer recognises. `getSession()` only
  * reads localStorage and PostgREST only checks the JWT signature, so a token whose `auth.sessions`
  * row has gone still reads data. Edge Functions call `auth.getUser()` and fail with "Session from
- * session_id claim in JWT does not exist"; this module recognises that answer and turns a
- * rejected session into a sign-out.
+ * session_id claim in JWT does not exist"; this module recognises that answer, asks the auth
+ * server itself, and turns a rejected session into a sign-out.
  */
 
 const INVALID_SESSION_SIGNATURES = [
@@ -54,6 +54,21 @@ export function isSessionRejected(error) {
   if (error.status === 401 || error.status === 403) return true;
   if (error.name === 'AuthRetryableFetchError') return false;
   return isInvalidSessionError(error);
+}
+
+/**
+ * Ask the auth server whether the session supabase-js holds is still live. getUser() deletes a
+ * session the server refused, whatever auth-js calls the error, so `current` is what supabase-js
+ * still holds afterwards. An unreachable server is never a refusal, even when it left `current`
+ * empty because an expired token could not be refreshed through it.
+ *
+ * @returns {Promise<{ error: unknown, current: object|null, rejected: boolean }>}
+ */
+export async function askAuthServer() {
+  const { error } = await supabase.auth.getUser();
+  const { data: { session: current } } = await supabase.auth.getSession();
+  const unreachable = error?.name === 'AuthRetryableFetchError';
+  return { error, current, rejected: !!error && (isSessionRejected(error) || (!current && !unreachable)) };
 }
 
 /**

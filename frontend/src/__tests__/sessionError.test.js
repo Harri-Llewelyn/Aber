@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supabase-js';
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supabase-js';
 
 const signOut = vi.fn().mockResolvedValue({ error: null });
-vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: { signOut } } }));
+const getUser = vi.fn();
+const getSession = vi.fn();
+vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: { signOut, getUser, getSession } } }));
 
-const { isInvalidSessionError, isSessionRefusal, isSessionRejected, clearInvalidSession, describeAuthFailure } =
-  await import('../utils/sessionError');
+const {
+  isInvalidSessionError, isSessionRefusal, isSessionRejected, askAuthServer, clearInvalidSession, describeAuthFailure
+} = await import('../utils/sessionError');
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -47,6 +50,37 @@ describe("reading an edge function's refusal", () => {
     expect(isSessionRefusal(403, { error: 'Forbidden: Insufficient privileges', details: 'Reading the broker requires Administrator.' })).toBe(false);
     expect(isSessionRefusal(500, ended)).toBe(false);
     expect(isSessionRefusal(undefined, ended)).toBe(false);
+  });
+});
+
+describe('asking the auth server about the session', () => {
+  const live = { access_token: 'token' };
+
+  it('calls a session the server refused rejected', async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
+    getSession.mockResolvedValue({ data: { session: null } });
+    expect(await askAuthServer()).toMatchObject({ rejected: true, current: null });
+  });
+
+  it('calls a session supabase-js dropped rejected, whatever auth-js calls the error', async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: new AuthApiError('A name this release has not seen', 400, 'some_new_code') });
+    getSession.mockResolvedValue({ data: { session: null } });
+    expect((await askAuthServer()).rejected).toBe(true);
+  });
+
+  it('never calls an unreachable server a refusal, even when an expired token could not be refreshed', async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) });
+    getSession.mockResolvedValue({ data: { session: null } });
+    expect((await askAuthServer()).rejected).toBe(false);
+
+    getSession.mockResolvedValue({ data: { session: live } });
+    expect((await askAuthServer()).rejected).toBe(false);
+  });
+
+  it('says a live session is live', async () => {
+    getUser.mockResolvedValue({ data: { user: { id: 'u' } }, error: null });
+    getSession.mockResolvedValue({ data: { session: live } });
+    expect(await askAuthServer()).toEqual({ error: null, current: live, rejected: false });
   });
 });
 
