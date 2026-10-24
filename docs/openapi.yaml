@@ -4594,7 +4594,7 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: North Shop, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
         description: { type: string, nullable: true }
-        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the area is for.' }
+        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. A picture to tell areas apart: nothing classifies by it.' }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true, description: 'Retention purge deadline. NULL means permanent retention — the purge honours this, never `archived_at` age.' }
@@ -4628,6 +4628,7 @@ components:
         plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its area''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `area_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell in the same area. Moving the cell to another area clears it, unless the same write names a new place.' }
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
         description: { type: string, nullable: true, description: 'Free text. The Cells page shows it under the name and in the drawer, and the Site Map as a field in the cell''s panel. i3X serves it as the cell object''s description.' }
+        icon: { type: string, default: Factory, enum: [Factory, Bot, Cog, CircuitBoard, Gauge, Building2, Truck, Zap], description: 'Icon key, a closed set (`cells_icon_valid`) rendered by the dashboard from a bundled SVG set. A picture to tell cells apart: nothing classifies by it.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -4646,6 +4647,7 @@ components:
         plan_x: { type: number, nullable: true }
         plan_y: { type: number, nullable: true }
         description: { type: string, nullable: true }
+        icon: { type: string, enum: [Factory, Bot, Cog, CircuitBoard, Gauge, Building2, Truck, Zap] }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, description: 'true is refused while any device or gateway is in the cell (see the PATCH). No device or gateway can be filed in an archived cell.' }
         archived_at: { type: string, format: date-time, nullable: true }
