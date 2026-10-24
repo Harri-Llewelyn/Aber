@@ -1,0 +1,28 @@
+# The third render scan:config scans (scripts/scan-config.mjs), layered on
+# deploy/helm/aber/values-prod.yaml.example and scripts/lint/config-scan-every-workload.yaml: every
+# workload on, then each switch that replaces part of one turned back off, so the part it replaces
+# renders with everything else on. Rendered to be scanned, never deployed.
+#
+# Check 130 (scripts/check-docs-drift.mjs) holds it to naming every switch a template reads as
+# `not .Values.<switch>` while the example or the second render turns it on: false, or true with
+# the reason it hides nothing. It names nothing else.
+
+backupService:
+  # The backup service replaces the backup CronJob, which then mounts the storage volume
+  # (backup.includeStorage).
+  enabled: false
+
+networkPolicy:
+  # The default-deny layer replaces the one policy the chart renders without it, which keeps other
+  # pods from signing in to the forge with its identity header.
+  enabled: false
+
+mosquitto:
+  tls:
+    # Read as `not` only by a render-time refusal (plaintext withdrawn with TLS off), which renders
+    # nothing; off here, with plaintext off below, the render would fail.
+    enabled: true
+  external:
+    # Off, the broker's 1883 listener binds to loopback: the end state the example describes once
+    # every gateway is on 8883.
+    plaintext: false

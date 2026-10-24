@@ -7,10 +7,12 @@
  *
  *   node scripts/scan-config.mjs
  *
- * The chart is rendered twice from values-prod.yaml.example, with placeholder values for the keys
- * that example leaves to the site: once as a site deploys it, and once with
+ * The chart is rendered three times from values-prod.yaml.example, with placeholder values for the
+ * keys that example leaves to the site: as a site deploys it; with
  * scripts/lint/config-scan-every-workload.yaml on top, which turns on every workload the example
- * leaves off. Each finding names the render it came from. Needs helm and Docker.
+ * leaves off; and with scripts/lint/config-scan-replaced-workloads.yaml on top of that, which turns
+ * off each switch that replaces a workload, so the replaced one renders with every part on. Each
+ * finding names the render it came from. Needs helm and Docker.
  */
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -24,9 +26,11 @@ const env = { ...process.env, MSYS_NO_PATHCONV: '1' }
 const slash = (p) => p.replace(/\\/g, '/')
 
 const PROD = join(REPO, 'deploy/helm/aber/values-prod.yaml.example')
+const EVERY = join(REPO, 'scripts/lint/config-scan-every-workload.yaml')
 const RENDERS = [
   { label: 'as a site deploys it', file: 'site.yaml', values: [PROD] },
-  { label: 'every workload on', file: 'every-workload.yaml', values: [PROD, join(REPO, 'scripts/lint/config-scan-every-workload.yaml')] },
+  { label: 'every workload on', file: 'every-workload.yaml', values: [PROD, EVERY] },
+  { label: 'the workloads a switch replaces', file: 'replaced-workloads.yaml', values: [PROD, EVERY, join(REPO, 'scripts/lint/config-scan-replaced-workloads.yaml')] },
 ]
 
 // A finding's stable identity: the check and the resource, never a line number.
@@ -78,7 +82,7 @@ try {
   }
 
   console.log('Scanning configuration')
-  // Both renders in one run: trivy's start-up, loading its checks, is most of a run's time. The
+  // Every render in one run: trivy's start-up, loading its checks, is most of a run's time. The
   // renders are manifests, so only the kubernetes scanner reads them.
   const chart = trivy('rendered chart', ['/scan', '--misconfig-scanners', 'kubernetes'], ['-v', `${slash(work)}:/scan:ro`])
   for (const r of RENDERS) {
