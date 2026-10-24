@@ -503,7 +503,7 @@ class BackupServiceTests(unittest.TestCase):
         dump = next(c for c in row["components"] if c["name"] == "supabase-db")
         aws("s3api", "get-object", "--bucket", OFFSITE_BUCKET, "--key", f"{OFFSITE_PREFIX}/{row['stamp']}/{dump['file']}.age", "/tmp/offsite-test.age")
         self.assertEqual(service("head", "-c", "21", "/tmp/offsite-test.age"), "age-encryption.org/v1")
-        stack_exec.run("backup-service", "sh", "-c", "umask 077; cat > /tmp/offsite-test.key", input=identity, check=True)
+        stack_exec.write_file("backup-service", "/tmp/offsite-test.key", identity)
         service("age", "-d", "-i", "/tmp/offsite-test.key", "-o", "/tmp/offsite-test.plain", "/tmp/offsite-test.age")
         self.assertEqual(service("sha256sum", "/tmp/offsite-test.plain").split()[0], dump["sha256"])
 
