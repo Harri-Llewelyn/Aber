@@ -3,7 +3,7 @@ import { isGatewayOnline, isGatewayPending } from './gatewayStatus'
 /**
  * The fleet figures the rail signals and the Site Map show. A shadow row is not part of the fleet:
  * the playback gateway is neither archived nor pending, so counted raw it lands in OFFLINE. The
- * shadow count is returned separately; the four buckets stay mutually exclusive and sum to `total`.
+ * shadow count is returned separately, outside `total`.
  */
 
 /** The playback gateway (0060). One row per stack, seeded rather than created. */
@@ -16,7 +16,7 @@ export const isShadowDevice = (d) => !!(d && d.shadow_of)
 
 /**
  * Gateway buckets over the real fleet. Awaiting setup is its own bucket: a gateway waiting for its
- * bundle is not offline.
+ * bundle is not offline. The four buckets are mutually exclusive and sum to `total`.
  */
 export function gatewayFleetCounts(gateways = []) {
   const real = gateways.filter((g) => !isShadowGateway(g))
@@ -34,17 +34,14 @@ export function gatewayFleetCounts(gateways = []) {
 }
 
 /**
- * Device buckets over the real fleet. Quarantined is its own bucket, excluded from online and
- * offline. A missing `status` reads as online; the column defaults to OFFLINE, so a device before
- * its first birth reads OFFLINE.
+ * Device figures over the real fleet. Quarantined counts devices waiting to be admitted, archived
+ * ones aside. No online or offline here: count devices by state with deviceSummaryCounts() in
+ * deviceStatus.js, the rule every page's devices summary uses.
  */
 export function deviceFleetCounts(devices = []) {
   const real = devices.filter((d) => !isShadowDevice(d))
-  const live = real.filter((d) => !d.is_archived && !d.is_quarantined)
   return {
     total: real.length,
-    online: live.filter((d) => d.status === 'ONLINE' || !d.status).length,
-    offline: live.filter((d) => d.status === 'OFFLINE').length,
     quarantined: real.filter((d) => d.is_quarantined && !d.is_archived).length,
     archived: real.filter((d) => d.is_archived).length,
     shadow: devices.filter((d) => isShadowDevice(d) && !d.is_archived).length
