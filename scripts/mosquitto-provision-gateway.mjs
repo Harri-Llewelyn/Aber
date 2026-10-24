@@ -107,7 +107,7 @@ function execPrefix() {
     );
     process.exit(1);
   }
-  return ['kubectl', '-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--'];
+  return ['kubectl', '-n', NAMESPACE, 'exec', '-i', pod, '-c', 'mosquitto', '--'];
 }
 
 const admin = adminCredential();

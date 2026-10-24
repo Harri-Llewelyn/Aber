@@ -16,9 +16,11 @@ import { dirname, join } from 'node:path';
 import { CredentialError } from './mosquitto-credentials.mjs';
 import {
   ADMIN_ROLE,
+  CONTROL_SCRIPT,
   GATEWAY_SHARED_ROLE,
   clientFromPasswordEntry,
   controlArgv,
+  controlInput,
   controlPayload,
   isRetiredGatewayRoleName,
   issueCommand,
@@ -277,16 +279,37 @@ describe('the control API', () => {
     assert.throws(() => parseControlResponse('Connection Refused'), (e) => e.code === 'backend_unavailable');
   });
 
-  test('the payload rides on argv with -m', () => {
-    // Measured on 2.0.22: mosquitto_rr's stdin and file modes delivered a payload the plugin
-    // rejected as not JSON. 2.1.2 accepts both (mosquitto/README.md); every caller still uses -m,
-    // and scripts/check-broker-config.mjs drives the real binary.
-    const payload = controlPayload([{ command: 'listClients' }]);
-    const argv = controlArgv({ host: 'mosquitto', port: 1883, username: 'admin', password: 'pw' }, payload);
-    assert.equal(argv[argv.indexOf('-m') + 1], payload);
-    assert.ok(!argv.includes('-s') && !argv.includes('-f'));
+  test('neither the password nor the payload is on argv; both go on stdin', () => {
+    // scripts/check-broker-config.mjs drives this command against the real binary.
+    const connection = { host: 'mosquitto', port: 1883, username: 'admin', password: 'admin-secret-0001' };
+    const payload = controlPayload([issueCommand(GW_A, 'gateway-secret-0001')]);
+    const argv = controlArgv(connection);
+    for (const secret of [connection.password, 'gateway-secret-0001', payload]) {
+      assert.ok(!argv.some((arg) => arg.includes(secret)), `${secret} is on argv`);
+    }
+    assert.deepEqual(argv.slice(0, 2), ['sh', '-c']);
+    assert.equal(argv[argv.length - 1], '-s');
+    assert.ok(!argv.includes('-m') && !argv.includes('-P'));
     assert.equal(argv[argv.indexOf('-t') + 1], '$CONTROL/dynamic-security/v1');
     assert.equal(argv[argv.indexOf('-e') + 1], '$CONTROL/dynamic-security/v1/response');
+    assert.equal(controlInput(connection, payload), `admin-secret-0001\n${payload}`);
+  });
+
+  test('the script hands the password to mosquitto_rr as an options file on a pipe, never a file', () => {
+    // The here-document is the options file; ash backs it with a pipe, so nothing reaches disk
+    // (measured on a read-only root filesystem, as the chart runs both containers).
+    assert.match(CONTROL_SCRIPT, /^IFS= read -r password \|\|/);
+    assert.match(CONTROL_SCRIPT, /\nexec mosquitto_rr -o \/dev\/fd\/3 "\$@" 3<<EOF\n-P \$password\nEOF$/);
+    assert.ok(!/mktemp|\/tmp|>\s*\//.test(CONTROL_SCRIPT), 'the script writes a file');
+  });
+
+  test('a password the options file cannot carry is refused before anything runs', () => {
+    const at = (password) => () => controlInput({ password }, '{}');
+    for (const bad of ['', null, undefined, 'two\nlines', 'carriage\rreturn', 'nul\0byte', 'x'.repeat(1021)]) {
+      assert.throws(at(bad), (e) => e instanceof CredentialError && e.code === 'backend_unavailable', JSON.stringify(bad));
+    }
+    assert.doesNotThrow(at('x'.repeat(1020)));
+    assert.doesNotThrow(at(' a b$(id)`id`\\c\'"#;|&>*?~ x '));
   });
 
   test('the inventory summary carries no hash material', () => {

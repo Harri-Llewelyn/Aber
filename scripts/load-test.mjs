@@ -116,7 +116,7 @@ function brokerControl () {
       username: creds.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin',
       password: creds.MQTT_DYNSEC_ADMIN_PASSWORD,
     },
-    ['kubectl', '-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--'],
+    ['kubectl', '-n', NAMESPACE, 'exec', '-i', pod, '-c', 'mosquitto', '--'],
   );
 }
 

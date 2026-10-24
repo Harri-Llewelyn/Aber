@@ -142,10 +142,18 @@ tags, and `renovate.json` proposes the next one.
   the role from the document, while the broker is down and nothing is connected.
 - `password_file` is not used: one authority is easier to reason about than two, and 2.1 deprecates
   it for removal in 3.0.
-- **`mosquitto_rr -s` and `-f` delivered a payload the 2.0.22 plugin rejected** ("Payload not valid
-  JSON"); the same bytes through `-m` were accepted. 2.1.2 accepts all three. Every caller still
-  puts the command on argv, where a password is visible to the container's own process list for
-  the request's duration, the exposure `mosquitto_passwd -b` has always had.
+- **A control request carries no password on argv.** On 2.0.22 the plugin rejected a payload sent
+  through `mosquitto_rr -s` or `-f` ("Payload not valid JSON"), so the command rode on `-m` and the
+  admin's password on `-P`. Both sat in the process list of the container and of the host running
+  `kubectl exec`, a gateway's new password among them, for as long as the request lasted. 2.1.2
+  accepts `-s`. Each request now runs `sh -c` with the admin's password on the first line of stdin
+  and the command after it (`controlArgv()` and `controlInput()`). The shell hands the password to
+  `mosquitto_rr -o` as an options file on a here-document, which busybox ash backs with a pipe, and
+  `-s` reads the rest. Measured by hand (2026-10-24): the waiting request's argv holds neither, no
+  file holds either, and it works on a read-only root filesystem, as the chart runs both
+  containers. `-o` reads a line into 1,024 bytes, so the admin's password is limited to 1,020 bytes
+  on one line. An exec prefix must pass `-i`, or the request reads an empty stdin and fails.
+  `check-broker-config.mjs` asserts the argv, and issues and re-issues a gateway through stdin.
 - **The ingestion daemon's will is prompt.** Opened as the daemon opens it (a clean session, a
   retained QoS 1 will with no Will Delay Interval) and killed outright, its death certificate
   reaches a gateway watching `spBv1.0/STATE/#` within a second. A gateway that buffers on STATE
