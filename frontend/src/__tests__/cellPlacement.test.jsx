@@ -114,6 +114,17 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(getByTooltip('Bay 1 — already in this area')).toBeInTheDocument()
   })
 
+  it('names each icon by its picture, and says the icon is there to tell cells apart', async () => {
+    await renderCells()
+    fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
+    const picker = screen.getByRole('radiogroup', { name: 'Cell icon' })
+    expect(picker).toHaveAccessibleDescription('A picture to tell this cell apart on the Site Map and in lists.')
+    expect(within(picker).getAllByRole('radio').map(r => r.textContent)).toEqual([
+      'Factory', 'Robot', 'Gear', 'Circuit board', 'Gauge', 'Office block', 'Lorry', 'Lightning bolt'
+    ])
+    expect(within(picker).getByRole('radio', { name: 'Factory' })).toHaveAttribute('aria-checked', 'true')
+  })
+
   it('draws the default outline for an area with no plan uploaded', async () => {
     await renderCells()
     fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))

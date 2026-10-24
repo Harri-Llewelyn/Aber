@@ -700,8 +700,10 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     fireEvent.click(screen.getByRole('button', { name: /New Area/ }))
     fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Stores' } })
-    expect(screen.getByRole('radio', { name: 'Office & general' })).toHaveAttribute('aria-checked', 'true')
-    fireEvent.click(screen.getByRole('radio', { name: 'Warehouse & stores' }))
+    // Each option is named by its picture, and the hint says what the icon is for.
+    expect(screen.getByRole('radiogroup', { name: 'Area icon' })).toHaveAccessibleDescription(/^A picture to tell this area apart/)
+    expect(screen.getByRole('radio', { name: 'Office block' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('radio', { name: 'Warehouse' }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
     expect(api.post.mock.calls[0][1]).toMatchObject({ area_name: 'Stores', icon: 'Warehouse' })
   })

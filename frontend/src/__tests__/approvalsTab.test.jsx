@@ -1002,6 +1002,57 @@ describe('a cell, a gateway or an area proposal names its subject', () => {
   })
 })
 
+/* An icon is stored as a key ("Bot") that only the dashboard can draw. The approver sees the
+   picture and the words for it on both sides, from the set of the proposal's own kind: cells and
+   areas share four keys, and each admits keys the other does not. */
+describe('an icon change shows each picture and its label', () => {
+  const iconChange = (entity_type, from, to, over = {}) => deviceProposal({
+    id: `p-${entity_type}-icon`, entity_type, entity_id: `${entity_type}-1`,
+    patch: { icon: to }, target_label: entity_type === 'cells' ? 'Weld Bay' : 'North Shop',
+    current: { name: 'x', icon: from }, ...over
+  })
+  const iconRow = () => [...document.querySelectorAll('.modal-table tbody tr')]
+    .find(tr => tr.cells[0].textContent === 'Icon')
+  const sides = () => [...iconRow().cells].slice(1)
+
+  it('draws a cell icon change as Now and Proposed pictures, each with its label', async () => {
+    mockLoad([iconChange('cells', 'Building2', 'Bot')])
+    renderTab()
+    await selectRow()
+    expect(sides().map(td => td.textContent)).toEqual(['Office block', 'Robot'])
+    for (const td of sides()) expect(td.querySelector('svg')).toBeTruthy()
+    // The stored key stays in reach, in the tooltip, as a uuid does.
+    expect(tooltipOf(within(sides()[1]).getByText('Robot'))).toBe('Bot')
+  })
+
+  it('reads an area icon from the area set', async () => {
+    mockLoad([iconChange('areas', 'Building2', 'Parking')])
+    renderTab()
+    await selectRow()
+    expect(sides().map(td => td.textContent)).toEqual(['Office block', 'Parking sign'])
+  })
+
+  it('shows a key its kind does not offer as the raw key, with no picture', async () => {
+    mockLoad([iconChange('areas', 'Building2', 'Bot')])
+    renderTab()
+    await selectRow()
+    expect(sides()[1].textContent).toBe('Bot')
+    expect(sides()[1].querySelector('svg')).toBeNull()
+  })
+
+  it('draws Before from the audit record and After once applied', async () => {
+    api.getAuditTrailRow.mockResolvedValue({ id: 99, action: 'PROPOSAL_APPLIED', replaced: { icon: 'Factory' } })
+    mockLoad([iconChange('cells', 'Cog', 'Cog', {
+      status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T10:00:00Z', applied_trail_id: 99
+    })])
+    renderTab()
+    showDecided()
+    await selectRow()
+    await waitFor(() => expect(sides().map(td => td.textContent)).toEqual(['Factory', 'Gear']))
+    for (const td of sides()) expect(td.querySelector('svg')).toBeTruthy()
+  })
+})
+
 describe('one card, two tabs, no counts, and attention only on work this viewer can do', () => {
   const decidedOne = (id, at) => deviceProposal({
     id, target_label: id, status: 'applied', decided_by: MANAGER_ID, decided_at: at

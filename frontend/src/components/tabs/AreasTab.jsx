@@ -461,7 +461,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           <div className="form-group">
             {/* A grid of buttons, as the cell form has: the choice is visual. */}
             <label className="form-label">Area Icon</label>
-            <div className="icon-picker" role="radiogroup" aria-label="Area icon">
+            <div className="icon-picker" role="radiogroup" aria-label="Area icon" aria-describedby="area-icon-hint">
               {AREA_ICONS.map(({ key, label, Icon }) => (
                 <button
                   key={key}
@@ -476,6 +476,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 </button>
               ))}
             </div>
+            <div className="form-hint" id="area-icon-hint">A picture to tell this area apart on the Site Map, in the Areas list and in a cell's or device's details.</div>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="area-description">Description (Optional)</label>

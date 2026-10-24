@@ -4885,6 +4885,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The value column holds anything the device reported, including strings nobody sized for. */
 .modal-table .telemetry-value { overflow-wrap: anywhere; }
 
+/* An icon key in a before/after table: its glyph, then its label. */
+.icon-value { display: inline-flex; align-items: center; gap: 6px; }
+
 
 /* Cells table, the same shape Gateways and Devices use. The icon column is fixed and narrow: it
    carries a 16px glyph, and under auto layout it would take an equal share of the row. */
