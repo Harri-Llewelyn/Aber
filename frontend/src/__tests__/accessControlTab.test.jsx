@@ -246,7 +246,7 @@ describe('AccessControlTab', () => {
     })
     await renderTab('Broker accounts')
 
-    const rowOf = async (name) => (await screen.findByRole('button', { name: new RegExp(name) })).closest('tr')
+    const rowOf = async (name) => (await screen.findByRole('button', { name: (n) => n.includes(name) })).closest('tr')
     expect(within(await rowOf('aber_ingestion')).getByText('Connected (3)')).toBeTruthy()
     expect(within(await rowOf('aber_i3x')).getByText('Not connected')).toBeTruthy()
     // An account no gateway claims, still in use, is the case the count is most worth having for.
