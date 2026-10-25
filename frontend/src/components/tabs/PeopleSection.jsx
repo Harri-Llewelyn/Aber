@@ -47,15 +47,15 @@ const PEOPLE_SORT = {
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, remove or restore, or to give a new password. A person is
- * drawn by their display name with their email beside it, or by the email alone; Change Name sets
- * the name through set_display_name(). Roles are set
- * through set_person_role(); adding, removing, restoring and setting a password go through
- * manage-people, which holds GoTrue's secret key. The database refuses your own role, access or
- * password and the last Administrator who can sign in; the controls are disabled for those with
- * the reason as their tooltip. A new password is shown once, in NewPasswordModal.
+ * drawn by their display name with their email beside it, or by the email alone. Roles are set
+ * through set_person_role() and names through set_display_name(); adding, removing, restoring and
+ * setting a password go through manage-people, which holds GoTrue's secret key. The database
+ * refuses your own role, access or password and the last Administrator who can sign in; the
+ * controls are disabled for those with the reason as their tooltip. A new password is shown once,
+ * in NewPasswordModal.
  *
- * The list is searched by name and email and filtered by role and status, in the browser: list_people()
- * returns every account, and a site has tens of them. A removed account is hidden until Show
+ * The list is searched by name and email and filtered by role and status, in the browser:
+ * list_people() returns every account, and a site has tens of them. A removed account is hidden until Show
  * removed is on; a removal that has not finished (Sign-in still open) is never hidden, because it
  * still needs Remove Access again. The filters are in the address.
  */
