@@ -69,11 +69,12 @@ export function SessionsSection({ isPerson = true, showToast }) {
 
   const others = (sessions || []).filter(s => !s.is_current).length
 
+  // A fragment, not a wrapper: the table must stay a direct child of the card, which scrolls it.
   return (
-    <section className="profile-section" aria-labelledby="profile-sessions-title">
+    <>
       <div className="card-body profile-section-head">
         <div className="profile-section-heading">
-          <h4 className="profile-section-title" id="profile-sessions-title">Sessions</h4>
+          <h4 className="profile-section-title">Sessions</h4>
           <HelpTip
             label="About sessions"
             text="Ending a session stops its access to the API at once. Grafana and Node-RED notice a little later. Studio and forge sign-ins outlive Sign Out until you end them here or they time out."
@@ -175,6 +176,6 @@ export function SessionsSection({ isPerson = true, showToast }) {
           onCancel={() => setConfirmingOthers(false)}
         />
       )}
-    </section>
+    </>
   )
 }
