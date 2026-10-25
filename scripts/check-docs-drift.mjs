@@ -2235,6 +2235,8 @@ const OPERATOR_PAIRS = [
 // labels, the sentence it refuses an unknown action with, docs/openapi.yaml's `action` enum and
 // its description's bullets, and the dashboard's calls. An action added to one and not the others
 // is a request the spec says is refused, or a refusal that names an action the function lacks.
+// And because change-email frees an address, the forge never finds a person by one: its email
+// fallback stays off (templates/apps/gitea.yaml).
 // -------------------------------------------------------------------------------------------------
 {
   const FN_FILE = 'supabase/functions/manage-people/people.ts';
@@ -2263,10 +2265,13 @@ const OPERATOR_PAIRS = [
   for (const action of called) {
     if (!handled.includes(action)) wrong.push(`frontend/src/api.js asks manage-people for '${action}', which the handler does not take`);
   }
+  if (!/- name: GITEA__service__ENABLE_REVERSE_PROXY_EMAIL\n\s+value: "false"\n/.test(read('deploy/helm/aber/templates/apps/gitea.yaml'))) {
+    wrong.push('templates/apps/gitea.yaml does not set GITEA__service__ENABLE_REVERSE_PROXY_EMAIL to "false": the forge would sign a newcomer in as whoever holds their address');
+  }
   if (wrong.length) {
     fail(`manage-people's actions disagree:\n${wrong.map((w) => `        ${w}`).join('\n')}`);
   } else {
-    pass(`manage-people's ${handled.length} actions agree across the handler, its refusal, the OpenAPI enum and bullets, and the dashboard's ${called.length} calls`);
+    pass(`manage-people's ${handled.length} actions agree across the handler, its refusal, the OpenAPI enum and bullets, and the dashboard's ${called.length} calls; the forge's email fallback is off`);
   }
 }
 
