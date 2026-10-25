@@ -33,7 +33,7 @@ window is listed in
 
 A new password does not stop someone at once: they keep their role meanwhile. To stop someone, use
 Remove Access first
-([A new password does not end a session at once](../../docs/security-model.md#a-new-password-does-not-end-a-session-at-once)).
+([An ended session keeps Storage, Realtime and Grafana until its token expires](../../docs/security-model.md#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires)).
 
 ## Machines
 

@@ -147,7 +147,7 @@ function AccessTokenRow() {
     <ProfileRow
       id="access-token"
       label="Access token"
-      description="Paste it into Swagger UI or i3X Explorer to call the API as yourself. It acts as you, with your role, until it expires, and signing out does not end it sooner. Copy again for the current one."
+      description="Paste it into Swagger UI or i3X Explorer to call the API as yourself. It acts as you, with your role, until it expires or you sign out. Copy again for the current one."
       value={validUntil(expiresAt)}
       actions={<CopyAction label="Copy Token" read={read} />}
     />

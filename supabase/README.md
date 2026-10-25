@@ -1314,7 +1314,8 @@ value: nothing the stack uses registers itself.
 - **`0197` deletes every client registered dynamically** while the flag was on. Each foreign key to
   `auth.oauth_clients` cascades, so its authorizations, its consents and the sessions issued to it go
   too, and with a session its refresh tokens. Nothing it was issued can be refreshed. An access
-  token it already holds lasts until it expires (`supabaseAuth.jwtExpiry`, an hour by default).
+  token it already holds is refused at the API (`0205`), and lasts elsewhere until it expires
+  (`supabaseAuth.jwtExpiry`, an hour by default).
 - **The deletion is reported**, as a NOTICE in db-init's log naming each client and its id.
 - **It replays harmlessly.** With registration off, a later boot finds nothing to delete. On the test
   database, whose GoTrue-shaped fixture has no OAuth tables, it does nothing.
@@ -1587,6 +1588,41 @@ The file's self-check asserts the table's RLS and grants, its policy and trigger
 each function, both list shapes, and the pin on the redeclared matcher.
 `test_a_person_can_have_a_display_name.py` holds the rules, the refusals, the audit rows, who reads
 a name, and the replay of `0001` and `0166` over the older shapes.
+
+### The API refuses a token whose session has ended (0205)
+
+GoTrue writes the session's id into every access token it issues (`session_id`), and deletes the
+session's row in `auth.sessions` when the session ends: a Sign Out, a new password, Set New
+Password. PostgREST checked only the token's signature, so a token went on reading for the rest of
+its life (`supabaseAuth.jwtExpiry`, an hour by default) after its session ended. The dashboard's
+Sign Out now ends only its own session (scope `local`), so this is what makes that sign-out reach
+the API.
+
+- **One more arm in `auth_pre_request()`**, after the removed person's and before the token
+  denylist. A token whose `session_id` is a uuid naming no row in `auth.sessions` is refused. It is
+  one primary-key probe, with a pattern test before the cast, as `0170`'s arm has.
+- **401, with GoTrue's own code.** Raised as `raise_not_found()` raises its 404: SQLSTATE `PGRST`,
+  the body as the message (`code` `session_not_found`, `message` `this session has ended`, the
+  session in `details`), and the status with a `WWW-Authenticate` header as the detail. GoTrue
+  answers the same condition with `session_not_found`, so the dashboard reads one code from either.
+  postgrest-js drops the HTTP status, so the code is what `classifyRefreshError()`
+  (`frontend/src/lib/connectionState.js`) matches; the strip then says the session has ended and
+  offers Sign In Again.
+- **What still passes.** A token with no `session_id` (a minted service token, the publishable and
+  service keys), and one whose `session_id` is not a uuid. Storage and Realtime verify the token
+  themselves and do not run the hook, so there it lasts until it expires.
+- **The removal answers first.** A removed person's sessions may have ended too, and "access
+  removed" is the fact that explains both.
+- **`auth.sessions` is GoTrue's.** `postgres`, which owns the hook, reads it by grant. The test
+  database has no GoTrue, so `test-harness/auth-bootstrap.sql` declares a minimal one, as it does
+  `auth.identities`.
+
+The file's self-check asserts both person arms, `SECURITY DEFINER`, that every API role may run the
+hook, and that a token naming no session passes. Where `auth.sessions` exists, it also asserts that
+the hook's owner may read it and that a session that does not exist is refused with 401
+`session_not_found`. `test_the_api_refuses_a_token_whose_session_has_ended.py` holds the arm in the
+db lane. `test_sign_out_ends_one_session.py` holds it through the gateway in the stack lane, with the
+person's other session still served.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -2290,7 +2326,7 @@ has two other ways in.
   the same. If the record fails after GoTrue changed the password, the function answers 500 and
   withholds the password, so a password nobody has seen is the only unrecorded one there can be.
   GoTrue deletes the person's sessions when an administrator sets their password; an access token
-  already issued lasts until it expires.
+  already issued is refused at the API from then on (`0205`), and lasts elsewhere until it expires.
 - **Change Password**, on the Profile page, is a person changing their own. The dashboard sends the
   current password with the new one in a single `PUT /auth/v1/user`, and GoTrue checks it
   (`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`, always on), so an access token alone
@@ -4979,8 +5015,8 @@ GoTrue's OIDC claims carry no `app_metadata`; `custom_access_token_hook` puts th
 without a round trip. The claim is what the role was when the token was signed, though, so
 `ext_authz` asks again on every request, as the forge's door does: a removed or demoted
 Administrator is refused on the next request rather than when the token expires (`0170` is the
-same rule at the API). A session GoTrue no longer has (Remove Access bans the account; Sign Out and
-a new password end its sessions) is a `302` to `/oauth2/signout`, which clears the cookies. The
+same rule at the API). A session GoTrue no longer has (Remove Access bans the account; a new
+password ends its sessions) is a `302` to `/oauth2/signout`, which clears the cookies. The
 step fails open on a 5xx because the claim has already been checked, and an outage of the edge
 runtime or the API should not also take away the console that mends it.
 

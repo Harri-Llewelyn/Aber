@@ -34,10 +34,10 @@ info:
     > this spec's schemas whether or not those rows exist. Press **Execute** and read the
     > **Response body** panel to see what your stack actually holds.
 
-    > ℹ️ **Tokens outlive their sessions.** PostgREST verifies only the JWT signature, so a
-    > token stays readable after its `auth.sessions` row is gone — which is what
-    > `npm run dev:reset` does. Edge Functions validate the session properly and answer
-    > `401 Invalid user token`. Sign in again for a fresh token.
+    > ℹ️ **A token ends with its session.** Once its `auth.sessions` row is gone (a Sign Out,
+    > a new password, `npm run dev:reset`), PostgREST answers `401` with the code
+    > `session_not_found`, and Edge Functions answer `401 Invalid user token`. Sign in again
+    > for a fresh token.
 
     ### Authorization
 

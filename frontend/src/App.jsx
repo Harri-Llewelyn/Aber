@@ -833,8 +833,8 @@ export default function App() {
     let announced
 
     // Restore and validate the stored session, resolving to the session the page may use.
-    // getSession() only reads localStorage and PostgREST only checks the JWT signature, so a revoked
-    // session would still read data; getUser() asks the auth server.
+    // getSession() only reads localStorage, so the stored session may have ended on the server;
+    // getUser() asks the auth server.
     const restoreSession = async () => {
       const { data: { session: stored } } = await supabase.auth.getSession()
       if (!stored) return null
@@ -954,13 +954,14 @@ export default function App() {
     return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
   }
 
-  // Three sessions end here: Studio and the forge sit behind sessions the gateway owns, so a beacon
-  // clears each cookie alongside signOut(). All start in the same tick so a slow console cannot
-  // delay the local sign-out, and signOut() is called synchronously on click, which
+  // Three sessions end here. signOut() ends this browser's dashboard session only (scope 'local');
+  // the person's other browsers and services keep theirs. Studio and the forge sit behind sessions
+  // the gateway owns, so a beacon clears each cookie alongside it. All start in the same tick so a
+  // slow console cannot delay the sign-out, and signOut() is called synchronously on click, which
   // navigationShell.test.jsx asserts.
   return <Dashboard
     session={session}
-    onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut()])}
+    onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut({ scope: 'local' })])}
     /* The rejected-session path above: a local sign-out, then the sign-in screen with its notice.
        setSession too, because signOut() cannot always clear an expired session it fails to refresh. */
     onSignInAgain={async () => { setAuthNotice(await clearInvalidSession()); setSession(null) }}

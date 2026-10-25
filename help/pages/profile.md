@@ -17,6 +17,8 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
+- **Sign Out**, in the account menu, signs you out of this browser. It signs this browser out of Studio and the forge too. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. To sign out everywhere else, change your password.
+- **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself
 
@@ -32,7 +34,7 @@ What the token can do:
 
 - It acts as you, with your role. Anyone who holds it can do what you can, so keep it to yourself.
 - On a standard install it lasts at most an hour from when it was issued. The row shows the exact time.
-- Signing out does not end it. It keeps working until that time.
+- Signing out of this browser ends it.
 - The dashboard renews its own token before it runs out. It does not renew the copy you made.
 
 A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. An Administrator issues its token on the **Access Control** page.
