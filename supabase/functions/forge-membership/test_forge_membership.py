@@ -297,38 +297,60 @@ class TestTheDoor(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertIn("/auth/v1/oauth/authorize", headers.get("location", ""), "the door did not start a fresh login")
 
-    def test_signing_out_of_the_forge_signs_out_of_the_platform(self):
+    def test_signing_out_of_the_forge_ends_the_door_s_session_and_no_other(self):
         """
-        GITEA'S OWN SIGN-OUT LINK, which did nothing: under reverse-proxy authentication the next
-        request re-signs the person in, and the door's sign-out alone lets the still-alive
-        dashboard session sign them in again after a flicker. The forge has no session of its own,
-        so its sign-out is the platform's -- every GoTrue session the person holds ends, the door's
-        cookies are cleared, and the fresh login meets a dashboard with nobody signed in.
+        GITEA'S OWN SIGN-OUT LINK, which does nothing on its own: under reverse-proxy
+        authentication the next request re-signs the person in. The forge has no session of its
+        own, so the link ends the door's GoTrue session and sends the browser to the dashboard's
+        /sign-out, which signs that browser out of the dashboard and clears the doors' cookies. The
+        same person's session in another browser stays alive, as after the dashboard's Sign Out.
         """
         email, _, _ = PERSONAS["Shopfloor_Manager"]
         jar, status = through_the_door(email)
         self.assertEqual(status, 200)
 
-        # A dashboard session of the same person, alive before the click.
-        dashboard = sign_in(email)
-        me = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {dashboard}"}
+        # The same person in the dashboard in another browser: a session of its own.
+        elsewhere = sign_in(email)
+        me = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {elsewhere}"}
         status, _, _ = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
         self.assertEqual(status, 200)
+        try:
+            # The click. Gitea 1.27's link is a plain GET on this path.
+            status, headers, _ = request(f"{FORGE_URL}/user/logout", jar=jar)
+            self.assertEqual(status, 302)
+            location = headers.get("location", "")
+            target = urllib.parse.urlsplit(location)
+            self.assertIn(target.scheme, ("http", "https"), f"not the dashboard's address: {location!r}")
+            self.assertTrue(target.netloc, f"not the dashboard's address: {location!r}")
+            self.assertEqual((target.path, target.query), ("/sign-out", "from=forge"), location)
 
-        # The click. Gitea 1.27's link is a plain GET on this path.
-        status, headers, _ = request(f"{FORGE_URL}/user/logout", jar=jar)
-        self.assertEqual(status, 302)
-        self.assertEqual(headers.get("location"), "/oauth2/signout")
+            # The address is the dashboard's: it serves its page there.
+            status, _, text = request(location)
+            self.assertEqual(status, 200, f"{location} did not serve the dashboard: {text[:120]}")
+            self.assertIn('id="root"', text, f"{location} did not serve the dashboard")
 
-        status, _, text = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
-        self.assertIn(status, (401, 403), f"the dashboard session survived the forge's sign-out: {text[:120]}")
+            # The door's session has ended: its cookie still verifies at the listener, and the
+            # membership step sends it back through the door's sign-out.
+            status, headers, text = request(f"{FORGE_URL}/", jar=jar)
+            self.assertEqual(status, 302, f"the door's session survived the forge's sign-out ({status}): {text[:120]}")
+            self.assertEqual(headers.get("location"), "/oauth2/signout")
 
-        status, _, _ = request(f"{FORGE_URL}/oauth2/signout", jar=jar)
-        self.assertEqual(status, 302)
-        self.assertFalse(
-            any(c.name.startswith("ForgeBearerToken") for c in jar),
-            "the door's bearer cookie survived the sign-out",
-        )
+            # The other browser's session is untouched, at GoTrue and at the API (0205).
+            status, _, text = request(f"{SUPABASE_URL}/auth/v1/user", headers=me)
+            self.assertEqual(status, 200, f"the forge's sign-out ended a session in another browser: {text[:120]}")
+            status, _, text = request(f"{SUPABASE_URL}/rest/v1/areas?select=id&limit=1", headers=me)
+            self.assertEqual(status, 200, f"the API refused a session in another browser: {text[:120]}")
+
+            # What the dashboard's /sign-out does to the door in this browser: the cookies go.
+            status, _, _ = request(f"{FORGE_URL}/oauth2/signout", jar=jar)
+            self.assertEqual(status, 302)
+            self.assertFalse(
+                any(c.name.startswith("ForgeBearerToken") for c in jar),
+                "the door's bearer cookie survived the sign-out",
+            )
+        finally:
+            # The other browser's session is this test's own; end it, and only it.
+            request(f"{SUPABASE_URL}/auth/v1/logout?scope=local", method="POST", headers=me)
 
     # -- helpers ---------------------------------------------------------------------------------
 

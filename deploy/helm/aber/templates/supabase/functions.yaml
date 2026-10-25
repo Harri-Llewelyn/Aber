@@ -222,6 +222,10 @@ spec:
               value: {{ ternary "true" "false" (ne (.Values.supabaseAuth.smtp.host | default "") "") | quote }}
             - name: AUTH_INVITE_REDIRECT_URL
               value: {{ printf "%s/reset-password" (include "aber.frontendUrl" .) | quote }}
+            {{- /* forge-signout sends the browser to the dashboard's /sign-out here, after ending the
+                   door's session. Unset, it falls back to the door's own sign-out and warns. */}}
+            - name: FRONTEND_PUBLIC_URL
+              value: {{ include "aber.frontendUrl" . | quote }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.77.0 by probing it directly:
           #
