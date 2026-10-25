@@ -263,9 +263,10 @@ class TestTheDoor(unittest.TestCase):
 
     def test_a_session_ended_elsewhere_sends_the_browser_back_through_the_door(self):
         """
-        THE DOOR HOLDS A COOKIE GoTrue NO LONGER HONOURS, and this is what happens next. A dashboard
-        sign-out revokes the GoTrue session; the forge's cookie is Envoy's own and survives it, its
-        token still verifies locally, and only the membership step notices. A 401 from it would
+        THE DOOR HOLDS A COOKIE GoTrue NO LONGER HONOURS, and this is what happens next. Ending the
+        door's GoTrue session elsewhere (Sign Out of All Other Sessions, an Administrator, the
+        inactivity timeout) leaves the forge's cookie, which is Envoy's own; its token still
+        verifies locally, and only the membership step notices. A 401 from it would
         reach the browser as a JSON body with the cookie still set -- stuck until it expires. So a
         dead session is a redirect to the door's sign-out, which clears the cookies and lands on a
         fresh login. Found by exactly that sequence on a laptop.
@@ -274,14 +275,12 @@ class TestTheDoor(unittest.TestCase):
         jar, status = through_the_door(email)
         self.assertEqual(status, 200)
 
-        # End every session this persona holds, the way a global dashboard sign-out does. The forge
-        # cookie in `jar` is untouched by this, which is the whole point.
-        token = sign_in(email)
-        status, _, text = request(
-            f"{SUPABASE_URL}/auth/v1/logout?scope=global", method="POST",
-            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}"},
-        )
-        self.assertIn(status, (200, 204), text[:200])
+        # End the door's session alone and keep the cookie in `jar`, which is the whole point. The
+        # forge's own sign-out does both: a local sign-out, then a 302 to the dashboard, not through
+        # the door (the cookie is encrypted, so the test cannot sign out with it directly). Local,
+        # so the persona's other sessions, a person's own browser among them, stay.
+        status, _, text = request(f"{FORGE_URL}/user/logout", jar=jar)
+        self.assertEqual(status, 302, text[:200])
 
         status, headers, text = request(f"{FORGE_URL}/", jar=jar)
         self.assertEqual(status, 302, f"a dead session was not sent back through the door ({status}): {text[:120]}")
