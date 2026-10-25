@@ -15,8 +15,19 @@ describe('ending the session the gateway holds in front of Studio', () => {
     // Without `credentials: include` the request carries no cookie, so the gateway has no session
     // to clear and answers 302 having done nothing, which looks identical to success from here.
     expect(init.credentials).toBe('include');
-    // Following the 302 would pull the browser into Studio's login flow to no purpose.
-    expect(init.redirect).toBe('manual');
+    expect(init.mode).toBe('no-cors');
+  });
+
+  it('asks for nothing a browser refuses before sending: no-cors follows its redirects', async () => {
+    // The Fetch standard answers a no-cors request whose redirect mode is not `follow` with a
+    // network error, so with `redirect: 'manual'` the request never left the browser, and the
+    // mocked fetch here could not tell.
+    const fetchImpl = vi.fn().mockResolvedValue({ type: 'opaque' });
+    await signOutOfStudio(fetchImpl);
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(init.mode).toBe('no-cors');
+    expect(init.redirect ?? 'follow').toBe('follow');
   });
 
   it('reports failure instead of throwing when Studio cannot be reached', async () => {
