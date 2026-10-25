@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
+import { identityUrl } from '../routes'
 
 /**
  * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
@@ -12,6 +13,15 @@ export const RECONCILE_MS = 60000
 export const POLL_INTERVAL_MS = 15000
 
 /**
+ * Where an alert's toast leads. An alert about a machine identity's token goes to the identity on
+ * Access Control, where a new token is issued and the old one revoked; any other goes to its rule in
+ * Grafana Alerting, where its thresholds, silences and history are.
+ */
+export const alertToastUrl = (row) => (row.entity_type === 'service_identity' && row.entity_id
+  ? identityUrl(row.entity_id)
+  : grafanaAlertUrl(row.alert_name))
+
+/**
  * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
  * transition. Grafana posts to the grafana-alert-webhook function, which writes
  * `public.platform_alerts`; this hook reads the `platform_alerts_active` view and subscribes to the
@@ -19,9 +29,9 @@ export const POLL_INTERVAL_MS = 15000
  * page load does not toast everything already firing.
  *
  * A firing toast carries the alert name only; the summary is in the alert counter's list. Both
- * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link to the
- * rule in Grafana Alerting, where its thresholds, silences and history are. Neither is recorded in
- * the bell's history: the alert counter shows what is firing, and Grafana keeps what has fired.
+ * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link where
+ * alertToastUrl() says. Neither is recorded in the bell's history: the alert counter shows what is
+ * firing, and Grafana keeps what has fired.
  */
 export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
@@ -59,7 +69,7 @@ export function usePlatformAlerts(showToast) {
           showToastRef.current?.(
             row.alert_name,
             row.severity === 'critical' ? 'error' : 'warning',
-            { group: 'alert', to: grafanaAlertUrl(row.alert_name), record: false }
+            { group: 'alert', to: alertToastUrl(row), record: false }
           )
         }
       }
@@ -67,7 +77,7 @@ export function usePlatformAlerts(showToast) {
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
         if (!next.has(fingerprint)) {
-          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: grafanaAlertUrl(row.alert_name), record: false })
+          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: alertToastUrl(row), record: false })
         }
       }
     }

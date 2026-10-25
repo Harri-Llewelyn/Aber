@@ -17,10 +17,13 @@ import unittest
 from pathlib import Path
 
 INDEX_TS = Path(__file__).resolve().parent / "index.ts"
+BASELINE = Path(__file__).resolve().parents[2] / "migrations" / "0001_baseline_schema.sql"
 
 RESOLVED = "resolved"
 FIRING = "firing"
 SEVERITIES = {"critical", "warning", "info"}
+ENTITY_TYPES = {"device", "gateway", "platform", "service_identity"}
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
 def authorize_alert_webhook(auth_header, expected_secret):
@@ -42,11 +45,23 @@ def normalize_alert(alert):
     labels = alert.get("labels") or {}
     annotations = alert.get("annotations") or {}
 
-    sparkplug_id = (labels.get("sparkplug_id") or "").strip()
     fingerprint = (alert.get("fingerprint") or "").strip()
     alert_name = (labels.get("alertname") or "").strip()
     starts_at = alert.get("startsAt")
-    if not sparkplug_id or not fingerprint or not alert_name or not starts_at:
+    if not fingerprint or not alert_name or not starts_at:
+        return None
+
+    entity_type = (labels.get("entity_type") or "device").strip().lower()
+    if entity_type not in ENTITY_TYPES:
+        return None
+
+    identity = entity_type == "service_identity"
+    principal_id = (labels.get("principal_id") or "").strip() if identity else ""
+    if identity and not UUID.match(principal_id):
+        return None
+    sparkplug_id = None if identity else ((labels.get("sparkplug_id") or "").strip() or None)
+
+    if entity_type != "platform" and not identity and not sparkplug_id:
         return None
 
     resolved = (alert.get("status") or "").lower() == RESOLVED
@@ -60,6 +75,8 @@ def normalize_alert(alert):
 
     return {
         "fingerprint": fingerprint,
+        "entity_type": entity_type,
+        "entity_id": principal_id.lower() if identity else None,
         "sparkplug_id": sparkplug_id,
         "alert_name": alert_name,
         "severity": severity if severity in SEVERITIES else "warning",
@@ -200,6 +217,57 @@ class TestNormalisation(unittest.TestCase):
         self.assertEqual(row["summary"], "fallback text")
         self.assertIsNone(normalize_alert(alert(annotations={}))["summary"])
 
+    def test_a_platform_alert_needs_no_wire_identity(self):
+        row = normalize_alert(alert(labels={"alertname": "Backup Stale", "entity_type": "platform"}))
+        self.assertEqual((row["entity_type"], row["sparkplug_id"], row["entity_id"]), ("platform", None, None))
+
+    def test_an_unknown_entity_type_is_refused(self):
+        self.assertIsNone(normalize_alert(alert(labels={**alert()["labels"], "entity_type": "building"})))
+
+
+PRINCIPAL = "5E000000-0204-4000-8000-0000000000A1"
+
+
+def token_alert(**labels):
+    """An instance of Service Token Expiring, labelled as the rule's query labels it."""
+    base = {
+        "alertname": "Service Token Expiring",
+        "severity": "warning",
+        "entity_type": "service_identity",
+        "identity": "Line 4 report",
+        "principal_id": PRINCIPAL,
+        "jti": "0f3c9a",
+        "renewal": "access_control",
+    }
+    base.update(labels)
+    return alert(labels={k: v for k, v in base.items() if v is not None},
+                 annotations={"summary": "The token 0f3c9a for the machine identity Line 4 report expires"})
+
+
+class TestMachineIdentity(unittest.TestCase):
+    """An alert about a machine identity's token: its subject is the principal id, not a wire id."""
+
+    def test_the_principal_id_is_the_subject(self):
+        row = normalize_alert(token_alert())
+        self.assertEqual(row["entity_type"], "service_identity")
+        self.assertEqual(row["entity_id"], PRINCIPAL.lower())
+        self.assertIsNone(row["sparkplug_id"])
+
+    def test_a_sparkplug_id_label_is_not_stored(self):
+        # `platform_alerts_asset_has_wire_id` admits it without one, and the device surfaces index
+        # by sparkplug_id: carrying one would let a token alert colour an asset.
+        self.assertIsNone(normalize_alert(token_alert(sparkplug_id="dev220000000000400080000"))["sparkplug_id"])
+
+    def test_a_principal_id_that_is_not_a_uuid_is_refused(self):
+        # entity_id is a uuid column. Written as it came, one bad instance would fail the batch.
+        for bad in (None, "", "Line 4 report", "5e000000-0204-4000-8000", f"{PRINCIPAL}0", f" {PRINCIPAL}x"):
+            with self.subTest(principal_id=bad):
+                self.assertIsNone(normalize_alert(token_alert(principal_id=bad)))
+
+    def test_it_resolves_like_any_other_occurrence(self):
+        resolved = normalize_alert({**token_alert(), "status": "resolved", "endsAt": "2026-10-25T09:00:00Z"})
+        self.assertEqual((resolved["status"], resolved["entity_id"]), ("resolved", PRINCIPAL.lower()))
+
 
 class TestMirrorIsFaithful(unittest.TestCase):
     """
@@ -232,6 +300,23 @@ class TestMirrorIsFaithful(unittest.TestCase):
         self.assertIn(".in(\"sparkplug_id\"", self.src)
         # Resolving by NAME is the deprecated identity path; it must not appear as a lookup.
         self.assertNotIn('.eq("name"', self.src)
+
+    def test_the_entity_types_match_the_table_and_this_mirror(self):
+        # One set in three places: the webhook refuses what the CHECK would refuse, before the insert.
+        ts = re.search(r"const ENTITY_TYPES = new Set\(\[([^\]]*)\]\)", self.src)
+        self.assertIsNotNone(ts, "ENTITY_TYPES is no longer a Set literal in index.ts")
+        ts_types = set(re.findall(r'"([a-z_]+)"', ts.group(1)))
+        check = re.search(
+            r"ADD CONSTRAINT platform_alerts_entity_type_valid CHECK \(\(entity_type = ANY \(ARRAY\[([^\]]*)\]\)\)\);",
+            BASELINE.read_text(encoding="utf-8"))
+        self.assertIsNotNone(check, "0001 no longer adds platform_alerts_entity_type_valid in this form")
+        sql_types = set(re.findall(r"'([a-z_]+)'::text", check.group(1)))
+        self.assertEqual(ts_types, sql_types)
+        self.assertEqual(ENTITY_TYPES, ts_types)
+
+    def test_it_checks_a_principal_id_as_this_mirror_does(self):
+        self.assertIn(UUID.pattern, self.src)
+        self.assertIn('entityType === "service_identity"', self.src)
 
     def test_it_never_hardcodes_a_threshold(self):
         # Thresholds live in the Grafana rules. A number here would be the browser-side alarm all

@@ -10,6 +10,8 @@ import {
   HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
 } from '../hooks/useToast'
 import { grafanaAlertUrl } from '../constants'
+import { identityUrl } from '../routes'
+import { alertToastUrl } from '../hooks/usePlatformAlerts'
 
 /**
  * The toast and the history behind it. What is pinned: each toast owns its timer, so a second one
@@ -400,8 +402,13 @@ describe('a firing platform alert', () => {
     }
     render(<AlertsHarness />)
     await act(async () => { await vi.advanceTimersByTimeAsync(10) })
-    current = rows
-    await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+    // Returns how to change what is firing at the next reconciliation.
+    const firing = async (next) => {
+      current = next
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+    }
+    await firing(rows)
+    return firing
   }
 
   it('toasts the alert name only, and records nothing in the history', async () => {
@@ -433,6 +440,30 @@ describe('a firing platform alert', () => {
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
     expect(hook.history).toEqual([])
+  })
+
+  it('links an alert about a machine identity to the identity on Access Control, firing and resolved', async () => {
+    const principal = '5e000000-0204-4000-8000-0000000000a1'
+    const token = {
+      ...row, fingerprint: 'f3', alert_name: 'Service Token Expiring',
+      entity_type: 'service_identity', entity_id: principal, sparkplug_id: null
+    }
+    const firing = await mountAlerts([token])
+    const link = screen.getByRole('link', { name: /Service Token Expiring/ })
+    expect(link).toHaveAttribute('href', `/access-control/identities?search=${principal}`)
+    expect(link).toHaveAttribute('href', identityUrl(principal))
+    expect(link).not.toHaveAttribute('target')
+    expect(link).toHaveAccessibleDescription('Go to Access Control › Identities')
+
+    await firing([])
+    const resolved = hook.toasts.find(t => t.msg === 'Resolved — Service Token Expiring')
+    expect(resolved.to).toBe(identityUrl(principal))
+    expect(hook.history).toEqual([])
+  })
+
+  it('links any other alert to its rule, whatever entity_id it carries', () => {
+    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row.alert_name))
+    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row.alert_name))
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

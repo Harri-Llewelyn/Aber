@@ -272,14 +272,16 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     if (!loading && !loadError && showArchived && filterCounts.archived === 0) setShowArchived(false)
   }, [loading, loadError, showArchived, filterCounts.archived, setShowArchived])
 
-  // Withdrawn identities are left off until Show withdrawn is on. Searched by the name the page shows.
+  // Withdrawn identities are left off until Show withdrawn is on. Searched by the name the page shows,
+  // or by the whole principal id, which an alert's link carries.
   const withdrawnCount = useMemo(
     () => principals.filter(p => revokedPrincipals.has(p.principal_id)).length,
     [principals, revokedPrincipals]
   )
   const visiblePrincipals = useMemo(() => principals.filter(p =>
     (showWithdrawn || !revokedPrincipals.has(p.principal_id)) &&
-    (!query || describePrincipal(p.principal_id, p).name.toLowerCase().includes(query))
+    (!query || describePrincipal(p.principal_id, p).name.toLowerCase().includes(query)
+      || String(p.principal_id).toLowerCase() === query)
   ), [principals, revokedPrincipals, showWithdrawn, query])
 
   const clientsByUsername = useMemo(
@@ -622,8 +624,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               <SearchInput
                 value={search}
                 onChange={setSearch}
-                placeholder="Search by name…"
-                ariaLabel="Search machine identities by name"
+                placeholder="Search by name or principal ID…"
+                ariaLabel="Search machine identities by name or principal ID"
               />
               {/* Offered only while an identity is withdrawn; the count is what it would list. */}
               {withdrawnCount > 0 && (
@@ -768,7 +770,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                           )}
                         </td>
                         {/* A button where a token is actually read, and the command everywhere
-                            else. `isMintableFromPage()` decides: the two environment-key identities
+                            else. `isMintableFromPage()` decides: the three environment-key identities
                             take their key from the environment at boot, so a minted token for them
                             would be a second privileged credential nothing reads. They keep the
                             rotate command. */}
