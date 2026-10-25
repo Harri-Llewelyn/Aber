@@ -293,8 +293,11 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # backup cannot use stops it before the first dump, a run leaves a manifest naming every file or
 # leaves nothing, and the restore replays each file that manifest names into its own database.
 # And the half of `npm run try` that needs no cluster: the tools it checks for, what holds a port,
-# and the published chart and values it installs. And the ESLint rule that fails on a `title` on an
-# HTML element in the dashboard, the browser's tooltip, against a fixture and its allow-list. And
+# and the published chart and values it installs. And a port-forward that does not open saying why
+# (kubectl's exit and stderr, or no "Forwarding from" in time), against stand-ins for kubectl, and
+# the second attempt the rehearsals' Traefik forward makes only on a port another socket took. And
+# the ESLint rule that fails on a `title` on an HTML element in the dashboard, the browser's
+# tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
 # prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
 npm run test:lib
