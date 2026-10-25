@@ -1624,6 +1624,53 @@ the hook's owner may read it and that a session that does not exist is refused w
 db lane. `test_sign_out_ends_one_session.py` holds it through the gateway in the stack lane, with the
 person's other session still served.
 
+### An Administrator ends a person's sessions and changes their email address (0207)
+
+A person's drawer on Access Control › People offers both. A lost laptop needs the first without a
+removal, and a wrong or renamed address needed the person removed and added again, which made a new
+account and left their history behind.
+
+- **`end_person_sessions(p_user_id)`** deletes every `auth.sessions` row the person holds: each
+  browser's dashboard session and each service's sign-in (Grafana, Node-RED, Studio, the forge).
+  GoTrue's own foreign keys take the refresh tokens with them, so none refreshes. `0205`'s arm in
+  `auth_pre_request()` then refuses each access token at the API on its next request. It writes one
+  `SESSIONS_ENDED` row on `entity_type = 'user_roles'`, as `0203`'s rename does: the caller in
+  `changed_by`, the person's email and how many ended in `new_data`. It returns that number. It goes
+  through `check_person_act()` (`0166`), so it is Administrator only, under the People lock, and
+  refuses a machine identity and an unknown person. Your own sessions are refused (`42501`): Sign
+  Out ends this browser's. A removed person's may be ended, which is harmless and closes what a
+  removal leaves open until tokens expire.
+- **`person_session_summary(p_user_id)`** is the drawer's count: how many rows, and the latest of
+  each row's `refreshed_at`, `updated_at` and `created_at`. GoTrue writes `refreshed_at` as a
+  `timestamp` without a zone, in UTC, so it is read `AT TIME ZONE 'UTC'`. There is no list for an
+  Administrator: which browsers and services a person uses is theirs to see. A session past the
+  inactivity timeout keeps its row until GoTrue's cleanup, so it is counted until then.
+- **A change of address is two calls around GoTrue**, as Set New Password is (`0167`).
+  `manage-people` calls `check_person_email_change()` first, which writes nothing and answers with
+  the address held. It refuses your own address, a removed person, an address another account
+  holds, the same address and anything not shaped like one. GoTrue's admin update would refuse a
+  taken address only through its unique index, as a 500, so it is decided here. After GoTrue,
+  `record_person_email_change()` refuses unless the account now holds the new address, writes
+  `EMAIL_CHANGED` with both addresses, and calls `end_person_sessions()` in the same transaction:
+  the person's access token carries the old address until it refreshes, and
+  `stamp_proposal_author()` stamps `proposed_by_email` from it. So sessions end in one place, and
+  both rows share a `causation_id`.
+- **What the record can and cannot vouch for.** It is written only for a change the account
+  shows. The old address is the one the check answered, carried by the edge function, so an
+  Administrator calling the RPC by hand could misstate it, as one could record a `PASSWORD_SET`
+  with no new password behind it.
+- **History keeps the address it was stamped with.** `proposed_by_email` and `retired_by_email`
+  are not rewritten. `list_people()` and `list_user_accounts()` read the account, so People and the
+  Audit Trail's person labels show the new address.
+- **`auth.sessions` is GoTrue's.** `postgres`, which owns the functions, reads and deletes it by
+  grant. The test database's fixture (`test-harness/auth-bootstrap.sql`) gains `refreshed_at`.
+
+The file's self-check asserts who may execute each function, `SECURITY DEFINER` with the pinned
+`search_path`, and, where `auth.sessions` exists, that the owner may read and delete it and that
+it has the four columns the summary reads. `test_an_administrator_ends_a_person_s_sessions.py`
+holds the refusals, the deletion, the API's refusal of an ended session's token, the audit rows and
+the summary.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

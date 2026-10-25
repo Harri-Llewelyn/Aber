@@ -154,13 +154,13 @@ people's accounts in GoTrue, and it is narrow by construction.
   an Administrator. The `manage-people` edge function resolves the caller's role from `user_roles`
   before it makes any admin call. Every database function behind the tab (`list_people()`,
   `set_person_role()`, `record_person_added()`, `remove_person_access()`,
-  `restore_person_access()`, `record_person_password_set()`) checks
-  `has_role(ARRAY['Administrator'])` again in its own body.
-- **Two rules no Administrator can break.** Nobody changes their own role, access or password here,
-  and no act may
-  leave the site without an Administrator who can sign in (a banned one does not count). Both are
-  checked in SQL under one lock on `user_roles`, so two Administrators cannot demote each other at
-  once. The function refuses your own access before calling the database, and calls the database
+  `restore_person_access()`, `record_person_password_set()`, and `0207`'s
+  `end_person_sessions()`, `person_session_summary()`, `check_person_email_change()` and
+  `record_person_email_change()`) checks `has_role(ARRAY['Administrator'])` again in its own body.
+- **Two rules no Administrator can break.** Nobody changes their own role, access, password or
+  email address here, or ends their own sessions, and no act may leave the site without an
+  Administrator who can sign in (a banned one does not count). Both are checked in SQL under one
+  lock on `user_roles`, so two Administrators cannot demote each other at once. The function refuses your own access before calling the database, and calls the database
   before GoTrue, so a refused act never reaches GoTrue.
 - **The secret key stays in the edge function.** GoTrue's admin API needs the service-role key.
   `manage-people` holds it, granted in `main/index.ts` beside two settings, and uses it for GoTrue
@@ -185,6 +185,26 @@ people's accounts in GoTrue, and it is narrow by construction.
   writes `PASSWORD_SET` (email and method, no password). If that record fails, the answer is a 500
   that withholds the password: it was changed, nobody has seen it, and setting it again records it.
   So no password anyone holds was set without a row in the trail.
+- **Ending a person's sessions** (`0207`). End Sessions, in a person's drawer, deletes every
+  `auth.sessions` row they hold, for every browser and service, and writes one `SESSIONS_ENDED`
+  row naming who ended whose and how many. None of their refresh tokens works again, and the API
+  refuses each access token at its next request. The other surfaces follow on the schedule in
+  [An ended session keeps Storage, Realtime and Grafana until its token expires](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires).
+  The person keeps their role and may sign in again; Remove Access is what stops them. An
+  Administrator sees how many sessions a person holds and when one was last active, never which
+  browsers or services they are.
+- **A new email address, set by an Administrator** (`0207`). Sign-in autoconfirms and a site may
+  have no mail relay, so nothing can prove a person owns an address they type: only an
+  Administrator changes one, never their own. `manage-people` asks `check_person_email_change()`
+  first, which refuses a removed person and an address another account holds without naming that
+  account's role. GoTrue's admin update then changes the address with `email_confirm`, which
+  sends no mail and clears GoTrue's pending recovery and invitation links. `record_person_email_change()`
+  writes `EMAIL_CHANGED` with both addresses and ends every session the person holds, in one
+  transaction, because their access token carries the old address and `stamp_proposal_author()`
+  stamps `proposed_by_email` from it. Grafana matches a person by account id and takes the new
+  address, as its login too, at their next sign-in there. The forge matches them by account id as
+  well, but keeps the address its account was made with, and finds an account by that address when
+  a new login cannot be made. So an old address must not be given to another person.
 - **A person's own password.** Change Password, on the Profile page, sends the current password
   with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
   sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
