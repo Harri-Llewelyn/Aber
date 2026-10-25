@@ -1,14 +1,14 @@
 /**
  * Add a person, remove their access, restore it, set them a new password or change their email
- * address: the GoTrue half of the People tab. A function and not an RPC because GoTrue's admin API needs the secret key, which is
- * not in the database.
+ * address: the GoTrue half of the People tab. A function and not an RPC because GoTrue's admin API
+ * needs the secret key, which is not in the database.
  *
  * Administrator only, checked twice: here, from the caller's session, before any admin call; and by
  * the SECURITY DEFINER function each act calls in the caller's session, which also writes its audit
  * row. Removing, restoring, setting a password and changing an address call the database FIRST, so
  * its rules (not your own account, not the last Administrator who can sign in) are decided before
- * GoTrue changes anything. Removing bans the account and never deletes it: the Audit Trail names the person
- * through it.
+ * GoTrue changes anything. Removing bans the account and never deletes it: the Audit Trail names
+ * the person through it.
  *
  * A new account without a mail relay, and every new password, is minted here and returned once.
  * Nothing stores or logs it; GoTrue keeps only its hash.
