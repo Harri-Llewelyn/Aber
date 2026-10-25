@@ -12438,8 +12438,8 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
     starts_at timestamp with time zone NOT NULL,
     ends_at timestamp with time zone,
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = 'platform'::text) OR (sparkplug_id IS NOT NULL))),
-    CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text]))),
+    CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL))),
+    CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text]))),
     CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL))),
     CONSTRAINT platform_alerts_severity_valid CHECK ((severity = ANY (ARRAY['critical'::text, 'warning'::text, 'info'::text]))),
     CONSTRAINT platform_alerts_status_valid CHECK ((status = ANY (ARRAY['firing'::text, 'resolved'::text])))
@@ -12483,14 +12483,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_asset_has_wire_id'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((entity_type = ''platform''::text) OR (sparkplug_id IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((entity_type = ANY (ARRAY[''platform''::text, ''service_identity''::text])) OR (sparkplug_id IS NOT NULL)))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_asset_has_wire_id;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'platform_alerts_asset_has_wire_id'
                     AND conrelid = 'public.platform_alerts'::regclass) THEN
     ALTER TABLE public.platform_alerts
-        ADD CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = 'platform'::text) OR (sparkplug_id IS NOT NULL)));
+        ADD CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL)));
   END IF;
 END $c$;
 
@@ -12499,14 +12499,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_entity_type_valid'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ANY (ARRAY[''device''::text, ''gateway''::text, ''platform''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ANY (ARRAY[''device''::text, ''gateway''::text, ''platform''::text, ''service_identity''::text])))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_entity_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'platform_alerts_entity_type_valid'
                     AND conrelid = 'public.platform_alerts'::regclass) THEN
     ALTER TABLE public.platform_alerts
-        ADD CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text])));
+        ADD CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text])));
   END IF;
 END $c$;
 
@@ -12566,17 +12566,17 @@ COMMENT ON TABLE public.platform_alerts IS 'One row per Grafana alert OCCURRENCE
 --
 
 -- COLUMN platform_alerts.entity_type :: COMMENT
-COMMENT ON COLUMN public.platform_alerts.entity_type IS 'What the alert is about: device | gateway | platform. The dashboard reddens an asset only for its own kind, so this is read before entity_id anywhere a colour or a link is derived.';
+COMMENT ON COLUMN public.platform_alerts.entity_type IS 'What the alert is about: device | gateway | platform | service_identity. The dashboard reddens an asset only for its own kind, so this is read before entity_id anywhere a colour or a link is derived. A service_identity row is about a machine identity''s token, and only an Administrator reads it (0204).';
 
 --
 
 -- COLUMN platform_alerts.entity_id :: COMMENT
-COMMENT ON COLUMN public.platform_alerts.entity_id IS 'The subject row id, or NULL for a platform-scoped alert or an id that matched nothing. Carries no foreign key on purpose -- see the column definition.';
+COMMENT ON COLUMN public.platform_alerts.entity_id IS 'The subject row id, or NULL for a platform-scoped alert or an id that matched nothing. For service_identity, the machine identity''s principal id from the rule''s principal_id label. Carries no foreign key on purpose -- see the column definition.';
 
 --
 
 -- COLUMN platform_alerts.sparkplug_id :: COMMENT
-COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplug id of the asset the alert was raised for, taken from the Grafana label. Never a display name. NULL only for entity_type = platform, which has no single subject.';
+COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplug id of the asset the alert was raised for, taken from the Grafana label. Never a display name. NULL only for entity_type platform, which has no single subject, and service_identity, which has no wire identity.';
 
 --
 
@@ -17294,7 +17294,7 @@ $ddl$);
 -- platform_alerts platform_alerts_select_authenticated :: POLICY
 SELECT public.replay_policy('public.platform_alerts', 'platform_alerts_select_authenticated', $ddl$
 CREATE POLICY platform_alerts_select_authenticated ON public.platform_alerts FOR SELECT TO authenticated USING (true);
-$ddl$);
+$ddl$, p_stated_by => '0204_a_service_token_warns_before_it_expires.sql');
 COMMIT;
 
 --
@@ -19625,5 +19625,11 @@ BEGIN
   GRANT EXECUTE ON FUNCTION public.gateway_health_rows()        TO grafana_reader;
   GRANT EXECUTE ON FUNCTION public.backup_offsite_health_rows() TO grafana_reader;
   GRANT EXECUTE ON FUNCTION public.platform_storage_rows()      TO grafana_reader;
+
+  -- 0204 creates these, and grants them itself on the first boot.
+  IF to_regclass('public.service_token_health') IS NOT NULL THEN
+    GRANT SELECT ON TABLE public.service_token_health          TO grafana_reader;
+    GRANT EXECUTE ON FUNCTION public.service_token_health_rows() TO grafana_reader;
+  END IF;
 END
 $grafana_reader$;

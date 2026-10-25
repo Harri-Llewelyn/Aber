@@ -235,10 +235,20 @@ describe('Machine identities', () => {
   it('searches by name', async () => {
     await openIdentities()
     fireEvent.click(await screen.findByRole('button', { name: 'Show withdrawn (1)' }))
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machine identities by name' }), { target: { value: 'histor' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machine identities by name or principal ID' }), { target: { value: 'histor' } })
     expect(screen.queryByText('Line 4 OEE report')).toBeNull()
     expect(screen.getByText('Historian export')).toBeInTheDocument()
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machine identities by name' }), { target: { value: 'nothing like it' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machine identities by name or principal ID' }), { target: { value: 'nothing like it' } })
+    expect(screen.getByText('No machine identity matches these filters.')).toBeInTheDocument()
+  })
+
+  it('finds one identity by its whole principal id, as an alert links to it', async () => {
+    window.history.replaceState(null, '', `/access-control/identities?search=${IDENTITY(1).principal_id.toUpperCase()}`)
+    renderPage()
+    expect(await screen.findByText('Line 4 OEE report')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Historian export')).toBeNull())
+    // A part of an id is not a search for it: a short query would match hex digits everywhere.
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search machine identities by name or principal ID' }), { target: { value: 'c0000001' } })
     expect(screen.getByText('No machine identity matches these filters.')).toBeInTheDocument()
   })
 })

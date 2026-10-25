@@ -2158,6 +2158,12 @@ const OPERATOR_PAIRS = [
       + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
       + 'reads backups, the destination settings and the vault through an owner-run function so '
       + 'the Off-site Backup Stale rule can see a number and nothing behind it',
+  service_token_health:
+      'Every live machine-identity token with its warn point (0204), granted to `grafana_reader` '
+      + 'alone and revoked from anon/authenticated, like backup_health above. It reads the '
+      + 'TOKEN_MINTED audit rows through an owner-run function so the Service Token Expiring rule '
+      + 'needs no privilege on audit_trail; the Access Control page reads those rows itself, under '
+      + 'the security lane\'s RLS',
   audit_trail_default:
       'The DEFAULT partition of audit_trail (0079), which exists so that a lapsed partition '
       + 'job degrades instead of refusing every audit write -- and therefore every asset write, '

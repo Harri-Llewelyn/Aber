@@ -598,6 +598,8 @@ curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
 **For a client you keep, issue a token for the Read-only API client instead.** It is a machine
 identity that reads telemetry and changes nothing. Its token lasts 30 days by default, and any
 client of this server can present it: i3X Explorer, an MCP client, Swagger UI, curl or a script.
+A week before it expires, the alert *Service Token Expiring* names it, so the 401s are not the
+first sign ([The token](#the-token)).
 Issue it on Access Control and copy the setup the dialog gives, or mint one from a shell.
 [The token](#the-token) says how.
 
@@ -785,6 +787,13 @@ GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
 Read-only API client, seeded by archived migration 0034. The ceiling is
 `service_token_max_days()`, which the database enforces as well as both issuers.
+
+**A recorded token warns before it expires, rather than failing as a broken server.** The Grafana
+alert *Service Token Expiring* fires 7 days before expiry, or 42 hours before for a 7-day token,
+and names the identity, the `jti` and the expiry. In the dashboard an Administrator sees it in the
+alert list, linked to the identity on Access Control: issue a new token there, put it in the
+client, then revoke the old one, which clears the alert. The rule is described in
+[`grafana/README.md`](../grafana/README.md#service-token-expiring-aber-service-token-expiring).
 
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
 write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — archived `0069`
