@@ -9,6 +9,7 @@ The settings for the whole site are on the **Settings** page, not here.
 ## What the controls do
 
 - **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your role, on the **Access Control** page.
+- **Display name**, on the **Account** tab, is the name other people see you by. Type it, then select **Save**. To remove it, empty the box and select **Save**. **Your display name**, below, says where it shows.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.
 - **Copy Key**, on the **Publishable key** row, copies the site's publishable key. Some tools ask for it beside your token. It is public: every browser that opens the dashboard is given it.
@@ -50,8 +51,21 @@ Sometimes your account cannot be reached, for example while the network is down.
 
 A change you make then applies in this browser only. The next time you sign in, your account's choices come back.
 
-## What is not here
+## Your display name
 
-There is no display name. Aber names you by your email address.
+Your display name is shown first wherever you appear. Your email address stays the way you sign in.
+
+- **On the Audit Trail, Approvals and People, your email address is always shown beside the name.** Two people can have the same name, and anyone can type any name. The email address tells them apart.
+- **In the account menu and on Archived Entities, the email address is shown when you point at the name.**
+- **Without a display name,** you are shown by your email address alone.
+- **It can be up to 80 characters.** Spaces at either end are removed. A line break, a tab or another control character is refused.
+- **An Administrator can also set it,** with **Change Name** on the **People** tab of **Access Control**.
+- **Each change is recorded in the Audit Trail,** with the old name, the new name and who changed it.
+
+**A new name shows everywhere at once.** Pages read the name when they open. So a person who changes their name is shown under the new one, even beside things they did before.
+
+**The email address beside it is the one they had at the time.** Approvals keeps the address a proposal was made from. Archived Entities keeps the address of the person who deleted the entity. The Audit Trail and People show the address the account has now.
+
+## What is not here
 
 Your notification history is not kept here. It belongs to the browser tab, and it is cleared when you sign out.

@@ -10,7 +10,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 
 ## Finding a person
 
-- The **search** box matches the email address.
+- The **search** box matches the display name and the email address.
 - The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each option shows how many people it would list.
 - People whose access is removed are hidden. Select **Show removed** to list them. The button shows how many there are, and appears only while there are some. While it is on, the status filter also offers **Access removed**.
 - A **Sign-in still open** row is never hidden. Its removal did not finish, so it still needs **Remove Access**.
@@ -19,7 +19,9 @@ There is no Refresh button. Every change you make here reads the list again. To 
 
 ## Adding and removing people
 
-- **Add Person** asks for an email address and a role. The person signs in with that address.
+- **Add Person** asks for an email address and a role, and can take a display name. The person signs in with that address.
+- **A display name** is shown first, with the email address beside it. Two people can have the same name, so the address is always shown here, on Approvals and on the Audit Trail. A person without one is shown by email address alone.
+- If the display name is too long, or holds a line break or a tab, Add Person refuses it before anything is made. It can be up to 80 characters.
 - If this site has a mail relay, the person gets an invitation by email. They choose their own password from the link in it.
 - Without a mail relay, Aber makes a password for them and shows it once. Copy it before you close the dialog. Give it to them in person, or by a channel you trust. Nothing in Aber keeps a copy.
 - If that password is lost, it cannot be shown again. Select **Set New Password** on their row instead.
@@ -30,11 +32,13 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
+- **Change Name** sets or changes a person's display name, on any row. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
+- A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
 - **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**. Its role and removal controls are greyed out: hover over one to see why. In place of **Set New Password**, your row has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
-- Adding a person, changing a role, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
+- Adding a person, changing a role, changing a display name, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
 
 **A removed person loses their sessions within a minute, except in Grafana.** Their role goes straight away. An open dashboard gets nothing more from the database. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within the hour. They cannot sign in again. If they held Administrator, check Node-RED's flows, Grafana and the Audit Trail afterwards.
