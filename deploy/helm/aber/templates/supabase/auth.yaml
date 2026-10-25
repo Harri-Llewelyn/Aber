@@ -88,6 +88,15 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             - name: GOTRUE_JWT_EXP
               value: {{ .Values.supabaseAuth.jwtExpiry | quote }}
+            {{- /* Unset is off. GoTrue exits on a duration of zero or less, or one with no unit. */}}
+            {{- with .Values.supabaseAuth.sessionInactivityTimeout }}
+            {{- $timeout := toString . }}
+            {{- if or (not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$" $timeout)) (regexMatch "^([0.]+(ns|us|µs|ms|s|m|h))+$" $timeout) }}
+            {{- fail (printf "\n\naber: supabaseAuth.sessionInactivityTimeout must be a positive duration such as 168h, or \"\" for no timeout, not %q.\n" $timeout) }}
+            {{- end }}
+            - name: GOTRUE_SESSIONS_INACTIVITY_TIMEOUT
+              value: {{ $timeout | quote }}
+            {{- end }}
             - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
               value: authenticated
             # GoTrue does NOT default the audience. Without this it looks users up with aud = '',

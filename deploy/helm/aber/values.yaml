@@ -605,6 +605,10 @@ supabaseAuth:
   # password. For a development stack only; values-dev.yaml turns them on.
   demoAccounts: false
   jwtExpiry: 3600
+  # GoTrue ends a session nothing has refreshed for this long, so the person signs in again. An
+  # open dashboard refreshes about hourly and stays signed in, as a wall display must; a closed
+  # browser or a forgotten laptop does not. A duration (168h is 7 days); "" for no timeout.
+  sessionInactivityTimeout: 168h
   # The request header GoTrue keys its per-client rate limits on (sign-in, token refresh, OTP,
   # verify, MFA). On /auth/v1/ the gateway sets X-Forwarded-For to the one client address it
   # resolves (supabaseEnvoy.trustedProxyHops), which names the client only once

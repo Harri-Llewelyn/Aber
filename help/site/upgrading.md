@@ -1205,6 +1205,39 @@ Every workload rolls once, as at every release. Beyond that:
     `supabase-envoy` on port 8000. The chart's own policies already do. Without it, each run fails
     and deletes nothing.
 
+### From 1.7.0, Sign Out ends this browser's session only
+
+**Sign Out** in the dashboard used to end every session the person held, in every browser and
+service. It now ends the dashboard's session in that browser only. It still signs that browser out
+of Studio and the forge.
+
+The API now refuses a token whose session has ended. It answers 401 with the code
+`session_not_found`. Before, it accepted the token until it expired, up to an hour later. A session
+ends at a Sign Out, a new password, or the timeout below.
+
+This matters for a script that uses a token copied with **Copy Token** on the Profile page. Signing
+out in that browser now ends the token at once. Give a script a machine identity's token instead,
+from **Access Control** → **Machine identities**.
+
+### From 1.7.0, a session nobody uses for 7 days ends
+
+Before 1.7.0, a session lasted until someone signed out. Now GoTrue ends a session that nothing has
+refreshed for `supabaseAuth.sessionInactivityTimeout`. The default is `168h`, which is 7 days.
+
+- An open dashboard refreshes about once an hour, so a wall display stays signed in.
+- A browser left closed for a week asks for a sign-in.
+- The time counts from each session's last refresh. So a browser not opened in the week before the
+  upgrade asks for a sign-in straight away.
+
+To keep sessions open until someone signs out, set the value empty:
+
+```yaml
+supabaseAuth:
+  sessionInactivityTimeout: ""
+```
+
+The chart refuses `0` and a number with no unit, because GoTrue does not start with either.
+
 ### From 1.7.0, `scripts/mint-mcp-token.mjs` is deprecated
 
 The script that issues a token from a shell is now `scripts/mint-api-token.mjs`. It takes the same
