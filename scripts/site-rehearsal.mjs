@@ -45,8 +45,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  IMAGES, IMG_NS, buildImages, capture, die, ensureCertManager, ensureTraefikConfig, forwardReady,
-  freePort, importImages, must, preflight, printRestartedContainers, run, sleep, step,
+  IMAGES, IMG_NS, buildImages, capture, die, ensureCertManager, ensureTraefikConfig, forwardOnFreePort,
+  importImages, must, preflight, printRestartedContainers, run, sleep, spawnPortForward, step,
 } from './dev-cluster.mjs'
 import { CHART_REF, compareReleases, readChartVersion } from './lib/release-chart.mjs'
 
@@ -420,13 +420,17 @@ function assertUpgradeMigrated (version) {
 // ---------------------------------------------------------------------------------------------
 // Sign-in, through Traefik
 // ---------------------------------------------------------------------------------------------
+// A second attempt only when the port was taken (forwardOnFreePort): a Service with no ready pod
+// fails on the first.
 async function forwardTraefik () {
-  const port = await freePort()
-  const child = spawn('kubectl', ['-n', 'kube-system', 'port-forward', 'svc/traefik', `${port}:443`],
-    { cwd: REPO, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
-  children.add(child)
-  if (!(await forwardReady(child))) die('the port-forward to Traefik did not open')
-  return { port, close: () => { child.kill(); children.delete(child) } }
+  const forward = await forwardOnFreePort(port => {
+    const child = spawnPortForward('kube-system', 'svc/traefik', `${port}:443`)
+    children.add(child)
+    child.on('close', () => children.delete(child))
+    return child
+  })
+  if (!forward.ok) die(`the port-forward to Traefik did not open: ${forward.reason}`)
+  return { port: forward.port, close: () => forward.child.kill() }
 }
 
 function request ({ port, ca, method = 'GET', urlPath, headers = {}, body }) {
