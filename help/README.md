@@ -48,7 +48,7 @@ The help for each page of the dashboard, in the order the sidebar lists them.
 - [Directory](pages/directory.md): every service Aber runs, and how to reach it.
 - [Access Control](pages/access-control.md): who and what may reach Aber.
 - [Settings](pages/settings.md): the settings for the whole site.
-- [Profile](pages/profile.md): your account, and how the dashboard looks to you.
+- [Profile](pages/profile.md): your account, how the dashboard looks to you, and where you are signed in.
 
 ## Writing a page
 
