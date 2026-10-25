@@ -962,6 +962,15 @@ each pod's current log, and for every container that restarted, how its previous
 exit code, signal) and that run's last 80 lines. A restarted container's current log is its fresh
 start, which says nothing about the crash. `dev-cluster.mjs` prints the same when an e2e Job fails.
 
+**k8s-validation reserves the dev loop's forward ports before it creates its cluster.** 54321 to
+54323 sit inside Linux's ephemeral range (32768 to 60999), so any outgoing connection on the runner
+can be handed one before `dev-cluster test` listens there, and the forward fails with `EADDRINUSE`.
+The job's step after the checkout adds them to `net.ipv4.ip_local_reserved_ports`, and the restore rehearsal does
+the same for its tunnels' 54398 and 54399 (check 140 holds both lists to the scripts). On a Linux
+machine that meets the same error, `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54321-54323`
+reserves them until the next reboot; add them to the list if `sysctl net.ipv4.ip_local_reserved_ports`
+already names other ports.
+
 ## The install and upgrade rehearsals
 
 k8s-validation installs the checkout with `values-dev.yaml`, which sets every password and every

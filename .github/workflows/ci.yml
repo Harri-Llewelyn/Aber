@@ -1681,6 +1681,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      # The dev loop's fixed forwards that sit inside Linux's ephemeral range. Any outgoing socket
+      # can be handed one of them before `dev-cluster test` listens there (EADDRINUSE). Reserved,
+      # the kernel stops handing them out; an explicit listen still takes them. Added to whatever
+      # the runner reserves already. Check 140 holds the list to scripts/dev-cluster.mjs.
+      - name: Reserve The Fixed Forward Ports
+        env:
+          RESERVED_PORTS: 54321-54323
+        run: |
+          set -euo pipefail
+          echo "ephemeral range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
+          BEFORE=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
+          sudo sysctl -q -w net.ipv4.ip_local_reserved_ports="${BEFORE:+$BEFORE,}$RESERVED_PORTS"
+          echo "reserved: $(cat /proc/sys/net/ipv4/ip_local_reserved_ports)"
+
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
