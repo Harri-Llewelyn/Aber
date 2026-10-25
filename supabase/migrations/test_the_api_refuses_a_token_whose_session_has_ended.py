@@ -75,7 +75,7 @@ class EndedSessionRefusal(unittest.TestCase):
         request is served, or the error it is refused with."""
         self.cur.execute("SAVEPOINT pre_request;")
         try:
-            self.cur.execute(f"SET LOCAL ROLE {role};")
+            self.cur.execute("SELECT set_config('role', %s, true);", (role,))
             self.cur.execute('SET LOCAL "request.jwt.claims" = %s;', (json.dumps(claims),))
             self.cur.execute("SELECT public.auth_pre_request();")
         except psycopg2.Error as refused:
