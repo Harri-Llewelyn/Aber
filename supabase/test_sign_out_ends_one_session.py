@@ -40,7 +40,8 @@ def request(path, method="GET", token=None, body=None):
         with urllib.request.urlopen(req, timeout=20) as response:
             return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read().decode()
     except urllib.error.HTTPError as err:
-        return err.code, {k.lower(): v for k, v in err.headers.items()}, err.read().decode()
+        with err:
+            return err.code, {k.lower(): v for k, v in err.headers.items()}, err.read().decode()
 
 
 def sign_in():
