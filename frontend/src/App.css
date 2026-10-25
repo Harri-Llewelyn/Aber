@@ -5795,6 +5795,33 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* The note that the row could not be reached, above the table it explains. */
 .profile-source { flex-shrink: 0; padding-bottom: 0; }
 
+/* A section of the Security tab: its heading, About tip and button on one row, a line under it,
+   then its table. The button wraps under the heading on a narrow window. */
+.profile-section-head { flex-shrink: 0; }
+.profile-section-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.profile-section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.profile-section-actions { margin-left: auto; }
+.profile-section-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* A session's place, then its badges on the same line. */
+.session-where { color: var(--text-primary); }
+.session-badge { margin-left: 8px; }
+
 
 /* The sign-in screen's theme toggle. In App.css rather than inline because it needs :hover and
    :focus-visible. Every colour is a token and none has a fallback literal, the rule

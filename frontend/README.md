@@ -625,10 +625,19 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
 ### Profile, and the preferences that follow the person
 
 Two pages, two scopes, and each says which in its heading's note. **Profile**
-(`components/tabs/ProfileTab.jsx`, page id `profile`, tabs `account` and `appearance`) is the signed-in
-person's own: "Applies to you, on any browser". **Settings** is the site's: "Applies to everyone on
-this site". Profile's tabs reuse the Settings table (Setting, Description, Value, Actions), header
-row and all, so the two read alike.
+(`components/tabs/ProfileTab.jsx`, page id `profile`, tabs `account`, `appearance` and `security`) is
+the signed-in person's own: "Applies to you, on any browser". **Settings** is the site's: "Applies to
+everyone on this site". Account and Appearance reuse the Settings table (Setting, Description,
+Value, Actions), header row and all, so the two read alike.
+
+- **Security is a tab of sections, each with its own heading, About tip and line under it.** The
+  first is Sessions (`components/tabs/SessionsSection.jsx`): every session the person holds
+  (`list_my_sessions()`, `supabase/README.md` `0206`), the one in use first and marked This browser,
+  then by last activity. Where is the browser and system from the user agent, or the service
+  without the "Aber " prefix (`utils/sessions.js`, no parsing library). End calls
+  `end_my_session()` on any other row; Sign Out of All Other Sessions is
+  `signOut({ scope: 'others' })`, which auth-js answers without touching this browser's session.
+  Each act toasts with a link back to the tab and reads the list again.
 
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
