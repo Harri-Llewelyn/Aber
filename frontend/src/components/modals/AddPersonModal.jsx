@@ -3,13 +3,10 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconCheck, IconPlus, IconUser } from '../common/Icons'
-import { PERSON_ROLES, personRoleLabel } from '../../utils/people'
+import { EMAIL, PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
 import { personUrl } from '../../routes'
 import { DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName, personLabel } from '../../utils/displayName'
-
-/** ensure_first_administrator()'s and manage-people's test of an address. */
-const EMAIL = /^[^@\s]+@[^@\s]+$/
 
 /**
  * Add a person with a role, and optionally a display name. manage-people decides how they get in:
@@ -75,7 +72,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
             email={added.email}
             password={added.password}
             showToast={showToast}
-            hint="It cannot be shown again. If it is lost, select Set New Password on their row."
+            hint="It cannot be shown again. If it is lost, open their row and select Set New Password."
           >
             Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to{' '}
             {added.email} in person, or by a channel you trust. They sign in with it as{' '}

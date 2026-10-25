@@ -127,6 +127,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   const [section, setSection, sectionHref] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
   // The role whose rules the drawer shows, by name, in the address as `?broker-role=`.
   const [openRole, setOpenRole] = useUrlState('broker-role', '', { allowed: ROLE_ENTRIES.map(e => e.rolename) })
+  // Where People draws a person's drawer: beside the card, as the role drawer is.
+  const [personDrawerHost, setPersonDrawerHost] = useState(null)
   const [rows, setRows] = useState([])
   // One flag per read a card waits on, so a card that is still loading says so instead of reading
   // as empty.
@@ -415,7 +417,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           />
 
           {section === 'people' && showPeople && (
-            <PeopleSection showToast={showToast} currentUserId={currentUserId} />
+            <PeopleSection showToast={showToast} currentUserId={currentUserId} drawerHost={personDrawerHost} />
           )}
 
           {section === 'credentials' && (<>
@@ -1030,6 +1032,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           </ContextPanel>
         )
       })()}
+
+      {/* A box of its own would be a third column; `contents` makes the drawer a flex item of the row. */}
+      <div ref={setPersonDrawerHost} style={{ display: 'contents' }} />
 
       {credentialForGw && (
         <GatewayCredentialModal

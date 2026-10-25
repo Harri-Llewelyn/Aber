@@ -142,8 +142,8 @@ describe('where a notification links to', () => {
   it('finds a backup run, a person and a machine identity', () => {
     expect(backupUrl()).toBe('/backups')
     expect(backupUrl('b-1')).toBe('/backups?run=b-1')
-    expect(personUrl('op@site.test')).toBe('/access-control/people?search=op%40site.test')
-    expect(personUrl('op@site.test', true)).toBe('/access-control/people?search=op%40site.test&removed=1')
+    expect(personUrl('op@site.test')).toBe('/access-control/people?search=op%40site.test&person=op%40site.test')
+    expect(personUrl('op@site.test', true)).toBe('/access-control/people?search=op%40site.test&removed=1&person=op%40site.test')
     expect(identityUrl('Line 4 report', true)).toBe('/access-control/identities?search=Line+4+report&withdrawn=1')
   })
 
@@ -156,7 +156,7 @@ describe('where a notification links to', () => {
     ['components/tabs/MetricsTab.jsx', ["useUrlState('metric'"], 'deprecated'],
     ['components/tabs/CaptureTab.jsx', ["useUrlState('subject'"], 'device'],
     ['components/tabs/BackupsTab.jsx', ["useUrlState('run'"], null],
-    ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'"], null],
+    ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'", "useUrlState('person'"], null],
     ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
   ])('%s reads what its link writes', (file, needles, tab) => {
     const text = source(file)
