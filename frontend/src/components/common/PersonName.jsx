@@ -16,13 +16,13 @@ export function PersonName({ name, email, id, emailOnHover = false, stacked = fa
     return <span className={`${classes} mono`}>{id ? String(id) : ''}</span>
   }
   if (!email) {
-    return <span className={classes}><bdi className="person-name-display">{name}</bdi></span>
+    return <span className={classes}><bdi>{name}</bdi></span>
   }
   if (emailOnHover) {
     return (
       <Tooltip text={email}>
         <span className={classes}>
-          <bdi className="person-name-display">{name}</bdi>
+          <bdi>{name}</bdi>
           {/* Read out, since a tooltip is not. */}
           <span className="sr-only"> ({email})</span>
         </span>
@@ -31,7 +31,7 @@ export function PersonName({ name, email, id, emailOnHover = false, stacked = fa
   }
   return (
     <span className={classes}>
-      <bdi className="person-name-display">{name}</bdi>
+      <bdi>{name}</bdi>
       {stacked ? null : ' '}
       <span className="person-name-email">{email}</span>
     </span>

@@ -1711,10 +1711,10 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* A person (PersonName.jsx): the display name, then the email in the secondary colour. Stacked, the
    email takes a line of its own, as in the People table. */
+.person-name { overflow-wrap: anywhere; }
 .person-name-email {
   font-size: 12px;
   color: var(--text-muted);
-  overflow-wrap: anywhere;
 }
 .person-name-stacked {
   display: inline-flex;

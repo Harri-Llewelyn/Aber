@@ -199,7 +199,7 @@ async function addPerson(req: Request, body: Record<string, unknown>, caller: Cl
   if (displayName) {
     const { error: nameRefusal } = await caller.rpc("set_display_name", { p_user_id: userId, p_name: displayName });
     if (nameRefusal) {
-      console.error(`manage-people: setting the display name of new account ${userId} failed:`, nameRefusal.message);
+      console.error("manage-people: setting a new account's display name failed:", userId, nameRefusal.message);
       nameError = "Their display name was not set. Select Change Name on their row to set it.";
     }
   }
