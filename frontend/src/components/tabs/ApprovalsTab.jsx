@@ -3,6 +3,7 @@ import { proposalSubjectUrl, proposalUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
@@ -15,6 +16,7 @@ import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
+import { PersonName } from '../common/PersonName'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -172,14 +174,15 @@ function ProposalStatus({ status }) {
 
 /**
  * The proposer. `proposed_by_email` is stamped from the signed access token on INSERT, so it is
- * evidence rather than a typed name. A machine identity has no email; `machineName` is the name an
- * Administrator gave it, from `list_proposer_names()`. The uuid is the fallback for a principal
- * with neither.
+ * evidence rather than a typed name, and it stays beside the person's display name (`name`, read
+ * live through display_names_for()), since anyone can type any name. A machine identity has no
+ * email; `machineName` is the name an Administrator gave it, from `list_proposer_names()`. The
+ * uuid is the fallback for a principal with neither.
  */
-export function ActorLabel({ id, email, machineName, currentUserId }) {
+export function ActorLabel({ id, email, name, machineName, currentUserId }) {
   if (!id) return <span className="context-field-empty">—</span>
   if (id === currentUserId) return <strong>you</strong>
-  if (email) return <Tooltip text={id}><span>{email}</span></Tooltip>
+  if (email) return <Tooltip text={id}><span><PersonName name={name} email={email} /></span></Tooltip>
   if (machineName) {
     return (
       <Tooltip text={`A machine identity, ${id}`}>
@@ -392,15 +395,15 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
  * The filter both queues share. `entity_id` is searchable because a route from elsewhere arrives
  * pointed at one subject by uuid.
  */
-export function filterProposals(rows, kind, query) {
+export function filterProposals(rows, kind, query, names = new Map()) {
   const needle = String(query || '').trim().toLowerCase()
   return rows.filter(p => {
     if (kind !== 'all' && p.entity_type !== kind) return false
     if (!needle) return true
     // The fields somebody remembers about a request: subject, reason, rationale, the proposer's
-    // email or machine name, and the id.
-    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email,
-      p.proposed_by_machine_name, p.entity_id]
+    // name, email or machine name, and the id.
+    return [p.target_label, p.decision_reason, p.rationale, names.get(p.proposed_by),
+      p.proposed_by_email, p.proposed_by_machine_name, p.entity_id]
       .some(v => String(v || '').toLowerCase().includes(needle))
   })
 }
@@ -489,6 +492,10 @@ export function ApprovalsTab({
 
   usePolling(loadAll, POLL_INTERVAL_MS)
 
+  // The proposers' display names, read live beside the email stamped at the time. Only the people
+  // this viewer can already see here are answered; anyone else is drawn by email alone.
+  const proposerNames = useDisplayNames(useMemo(() => proposals.map(p => p.proposed_by), [proposals]))
+
   const refresh = useCallback(async () => {
     try { await loadAll() } catch { /* the poller reports a failing backend */ }
   }, [loadAll])
@@ -508,11 +515,11 @@ export function ApprovalsTab({
   )
 
   const decidedFiltered = useMemo(
-    () => filterProposals(decided, decidedKind, decidedQuery), [decided, decidedKind, decidedQuery])
+    () => filterProposals(decided, decidedKind, decidedQuery, proposerNames), [decided, decidedKind, decidedQuery, proposerNames])
 
   // The working queue filters too: the device drawer routes here with the device's id as the query.
   const openFiltered = useMemo(
-    () => filterProposals(open, openKind, openQuery), [open, openKind, openQuery])
+    () => filterProposals(open, openKind, openQuery, proposerNames), [open, openKind, openQuery, proposerNames])
 
   /* What waits on this viewer, by the rule the sidebar's count uses: lanes they may decide, and not
      their own requests. */
@@ -711,6 +718,7 @@ export function ApprovalsTab({
           {
             label: 'Proposed by',
             value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
+                               name={proposerNames.get(selected.proposed_by)}
                                machineName={selected.proposed_by_machine_name}
                                currentUserId={currentUserId} />,
             help: selected.proposed_by_email || !selected.proposed_by_machine_name

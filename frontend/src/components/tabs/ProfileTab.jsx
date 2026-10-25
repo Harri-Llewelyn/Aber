@@ -7,6 +7,7 @@ import { useUrlTab } from '../../hooks/useUrlState'
 import { PROFILE_TABS } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
+import { DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName } from '../../utils/displayName'
 import { formatClockTime, formatDateTime, NO_VALUE } from '../../utils/format'
 import { supabase } from '../../lib/supabaseClient'
 import { SUPABASE_GATEWAY_KEY } from '../../config'
@@ -21,13 +22,18 @@ const THEME_OPTIONS = [
 ]
 
 /** One row of the Settings page's table: the name, what it does, its value, and what can be done. */
-/** Save and Discard for a row with an unsaved choice, as the Settings page shows them; nothing otherwise. */
-function SaveDiscard({ dirty, onSave, onDiscard }) {
+/**
+ * Save and Discard for a row with an unsaved choice, as the Settings page shows them; nothing
+ * otherwise. `disabled` holds both while a save runs, and Save alone while `saveBlocked` says why.
+ */
+function SaveDiscard({ dirty, onSave, onDiscard, disabled = false, saveBlocked = null }) {
   if (!dirty) return null
   return (
     <div className="setting-actions">
-      <button type="button" className="btn btn-primary btn-sm" onClick={onSave}>Save</button>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onDiscard}>
+      <Tooltip text={saveBlocked}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={disabled || !!saveBlocked}>Save</button>
+      </Tooltip>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onDiscard} disabled={disabled}>
         <IconX size={13} /> Discard
       </button>
     </div>
@@ -148,6 +154,76 @@ function AccessTokenRow() {
   )
 }
 
+/**
+ * The person's own display name (0203): shown first wherever they appear, with their email beside it
+ * where trust matters. Held as a draft until Save, as the other rows are; an empty name clears it.
+ * `displayName` is undefined while it is read. A machine identity has none.
+ */
+function DisplayNameRow({ displayName, onSave, isPerson }) {
+  // null while the row shows what is saved.
+  const [draft, setDraft] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const loading = displayName === undefined
+  const shown = draft ?? (displayName || '')
+  const problem = displayNameProblem(shown)
+  const dirty = draft !== null && normaliseDisplayName(draft) !== (displayName || null)
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave?.(normaliseDisplayName(draft))
+      setDraft(null)
+    } catch (err) {
+      setError(err.message || 'Your display name was not saved.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!isPerson) {
+    return (
+      <ProfileRow
+        id="display-name"
+        label="Display name"
+        description="The name shown beside a person's email address."
+        value="None: a machine identity is named on the Access Control page"
+      />
+    )
+  }
+  return (
+    <ProfileRow
+      id="display-name"
+      label="Display name"
+      description="Shown first wherever you appear, with your email address beside it on the Audit Trail, Approvals and People. Leave it empty to be shown by your email address alone."
+      value={(<>
+        <input
+          id="profile-display-name"
+          className="form-control"
+          type="text"
+          value={shown}
+          onChange={e => { setDraft(e.target.value); setError(null) }}
+          placeholder={loading ? 'Loading…' : 'Your name, as colleagues know it'}
+          disabled={loading || saving}
+          autoComplete="name"
+          aria-invalid={problem ? 'true' : undefined}
+          aria-describedby="profile-display-name-detail"
+        />
+        <div id="profile-display-name-detail" className="setting-bounds profile-detail">
+          {`Up to ${DISPLAY_NAME_MAX} characters.`}
+        </div>
+      </>)}
+      actions={(<>
+        <SaveDiscard dirty={dirty} disabled={saving} saveBlocked={problem}
+          onSave={save}
+          onDiscard={() => { setDraft(null); setError(null) }} />
+        {(problem || error) && <div className="setting-error" role="status">{problem || error}</div>}
+      </>)}
+    />
+  )
+}
+
 /** The four columns, with their header row even for a tab of one row. */
 function ProfileTable({ children }) {
   return (
@@ -177,10 +253,12 @@ function ProfileTable({ children }) {
  * `settingsSource` is that hook's `source`; 'browser' means the row could not be read or written.
  * `passwordBlocked` is why Change Password is unavailable (a machine identity), or null.
  * `userRole` is undefined while it is still being read, and null for an account with no role.
+ * `displayName` is the person's own (undefined while read, null for none); `onSaveDisplayName`
+ * saves it and rejects with the database's sentence.
  * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
-  email, userRole, passwordBlocked = null, onChangePassword,
+  email, userRole, passwordBlocked = null, onChangePassword, displayName, onSaveDisplayName,
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
   singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account',
 }) {
@@ -224,6 +302,7 @@ export function ProfileTab({
                 description="The address you sign in with."
                 value={email || 'None: this identity signs in with a token'}
               />
+              <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
               <ProfileRow
                 id="role"
                 label="Role"

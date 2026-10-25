@@ -926,6 +926,7 @@ paths:
         `status` is `removed` while the person's access is removed (here or by a GoTrue ban),
         `invited` until they first sign in, and `active` after. `sign_in_blocked` says whether
         GoTrue bans the account now; `removed` with `false` means the ban still has to be made.
+        `display_name` is the person's display name (`0203`), NULL when they have none.
       responses:
         '200':
           description: Every person, by email.
@@ -945,7 +946,74 @@ paths:
                     invited_at:      { type: string, format: date-time, nullable: true }
                     last_sign_in_at: { type: string, format: date-time, nullable: true }
                     created_at:      { type: string, format: date-time, nullable: true }
+                    display_name:    { type: string, nullable: true, description: 'Read live. 1 to 80 characters; NULL when the person has none.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/set_display_name:
+    post:
+      tags: [Auth]
+      summary: Set or clear a person's display name
+      description: |
+        A person sets their own; an Administrator sets anyone's (`0203`). The name is trimmed, and
+        an empty or null `p_name` clears it. A change writes one `DISPLAY_NAME_CHANGED` row in the
+        person's lane of the Audit Trail (old and new name, and who changed it); setting the name a
+        person already has writes nothing. The email stays the identifier: the dashboard shows it
+        beside the name wherever trust matters.
+
+        Refused, with the reason in the message: another person's name unless you are an
+        Administrator (403); a machine identity (400, `22023`); a name over 80 characters, or one
+        holding a control character such as a line break, a tab or a bidirectional control (400,
+        `22023`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_name]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_name:    { type: string, nullable: true, description: 'Up to 80 characters after trimming. Empty or null clears the name.' }
+      responses:
+        '200':
+          description: The name the person holds now, or null.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        '400': { description: 'A machine identity, or a name the database refuses.' }
+        '403': { description: "Another person's name, and you are not an Administrator." }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/display_names_for:
+    post:
+      tags: [Auth]
+      summary: Look up the display names of people you can already see
+      description: |
+        For Approvals and Archived Entities (`0203`), which Operators and Shopfloor Managers read
+        too. Answers for your own id, for the proposer of a change proposal you may read, and for
+        the retirer of a retired entity you may read. Any other id is left out rather than refused,
+        and so is a person with no name: show the email alone for those.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_ids]
+              properties:
+                p_ids: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: One row per id answered.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:      { type: string, format: uuid }
+                    display_name: { type: string }
 
   /rest/v1/rpc/set_person_role:
     post:
@@ -2173,6 +2241,35 @@ paths:
         '400': { description: 'The value did not match `value_type`, or an immutable column was addressed.' }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/person_profiles:
+    get:
+      tags: [Auth]
+      summary: Read your own display name
+      description: |
+        One row per person who has a display name (`0203`). RLS returns your own row and nobody
+        else's, an `Administrator` included; an empty array means you have no name. Written only
+        through `/rest/v1/rpc/set_display_name`, so every change reaches the Audit Trail. Other
+        people's names are read through `list_people()`, `list_user_accounts()` and
+        `display_names_for()`. `anon` and `service_role` hold nothing on the table.
+      parameters:
+        - { name: user_id, in: query, schema: { type: string }, description: 'e.g. `eq.<your auth.uid()>`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Your row, or an empty array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:      { type: string, format: uuid }
+                    display_name: { type: string, description: 'Trimmed, 1 to 80 characters, no control characters.' }
+                    updated_at:   { type: string, format: date-time }
+                    updated_by:   { type: string, format: uuid, nullable: true, description: 'You, or the Administrator who set it.' }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/user_settings:
     get:
       tags: [Registry]
@@ -3109,7 +3206,10 @@ paths:
           link lands on the form that sets a password. Without one, the account is created with a
           24-character password minted here, returned once in `password`, and never stored or
           logged. `record_person_added()` then gives the role; if it refuses, the account is
-          deleted again.
+          deleted again. An optional `display_name` is checked before anything is created, so a
+          name the database would refuse refuses the whole add (400). It is then set with
+          `set_display_name()` in the caller's session. If that fails, the person is still added,
+          and `name_error` says why the name was not set.
         - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
           changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
         - **`restore`**: `restore_person_access()`, then the ban is lifted.
@@ -3136,6 +3236,7 @@ paths:
                 action:  { type: string, enum: [add, remove, restore, set-password] }
                 email:   { type: string, format: email, description: '`add` only.' }
                 role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
+                display_name: { type: string, nullable: true, description: '`add` only, optional. Up to 80 characters after trimming, no control characters.' }
                 user_id: { type: string, format: uuid, description: '`remove`, `restore` and `set-password`.' }
       responses:
         '200':
@@ -3149,6 +3250,8 @@ paths:
                   email:    { type: string, description: '`add`.' }
                   role:     { type: string, nullable: true, description: '`add`, and the role `restore` gave back.' }
                   invited:  { type: boolean, description: '`add`: true when an invitation was sent.' }
+                  display_name: { type: string, nullable: true, description: '`add`: the name set, or null.' }
+                  name_error: { type: string, description: '`add`, only when the person was added and their name could not be set.' }
                   password: { type: string, description: '`add` without a mail relay, and `set-password`. Shown once; nothing keeps a copy.' }
                   access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
@@ -4993,7 +5096,7 @@ components:
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
-                 PASSWORD_SET, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PASSWORD_SET, DISPLAY_NAME_CHANGED, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
@@ -5003,7 +5106,8 @@ components:
             `TOKEN_REVOKED` by `revoke_service_token()`. A service principal's creation is an
             `INSERT` written by `create_machine_principal()`. The capture and playback acts (0193)
             are written by their gates, and `CAPTURE_DELETED` by a trigger on `captures`, so a
-            replacement and a deleted subject's cascade are recorded too.
+            replacement and a deleted subject's cascade are recorded too. `DISPLAY_NAME_CHANGED`
+            (0203) is written by a trigger on `person_profiles`, in the person's `user_roles` lane.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

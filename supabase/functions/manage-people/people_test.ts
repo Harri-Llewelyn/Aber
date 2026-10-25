@@ -39,6 +39,7 @@ function stack(replies: Record<string, Reply | Reply[]> = {}, role = "Administra
     "POST /auth/v1/admin/users": { status: 200, body: NEW_USER },
     "POST /auth/v1/invite": { status: 200, body: NEW_USER },
     "POST /rest/v1/rpc/record_person_added": { status: 204, body: null },
+    "POST /rest/v1/rpc/set_display_name": { status: 200, body: "Jane Smith" },
     "POST /rest/v1/rpc/remove_person_access": { status: 200, body: true },
     "POST /rest/v1/rpc/restore_person_access": { status: 200, body: "Operator" },
     "POST /rest/v1/rpc/record_person_password_set": { status: 204, body: null },
@@ -218,6 +219,89 @@ Deno.test("an unknown role or a malformed address is refused before GoTrue", asy
     assert.equal(response.status, 400, JSON.stringify(body));
     assert.equal(gotrueAdmin(s.paths()), []);
   }
+});
+
+Deno.test("a display name is set as the caller, after the role, trimmed", async () => {
+  env(false);
+  const s = stack();
+  const { response, body } = await run(
+    post({ action: "add", email: "new@site.test", role: "Operator", display_name: "  Jane Smith " }),
+    s,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(body.display_name, "Jane Smith");
+  assert.equal("name_error" in body, false);
+  const paths = s.paths();
+  assert.ok(
+    paths.indexOf("POST /rest/v1/rpc/record_person_added") < paths.indexOf("POST /rest/v1/rpc/set_display_name"),
+    "the role is recorded before the name",
+  );
+  const named = s.calls.find((c) => c.path === "/rest/v1/rpc/set_display_name")!;
+  assert.equal(named.auth, `Bearer ${CALLER_TOKEN}`, "set as the caller, so the audit row names them");
+  assert.equal(named.body, { p_user_id: NEW_ID, p_name: "Jane Smith" });
+});
+
+Deno.test("without a display name, none is set", async () => {
+  for (const displayName of [undefined, null, "", "   "]) {
+    env(false);
+    const s = stack();
+    const { response, body } = await run(
+      post({ action: "add", email: "new@site.test", role: "Operator", display_name: displayName }),
+      s,
+    );
+    assert.equal(response.status, 200, String(displayName));
+    assert.equal(body.display_name, null, String(displayName));
+    assert.equal(s.paths().includes("POST /rest/v1/rpc/set_display_name"), false, String(displayName));
+  }
+});
+
+Deno.test("a display name the database would refuse refuses the add before the account exists", async () => {
+  for (const [displayName, why] of [
+    ["N".repeat(81), /80 characters/],
+    ["Jane\nSmith", /control character/],
+    ["Jane\u202eSmith", /control character/],
+    [42, /must be text/],
+  ] as const) {
+    env(false);
+    const s = stack();
+    const { response, body } = await run(
+      post({ action: "add", email: "new@site.test", role: "Operator", display_name: displayName }),
+      s,
+    );
+    assert.equal(response.status, 400, String(displayName));
+    assert.ok(why.test(body.details), body.details);
+    assert.equal(gotrueAdmin(s.paths()), [], "GoTrue made nothing");
+    assert.equal(s.paths().includes("POST /rest/v1/rpc/record_person_added"), false);
+  }
+});
+
+Deno.test("eighty characters, in any script, is a name", async () => {
+  env(false);
+  const name = "Siân ".repeat(16).trim() + "Ó"; // 80 code points
+  const s = stack();
+  const { response } = await run(post({ action: "add", email: "new@site.test", role: "Operator", display_name: name }), s);
+  assert.equal(response.status, 200);
+  assert.equal(s.calls.find((c) => c.path === "/rest/v1/rpc/set_display_name")?.body?.p_name, name);
+});
+
+Deno.test("a name the database does not set leaves the person added, and says so", async () => {
+  env(false);
+  const s = stack({
+    "POST /rest/v1/rpc/set_display_name": {
+      status: 503,
+      body: { code: "57P01", message: "terminating connection", details: null, hint: null },
+    },
+  });
+  const { response, body, logged } = await run(
+    post({ action: "add", email: "new@site.test", role: "Operator", display_name: "Jane Smith" }),
+    s,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(body.display_name, null);
+  assert.ok(/Change Name/.test(body.name_error), body.name_error);
+  assert.ok(typeof body.password === "string", "the password is still shown once");
+  assert.equal(s.paths().some((p) => p.startsWith("DELETE")), false, "the account is kept");
+  assert.ok(logged.some((l) => l.includes("terminating connection")), "the cause is logged");
 });
 
 Deno.test("an address the site already holds is a conflict, and GoTrue is not asked", async () => {

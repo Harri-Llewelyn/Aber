@@ -302,18 +302,19 @@ class UserAccountsListing(unittest.TestCase):
         )
         self.assertEqual(self.cur.fetchone()[0], 0)
 
-    def test_it_returns_the_id_and_the_email_and_nothing_else(self):
+    def test_it_returns_the_id_the_email_and_the_display_name_and_nothing_else(self):
         """
         A read surface over the auth schema returns the least that does the job. A column added
         here is a column every Administrator's browser receives, so it is a decision rather than a
-        convenience.
+        convenience. The display name (0203) is the one decided since: the lane it labels shows it
+        beside the email.
         """
         self.cur.execute(
             "SELECT pg_get_function_result(p.oid) FROM pg_proc p"
             "  JOIN pg_namespace n ON n.oid = p.pronamespace"
             " WHERE n.nspname = 'public' AND p.proname = 'list_user_accounts'"
         )
-        self.assertEqual(self.cur.fetchone()[0], "TABLE(user_id uuid, email text)")
+        self.assertEqual(self.cur.fetchone()[0], "TABLE(user_id uuid, email text, display_name text)")
 
 
 if __name__ == "__main__":

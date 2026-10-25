@@ -506,6 +506,8 @@ function portOpen (port) {
 
 // A port the OS picks, but never one of the fixed forwards: Linux hands out 32768-60999, which holds
 // 54321-54323, and a relay's warm forward that took 54322 left the next relay nowhere to listen.
+// Any other socket can take one too; CI reserves them (net.ipv4.ip_local_reserved_ports), and
+// docs/testing.md says how on a Linux machine.
 export async function freePort () {
   const fixed = new Set([...FORWARDS, ...LB_FORWARDS].map(f => f.local))
   for (;;) {
@@ -518,22 +520,62 @@ export async function freePort () {
   }
 }
 
-function spawnForward (f, local) {
-  return spawn('kubectl', ['-n', NS, 'port-forward', `svc/${f.service}`, `${local}:${f.remote}`],
-    { cwd: REPO, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+// kubectl port-forward with stdout and stderr piped. forwardReady reads both and keeps draining
+// them for the forward's life: a pipe nobody reads fills, and kubectl stalls writing to it. The pod
+// wait stays inside forwardReady's 15 s, so a Service with no running pod exits with kubectl's
+// reason rather than timing out silently (kubectl's own default wait is a minute).
+export function spawnPortForward (namespace, target, ports) {
+  return spawn('kubectl', ['-n', namespace, 'port-forward', '--pod-running-timeout=10s', target, ports],
+    { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
 }
 
-// Resolves true once kubectl reports the listener open, false if it exited or timed out first.
-// Read from its stdout rather than probed: a probe is a connection the Service behind sees.
+function spawnForward (f, local) {
+  return spawnPortForward(NS, `svc/${f.service}`, `${local}:${f.remote}`)
+}
+
+// kubectl's words for a listener it could not bind because another socket holds the port, on
+// Linux and macOS, and on Windows.
+const PORT_TAKEN = /address already in use|only one usage of each socket address/i
+
+// Resolves { ok: true } once kubectl reports the listener open. Otherwise { ok: false, reason,
+// portTaken }: the reason says whether kubectl exited (with the last lines of its stderr) or printed
+// no "Forwarding from" in time (with whatever stderr it had printed). Read from stdout rather than
+// probed: a probe is a connection the Service behind sees.
 export function forwardReady (child, ms = 15_000) {
   return new Promise(resolve => {
     let out = ''
+    let err = ''
     let settled = false
-    const settle = ok => { if (!settled) { settled = true; clearTimeout(timer); resolve(ok) } }
-    const timer = setTimeout(() => settle(false), ms)
-    child.stdout.on('data', d => { if (!settled) { out += d; if (out.includes('Forwarding from')) settle(true) } })
-    child.on('exit', () => settle(false))
+    const settle = result => { if (!settled) { settled = true; clearTimeout(timer); resolve(result) } }
+    const fail = (what, quoted) => {
+      const lines = err.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-5)
+      const reason = lines.length
+        ? `${what}. ${quoted}:\n${lines.map(l => `    ${l}`).join('\n')}`
+        : `${what}; kubectl's stderr was empty`
+      settle({ ok: false, reason, portTaken: PORT_TAKEN.test(err) })
+    }
+    const timer = setTimeout(() => fail(`no "Forwarding from" after ${ms / 1000} s`, 'kubectl\'s stderr so far'), ms)
+    child.stdout.on('data', d => { if (!settled) { out += d; if (out.includes('Forwarding from')) settle({ ok: true }) } })
+    child.stderr.on('data', d => { if (!settled) err = (err + d).slice(-4096) })
+    child.on('error', error => fail(`kubectl did not start (${error.message})`, 'Its stderr'))
+    // 'close', not 'exit': it comes after the pipes are read to the end, so the last lines are in.
+    child.on('close', (code, signal) => fail(code === null ? `kubectl exited on ${signal}` : `kubectl exited with code ${code}`, 'Its stderr ended'))
   })
+}
+
+// A forward on a port freePort() picks, opened once more on another when kubectl found the first
+// one taken: freePort() closes its listener before kubectl opens one, and another socket can take
+// the port in between. Any other failure is returned at once. `spawnAt(port)` starts kubectl.
+export async function forwardOnFreePort (spawnAt, ms) {
+  for (let attempt = 1; ; attempt++) {
+    const port = await freePort()
+    const child = spawnAt(port)
+    const ready = await forwardReady(child, ms)
+    if (ready.ok) return { ok: true, port, child }
+    child.kill()
+    if (!ready.portTaken || attempt === 2) return ready
+    console.log(`  ${c.dim(`port ${port} was taken before kubectl listened on it; once more on another`)}`)
+  }
 }
 
 // A libpq session over TLS ends with a Terminate message and then a TLS close_notify. The backend
@@ -558,9 +600,12 @@ async function openRelay (f) {
     const child = spawnForward(f, port)
     live.add(child)
     child.on('exit', () => live.delete(child))
-    const ok = await forwardReady(child)
+    const opened = await forwardReady(child)
     pending--
-    if (!ok || closed) {
+    if (!opened.ok || closed) {
+      if (!opened.ok && !closed) {
+        console.error(`  ${c.red('relay')} a forward for ${f.what} (${port} -> ${f.service}:${f.remote}) did not open: ${opened.reason}`)
+      }
       child.kill()
       while (waiting.length && !pending) waiting.shift()(null)
       return
@@ -617,9 +662,10 @@ async function openForwards ({ tls }) {
     } else {
       const child = spawnForward(f, f.local)
       handles.push({ close: () => child.kill() })
-      if (!(await forwardReady(child))) {
+      const ready = await forwardReady(child)
+      if (!ready.ok) {
         close()
-        die(`the port-forward for ${f.what} (${f.local} -> ${f.service}:${f.remote}) did not open`)
+        die(`the port-forward for ${f.what} (${f.local} -> ${f.service}:${f.remote}) did not open: ${ready.reason}`)
       }
     }
     opened.push(f)

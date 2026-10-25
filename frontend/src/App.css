@@ -532,6 +532,14 @@ html, body, #root {
   line-height: 1.35;
 }
 
+/* The address under a display name: the identifier, quieter than the name above it. */
+.user-popover-address {
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
 .user-popover-role {
   font-size: 11px;
   text-transform: uppercase;
@@ -1699,6 +1707,19 @@ tbody tr:hover { background: var(--bg-glass); }
 .cell-meta {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* A person (PersonName.jsx): the display name, then the email in the secondary colour. Stacked, the
+   email takes a line of its own, as in the People table. */
+.person-name { overflow-wrap: anywhere; }
+.person-name-email {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.person-name-stacked {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* The auto-purge date on an archived row: a plain date. Within a week of the purge it takes the
@@ -5134,6 +5155,18 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   font-weight: 600;
   color: var(--text-dim);
   font-family: var(--font-mono);
+}
+
+/* A person's email beside their display name. It gives way before the name does, never to nothing,
+   and the lane's tooltip has it whole. */
+.trail-lane-email {
+  flex: 0 3 auto;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* A flag, not a heading: it costs the lane's name as little room as possible. */

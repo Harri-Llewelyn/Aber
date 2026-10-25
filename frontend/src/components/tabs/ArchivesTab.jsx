@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { entityUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -15,6 +15,8 @@ import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
 import { ARCHIVES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
+import { useDisplayNames } from '../../hooks/useDisplayNames'
+import { PersonName } from '../common/PersonName'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle, IconLock } from '../common/Icons'
@@ -52,7 +54,7 @@ const RETIRED_SORT = {
   type: { type: 'text', value: r => r.entity_type },
   entity_id: { type: 'text', value: r => r.entity_id },
   retired_at: { type: 'time', value: r => r.retired_at },
-  by: { type: 'text', value: r => r.retired_by_email || r.retired_by || 'retention timer' },
+  by: { type: 'text', value: r => r.retired_by_name || r.retired_by_email || r.retired_by || 'retention timer' },
   historian_id: { type: 'text', value: r => r.sparkplug_id }
 }
 
@@ -74,7 +76,14 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
   // The tab, in the path: `/archives` or `/archives/retired`.
   const [stage, setStage, stageHref] = useUrlTab('archives', STAGES.map(s => s.id), 'archived')
   const [archivedRows, archivedSort] = useSortableRows(archives, ARCHIVED_SORT, { active: stage === 'archived' })
-  const [retiredRows, retiredSort] = useSortableRows(retired, RETIRED_SORT, { active: stage === 'retired' })
+  // Who deleted each one: the email stamped at the time, and their display name read live. Only
+  // people this viewer can already see here are answered; anyone else is drawn by email alone.
+  const retirerNames = useDisplayNames(useMemo(() => retired.map(r => r.retired_by), [retired]))
+  const retiredNamed = useMemo(
+    () => retired.map(r => ({ ...r, retired_by_name: retirerNames.get(r.retired_by) || null })),
+    [retired, retirerNames]
+  )
+  const [retiredRows, retiredSort] = useSortableRows(retiredNamed, RETIRED_SORT, { active: stage === 'retired' })
   const [confirmPurge, setConfirmPurge] = useState(null)
   const [confirmRestore, setConfirmRestore] = useState(null)
   // The archived device whose export dialog is open, or null.
@@ -305,7 +314,10 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
                      <Tooltip text={r.archived_at ? `Archived ${formatDateTime(r.archived_at)}` : null}>
                        <td className="cell-meta">{formatDateTime(r.retired_at)}</td>
                      </Tooltip>
-                     <td className="cell-meta">{r.retired_by_email || (r.retired_by ? <span className="mono">{String(r.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
+                     {/* The name with the email on hover, where the column is narrow. */}
+                     <td className="cell-meta">{r.retired_by_email
+                       ? <PersonName name={r.retired_by_name} email={r.retired_by_email} emailOnHover />
+                       : (r.retired_by ? <span className="mono">{String(r.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
                      <td>{r.sparkplug_id ? <CopyableId value={r.sparkplug_id} label="historian id" onNotify={showToast} /> : <span className="cell-meta">—</span>}</td>
                      <td className="row-actions">{survivors(r)}</td>
                    </tr>

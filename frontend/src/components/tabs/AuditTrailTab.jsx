@@ -519,9 +519,12 @@ export const shortId = (id) => {
   return s.length > 13 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
 
-/** A lane's name as its label draws it: the name and its qualifier, or the shortened id. */
+/**
+ * A lane's name as its label draws it: the name and its qualifier, or the shortened id. A person
+ * with a display name carries their email too, which is said after the name.
+ */
 const laneLabel = (lane) => (lane.name
-  ? [lane.name, lane.qualifier].filter(Boolean).join(' ')
+  ? [lane.name, lane.qualifier, lane.email && `(${lane.email})`].filter(Boolean).join(' ')
   : shortId(lane.entityId))
 
 /**
@@ -640,7 +643,7 @@ export function snapshotIdentity(event) {
 export function resolveLaneName(entityId, laneEvents, identities, { canTellDeleted = false } = {}) {
   const joined = identities.get(entityId)
   if (joined?.name) {
-    return { name: joined.name, qualifier: joined.qualifier, fromSnapshot: false, gone: false }
+    return { name: joined.name, qualifier: joined.qualifier, email: joined.email, fromSnapshot: false, gone: false }
   }
 
   // Absent from a lookup that covers this kind, once that lookup has landed. Decided here rather
@@ -1057,9 +1060,13 @@ export function AuditTrailTab({ userRole, showToast }) {
         qualifier: sc.version ? `v${sc.version}` : undefined,
       })
     }
-    // The email, which is all `auth.users` carries here. An account without one falls through to
-    // the id.
-    for (const u of userAccounts) if (u?.user_id && u.email) m.set(u.user_id, { name: u.email })
+    // A person: their display name with the email beside it, since two people can share a name, or
+    // the email alone. An account with neither falls through to the id.
+    for (const u of userAccounts) {
+      if (!u?.user_id) continue
+      if (u.display_name) m.set(u.user_id, { name: u.display_name, email: u.email || undefined })
+      else if (u.email) m.set(u.user_id, { name: u.email })
+    }
     // Machine identities come from two places: the pinned ones are named by the dashboard's own
     // registry, and one created on the Access Control page has a `machine_principals` row. An id
     // in neither keeps its uuid, so unknown ones are not all drawn as one lane.
@@ -1079,7 +1086,9 @@ export function AuditTrailTab({ userRole, showToast }) {
   const entityNames = useMemo(() => {
     const m = new Map()
     for (const [id, v] of entityIdentities) {
-      if (v.name) m.set(id, v.qualifier ? `${v.name} ${v.qualifier}` : v.name)
+      if (!v.name) continue
+      const named = v.qualifier ? `${v.name} ${v.qualifier}` : v.name
+      m.set(id, v.email ? `${named} (${v.email})` : named)
     }
     return m
   }, [entityIdentities])
@@ -1802,6 +1811,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                               lane.name
                                 ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
                                 : null,
+                              lane.email || null,
                               lane.entityId,
                             ].filter(Boolean).join(' — ') + (!lane.gone ? ''
                               : lane.fromSnapshot
@@ -1818,6 +1828,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                                 {lane.qualifier && (
                                   <span className="trail-lane-qualifier">{lane.qualifier}</span>
                                 )}
+                                {/* A person's email beside their display name: the name alone is
+                                    not enough to tell who it was. */}
+                                {lane.email && <span className="trail-lane-email">{lane.email}</span>}
                                 {/* `gone`, not `fromSnapshot`: a name from a snapshot says where the
                                     label came from, and a settings or backup lane is named that way
                                     while existing perfectly well. */}
@@ -2034,7 +2047,14 @@ export function AuditTrailTab({ userRole, showToast }) {
                 copyable: true,
                 mono: true
               }
-              : { label: 'User ID', value: selected.changed_by, copyable: true, mono: true }]
+              : {
+                label: 'User ID',
+                value: selected.changed_by,
+                // The person, by name and email, where this viewer may read them; the id is copied.
+                display: entityNames.get(selected.changed_by),
+                copyable: true,
+                mono: true
+              }]
             : []),
           {
             label: 'Entity ID',

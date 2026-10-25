@@ -19,6 +19,7 @@ vi.mock('../api', () => ({
     removePersonAccess: vi.fn(),
     restorePersonAccess: vi.fn(),
     managePeople: vi.fn(),
+    setDisplayName: vi.fn(),
     // The rest of the page's reads, answered empty: this suite is about the People tab.
     listGatewayCredentials: vi.fn(),
     listBrokerInventory: vi.fn(),
@@ -286,7 +287,8 @@ describe('adding a person', () => {
     renderPeople()
     await submit('new@site.test', 'Operator')
 
-    await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator'))
+    // No name was given, so none is sent.
+    await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', null))
     const reveal = await screen.findByRole('dialog')
     expect(reveal).toHaveTextContent('it is not shown again')
     expect(within(reveal).getByLabelText('Password')).toHaveValue(MINTED)
@@ -324,6 +326,120 @@ describe('adding a person', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('button', { name: /Add Person/ })).toBeDisabled()
+  })
+})
+
+describe('display names', () => {
+  const NAMED = PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, display_name: 'Owain Operator' } : p))
+
+  it('shows a name first with the email beside it, and the email alone without one', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    renderPeople()
+    const named = await row('operator@site.test')
+    const cell = named.cells[0]
+    expect(cell).toHaveTextContent('Owain Operator')
+    // Both in view, name first: two people can share a name, and anyone can type any name.
+    expect(cell.textContent.indexOf('Owain Operator')).toBeLessThan(cell.textContent.indexOf('operator@site.test'))
+    expect((await row('invited@site.test')).cells[0].textContent).toBe('invited@site.test')
+  })
+
+  it('is matched by the search as well as the email', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    renderPeople()
+    await screen.findByText('Owain Operator')
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by name or email' }), { target: { value: 'owain' } })
+    await waitFor(() => expect(screen.queryByText('invited@site.test')).toBeNull())
+    expect(screen.getByText('operator@site.test')).toBeInTheDocument()
+  })
+
+  it('is changed from the row with Change Name, and the list is read again', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    api.setDisplayName.mockResolvedValue('Owain ap Rhys')
+    const toast = renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Change the name for operator@site.test')
+    const input = within(dialog).getByLabelText('Display name')
+    expect(input).toHaveValue('Owain Operator')
+    fireEvent.change(input, { target: { value: '  Owain ap Rhys ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, 'Owain ap Rhys'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now shown as Owain ap Rhys', 'success',
+      { to: personUrl('operator@site.test') })
+    await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
+  })
+
+  it('is cleared by saving an empty name', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    api.setDisplayName.mockResolvedValue(null)
+    const toast = renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: '   ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, null))
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now shown by email alone', 'success',
+      { to: personUrl('operator@site.test') })
+  })
+
+  it('refuses a name the database would refuse before sending it', async () => {
+    renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    const dialog = await screen.findByRole('dialog')
+    const input = within(dialog).getByLabelText('Display name')
+    fireEvent.change(input, { target: { value: 'N'.repeat(81) } })
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(dialog).toHaveTextContent('A display name is 80 characters at most.')
+    fireEvent.change(input, { target: { value: 'Owain\tOperator' } })
+    expect(dialog).toHaveTextContent('cannot contain a control character')
+    expect(api.setDisplayName).not.toHaveBeenCalled()
+  })
+
+  it('keeps the dialog open with the database\'s sentence when it is refused', async () => {
+    api.setDisplayName.mockRejectedValue(new Error('A display name is 80 characters at most.'))
+    renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Owain' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByText('A display name is 80 characters at most.')).toBeInTheDocument()
+  })
+
+  it('goes with Add Person when one is given, and a bad one stops the add', async () => {
+    api.addPerson.mockResolvedValue({
+      user_id: 'n0000000-0000-4000-8000-000000000003', email: 'new@site.test', role: 'Operator',
+      invited: true, display_name: 'Nia Newcomer',
+    })
+    renderPeople()
+    fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new@site.test' } })
+    const name = within(dialog).getByLabelText('Display name (optional)')
+    // A tab: a text box drops a line break by itself.
+    fireEvent.change(name, { target: { value: 'Nia\tNewcomer' } })
+    expect(within(dialog).getByRole('button', { name: /Add Person/ })).toBeDisabled()
+    fireEvent.change(name, { target: { value: ' Nia Newcomer ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
+    await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', 'Nia Newcomer'))
+    expect(await screen.findByText('Nia Newcomer (new@site.test) added')).toBeInTheDocument()
+  })
+
+  it('says so when the person was added and their name was not set', async () => {
+    api.addPerson.mockResolvedValue({
+      user_id: 'n0000000-0000-4000-8000-000000000004', email: 'new@site.test', role: 'Operator',
+      invited: true, display_name: null,
+      name_error: 'Their display name was not set. Select Change Name on their row to set it.',
+    })
+    const toast = renderPeople()
+    fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new@site.test' } })
+    fireEvent.change(within(dialog).getByLabelText('Display name (optional)'), { target: { value: 'Nia' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(
+      'Their display name was not set. Select Change Name on their row to set it.', 'warning',
+      { to: personUrl('new@site.test') }))
   })
 })
 

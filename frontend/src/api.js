@@ -909,7 +909,8 @@ const apiMethods = {
   },
 
   /**
-   * The people who can reach this stack, as `{ user_id, email }`.
+   * The people who can reach this stack, as `{ user_id, email, display_name }`; `display_name` is
+   * null for a person with none (0203).
    *
    * Through `list_user_accounts()` (0116) for the reason `listServicePrincipals()` goes through an
    * RPC: `auth.users` is not served by PostgREST. Administrator and Auditor only, matching the
@@ -925,13 +926,50 @@ const apiMethods = {
 
   /**
    * Every person, for the People tab: `{ user_id, email, role, status, sign_in_blocked,
-   * role_on_restore, invited_at, last_sign_in_at, created_at }` from `list_people()` (0166).
-   * Administrator only; anybody else is refused.
+   * role_on_restore, invited_at, last_sign_in_at, created_at, display_name }` from `list_people()`
+   * (0166, 0203). Administrator only; anybody else is refused.
    */
   listPeople: async () => {
     const { data, error } = await supabase.rpc('list_people');
     if (error) throw new Error(error.message || 'Could not list people');
     return data || [];
+  },
+
+  /**
+   * The signed-in person's own display name, or null for none: their `person_profiles` row (0203),
+   * the only one RLS returns them.
+   */
+  ownDisplayName: async (userId) => {
+    const { data, error } = await supabase
+      .from('person_profiles')
+      .select('display_name')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read your display name');
+    return data?.display_name ?? null;
+  },
+
+  /**
+   * Set a person's display name, or clear it with an empty or null name: your own, or anyone's as
+   * an Administrator. Resolves to the name now held, or null. The database's sentence is the error.
+   */
+  setDisplayName: async (userId, name) => {
+    const { data, error } = await supabase.rpc('set_display_name', { p_user_id: userId, p_name: name ?? null });
+    if (error) throw new Error(error.message || 'Could not set the display name');
+    return data ?? null;
+  },
+
+  /**
+   * Person id -> display name, for the people the caller can already see on Approvals and Archived
+   * Entities (`display_names_for()`, 0203). An id it may not answer, or a person with no name, is
+   * absent: show the email alone.
+   */
+  displayNamesFor: async (ids) => {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (unique.length === 0) return new Map();
+    const { data, error } = await supabase.rpc('display_names_for', { p_ids: unique });
+    if (error) throw new Error(error.message || 'Could not read display names');
+    return new Map((data || []).map(r => [r.user_id, r.display_name]));
   },
 
   /**
@@ -972,7 +1010,9 @@ const apiMethods = {
     return result;
   },
 
-  addPerson: (email, role) => api.managePeople({ action: 'add', email, role }),
+  // The name is optional; manage-people refuses a bad one before the account exists.
+  addPerson: (email, role, displayName) =>
+    api.managePeople({ action: 'add', email, role, ...(displayName ? { display_name: displayName } : {}) }),
   removePersonAccess: (userId) => api.managePeople({ action: 'remove', user_id: userId }),
   restorePersonAccess: (userId) => api.managePeople({ action: 'restore', user_id: userId }),
 

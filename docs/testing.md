@@ -297,8 +297,11 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # backup cannot use stops it before the first dump, a run leaves a manifest naming every file or
 # leaves nothing, and the restore replays each file that manifest names into its own database.
 # And the half of `npm run try` that needs no cluster: the tools it checks for, what holds a port,
-# and the published chart and values it installs. And the ESLint rule that fails on a `title` on an
-# HTML element in the dashboard, the browser's tooltip, against a fixture and its allow-list. And
+# and the published chart and values it installs. And a port-forward that does not open saying why
+# (kubectl's exit and stderr, or no "Forwarding from" in time), against stand-ins for kubectl, and
+# the second attempt the rehearsals' Traefik forward makes only on a port another socket took. And
+# the ESLint rule that fails on a `title` on an HTML element in the dashboard, the browser's
+# tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
 # prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
 npm run test:lib
@@ -440,6 +443,14 @@ python supabase/migrations/test_release_check.py
 # are never null; the first sign-in's seed never overwrites a row; and deleting the account
 # deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
+# A person can have a display name (0203). A person sets only their own and an Administrator
+# anyone's, never a machine identity's; the CHECKs refuse 81 characters and a control character,
+# with a sentence, and an empty or whitespace-only name clears it; each change writes one row in
+# the person's Audit Trail lane and the same name none; nothing writes person_profiles but
+# set_display_name(); display_names_for() answers only for the caller, the proposers and the
+# retirers they may already read; list_people() and list_user_accounts() carry the name; and
+# 0001 and 0166 bring a database holding the older list shapes forward. Every test rolls back.
+python supabase/migrations/test_a_person_can_have_a_display_name.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
@@ -969,6 +980,15 @@ The three k3d jobs share their failure dump, [`.github/actions/cluster-diagnosti
 each pod's current log, and for every container that restarted, how its previous run ended (reason,
 exit code, signal) and that run's last 80 lines. A restarted container's current log is its fresh
 start, which says nothing about the crash. `dev-cluster.mjs` prints the same when an e2e Job fails.
+
+**k8s-validation reserves the dev loop's forward ports before it creates its cluster.** 54321 to
+54323 sit inside Linux's ephemeral range (32768 to 60999), so any outgoing connection on the runner
+can be handed one before `dev-cluster test` listens there, and the forward fails with `EADDRINUSE`.
+The job's step after the checkout adds them to `net.ipv4.ip_local_reserved_ports`, and the restore rehearsal does
+the same for its tunnels' 54398 and 54399 (check 140 holds both lists to the scripts). On a Linux
+machine that meets the same error, `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54321-54323`
+reserves them until the next reboot; add them to the list if `sysctl net.ipv4.ip_local_reserved_ports`
+already names other ports.
 
 ## The install and upgrade rehearsals
 
