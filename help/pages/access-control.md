@@ -39,7 +39,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 
 **A removed person loses their sessions within a minute, except in Grafana.** Their role goes straight away. An open dashboard gets nothing more from the database. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within the hour. They cannot sign in again. If they held Administrator, check Node-RED's flows, Grafana and the Audit Trail afterwards.
 
-**A new password ends their other sessions, some of them later.** Their old password stops working straight away. Studio and the forge sign them out at their next request, and Node-RED within a minute. An open dashboard and Grafana ask them to sign in again within the hour. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
+**A new password ends their other sessions, some of them later.** Their old password stops working straight away. Studio and the forge sign them out at their next request. Node-RED and an open dashboard do within a minute, and Grafana within the hour. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
 
 ## The other tabs
 
