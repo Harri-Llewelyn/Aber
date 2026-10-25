@@ -5328,7 +5328,21 @@ COMMENT ON FUNCTION public.list_proposer_names() IS 'The name of each machine id
 --
 
 -- list_user_accounts() :: FUNCTION
-CREATE OR REPLACE FUNCTION public.list_user_accounts() RETURNS TABLE(user_id uuid, email text)
+-- display_name is 0203's. A return type cannot be replaced in place, so a database holding the
+-- two-column form drops it here first; once the shape matches, a boot drops nothing. The grants
+-- are restated in the ACL section. person_profiles is created by 0203, after this file: PL/pgSQL
+-- resolves the name when the function first runs, not when it is declared.
+DO $shape$
+BEGIN
+    IF to_regprocedure('public.list_user_accounts()') IS NOT NULL
+       AND pg_get_function_result(to_regprocedure('public.list_user_accounts()'))
+           <> 'TABLE(user_id uuid, email text, display_name text)' THEN
+        DROP FUNCTION public.list_user_accounts();
+    END IF;
+END
+$shape$;
+
+CREATE OR REPLACE FUNCTION public.list_user_accounts() RETURNS TABLE(user_id uuid, email text, display_name text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
@@ -5341,8 +5355,9 @@ BEGIN
     END IF;
 
     RETURN QUERY
-    SELECT u.id, u.email::text
+    SELECT u.id, u.email::text, p.display_name
       FROM auth.users u
+      LEFT JOIN public.person_profiles p ON p.user_id = u.id
      -- ONE DEFINITION OF "IS THIS A SERVICE ACCOUNT", which is 0048's rule. Spelling the test out
      -- again here would be a second one, and the two would agree until the day they did not.
      WHERE NOT public.is_machine_principal(u.id)
@@ -5356,7 +5371,7 @@ ALTER FUNCTION public.list_user_accounts() OWNER TO postgres;
 --
 
 -- FUNCTION list_user_accounts() :: COMMENT
-COMMENT ON FUNCTION public.list_user_accounts() IS 'The people who can reach this stack, as id and email, for naming the person an audit_trail role-assignment row is about. Membership is NOT is_machine_principal() (0048), the same predicate the rest of the stack tells a person from a service identity with. Administrator and Auditor only -- the roles audit_trail_select_security admits, because an Auditor reading uuids beside an Administrator reading names would be the same record told two ways. The email may be NULL; the caller falls back to the id.';
+COMMENT ON FUNCTION public.list_user_accounts() IS 'The people who can reach this stack, as id, email and display name (0203; NULL when they have none), for naming the person an audit_trail role-assignment row is about. Membership is NOT is_machine_principal() (0048), the same predicate the rest of the stack tells a person from a service identity with. Administrator and Auditor only -- the roles audit_trail_select_security admits, because an Auditor reading uuids beside an Administrator reading names would be the same record told two ways. The email may be NULL; the caller falls back to the id.';
 
 --
 
