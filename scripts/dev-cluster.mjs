@@ -506,6 +506,8 @@ function portOpen (port) {
 
 // A port the OS picks, but never one of the fixed forwards: Linux hands out 32768-60999, which holds
 // 54321-54323, and a relay's warm forward that took 54322 left the next relay nowhere to listen.
+// Any other socket can take one too; CI reserves them (net.ipv4.ip_local_reserved_ports), and
+// docs/testing.md says how on a Linux machine.
 export async function freePort () {
   const fixed = new Set([...FORWARDS, ...LB_FORWARDS].map(f => f.local))
   for (;;) {

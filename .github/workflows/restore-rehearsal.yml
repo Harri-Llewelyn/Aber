@@ -111,6 +111,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      # The two database tunnels' local ports (rehearse-restore.sh's SB_PORT and TS_PORT) sit inside
+      # Linux's ephemeral range, so any outgoing socket can be handed one before the tunnel listens
+      # there. Reserved, the kernel stops handing them out; an explicit listen still takes them.
+      # Check 140 holds the list to the script, as ci.yml's k8s-validation does for the dev loop.
+      - name: Reserve The Tunnels' Local Ports
+        env:
+          RESERVED_PORTS: 54398-54399
+        run: |
+          set -euo pipefail
+          echo "ephemeral range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
+          BEFORE=$(cat /proc/sys/net/ipv4/ip_local_reserved_ports)
+          sudo sysctl -q -w net.ipv4.ip_local_reserved_ports="${BEFORE:+$BEFORE,}$RESERVED_PORTS"
+          echo "reserved: $(cat /proc/sys/net/ipv4/ip_local_reserved_ports)"
+
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
