@@ -113,6 +113,7 @@ const STATED_LATER = {
   'public.change_proposals change_proposals_insert_proposer': '0177_policies_check_the_caller_once_per_query.sql',
   'public.change_proposals change_proposals_select_own_or_approver': '0177_policies_check_the_caller_once_per_query.sql',
   'public.change_proposals change_proposals_update_own_open': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.platform_alerts platform_alerts_select_authenticated': '0204_a_service_token_warns_before_it_expires.sql',
   'public.principal_permissions principal_permissions_select_own_or_admin': '0177_policies_check_the_caller_once_per_query.sql',
   'public.system_settings system_settings_select_authenticated': '0177_policies_check_the_caller_once_per_query.sql',
   'public.user_roles user_roles_select_own_or_privileged': '0177_policies_check_the_caller_once_per_query.sql',

@@ -6,8 +6,9 @@
 apiVersion: 1
 
 groups:
-  # Platform Conditions: rows of public.platform_health, gateway_health and backup_health, read as
-  # grafana_reader through the Supabase datasource. NoData is OK throughout: no row is nothing to report.
+  # Platform Conditions: rows of public.platform_health, gateway_health, backup_health and
+  # service_token_health, read as grafana_reader through the Supabase datasource. NoData is OK
+  # throughout: no row is nothing to report.
   - orgId: 1
     name: Platform Conditions
     folder: Aber - Platform Infrastructure
@@ -250,6 +251,76 @@ groups:
                 - evaluator:
                     type: lt
                     params: [30]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Service Token Expiring: a machine identity's token past its warn point, 7 days before expiry or
+      # a quarter of a shorter lifetime. The query emits only those, so any row is the alert. One
+      # instance per token; it clears when the token is revoked, its identity withdrawn, or it expires.
+      - uid: aber-service-token-expiring
+        title: Service Token Expiring
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: service_identity
+        annotations:
+          summary: >-
+            The token {{ $labels.jti }} for the machine identity {{ $labels.identity }} expires at
+            {{ $labels.expires_at }}. After that the API refuses it, and the client using it stops
+            working. {{ if eq $labels.renewal "keys_rotate" }}The deployment reads this key at
+            start: run npm run keys:rotate to sign new keys and put them in place, then revoke the
+            old token on Access Control, under Machine identities.{{ else }}Issue a new token for
+            {{ $labels.identity }} on Access Control, under Machine identities, put it in the
+            client, then revoke the old one.{{ end }}
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              # Each text column is a label. expires_at is text so the label stays fixed for the token.
+              rawSql: |
+                SELECT collected_at        AS "time",
+                       identity_name       AS identity,
+                       principal_id::text  AS principal_id,
+                       jti                 AS jti,
+                       renewal             AS renewal,
+                       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI "UTC"') AS expires_at,
+                       remaining_seconds   AS remaining_seconds
+                  FROM public.service_token_health
+                 WHERE warn_at <= collected_at
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
               datasource:
                 type: __expr__
                 uid: __expr__

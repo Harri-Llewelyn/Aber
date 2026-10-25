@@ -103,6 +103,15 @@ describe('only DEVICE alerts can redden a device', () => {
     expect(index.size).toBe(0)
   })
 
+  it('excludes an alert about a machine identity from the device and the gateway index', () => {
+    // Its entity_id is a principal id; were it ever a device's asset_id, the filter still holds.
+    const token = alert({ entity_type: 'service_identity', sparkplug_id: null,
+                          entity_id: device().asset_id, alert_name: 'Service Token Expiring', severity: 'warning' })
+    expect(alertIndex([token]).size).toBe(0)
+    expect(alertIndex([token], 'gateway').size).toBe(0)
+    expect(alertForDevice(alertIndex([token]), device())).toBeNull()
+  })
+
   it('would redden the WRONG asset without the filter, which is the case it exists for', () => {
     // A gateway alert whose wire id collides with a device's. Contrived, and exactly what a
     // re-provision under a reused id would produce.
