@@ -349,6 +349,11 @@ ends when:
 
 - the person selects **Sign Out**. That ends the dashboard's session in that browser alone, and
   clears the Studio and forge doors' cookies there. Their other browsers and services keep theirs.
+- the person ends it on the Profile page's Security tab, which lists every session they hold
+  (`list_my_sessions()`, `0206`). **End** ends one (`end_my_session()`), never the one in use;
+  **Sign Out of All Other Sessions** ends every one but that (GoTrue's `scope=others`). A person
+  sees and ends only their own: another person's session is answered as one that does not exist.
+  Ending one writes no Audit Trail row.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open
@@ -367,6 +372,12 @@ access token an ended session issued is refused:
 | Storage and Realtime | When the access token expires, at most `supabaseAuth.jwtExpiry`. They verify the token themselves and do not run `auth_pre_request()` |
 
 Unlike a removal, the person keeps their role.
+
+The Security tab shows what GoTrue records, and no more. A service's session (Grafana, Node-RED,
+Studio, the forge) was started by the service's server, so it carries no device, only the service's
+name. No session carries an address: `auth.sessions.ip` is empty. The Studio and forge sessions
+outlive a Sign Out, which clears only this browser's cookies for them, and stay listed until the
+person ends them or the inactivity timeout does.
 
 **Accepted because** the API, where every write that matters goes, refuses the token at once;
 Storage and Realtime only read; and Grafana's window is bounded by the token's expiry. A new
