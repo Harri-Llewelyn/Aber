@@ -10,7 +10,7 @@
 
 backup:
   # Each mounts a PVC into the backup service; the forge and the broker run it as root. The backup
-  # CronJob gives way to the backup service, so the first render is the one that has it.
+  # CronJob gives way to the backup service: the third render has it, with the storage volume.
   includeStorage: true
   includeForge: true
   includeBroker: true
