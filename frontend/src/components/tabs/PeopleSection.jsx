@@ -6,6 +6,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { IconArchive, IconPlus, IconShieldAlert, IconUser } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
+import { PersonName } from '../common/PersonName'
 import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlState } from '../../hooks/useUrlState'
@@ -14,10 +15,12 @@ import { rankIn, severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { AddPersonModal } from '../modals/AddPersonModal'
+import { DisplayNameModal } from '../modals/DisplayNameModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
 import { personUrl, tabUrl } from '../../routes'
+import { personLabel } from '../../utils/displayName'
 import {
   NO_ROLE,
   PERSON_ROLES,
@@ -35,7 +38,7 @@ import {
  * Administrator first, and someone holding none goes last, as does someone who never signed in.
  */
 const PEOPLE_SORT = {
-  person: { type: 'text', value: p => p.email || p.user_id },
+  person: { type: 'text', value: p => p.display_name || p.email || p.user_id },
   role: { type: 'rank', value: p => rankIn(PERSON_ROLES.map(r => r.name), p.role) },
   status: { type: 'rank', value: p => severityRank(personStatus(p).tone) },
   last_sign_in: { type: 'time', value: p => p.last_sign_in_at }
@@ -43,13 +46,15 @@ const PEOPLE_SORT = {
 
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
- * Administrator to add, re-role, remove or restore, or to give a new password. Roles are set
+ * Administrator to add, re-role, rename, remove or restore, or to give a new password. A person is
+ * drawn by their display name with their email beside it, or by the email alone; Change Name sets
+ * the name through set_display_name(). Roles are set
  * through set_person_role(); adding, removing, restoring and setting a password go through
  * manage-people, which holds GoTrue's secret key. The database refuses your own role, access or
  * password and the last Administrator who can sign in; the controls are disabled for those with
  * the reason as their tooltip. A new password is shown once, in NewPasswordModal.
  *
- * The list is searched by email and filtered by role and status, in the browser: list_people()
+ * The list is searched by name and email and filtered by role and status, in the browser: list_people()
  * returns every account, and a site has tens of them. A removed account is hidden until Show
  * removed is on; a removal that has not finished (Sign-in still open) is never hidden, because it
  * still needs Remove Access again. The filters are in the address.
@@ -63,6 +68,8 @@ export function PeopleSection({ showToast, currentUserId }) {
   const [confirming, setConfirming] = useState(null)
   // { email, password } while a new password is on screen; gone when its dialog closes.
   const [newPassword, setNewPassword] = useState(null)
+  // The person whose name the Change Name dialog is open for.
+  const [naming, setNaming] = useState(null)
   // The user_id whose role is being saved, so its select shows the wait.
   const [savingRole, setSavingRole] = useState(null)
   const [search, setSearch] = useUrlState('search')
@@ -88,7 +95,7 @@ export function PeopleSection({ showToast, currentUserId }) {
   const matching = useMemo(() => listed.filter(p => {
     if (roleFilter && (p.role || NO_ROLE) !== roleFilter) return false
     if (statusFilter && personStatus(p).key !== statusFilter) return false
-    return !query || String(p.email || p.user_id).toLowerCase().includes(query)
+    return !query || [p.display_name, p.email || p.user_id].some(v => String(v || '').toLowerCase().includes(query))
   }), [listed, roleFilter, statusFilter, query])
   const [shown, sort] = useSortableRows(matching, PEOPLE_SORT)
   const roleCount = (name) => listed.filter(p => (p.role || NO_ROLE) === name).length
@@ -107,7 +114,7 @@ export function PeopleSection({ showToast, currentUserId }) {
     setSavingRole(person.user_id)
     try {
       await api.setPersonRole(person.user_id, role)
-      showToast?.(`${person.email} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.email) })
+      showToast?.(`${personLabel(person)} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.email) })
     } catch (err) {
       showToast?.(err.message, 'error')
     } finally {
@@ -121,15 +128,15 @@ export function PeopleSection({ showToast, currentUserId }) {
     try {
       if (act === 'remove') {
         await api.removePersonAccess(person.user_id)
-        showToast?.(`${person.email} can no longer sign in`, 'success', { to: personUrl(person.email, true) })
+        showToast?.(`${personLabel(person)} can no longer sign in`, 'success', { to: personUrl(person.email, true) })
       } else if (act === 'password') {
         const result = await api.managePeople({ action: 'set-password', user_id: person.user_id })
         setNewPassword({ email: person.email, password: result.password })
-        showToast?.(`${person.email} has a new password`, 'success', { to: personUrl(person.email) })
+        showToast?.(`${personLabel(person)} has a new password`, 'success', { to: personUrl(person.email) })
       } else {
         const result = await api.restorePersonAccess(person.user_id)
         showToast?.(
-          `${person.email} can sign in again${result?.role ? ` as ${personRoleLabel(result.role)}` : ''}`,
+          `${personLabel(person)} can sign in again${result?.role ? ` as ${personRoleLabel(result.role)}` : ''}`,
           'success',
           { to: personUrl(person.email) }
         )
@@ -149,8 +156,8 @@ export function PeopleSection({ showToast, currentUserId }) {
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search by email…"
-            ariaLabel="Search people by email"
+            placeholder="Search by name or email…"
+            ariaLabel="Search people by name or email"
           />
           <select
             className="form-control control-md"
@@ -244,7 +251,8 @@ export function PeopleSection({ showToast, currentUserId }) {
                 return (
                   <tr key={p.user_id}>
                     <td>
-                      <span>{p.email || p.user_id}</span>
+                      {/* The email stays in view beside a name: two people can share one. */}
+                      <PersonName name={p.display_name} email={p.email} id={p.user_id} stacked />
                       {isSelf && <Badge size="sm" className="badge-follow" title="The account you are signed in with">YOU</Badge>}
                     </td>
                     <td>
@@ -253,7 +261,7 @@ export function PeopleSection({ showToast, currentUserId }) {
                       <Tooltip text={roleBlocked || PERSON_ROLES.find(r => r.name === p.role)?.description}>
                         <select
                           className="form-control"
-                          aria-label={`Role for ${p.email || p.user_id}`}
+                          aria-label={`Role for ${personLabel(p)}`}
                           value={p.role || ''}
                           disabled={!!roleBlocked || savingRole === p.user_id}
                           onChange={e => changeRole(p, e.target.value)}
@@ -273,6 +281,15 @@ export function PeopleSection({ showToast, currentUserId }) {
                     </td>
                     <td className="cell-meta">{p.last_sign_in_at ? formatDateTime(p.last_sign_in_at) : 'Never'}</td>
                     <td className="row-actions">
+                      <ActionButton
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setNaming(p)}
+                        title={p.display_name
+                          ? 'Change or clear the name shown beside their email address. Their email address does not change.'
+                          : 'Give them a name, shown beside their email address. Their email address does not change.'}
+                      >
+                        Change Name
+                      </ActionButton>
                       {/* Your own password is changed on Profile, so your row links there instead. */}
                       {isSelf ? (
                         <RouteLink to={tabUrl('profile')} className="btn btn-ghost btn-sm"
@@ -330,9 +347,18 @@ export function PeopleSection({ showToast, currentUserId }) {
         />
       )}
 
+      {naming && (
+        <DisplayNameModal
+          person={naming}
+          onClose={() => setNaming(null)}
+          onSaved={load}
+          showToast={showToast}
+        />
+      )}
+
       {confirming?.act === 'remove' && (
         <ConfirmModal
-          title={`Remove access for ${confirming.person.email}`}
+          title={`Remove access for ${personLabel(confirming.person)}`}
           message={(
             <>
               They can no longer sign in, and their role
@@ -352,7 +378,7 @@ export function PeopleSection({ showToast, currentUserId }) {
 
       {confirming?.act === 'password' && (
         <ConfirmModal
-          title={`Set a new password for ${confirming.person.email}`}
+          title={`Set a new password for ${personLabel(confirming.person)}`}
           message={(
             <>
               Aber makes a new password and shows it to you once, for you to give them. Their
@@ -379,7 +405,7 @@ export function PeopleSection({ showToast, currentUserId }) {
 
       {confirming?.act === 'restore' && (
         <ConfirmModal
-          title={`Restore access for ${confirming.person.email}`}
+          title={`Restore access for ${personLabel(confirming.person)}`}
           message={(confirming.person.role_on_restore || confirming.person.role)
             ? `They can sign in again, as ${personRoleLabel(confirming.person.role_on_restore || confirming.person.role)}.`
             : 'They can sign in again. They hold no role, so set one afterwards.'}

@@ -12,7 +12,8 @@ vi.mock('../api', () => ({
     get: vi.fn(),
     post: vi.fn(),
     delete: vi.fn(),
-    assetExportDownloadUrl: vi.fn()
+    assetExportDownloadUrl: vi.fn(),
+    displayNamesFor: vi.fn()
   }
 }))
 
@@ -616,6 +617,15 @@ describe('ArchivesTab shows what has been retired', () => {
     expect(rows[0].textContent).toContain('retention timer')
     expect(rows[0].textContent).toContain('abc123')
     expect(rows[1].textContent).toContain('admin@example.test')
+  })
+
+  it("names who retired it by their display name, read live, with the stamped email on hover", async () => {
+    api.displayNamesFor.mockResolvedValue(new Map([['user-1', 'Ada Admin']]))
+    await showRetired({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
+    const name = await screen.findByText('Ada Admin')
+    expect(api.displayNamesFor).toHaveBeenCalledWith(['user-1'])
+    // Read out with the email, which the tooltip shows.
+    expect(name.closest('.person-name')).toHaveTextContent('Ada Admin (admin@example.test)')
   })
 
   it('opens the audit trail with deleted entities shown, since the row is gone', async () => {

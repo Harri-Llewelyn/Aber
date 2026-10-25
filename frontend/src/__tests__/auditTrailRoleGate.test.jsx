@@ -120,6 +120,21 @@ describe('naming the person a role assignment is about', () => {
     expect(within(lane).queryByText('deleted')).toBeNull()
   })
 
+  it('puts a display name first in the lane, with the email beside it', async () => {
+    renderWith([{ user_id: USER, email: 'manager@aber.local', display_name: 'Morgan Manager' }])
+    const name = await screen.findByText('Morgan Manager')
+    const label = name.closest('.trail-lane-label')
+    // Both in view: two people can share a name, and anyone can type any name.
+    expect(within(label).getByText('manager@aber.local')).toHaveClass('trail-lane-email')
+    expect(label.textContent.indexOf('Morgan Manager')).toBeLessThan(label.textContent.indexOf('manager@aber.local'))
+  })
+
+  it('names the lane by the email alone for a person with no display name', async () => {
+    renderWith([{ user_id: USER, email: 'manager@aber.local', display_name: null }])
+    const label = (await screen.findByText('manager@aber.local')).closest('.trail-lane-label')
+    expect(label.querySelector('.trail-lane-email')).toBeNull()
+  })
+
   it('falls back to the shortened id when the caller may not list accounts', async () => {
     /* A Shopfloor_Manager or Operator is refused by `list_user_accounts()`, and api.js rejects. They cannot see this
        lane either, so the fallback names nothing they were going to be shown -- but the page must

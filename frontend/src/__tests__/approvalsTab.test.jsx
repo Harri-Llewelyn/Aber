@@ -20,7 +20,7 @@ import { tabLink, tabLinks } from '../test/tabBar'
 import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn() }
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn(), displayNamesFor: vi.fn() }
 }))
 
 /**
@@ -556,6 +556,25 @@ describe('the columns say one thing each', () => {
     expect(screen.getByText('ops.person@aber.test')).toBeInTheDocument()
   })
 
+  it("puts the proposer's display name first, with the stamped email beside it", async () => {
+    mockLoad([deviceProposal()])
+    api.displayNamesFor.mockResolvedValue(new Map([[OPERATOR_ID, 'Owain Operator']]))
+    renderTab({ currentUserId: MANAGER_ID })
+    await selectRow()
+    const name = await screen.findByText('Owain Operator')
+    expect(name.closest('.person-name')).toHaveTextContent('Owain Operator ops.person@aber.test')
+    expect(api.displayNamesFor).toHaveBeenCalledWith([OPERATOR_ID])
+  })
+
+  it('shows the email alone when the lookup answers no name for the proposer', async () => {
+    mockLoad([deviceProposal()])
+    api.displayNamesFor.mockResolvedValue(new Map())
+    renderTab({ currentUserId: MANAGER_ID })
+    await selectRow()
+    await waitFor(() => expect(api.displayNamesFor).toHaveBeenCalled())
+    expect(screen.getByText('ops.person@aber.test').closest('.person-name')).toHaveTextContent(/^ops\.person@aber\.test$/)
+  })
+
   it('still says "you" on your own, which needed no lookup', async () => {
     mockLoad([deviceProposal()])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
@@ -629,6 +648,13 @@ describe('a machine proposer is named, and marked as a machine', () => {
     render(<ActorLabel id={OPERATOR_ID} email="ops.person@aber.test" currentUserId={MANAGER_ID} />)
     expect(screen.getByText('ops.person@aber.test')).toBeInTheDocument()
     expect(screen.queryByText('machine')).toBeNull()
+  })
+
+  it('puts a display name first with the email beside it, and the email alone without one', () => {
+    render(<ActorLabel id={OPERATOR_ID} email="ops.person@aber.test" name="Owain Operator" currentUserId={MANAGER_ID} />)
+    const label = screen.getByText('Owain Operator').closest('.person-name')
+    expect(label.textContent).toBe('Owain Operator ops.person@aber.test')
+    expect(label.querySelector('bdi')).toHaveTextContent('Owain Operator')
   })
 
   it('still says "you" and a dash where it always did', () => {
@@ -802,6 +828,13 @@ describe('filterProposals', () => {
     expect(filterProposals(rows, 'all', 'eng@').map(r => r.id)).toEqual(['b'])
     expect(filterProposals(rows, 'all', 'spindle').map(r => r.id)).toEqual(['a'])
     expect(filterProposals(rows, 'all', 'not yet').map(r => r.id)).toEqual(['b'])
+  })
+
+  it("matches the proposer's display name, read live beside the stamped email", () => {
+    const names = new Map([['op-1', 'Owain Operator']])
+    const named = rows.map(r => (r.id === 'a' ? { ...r, proposed_by: 'op-1' } : r))
+    expect(filterProposals(named, 'all', 'owain', names).map(r => r.id)).toEqual(['a'])
+    expect(filterProposals(named, 'all', 'owain').map(r => r.id)).toEqual([])
   })
 
   it('applies the lane and the text together, not either', () => {

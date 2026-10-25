@@ -6,47 +6,53 @@ import { IconCheck, IconPlus, IconUser } from '../common/Icons'
 import { PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
 import { personUrl } from '../../routes'
+import { DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName, personLabel } from '../../utils/displayName'
 
 /** ensure_first_administrator()'s and manage-people's test of an address. */
 const EMAIL = /^[^@\s]+@[^@\s]+$/
 
 /**
- * Add a person with a role. manage-people decides how they get in: an invitation when the site has
- * a mail relay, otherwise a password it mints, which this dialog shows once (PasswordShownOnce).
+ * Add a person with a role, and optionally a display name. manage-people decides how they get in:
+ * an invitation when the site has a mail relay, otherwise a password it mints, which this dialog
+ * shows once (PasswordShownOnce). It refuses a bad name before the account exists; a name the
+ * database then does not set leaves the person added, and the toast says so.
  *
  * `onAdded` runs once the person exists, so the list behind the dialog can reload.
  */
 export function AddPersonModal({ onClose, onAdded, showToast }) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('Operator')
+  const [displayName, setDisplayName] = useState('')
   const [added, setAdded] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const emailRef = useRef(null)
 
-  const valid = EMAIL.test(email.trim())
+  const nameProblem = displayNameProblem(displayName)
+  const valid = EMAIL.test(email.trim()) && !nameProblem
 
   const add = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
-      const result = await api.addPerson(email.trim(), role)
+      const result = await api.addPerson(email.trim(), role, normaliseDisplayName(displayName))
       setAdded(result)
       onAdded?.(result)
       showToast?.(result.invited ? `Invitation sent to ${result.email}` : `${result.email} added`, 'success', { to: personUrl(result.email) })
+      if (result.name_error) showToast?.(result.name_error, 'warning', { to: personUrl(result.email) })
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
     }
-  }, [email, role, onAdded, showToast])
+  }, [email, role, displayName, onAdded, showToast])
 
   const close = useCallback(() => onClose(), [onClose])
 
   if (added) {
     return (
       <Modal
-        title={`${added.email} added`}
+        title={`${personLabel(added)} added`}
         icon={<IconUser size={18} />}
         size="lg"
         onClose={close}
@@ -98,7 +104,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
             className="btn btn-primary"
             onClick={add}
             disabled={!valid}
-            title={valid ? undefined : 'Enter an email address first'}
+            title={valid ? undefined : nameProblem || 'Enter an email address first'}
           >
             <IconPlus size={14} /> Add Person
           </ActionButton>
@@ -118,6 +124,25 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           disabled={busy}
           ref={emailRef}
         />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="add-person-name">Display name (optional)</label>
+        <input
+          id="add-person-name"
+          className="form-control"
+          type="text"
+          value={displayName}
+          onChange={e => setDisplayName(e.target.value)}
+          placeholder="Their name, as colleagues know it"
+          autoComplete="off"
+          disabled={busy}
+          aria-invalid={nameProblem ? 'true' : undefined}
+          aria-describedby="add-person-name-hint"
+        />
+        <div id="add-person-name-hint" className={nameProblem ? 'form-hint hint-danger' : 'form-hint'}>
+          {nameProblem || `Shown with their email address beside it. Up to ${DISPLAY_NAME_MAX} characters. They can change it on their Profile page.`}
+        </div>
       </div>
 
       <div className="form-group">
