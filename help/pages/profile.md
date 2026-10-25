@@ -78,7 +78,7 @@ A session is one sign-in. Each browser you sign in on has its own. So do Grafana
 The **Security** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
 
 - **Where** names the browser and the system, such as "Chrome on Windows". A script or other program shows as "A program". Point at the name to see what the browser reported in full.
-- **A service's session** shows the service, such as "Grafana", marked **Service**. The service signed you in from its own server, so the list cannot say which device you used.
+- **A service's session** shows the service, such as "Grafana", marked **Service**. Studio and the forge are listed the same way. The service signed you in from its own server, so the list cannot say which device you used.
 - **No address is recorded** for any session.
 - **Started** is when you signed in. **Last active** is when the session last renewed its access. An open dashboard renews about once an hour.
 
@@ -90,10 +90,7 @@ What ending a session does:
 - **Grafana** signs you out when its access runs out: within an hour on a standard install.
 - **Nothing is written to the Audit Trail.** Ending your own session changes nothing for anyone else.
 
-Some sessions outlive a **Sign Out**:
-
-- **Studio and the forge.** **Sign Out** clears this browser's cookies for them, but their sessions stay listed. End them here.
-- **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
+**A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
 
 ## What is not here
 

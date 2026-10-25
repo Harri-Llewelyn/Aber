@@ -376,8 +376,7 @@ Unlike a removal, the person keeps their role.
 The Security tab shows what GoTrue records, and no more. A service's session (Grafana, Node-RED,
 Studio, the forge) was started by the service's server, so it carries no device, only the service's
 name. No session carries an address: `auth.sessions.ip` is empty. The Studio and forge sessions
-outlive a Sign Out, which clears only this browser's cookies for them, and stay listed until the
-person ends them or the inactivity timeout does.
+are listed by service like the others, and the person can end any of them.
 
 **Accepted because** the API, where every write that matters goes, refuses the token at once;
 Storage and Realtime only read; and Grafana's window is bounded by the token's expiry. A new

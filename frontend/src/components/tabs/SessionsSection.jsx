@@ -77,7 +77,7 @@ export function SessionsSection({ isPerson = true, showToast }) {
           <h4 className="profile-section-title">Sessions</h4>
           <HelpTip
             label="About sessions"
-            text="Ending a session stops its access to the API at once. Grafana and Node-RED notice a little later. Studio and forge sign-ins outlive Sign Out until you end them here or they time out."
+            text="Ending a session stops its access to the API at once. Grafana and Node-RED notice a little later. A session nobody uses for 7 days, or the time your site sets, ends by itself."
           />
           {isPerson && (
             <div className="profile-section-actions">
