@@ -1589,6 +1589,69 @@ each function, both list shapes, and the pin on the redeclared matcher.
 `test_a_person_can_have_a_display_name.py` holds the rules, the refusals, the audit rows, who reads
 a name, and the replay of `0001` and `0166` over the older shapes.
 
+### A service token warns before it expires (0204)
+
+A machine identity's token lasts 7, 30 or 90 days (`service_token_max_days()`). Once it expires
+the API refuses it, and the client presenting it fails as if the server were broken. The Grafana
+rule *Service Token Expiring* (`aber-service-token-expiring`, [`grafana/README.md`](../grafana/README.md#service-token-expiring-aber-service-token-expiring))
+warns first. This file gives it something to read, and lets an alert be about a machine identity.
+
+- **`service_token_health` has one row per live token.** That is a token whose newest
+  `TOKEN_MINTED` row is in the trail, that has not expired, whose `jti` is not in
+  `revoked_service_tokens`, and whose identity still has its `auth.users` row and is not in
+  `revoked_service_principals`. It reads the rows the Access Control page's token list reads
+  (`listServiceTokens()` in `frontend/src/api.js`). The columns are the principal id, the identity's
+  name, `renewal`, the `jti`, `issued_at`, `expires_at`, `warn_at` and `remaining_seconds`.
+- **`warn_at` is `expires_at - LEAST(7 days, lifetime / 4)`.** A 30- or 90-day token warns 7 days
+  before it expires. A 7-day token would warn the moment it was issued, so it warns a quarter of its
+  life before: 42 hours. The rule's query keeps the rows past `warn_at`.
+- **The name is the one the page shows.** An identity created on the page has its
+  `machine_principals` name. The four pinned identities have none, so the function names them as
+  `KNOWN_PRINCIPALS` in `frontend/src/utils/serviceIdentities.js` does, and `check-mirror-drift.mjs`
+  holds the two lists together. Any other id reads *Undocumented machine identity*, as on the page.
+- **`renewal` says how a new token is made.** `keys_rotate` for Service_Ingestor, Service_Playback
+  and Service_ReleaseCheck, whose keys the deployment reads at start: the page offers them no
+  **Issue Token**, and `npm run keys:rotate` makes theirs. `access_control` for every other identity.
+  The rule's summary gives the matching steps.
+- **It reads one lane's last 91 days, not the whole trail.** `audit_trail` is partitioned by month and only
+  grows, and Grafana evaluates the rule every minute. A token outlives its row by at most
+  `service_token_max_days()`, so the function reads only rows recorded in that many days plus one,
+  in the `security` lane. Partitions older than that are pruned when the query starts, and each
+  newer one is read through its copy of `idx_audit_trail_domain` (`audit_domain, recorded_at DESC`).
+  On a test database holding 4,000 mints over 100 days in monthly partitions, beside 44,000 other
+  rows, the June partition was pruned, the 40,000 asset-lane rows were never read, and the view
+  answered in 12 ms. No index was added.
+- **`grafana_reader` reads it through an owner-run function**, `service_token_health_rows()`, as it
+  reads `backup_offsite_health`. It holds no privilege on `audit_trail`, `auth.users`,
+  `machine_principals` or the two revocation tables. This file grants both on the first boot; the
+  `$grafana_reader$` block at the end of `0001` grants them again on every later boot, guarded by
+  `to_regclass`, after its sweep. `anon` and `authenticated` read neither.
+- **`platform_alerts` takes `entity_type` `service_identity`.** Its `entity_id` is the principal id
+  from the rule's `principal_id` label, and it has no `sparkplug_id`. `0001` declares the widened
+  `platform_alerts_entity_type_valid` and `platform_alerts_asset_has_wire_id` itself, as it did for
+  `0196`'s deployment: it replays first on every boot and re-adds a CHECK that differs from its own,
+  which would fail on the first such row. The webhook refuses an instance whose `principal_id` is
+  not a UUID, and stores no `sparkplug_id` for one, so a token alert can never colour a device or
+  a gateway.
+- **Only an Administrator reads a `service_identity` alert.** Before this file,
+  `platform_alerts_select_authenticated` was `USING (true)`: every signed-in role read every row,
+  and `platform_alerts_active` reads through it (`security_invoker`). It now admits every other row
+  as before, and a `service_identity` row only where `has_role(ARRAY['Administrator'])`, in a
+  sub-select so it runs once per query. An Administrator is the one who can act on it, on Access
+  Control, and Realtime applies the same policy to each change. `0001` passes `p_stated_by` for the
+  policy, so it creates it only on a fresh install, and this file keeps it current.
+
+The dashboard's alert toast, firing and resolved, links a `service_identity` alert to the
+identity's row on Access Control › **Machine identities**, by its principal id, rather than to
+Grafana: a notification links to its record. The page's search matches a principal id as well as a
+name. The alert list in the top bar links the row the same way.
+
+The file's self-check asserts that both CHECKs admit `service_identity`, that the policy names it,
+that `anon` and `authenticated` cannot read the view or run the function, and that `grafana_reader`
+can where it exists. `test_a_service_token_warns_before_it_expires.py` runs the rule's own query
+from the rules file, for the window, the exclusions, the reader, the CHECKs over a replay of
+`0001`, and who reads the alert.
+
 ### The API refuses a token whose session has ended (0205)
 
 GoTrue writes the session's id into every access token it issues (`session_id`), and deletes the
@@ -2002,6 +2065,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `user_settings` | own row only, `Administrator` included (`0188`) | own row: `INSERT`, `UPDATE`; no `DELETE` — the row goes with the account |
 | `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
+| `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes as `service_role` |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
 ### The two privileged roles, and what separates them (archived migration 0069)
@@ -4316,7 +4380,10 @@ path. The edge runtime boots with `VERIFY_JWT="false"` because each function aut
 this is the only thing standing in front of the table.
 
 **Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
-carries no device label; inventing one would attribute a broken query to a machine.
+carries no device label; inventing one would attribute a broken query to a machine. Two kinds need
+none: a `platform` alert, and a `service_identity` alert (`0204`), whose subject is the machine
+identity in its `principal_id` label. One whose `principal_id` is not a UUID is skipped the same
+way.
 
 ### Alert retention (archived migration 0030)
 

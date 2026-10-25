@@ -11,7 +11,8 @@ import { serverError } from "../_shared/failure.ts";
  * browser-SSO-fronted service the credential that bypasses RLS. The check cannot be delegated: the
  * edge runtime boots with VERIFY_JWT="false", and the gateway's key-auth proves only that the
  * caller has the anon key. Identity comes from `sparkplug_id`, never from the device name, which is
- * a mutable label; the name travels only so a summary can be read.
+ * a mutable label; the name travels only so a summary can be read. An alert about a machine
+ * identity names it by `principal_id` instead.
  */
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -23,8 +24,11 @@ const RESOLVED = "resolved";
 const FIRING = "firing";
 
 const SEVERITIES = new Set(["critical", "warning", "info"]);
-/** Mirrors `platform_alerts_entity_type_valid` in 0023. Kept in step by test_grafana_alert_webhook.py. */
-const ENTITY_TYPES = new Set(["device", "gateway", "platform"]);
+/** Mirrors `platform_alerts_entity_type_valid` in 0001. Kept in step by test_grafana_alert_webhook.py. */
+const ENTITY_TYPES = new Set(["device", "gateway", "platform", "service_identity"]);
+
+/** A machine identity's principal id, as the rule's `principal_id` label carries it. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface GrafanaAlert {
   status?: string;
@@ -85,6 +89,8 @@ export function authorizeAlertWebhook(
 interface AlertRow {
   fingerprint: string;
   entity_type: string;
+  /** Set only for a machine identity, whose id is in the labels; an asset's is looked up. */
+  entity_id: string | null;
   sparkplug_id: string | null;
   alert_name: string;
   severity: string;
@@ -98,16 +104,16 @@ interface AlertRow {
 /**
  * Normalise one Grafana alert instance into a platform_alerts row. The subject is (entity_type,
  * entity_id), not a device: a rule declares its scope with an `entity_type` label, `device` (the
- * default), `gateway` or `platform`. Returns null only for a malformed instance, which is not an
- * error: a DatasourceError notification carries no labels, and the caller counts and reports these.
- * An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id` enforces;
- * refusing it here keeps one bad instance from failing the batch.
+ * default), `gateway`, `platform` or `service_identity`. Returns null only for a malformed instance,
+ * which is not an error: a DatasourceError notification carries no labels, and the caller counts and
+ * reports these. An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id`
+ * enforces, and a machine identity its principal id; refusing either here keeps one bad instance
+ * from failing the batch.
  */
 export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const labels = alert.labels ?? {};
   const annotations = alert.annotations ?? {};
 
-  const sparkplugId = labels.sparkplug_id?.trim() || null;
   const fingerprint = alert.fingerprint?.trim();
   const alertName = (labels.alertname ?? "").trim();
   if (!fingerprint || !alertName || !alert.startsAt) return null;
@@ -118,9 +124,16 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const entityType = (labels.entity_type ?? "device").trim().toLowerCase();
   if (!ENTITY_TYPES.has(entityType)) return null;
 
+  // A machine identity has no wire identity: its subject is the principal id, which goes into a
+  // uuid column, so anything else is refused here rather than failing the insert.
+  const identity = entityType === "service_identity";
+  const principalId = identity ? (labels.principal_id ?? "").trim() : "";
+  if (identity && !UUID.test(principalId)) return null;
+  const sparkplugId = identity ? null : labels.sparkplug_id?.trim() || null;
+
   // Only a platform-scoped alert may omit the wire identity. Anything else claiming to be about an
   // asset without naming it is the failure this function has always existed to prevent.
-  if (entityType !== "platform" && !sparkplugId) return null;
+  if (entityType !== "platform" && !identity && !sparkplugId) return null;
 
   // Grafana sends `status: "resolved"` on recovery and "firing" otherwise. Anything unrecognised is
   // treated as firing: defaulting to resolved would silently clear the dashboard on an unknown
@@ -139,6 +152,7 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   return {
     fingerprint,
     entity_type: entityType,
+    entity_id: identity ? principalId.toLowerCase() : null,
     sparkplug_id: sparkplugId,
     alert_name: alertName,
     // Constrained by a CHECK in 0023, so an unexpected label value is mapped rather than allowed to
@@ -226,7 +240,8 @@ export default async function handler(req: Request): Promise<Response> {
   const toWrite = rows.map((r) => ({
     fingerprint: r.fingerprint,
     entity_type: r.entity_type,
-    entity_id: r.sparkplug_id ? subjectId.get(key(r.entity_type, r.sparkplug_id)) ?? null : null,
+    entity_id: r.entity_id ??
+      (r.sparkplug_id ? subjectId.get(key(r.entity_type, r.sparkplug_id)) ?? null : null),
     sparkplug_id: r.sparkplug_id,
     alert_name: r.alert_name,
     severity: r.severity,

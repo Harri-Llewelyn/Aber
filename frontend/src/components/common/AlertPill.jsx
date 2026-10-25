@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { RouteLink } from './RouteLink'
-import { deviceUrl, gatewayUrl } from '../../routes'
+import { deviceUrl, gatewayUrl, identityUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -18,7 +18,8 @@ import { Tooltip } from './Tooltip'
  *
  * A row goes where its subject lives, decided by the rule's `entity_type` label (checked by
  * `platform_alerts_entity_type_valid`), not by the id prefix. A platform alert has no asset and
- * opens the rule in Grafana Alerting.
+ * opens the rule in Grafana Alerting. An alert about a machine identity's token opens the identity
+ * on Access Control, by the principal id in `entity_id`.
  *
  * This is the only place in the dashboard that counts Grafana alerts: their toasts are not recorded
  * in the bell's history. What fired and cleared is in Grafana's alert history, which the footer
@@ -109,6 +110,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                 const navigable = Boolean(onSelect && a.sparkplug_id)
                 // The fleet-wide rules. No asset, so no page here -- Grafana is the subject's home.
                 const external = !a.sparkplug_id && kind === 'platform'
+                const identity = kind === 'service_identity' && Boolean(a.entity_id)
                 const body = (
                   <>
                     <span className={`alert-pill-dot alert-pill-dot-${a.severity}`} />
@@ -120,7 +122,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                       {/* A fleet-wide alert names no asset, and an empty mono line reads as a
                           failed lookup. It says what the scope IS instead. */}
                       <div className="alert-pill-item-meta mono">
-                        {a.sparkplug_id || (kind === 'platform' ? 'Platform-wide' : '')}
+                        {a.sparkplug_id || (kind === 'platform' ? 'Platform-wide' : kind === 'service_identity' ? 'Machine identity' : '')}
                         {external && <> <IconExternalLink size={10} /></>}
                       </div>
                     </div>
@@ -137,6 +139,15 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                         /* The sparkplug id, not a name: `platform_alerts` carries none, and the id
                            is what each page's search matches on. */
                         title={`Show ${a.sparkplug_id} on the ${page} page`}
+                      >
+                        {body}
+                      </RouteLink>
+                    ) : identity ? (
+                      <RouteLink
+                        className="alert-pill-item-link"
+                        to={identityUrl(a.entity_id)}
+                        onClick={() => setOpen(false)}
+                        title="Show this machine identity on Access Control"
                       >
                         {body}
                       </RouteLink>

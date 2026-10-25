@@ -71,7 +71,10 @@ export const backupUrl = (runId = '') => pageUrl('backups', { run: runId })
 /** One person on Access Control › People, found by email; a removed person is shown with the removed. */
 export const personUrl = (email, removed = false) => pageUrl('access-control', { search: email, removed }, 'people')
 
-/** One machine identity on Access Control › Machine identities, found by name; likewise the withdrawn. */
+/**
+ * One machine identity on Access Control › Machine identities, found by name or principal id;
+ * likewise the withdrawn.
+ */
 export const identityUrl = (name, withdrawn = false) => pageUrl('access-control', { search: name, withdrawn }, 'identities')
 
 /** One setting, by its key, on the category that holds it. */
