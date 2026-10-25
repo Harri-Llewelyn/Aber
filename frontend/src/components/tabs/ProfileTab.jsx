@@ -301,6 +301,7 @@ export function ProfileTab({
                 label="Email address"
                 description="The address you sign in with."
                 value={email || 'None: this identity signs in with a token'}
+                actions={email ? <span className="setting-fixed">Only an Administrator can change this</span> : undefined}
               />
               <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
               <ProfileRow

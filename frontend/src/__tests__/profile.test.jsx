@@ -88,6 +88,7 @@ describe('Account', () => {
   it('shows the address and the role, and who can change the role', () => {
     renderProfile()
     expect(within(row('Email address')).getByText('operator@site.test')).toBeInTheDocument()
+    expect(within(row('Email address')).getByText('Only an Administrator can change this')).toBeInTheDocument()
     expect(within(row('Role')).getByText('Shopfloor Manager')).toBeInTheDocument()
     expect(within(row('Role')).getByText('Only an Administrator can change this')).toBeInTheDocument()
   })
