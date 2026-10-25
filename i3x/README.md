@@ -599,7 +599,7 @@ curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
 identity that reads telemetry and changes nothing. Its token lasts 30 days by default, and any
 client of this server can present it: i3X Explorer, an MCP client, Swagger UI, curl or a script.
 A week before it expires, the alert *Service Token Expiring* names it, so the 401s are not the
-first sign ([The token](#the-token)).
+first sign.
 Issue it on Access Control and copy the setup the dialog gives, or mint one from a shell.
 [The token](#the-token) says how.
 
