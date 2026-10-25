@@ -14,6 +14,7 @@ module resolves it. KUBE_NAMESPACE and HELM_RELEASE select the release (default 
 Every suite that uses this puts test-harness/ on sys.path first, the way test_backup_service.py
 already reaches test_enroll_gateway.py.
 """
+import hashlib
 import json
 import os
 import re
@@ -76,6 +77,31 @@ def run(target, *args, env=None, input=None, check=False):
 def output(target, *args, env=None, input=None):
     """`run`, raising on a non-zero exit, returning stdout."""
     return run(target, *args, env=env, input=input, check=True).stdout
+
+
+def write_file(target, path, content, attempts=2):
+    """
+    Write `content` to `path` inside the target's container, readable by its owner only, and
+    prove it arrived: the file's SHA-256 there must be the content's. `cat` exits 0 on a stream
+    that `kubectl exec -i` delivered empty or cut short, so an unchecked write fails later, in
+    whatever reads the file. A write that does not match is tried once more, then raises.
+    """
+    t = TARGETS[target]
+    data = content.encode()
+    want = hashlib.sha256(data).hexdigest()
+    # Bytes, not text: Python on Windows sends each "\n" of a text stdin as "\r\n".
+    cmd = ["kubectl", "-n", NAMESPACE, "exec", "-i", t["workload"], "-c", t["container"], "--",
+           "sh", "-c", 'umask 077; cat > "$1"', "sh", path]
+    for _ in range(attempts):
+        result = subprocess.run(cmd, capture_output=True, input=data)
+        if result.returncode != 0:
+            raise RuntimeError(f"writing {path} failed in {describe(target)}: {result.stderr.decode().strip()}")
+        size, digest = output(target, "sh", "-c", 'wc -c < "$1"; sha256sum "$1"', "sh", path).split()[:2]
+        if digest == want:
+            return
+    raise RuntimeError(
+        f"{path} in {describe(target)} holds {size} bytes, not the {len(data)} written, after "
+        f"{attempts} attempts: kubectl exec -i did not deliver the stream whole")
 
 
 def running(target):
