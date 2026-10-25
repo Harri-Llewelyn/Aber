@@ -519,9 +519,11 @@ export async function freePort () {
 }
 
 // kubectl port-forward with stdout and stderr piped. forwardReady reads both and keeps draining
-// them for the forward's life: a pipe nobody reads fills, and kubectl stalls writing to it.
+// them for the forward's life: a pipe nobody reads fills, and kubectl stalls writing to it. The pod
+// wait stays inside forwardReady's 15 s, so a Service with no running pod exits with kubectl's
+// reason rather than timing out silently (kubectl's own default wait is a minute).
 export function spawnPortForward (namespace, target, ports) {
-  return spawn('kubectl', ['-n', namespace, 'port-forward', target, ports],
+  return spawn('kubectl', ['-n', namespace, 'port-forward', '--pod-running-timeout=10s', target, ports],
     { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
 }
 
