@@ -768,7 +768,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                           )}
                         </td>
                         {/* A button where a token is actually read, and the command everywhere
-                            else. `isMintableFromPage()` decides: the two environment-key identities
+                            else. `isMintableFromPage()` decides: the three environment-key identities
                             take their key from the environment at boot, so a minted token for them
                             would be a second privileged credential nothing reads. They keep the
                             rotate command. */}
