@@ -348,11 +348,21 @@ Every sign-in through GoTrue, to the dashboard or to a service, is a session of 
 ends when:
 
 - the person selects **Sign Out**. That ends the dashboard's session in that browser alone, and
-  clears the Studio and forge doors' cookies there. Their other browsers and services keep theirs.
+  every Studio and forge door session the person holds (`0208`). Their other browsers keep the
+  dashboard, and Grafana and Node-RED keep theirs.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open
   dashboard refreshes about hourly, so a wall display stays signed in.
+
+**The door sessions are the exception, because a door session belongs to a browser, not to the
+person.** Studio's and the forge's doors each sign in through GoTrue as an OAuth client and refresh
+their token, so a door session left alive keeps that browser signed in for as long as someone uses
+it. The dashboard cannot name the one in its own browser, because the door's code exchange happens
+on the server, and it cannot always clear the door's cookie, which is another site's when the hosts
+share no registrable domain. So Sign Out ends every door session the person holds. A door in
+another browser then sends its next request through its own sign-out, and signs in again by itself
+through the consent already given while the dashboard is signed in there.
 
 GoTrue deletes an ended session, so none of its refresh tokens works again. A timed-out session
 keeps its row, but GoTrue refuses its refresh, and its last access token expired days before. The
@@ -383,10 +393,9 @@ Two addresses sign out the browser that follows a link to them, with no confirma
 - **The forge's own Sign Out**, `GET /user/logout` on the forge's host. The forge listener routes it
   to `forge-signout`, which ends the door's GoTrue session (scope `local`), the one issued to the
   forge's OAuth client. It then answers 302 to the dashboard's `/sign-out?from=forge`.
-- **The dashboard's `/sign-out`**. It runs the account menu's **Sign Out**: it ends the dashboard's
-  session in that browser and clears the Studio and forge doors' cookies there. The sign-in page
-  then says the person signed out. It reads only the `from` values it knows and never shows the
-  query.
+- **The dashboard's `/sign-out`**. It runs the account menu's **Sign Out**: it ends the person's
+  door sessions and the dashboard's session in that browser. The sign-in page then says the person
+  signed out. It reads only the `from` values it knows and never shows the query.
 
 The forge's sign-out needs the dashboard's route. Gitea's own sign-out does nothing under
 reverse-proxy authentication, and the door's next login goes through the dashboard's consent page,
@@ -398,15 +407,16 @@ straight back in.
 
 The door's cookies stay `SameSite=Lax` (`supabase/envoy.yaml`, the forge listener's
 `cookie_configs`): the door's callback is a top-level GET, which Lax admits. So a top-level link
-from any site to `/user/logout` carries the door's token. Since 1.7.0 that signs out only the
-browser that followed it, as a link to `/sign-out` does. Before, it ended every session the person
-held, in every browser and service.
+from any site to `/user/logout` carries the door's token. Since 1.7.0 that signs out the browser
+that followed it, and the person's door sessions, as a link to `/sign-out` does. Before, it ended
+every session the person held, in every browser and service.
 
-**Accepted because** either address ends only the sessions of the browser that follows it, and
-costs the person nothing but signing in again. Neither changes data or ends a session elsewhere.
+**Accepted because** either address ends the dashboard's session only in the browser that follows
+it. The door sessions it ends elsewhere sign in again by themselves wherever the dashboard is still
+signed in. It costs the person nothing but signing in again, and changes no data.
 
-**Revisit if** a page ever holds work that a sign-out would lose, or the forge's sign-out ever ends
-more than the door's session.
+**Revisit if** a page ever holds work that a sign-out would lose, or a sign-out ever ends more than
+this browser's dashboard session and the door sessions.
 
 ### The broker's internal CA has no revocation list
 

@@ -1208,8 +1208,11 @@ Every workload rolls once, as at every release. Beyond that:
 ### From 1.7.0, Sign Out ends this browser's session only
 
 **Sign Out** in the dashboard used to end every session the person held, in every browser and
-service. It now ends the dashboard's session in that browser only. It still signs that browser out
-of Studio and the forge.
+service. It now ends the dashboard's session in that browser only.
+
+It also signs the person out of Studio and the forge, in every browser. In another browser where the
+dashboard is still signed in, Studio and the forge sign in again by themselves at their next page.
+Elsewhere they ask the person to sign in.
 
 The forge's own **Sign Out** changes the same way. It used to end every session the person held.
 Now it signs that browser out of the forge and the dashboard, then shows the dashboard's sign-in

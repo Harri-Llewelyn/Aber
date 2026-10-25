@@ -25,6 +25,7 @@ vi.mock('../lib/supabaseClient', () => ({
       signInWithPassword: vi.fn(),
       signOut: vi.fn()
     },
+    rpc: vi.fn(),
     channel: vi.fn().mockReturnValue({ on: vi.fn().mockReturnThis(), subscribe: vi.fn().mockReturnThis() }),
     removeChannel: vi.fn(),
     from: vi.fn().mockReturnValue({
@@ -48,6 +49,8 @@ beforeEach(() => {
   supabase.auth.getUser.mockResolvedValue({ data: { user: session.user }, error: null })
   supabase.auth.signOut.mockResolvedValue({ error: null })
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
+  // end_my_door_sessions(): a builder whose abortSignal() is the awaited call.
+  supabase.rpc.mockReturnValue({ abortSignal: vi.fn().mockResolvedValue({ data: 2, error: null }) })
 })
 
 /** Arrive at `address`, as the forge's 302 or a followed link does, and wait for the sign-in page. */
@@ -89,12 +92,22 @@ describe('the /sign-out route', () => {
     }
   })
 
+  it("ends the person's door sessions before the dashboard's own session", async () => {
+    await arriveAt('/sign-out?from=forge')
+
+    expect(supabase.rpc).toHaveBeenCalledWith('end_my_door_sessions')
+    expect(supabase.rpc.mock.invocationCallOrder[0])
+      .toBeLessThan(supabase.auth.signOut.mock.invocationCallOrder[0])
+  })
+
   it('works with nobody signed in here: the doors are still cleared and the notice still shows', async () => {
     supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
     await arriveAt('/sign-out?from=forge')
 
     expect(signOutOfStudio).toHaveBeenCalledTimes(1)
     expect(signOutOfForge).toHaveBeenCalledTimes(1)
+    // No session, so no token to end the door sessions with.
+    expect(supabase.rpc).not.toHaveBeenCalled()
     expect(screen.getByRole('status')).toHaveTextContent('You signed out of the forge.')
   })
 
@@ -136,8 +149,9 @@ describe("the account menu's Sign Out", () => {
     fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /sign out/i }))
 
-    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
-    await waitFor(() => expect(signOutOfForge).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' }))
+    expect(supabase.rpc).toHaveBeenCalledWith('end_my_door_sessions')
+    expect(signOutOfForge).toHaveBeenCalledTimes(1)
     expect(signOutOfStudio).toHaveBeenCalledTimes(1)
   })
 })

@@ -1624,6 +1624,39 @@ the hook's owner may read it and that a session that does not exist is refused w
 db lane. `test_sign_out_ends_one_session.py` holds it through the gateway in the stack lane, with the
 person's other session still served.
 
+### Signing out ends the person's door sessions (0208)
+
+The gateway's Studio and forge doors each sign in through GoTrue as an OAuth client, so each holds
+a GoTrue session of its own: an `auth.sessions` row whose `oauth_client_id` is the door's
+(`c0ffee00-…-0003` Studio, `-0004` the forge, seeded by `0002`). The dashboard's Sign Out ends only
+the dashboard's session in that browser (scope `local`). Its beacons ask each door to clear its
+cookie, but a browser applies the answer only when the door and the dashboard are one site, which
+`*.localhost` hosts never are. Both doors refresh their token, so a door session left alive kept
+that browser signed in to Studio or the forge for as long as someone used it.
+
+- **`end_my_door_sessions()`** deletes the caller's door sessions and returns how many it ended.
+  GoTrue's refresh tokens and MFA claims for a session go with its row (`ON DELETE CASCADE`), as at
+  GoTrue's own sign-out. The dashboard's other sessions, and Grafana's and Node-RED's, are left.
+- **Every door session the person holds, not this browser's.** A door's code exchange happens on
+  the server, so the browser holds nothing that names its door session. A door in another browser
+  sends its next request through its own sign-out (`studio-admission` and `forge-membership` answer
+  a dead session with a 302 to `/oauth2/signout`), and signs in again by itself through the consent
+  already given while the dashboard is signed in there.
+- **Before the dashboard's own sign-out.** `signOutOfThisBrowser()`
+  (`frontend/src/utils/signOut.js`) calls it first, because the API refuses a token whose session
+  has gone (`0205`). It waits at most two seconds, and a failure never stops the sign-out. With no
+  session stored, as on a `/sign-out` with nobody signed in, it is skipped.
+- **A person calls it for themselves.** No caller, or a machine identity, is `42501`; `anon` and
+  `service_role` may not execute it. No audit row: it is a sign-out.
+- **`auth.sessions` is GoTrue's.** `postgres`, which owns the function, deletes from it by grant,
+  as `0197` deletes from `auth.oauth_clients`. The test database's fixture gains the
+  `oauth_client_id` column, without GoTrue's reference to `auth.oauth_clients`.
+
+The file's self-check asserts `SECURITY DEFINER`, the `search_path` pin and who may execute it.
+Where `auth.sessions` exists, it also asserts the `oauth_client_id` column and that the owner may
+delete from the table. `test_signing_out_ends_the_person_s_door_sessions.py` holds the rest in the
+db lane.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -5140,17 +5173,18 @@ never of anything the person chose. `main` is protected on every gateway reposit
 approval required from `administrators` ([`_shared/forge.ts`](functions/_shared/forge.ts)), which
 is what makes deploying a flow to an appliance Administrator's.
 
-**Signing out of the forge ends this browser's sessions only.** Under reverse-proxy authentication
-Gitea's own sign-out is a no-op, so the listener routes its link, `GET /user/logout`, to
-`forge-signout`. That ends the one GoTrue session the door's token names (scope `local`), then
-answers 302 to the dashboard's `/sign-out?from=forge` (`FRONTEND_PUBLIC_URL`, from
-`publicUrls.frontend`). The dashboard's route runs the account menu's **Sign Out**: it ends the
-dashboard's session in this browser and clears the Studio and forge doors' cookies. Both halves are
-needed. The door's next login goes through the dashboard's consent page, which approves at once
-while the dashboard is signed in in that browser, so ending the door's session alone would sign the
-person straight back in. Without `FRONTEND_PUBLIC_URL` the function falls back to the door's own
-`/oauth2/signout`, and logs a warning saying so. The person's other browsers, and their Grafana and
-Node-RED sign-ins, stay signed in. Before 1.7.0 this ended every session the person held.
+**Signing out of the forge signs this browser out, as the dashboard's Sign Out does.** Under
+reverse-proxy authentication Gitea's own sign-out is a no-op, so the listener routes its link,
+`GET /user/logout`, to `forge-signout`. That ends the one GoTrue session the door's token names
+(scope `local`), then answers 302 to the dashboard's `/sign-out?from=forge` (`FRONTEND_PUBLIC_URL`,
+from `publicUrls.frontend`). The dashboard's route runs the account menu's **Sign Out**: it ends the
+person's door sessions ([`0208`](#signing-out-ends-the-persons-door-sessions-0208)) and the
+dashboard's session in this browser. Both halves are needed. The door's next login goes through the
+dashboard's consent page, which approves at once while the dashboard is signed in in that browser,
+so ending the door's session alone would sign the person straight back in. Without
+`FRONTEND_PUBLIC_URL` the function falls back to the door's own `/oauth2/signout`, and logs a
+warning saying so. The person's dashboard in other browsers, and their Grafana and Node-RED
+sign-ins, stay signed in. Before 1.7.0 this ended every session the person held.
 
 Two things a laptop finds and a cluster does not: the listener renames all seven of its cookies,
 because browsers scope cookies by host and not port, so on `localhost` this door and Studio's would

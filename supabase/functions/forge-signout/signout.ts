@@ -5,13 +5,13 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * Gitea's own "Sign out" link, routed here by the forge listener. Under reverse-proxy
  * authentication Gitea's sign-out clears only its own cookie, and the forge has no session of its
  * own. So this ends the one GoTrue session the door's token names (scope local): the door's own,
- * issued to the forge's OAuth client. The person's other browsers and services keep theirs, as
- * after the dashboard's Sign Out.
+ * issued to the forge's OAuth client.
  *
  * Local is enough because the browser is then sent to the dashboard's `/sign-out`, which signs this
- * browser out of the dashboard and clears the doors' cookies. The door's next login meets nobody
- * signed in, so the person is not signed straight back in. A request with no usable token is sent
- * there too. Without FRONTEND_PUBLIC_URL the browser goes through the door's own sign-out instead.
+ * browser out as the dashboard's Sign Out does: the person's door sessions, then the dashboard's
+ * session here. The door's next login meets nobody signed in, so the person is not signed straight
+ * back in. A request with no usable token is sent there too. Without FRONTEND_PUBLIC_URL the
+ * browser goes through the door's own sign-out instead.
  */
 
 /** The dashboard's route, appended to its address; and the door's own sign-out, on this host. */

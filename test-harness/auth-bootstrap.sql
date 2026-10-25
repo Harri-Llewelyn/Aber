@@ -113,7 +113,8 @@ ALTER TABLE auth.users
 
 -- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
 -- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as
--- GoTrue does. The chain reads only `id`; the other columns are GoTrue's, with its types.
+-- GoTrue does. The chain reads `id`, `user_id` and `oauth_client_id`; every column is GoTrue's,
+-- with its types.
 CREATE TABLE IF NOT EXISTS auth.sessions (
   id         uuid PRIMARY KEY,
   user_id    uuid NOT NULL,
@@ -121,3 +122,7 @@ CREATE TABLE IF NOT EXISTS auth.sessions (
   updated_at timestamptz DEFAULT now()
 );
 GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;
+-- The OAuth client a session was issued to, NULL for a sign-in to the dashboard itself: how 0208
+-- tells the Studio and forge doors' sessions apart. GoTrue references auth.oauth_clients; the
+-- fixture does not, so a suite can start a door session without registering the client.
+ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
