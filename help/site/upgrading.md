@@ -1211,6 +1211,10 @@ Every workload rolls once, as at every release. Beyond that:
 service. It now ends the dashboard's session in that browser only. It still signs that browser out
 of Studio and the forge.
 
+The forge's own **Sign Out** changes the same way. It used to end every session the person held.
+Now it signs that browser out of the forge and the dashboard, then shows the dashboard's sign-in
+page. A link to it from another site can no longer sign the person out everywhere.
+
 The API now refuses a token whose session has ended. It answers 401 with the code
 `session_not_found`. Before, it accepted the token until it expired, up to an hour later. A session
 ends at a Sign Out, a new password, or the timeout below.

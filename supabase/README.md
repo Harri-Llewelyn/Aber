@@ -4283,7 +4283,7 @@ refuses a missing or wrong token or secret.
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
 | [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
 | [`studio-admission`](functions/studio-admission) | `Administrator` | The studio listener's `ext_authz` step: refuses a role removed or changed since the token was signed, and sends a session GoTrue ended to the door's sign-out |
-| [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends every GoTrue session the caller holds, then the door's sign-out |
+| [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends the door's GoTrue session, then sends the browser to the dashboard's `/sign-out` (`FRONTEND_PUBLIC_URL`) |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 | [`aas-api`](functions/aas-api) | any authenticated user | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
@@ -5138,9 +5138,19 @@ is for.
 Gitea's teams decide what they may do inside, and the team is a function of the verified role,
 never of anything the person chose. `main` is protected on every gateway repository with one
 approval required from `administrators` ([`_shared/forge.ts`](functions/_shared/forge.ts)), which
-is what makes deploying a flow to an appliance Administrator's. Gitea's own
-sign-out link is routed to `forge-signout`, which ends every GoTrue session the caller holds,
-because under reverse-proxy authentication Gitea's own sign-out is a no-op.
+is what makes deploying a flow to an appliance Administrator's.
+
+**Signing out of the forge ends this browser's sessions only.** Under reverse-proxy authentication
+Gitea's own sign-out is a no-op, so the listener routes its link, `GET /user/logout`, to
+`forge-signout`. That ends the one GoTrue session the door's token names (scope `local`), then
+answers 302 to the dashboard's `/sign-out?from=forge` (`FRONTEND_PUBLIC_URL`, from
+`publicUrls.frontend`). The dashboard's route runs the account menu's **Sign Out**: it ends the
+dashboard's session in this browser and clears the Studio and forge doors' cookies. Both halves are
+needed. The door's next login goes through the dashboard's consent page, which approves at once
+while the dashboard is signed in in that browser, so ending the door's session alone would sign the
+person straight back in. Without `FRONTEND_PUBLIC_URL` the function falls back to the door's own
+`/oauth2/signout`, and logs a warning saying so. The person's other browsers, and their Grafana and
+Node-RED sign-ins, stay signed in. Before 1.7.0 this ended every session the person held.
 
 Two things a laptop finds and a cluster does not: the listener renames all seven of its cookies,
 because browsers scope cookies by host and not port, so on `localhost` this door and Studio's would

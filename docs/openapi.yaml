@@ -4469,22 +4469,26 @@ paths:
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
-      summary: Gitea's own sign-out link, routed here by the forge listener; ends every session the caller holds
+      summary: Gitea's own sign-out link, routed here by the forge listener; ends the door's session and sends the browser to the dashboard's sign-out
       description: |
         The forge listener routes Gitea's `GET /user/logout` here. Under reverse-proxy
         authentication Gitea's own sign-out is a no-op -- the next request carries the identity header
-        again -- and the forge has no session of its own, so its sign-out is the platform's: every
-        GoTrue session the caller holds is revoked (`scope=global`, the dashboard's included), and the
-        browser is sent to the door's `/oauth2/signout`, which clears the door's cookies and lands on a
-        fresh login that now meets a dashboard with no session.
+        again -- and the forge has no session of its own. So this ends the one GoTrue session the
+        token names (`scope=local`): the door's own, issued to the forge's OAuth client. The person's
+        other sessions, in other browsers and services, are left alone.
 
-        The token is the one the listener verified and forwarded. Called directly with a bearer it does
-        the same thing for that bearer's user; with no bearer it only redirects.
+        The browser is then sent to the dashboard's `/sign-out?from=forge`, which signs that browser
+        out of the dashboard and clears the Studio and forge doors' cookies, so the door's next login
+        meets nobody signed in. The dashboard's address is `FRONTEND_PUBLIC_URL`; without it the
+        browser is sent through the door's own `/oauth2/signout` instead, and a warning is logged.
+
+        The token is the one the listener verified and forwarded. Called directly with a bearer it
+        ends that bearer's session; with no bearer it only redirects.
       security:
         - bearerAuth: []
       responses:
         '302':
-          description: Always. `Location` is the door's `/oauth2/signout`. The caller's sessions have been revoked if a usable token was presented.
+          description: Always. `Location` is the dashboard's `/sign-out?from=forge`, or the door's `/oauth2/signout` without `FRONTEND_PUBLIC_URL`. The session the token names has ended if a usable token was presented.
         '500': { $ref: '#/components/responses/FunctionFailure' }
   /functions/v1/grafana-userinfo:
     get:
