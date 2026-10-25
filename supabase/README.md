@@ -5158,7 +5158,9 @@ would be necessary and not sufficient, since the relative paths would remain.
 
 **Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
-in its own header, and the full name carries the email so the UI shows a person. Gitea trusts
+in its own header, and the full name carries the email so the UI shows a person. Gitea ignores the
+email header: `ENABLE_REVERSE_PROXY_EMAIL` is off, so a new account gets Gitea's placeholder
+address and no sign-in finds an account by address (`docs/security-model.md`, *People*). Gitea trusts
 `X-WEBAUTH-USER` from **any** peer — `REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For`
 only — so the access control is reachability: the NetworkPolicy edge list admits only the gateway
 to port 3000. The listener overwrites or removes the identity headers on every route, so a value a

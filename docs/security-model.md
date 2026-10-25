@@ -202,9 +202,18 @@ people's accounts in GoTrue, and it is narrow by construction.
   writes `EMAIL_CHANGED` with both addresses and ends every session the person holds, in one
   transaction, because their access token carries the old address and `stamp_proposal_author()`
   stamps `proposed_by_email` from it. Grafana matches a person by account id and takes the new
-  address, as its login too, at their next sign-in there. The forge matches them by account id as
-  well, but keeps the address its account was made with, and finds an account by that address when
-  a new login cannot be made. So an old address must not be given to another person.
+  address, as its login too, at their next sign-in there. The forge matches them by account id too,
+  and keeps the address its forge account was made with.
+- **The forge never finds a person by email address** (1.7.0). Gitea's
+  `ENABLE_REVERSE_PROXY_EMAIL` is off. With it on, a first visit whose forge account could not be
+  made, because another forge user held the address, was signed in as that user, found by
+  `X-WEBAUTH-EMAIL`. A change of address frees the old one for someone else, so that made the
+  old holder's forge account reachable by the new one. It also let a forge user add someone else's
+  address to their own account, unconfirmed, before that person's first visit. Forge accounts made
+  before 1.7.0 keep their address. A new one holds Gitea's `<uuid>@localhost` placeholder, and
+  its full name is still the person's address. A commit authored with the person's address links
+  to their forge profile only once they add the address in the forge's settings, which Gitea
+  accepts without confirmation. That is attribution only: no sign-in reads it.
 - **A person's own password.** Change Password, on the Profile page, sends the current password
   with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
   sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
