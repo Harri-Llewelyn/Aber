@@ -808,6 +808,14 @@ export const SUITES = {
       "same name none; display_names_for() answers only for people the caller already sees on " +
       'Approvals and Archived Entities; and 0001 and 0166 bring the older list shapes forward.',
   },
+  'supabase/migrations/test_an_administrator_ends_a_person_s_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0207's People acts. Only an Administrator ends a person's sessions or counts them, never " +
+      'their own; every session the person holds ends and the API refuses its token; one ' +
+      'SESSIONS_ENDED row; and an email change is decided before GoTrue, recorded only once the ' +
+      'account holds the new address, and ends the sessions in the same transaction.',
+  },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],
     why:
