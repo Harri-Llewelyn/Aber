@@ -62,6 +62,11 @@ class ForgeFollowsTheArchive(unittest.TestCase):
 
     def setUp(self):
         self.conn = get_connection()
+        # REPEATABLE READ, so sweeps_queued() counts the sweeps this test asked for and nothing
+        # else. Under READ COMMITTED each count sees other sessions' commits: pg_net's worker
+        # deleting a sweep it has sent, or pg_cron queuing the quarter-hour one, would move the
+        # count between two reads.
+        self.conn.set_session(isolation_level="REPEATABLE READ")
         self.cur = self.conn.cursor()
 
     def tearDown(self):
@@ -190,6 +195,8 @@ class OnePassAtATime(unittest.TestCase):
 
     def setUp(self):
         self.conn = get_connection()
+        # REPEATABLE READ for sweeps_queued(), as in ForgeFollowsTheArchive.
+        self.conn.set_session(isolation_level="REPEATABLE READ")
         self.cur = self.conn.cursor()
         self.cur.execute(
             "UPDATE public.forge_sweep_lease SET holder = NULL, held_until = '-infinity', requested = false;"
@@ -287,7 +294,9 @@ class OnePassAtATime(unittest.TestCase):
 
     def test_two_claims_at_the_same_instant_have_one_winner(self):
         # The first claim keeps its transaction open, so the second waits on the row; once the
-        # first commits, the second re-reads held_until and is refused.
+        # first commits, the second re-reads held_until and is refused. That re-read is READ
+        # COMMITTED's, which is why these two sessions come from get_connection() as it is:
+        # under REPEATABLE READ the second claim would fail to serialize instead.
         self.conn.rollback()
         if self.one("SELECT held_until > clock_timestamp() FROM public.forge_sweep_lease;"):
             self.skipTest("a pass holds the lease on this database")
