@@ -920,6 +920,13 @@ export const SUITES = {
     lanes: ['db'],
     why: '0076 -- that a principal can be put beyond use, and stays beyond use.',
   },
+  'supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py': {
+    lanes: ['db'],
+    why:
+      '0205 -- that a token whose session has ended is refused with the 401 the dashboard signs ' +
+      'in again on, and that every token naming a live session, or none, is still served: a ' +
+      'false refusal here is the whole API down.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1255,6 +1262,14 @@ export const SUITES = {
       'and with it but Traefik on externalTrafficPolicy Cluster every client arrives as one ' +
       'address, so a single brute-forcer locks the whole site out. A probe pod spends its limit; ' +
       'the host must still sign in.',
+  },
+  'supabase/test_sign_out_ends_one_session.py': {
+    lanes: ['stack'],
+    why:
+      'Sign Out ends one session, and the API refuses its token at once (0205), through the ' +
+      'gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the ' +
+      'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
+      'still read.',
   },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],

@@ -210,7 +210,7 @@ people's accounts in GoTrue, and it is narrow by construction.
   `system_settings_update_admin`'s, which names Administrator alone.
 
 What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
-and so is what a new password does not reach ([below it](#a-new-password-does-not-end-a-session-at-once)).
+and so is what an ended session still reaches ([below it](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires)).
 
 ## Machine identities
 
@@ -342,21 +342,39 @@ the token's expiry, which was the bound on every surface before `0170`.
 **Revisit if** `jwtExpiry` is raised, which lengthens the Grafana, Storage and Realtime windows with
 it, or if a role change in Grafana ever has to be immediate.
 
-### A new password does not end a session at once
+### An ended session keeps Storage, Realtime and Grafana until its token expires
 
-Set New Password (`0167`) changes a person's password straight away, and GoTrue deletes every
-session they have, so none of their refresh tokens works again. Studio and the forge refuse the next
-request, because their doors ask GoTrue for the session, and Node-RED's editor within 60 seconds.
-What only checks the token's signature is not reached: the API, Storage and Realtime accept the
-access token until its `exp` (at most `supabaseAuth.jwtExpiry`), and Grafana keeps its session
-until that token's refresh is refused. Unlike a removal, the person keeps their role meanwhile.
+Every sign-in through GoTrue, to the dashboard or to a service, is a session of its own. A session
+ends when:
 
-**Accepted because** Set New Password is how a person who lost their password gets back in, not how
-one is stopped. Remove Access stops one, and is immediate for every role check.
+- the person selects **Sign Out**. That ends the dashboard's session in that browser alone, and
+  clears the Studio and forge doors' cookies there. Their other browsers and services keep theirs.
+- the person changes their password, which ends their other sessions.
+- an Administrator sets a new password (`0167`), which ends all of them.
+- nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open
+  dashboard refreshes about hourly, so a wall display stays signed in.
 
-**Revisit if** a compromised password ever has to be shut out everywhere at once. Today the nearest
-is Remove Access before Set New Password, and the removal's own limits are
-[above](#a-removed-person-keeps-what-a-session-already-holds).
+GoTrue deletes an ended session, so none of its refresh tokens works again. A timed-out session
+keeps its row, but GoTrue refuses its refresh, and its last access token expired days before. The
+access token an ended session issued is refused:
+
+| Surface | When it refuses the token |
+| :--- | :--- |
+| The API (PostgREST), and i3X and the edge functions that query through it | The next request. `auth_pre_request()` refuses a token whose `session_id` names no session, with 401 and the code `session_not_found` (`0205`). The dashboard then says the session has ended and offers Sign In Again |
+| Edge functions, Studio and the forge | The next request: each asks GoTrue for the session |
+| Node-RED's editor | Within 60 seconds |
+| Grafana | When the access token it holds expires, at most `supabaseAuth.jwtExpiry`. GoTrue refuses the refresh, and Grafana logs the session out |
+| Storage and Realtime | When the access token expires, at most `supabaseAuth.jwtExpiry`. They verify the token themselves and do not run `auth_pre_request()` |
+
+Unlike a removal, the person keeps their role.
+
+**Accepted because** the API, where every write that matters goes, refuses the token at once;
+Storage and Realtime only read; and Grafana's window is bounded by the token's expiry. A new
+password is how a person who lost theirs gets back in, not how one is stopped. Remove Access stops
+one, and its own limits are [above](#a-removed-person-keeps-what-a-session-already-holds).
+
+**Revisit if** `jwtExpiry` is raised, which lengthens the Grafana, Storage and Realtime windows with
+it.
 
 ### The broker's internal CA has no revocation list
 

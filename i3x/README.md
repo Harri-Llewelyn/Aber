@@ -755,8 +755,8 @@ The MCP client inherits exactly the RLS scope of whoever its token names, becaus
 passes the bearer straight to PostgREST. With an operator's token, a model asking about the
 shopfloor sees what an operator can see.
 
-**A token copied out of a browser session expires in an hour** (`supabaseAuth.jwtExpiry`, 3600 seconds) — the same
-trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
+**A token copied out of a browser session expires in an hour** (`supabaseAuth.jwtExpiry`, 3600 seconds), or when that
+browser signs out — the same trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
 the next session, and the symptom is `401`s on a server that was working.
 
 **Issue a token for the Read-only API client instead.** It is the machine identity for any client

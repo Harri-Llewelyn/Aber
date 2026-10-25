@@ -1058,7 +1058,7 @@ function edgeFunctionNames() {
     'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.relocate_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.withdraw_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
-    'public.auth_pre_request': '0170 also refuses a subject in access_removals, so a removed person\'s unexpired token is refused at PostgREST; the baseline refused by subject only a withdrawn service principal',
+    'public.auth_pre_request': '0170 also refuses a subject in access_removals, so a removed person\'s unexpired token is refused at PostgREST; the baseline refused by subject only a withdrawn service principal. 0205 also refuses a token whose GoTrue session has ended, with 401 session_not_found, so a Sign Out or a new password ends the token at PostgREST at once',
     'public.set_archive_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',
     'public.archive_credential_is_set': '0178 asks foreign_credential_is_set(), the one probe every foreign credential shares; the baseline carried its own copy',
     'public.set_backup_offsite_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',

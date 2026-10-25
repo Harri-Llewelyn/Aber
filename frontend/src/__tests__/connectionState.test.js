@@ -32,6 +32,13 @@ import { refreshInterval } from '../constants'
 const networkError = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
 const envoyDown = { message: 'no healthy upstream' }
 const jwtExpired = { code: 'PGRST303', message: 'JWT expired', details: null, hint: null }
+// What PostgREST passes on from auth_pre_request() (0205); postgrest-js drops the 401.
+const sessionEnded = {
+  code: 'session_not_found',
+  message: 'this session has ended',
+  details: 'session 3f1c2a9e-5b7d-4c1e-9a2f-6d8e0b4c7a15',
+  hint: 'The session was signed out, or its password was changed. Sign in again for a new token.'
+}
 const permissionDenied = { code: '42501', message: 'permission denied for table devices', details: null, hint: null }
 
 const status = () => getConnectionSnapshot().status
@@ -61,6 +68,8 @@ describe('classifyRefreshError', () => {
     ['PostgREST\'s expired token', jwtExpired],
     ['PostgREST\'s undecodable token', { code: 'PGRST301', message: 'JWSError JWSInvalidSignature' }],
     ['an expired token rethrown as its message', new Error('JWT expired')],
+    ['the API refusing a token whose session has ended', sessionEnded],
+    ['that refusal rethrown as its message', new Error('this session has ended')],
     ['an edge function saying the session no longer exists', Object.assign(new Error('Session from session_id claim in JWT does not exist'), { code: SESSION_REFUSED })]
   ])('calls %s a rejected session', (_label, err) => {
     expect(classifyRefreshError(err)).toBe(FAILURE_SESSION)
