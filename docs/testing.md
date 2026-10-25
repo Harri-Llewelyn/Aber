@@ -523,6 +523,14 @@ python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
 # and a deleted Dashboard link stays deleted; grafana_url is not proposable, and an open proposal
 # naming it is not approved. Each test replays the file and rolls back.
 python supabase/migrations/test_a_cell_s_dashboard_address_is_one_of_its_links.py
+# A service token warns before it expires (0204). Runs the Service Token Expiring rule's own query,
+# read from the rules file: a 7-, 30- and 90-day token fires an hour after its warn point and not an
+# hour before, and the lead is 42 hours, 7 days and 7 days; a revoked token, a withdrawn identity, a
+# deleted one and an expired token give no row; a pinned identity carries the page's name and its
+# renewal. grafana_reader signs in, runs the rule and is refused audit_trail. platform_alerts takes
+# a service_identity alert with no wire id, a replay of 0001 keeps both widened CHECKs over one, and
+# only an Administrator reads it there and in platform_alerts_active. Every test rolls back.
+python supabase/migrations/test_a_service_token_warns_before_it_expires.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,

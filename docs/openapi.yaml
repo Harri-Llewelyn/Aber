@@ -1741,6 +1741,10 @@ paths:
         even when no device row matches.
 
         `anon` is revoked. An alert summary names a device and the condition it breached.
+
+        A row whose `entity_type` is `service_identity` is about a machine identity's token
+        nearing expiry (0204). It carries the principal id and no `sparkplug_id`, and only an
+        Administrator reads it; every other role is returned the other rows.
       parameters:
         - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
         - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
@@ -2356,6 +2360,8 @@ paths:
         series can hold an old firing row *and* a newer resolved one. A plain filter would surface the
         stale one indefinitely; taking the newest occurrence first and discarding it unless it is
         still firing means a later resolve always wins.
+
+        A `service_identity` row is returned to an Administrator alone, as from `platform_alerts`.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -4271,6 +4277,9 @@ paths:
         `DatasourceError` notification — what `execErrState: Error` produces when a rule's query
         breaks — carries no device label, and inventing one would attribute a broken query to a
         machine. The response reports the skipped count so it is visible in Grafana's delivery log.
+        Two kinds need no `sparkplug_id`: `entity_type` `platform`, and `service_identity` (0204),
+        whose subject is the machine identity in `principal_id`. One whose `principal_id` is not a
+        UUID is skipped the same way.
       security:
         - AlertWebhookBearer: []
       requestBody:
@@ -4295,7 +4304,9 @@ paths:
                         properties:
                           alertname: { type: string }
                           severity: { type: string, enum: [critical, warning, info] }
+                          entity_type: { type: string, enum: [device, gateway, platform, service_identity], description: 'Defaults to device.' }
                           sparkplug_id: { type: string }
+                          principal_id: { type: string, format: uuid, description: 'The machine identity a service_identity alert is about.' }
                           device: { type: string }
                       annotations:
                         type: object
@@ -5799,6 +5810,10 @@ components:
             identifies the series and not the occurrence — which is why the unique constraint pairs it
             with `starts_at`.
           example: abc123def4567890
+        entity_type:
+          type: string
+          enum: [device, gateway, platform, service_identity]
+          description: 'What the alert is about. `platform` and `service_identity` (a machine identity, 0204) carry no `sparkplug_id`.'
         sparkplug_id:
           type: string
           description: 'The immutable wire identity the alert was raised for. Never the device name.'

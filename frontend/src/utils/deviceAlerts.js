@@ -2,8 +2,9 @@ import { deviceIds } from './sparkplugId';
 
 /**
  * Matching a firing Grafana alert to the device it is about, shared by the Site Map, Cells,
- * Gateways and Devices. Device-scoped alerts only, filtered on `entity_type`, so a gateway or
- * platform alert can never colour a device chip; the top bar's pill does not filter. Indexed on
+ * Gateways and Devices. Device-scoped alerts only, filtered on `entity_type`, so a gateway,
+ * platform or machine-identity alert can never colour a device chip; the top bar's pill does not
+ * filter. Indexed on
  * both `sparkplug_id` (the issued id, which telemetry and so Grafana's series are keyed on) and the
  * nullable `entity_id`, so a rename or a re-provision under a new UUID does not lose the alert.
  */

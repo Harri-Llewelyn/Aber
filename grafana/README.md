@@ -130,14 +130,15 @@ carries `> 0` on a value that cannot be zero.
 
 **One alert instance per subject.** Every rule is multi-dimensional, with the subject in the
 labels: the gateway, the edge node, the `reason`, the database `job`, the container. The
-`entity_type` label (`gateway` or `platform`; the webhook defaults to `device`) is what lets the
-dashboard tell an asset alert from a fleet one. A rule about a machine goes in a group of its own
+`entity_type` label (`gateway`, `platform` or `service_identity`; the webhook defaults to `device`)
+is what lets the dashboard tell an asset alert from a fleet one, and from one about a machine
+identity's token. A rule about a machine goes in a group of its own
 and names a metric the example set registers (`supabase/example-metrics.sql`), which
 `check-docs-drift.mjs` asserts.
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
 views the rules name (`platform_health`, `gateway_health`, `audit_trail_partition_health`,
-`storage_footprint`, `backup_health`, `backup_offsite_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
+`storage_footprint`, `backup_health`, `backup_offsite_health`, `service_token_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
 inventory; a rule that queried `public.devices` fails as `permission denied` and sits in error
 health. `asset_config` lives in Supabase and `postgres_fdw` runs Supabase → TimescaleDB only, so a
 per-device limit travels as a published metric. The `prometheus` datasource exists only where the
@@ -275,8 +276,8 @@ backend writes `GRAFANA_ALERTS` series but cannot be queried, so it cannot serve
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from
-`public.platform_health` (or `gateway_health`, `backup_health` or `backup_offsite_health`) through the `supabase`
-datasource.
+`public.platform_health` (or `gateway_health`, `backup_health`, `backup_offsite_health` or
+`service_token_health`) through the `supabase` datasource.
 
 ### Gateway Stale (`aber-gateway-stale`)
 
@@ -319,6 +320,37 @@ Read from the database, not Prometheus: the metrics endpoint is unauthenticated 
 does not export the certificate date (`ingestion/metrics.py`). NoData is OK because a stack with
 no Remote gateways, which is the demonstrator and every CI run, has no appliance reporting a date;
 that is a fleet with no appliances, not a fleet in trouble.
+
+### Service Token Expiring (`aber-service-token-expiring`)
+
+Warning, `for: 0s`, one instance per token. A machine identity's token has passed its warn point:
+7 days before it expires, or a quarter of its lifetime before for a shorter token. So a 30- or
+90-day token warns a week ahead, and a 7-day token 42 hours ahead; a fixed week would fire the
+moment a 7-day token was issued. Once a token expires the API refuses it, and the client using it,
+such as i3X Explorer, an MCP host or a script, fails as if the server were broken.
+
+The query reads `service_token_health` (`0204`), which lists every token that has not expired and
+is not revoked, whose identity exists and is not withdrawn, with its `warn_at`. The query keeps the
+rows past `warn_at`, so any row is the alert, and the window is the delay. Each text column is a
+label: the identity's name, its `principal_id`, the `jti`, `renewal` and the expiry as text, which
+stays fixed for the token. The value is the seconds left, which is always positive.
+
+The rule's `entity_type` is `service_identity`. The webhook stores the `principal_id` as the alert's
+subject, only an Administrator reads the row, and the dashboard's toast and alert list link it to
+the identity on Access Control › **Machine identities** rather than to this rule. The summary names
+the identity, the `jti` and the expiry, and says what to do. For most identities: issue a new token
+on Access Control, put it in the client, then revoke the old one. For Service_Ingestor,
+Service_Playback and Service_ReleaseCheck, whose keys the deployment reads at start
+(`renewal` = `keys_rotate`): run `npm run keys:rotate`, then revoke the old token.
+
+The instance clears when its token is revoked, its identity withdrawn, or it expires, because the
+row then leaves the view. Revoking the old token after issuing the new one is what clears it in
+the usual case. NoData is OK: a site that has issued no token has nothing to warn about.
+
+Only a recorded token is seen. The page and `mint-api-token.mjs` record every token before showing
+it, and `rotate-service-keys.mjs` records when it can reach the database. The three keys
+`npm run setup` signs at install are not recorded, because the database does not exist yet, so the
+first expiry of those keys gets no warning here. `npm run keys:check` reports their days left.
 
 ### Archive Backlog (`aber-archive-backlog`)
 

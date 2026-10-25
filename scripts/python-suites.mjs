@@ -711,6 +711,15 @@ export const SUITES = {
       'coming back at the next restart, a value that is not a web address cleared without a word, ' +
       'or an archived cell left out. Also holds that grafana_url is no longer proposable.',
   },
+  'supabase/migrations/test_a_service_token_warns_before_it_expires.py': {
+    lanes: ['db'],
+    why:
+      '0204. Runs the Service Token Expiring rule\'s own query: a 7-, 30- and 90-day token fires ' +
+      'inside its window and not before, and a revoked token, a withdrawn or deleted identity and ' +
+      'an expired token never do. grafana_reader reads the view and nothing behind it. ' +
+      'platform_alerts takes a service_identity alert, a replay of 0001 keeps both widened CHECKs ' +
+      'over one, and only an Administrator reads it.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:

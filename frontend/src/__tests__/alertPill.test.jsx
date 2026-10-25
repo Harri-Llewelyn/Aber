@@ -366,6 +366,31 @@ describe('AlertPill', () => {
       // `platform_alerts_asset_has_wire_id` (0001_baseline_schema.sql) requires sparkplug_id to be null here.
       expect(screen.getByText('Platform-wide')).toBeInTheDocument()
     })
+
+    it('opens an alert about a machine identity on Access Control, in this tab', () => {
+      const principal = '5e000000-0204-4000-8000-0000000000a1'
+      const onSelectDevice = vi.fn()
+      const onSelectGateway = vi.fn()
+      render(
+        <AlertPill
+          alerts={[alert({
+            fingerprint: 'fp-token', alert_name: 'Service Token Expiring', severity: 'warning',
+            entity_type: 'service_identity', entity_id: principal, sparkplug_id: null,
+          })]}
+          onSelectDevice={onSelectDevice}
+          onSelectGateway={onSelectGateway}
+        />
+      )
+      fireEvent.click(pill())
+      const link = document.querySelector('a.alert-pill-item-link')
+      expect(link).toHaveAttribute('href', `/access-control/identities?search=${principal}`)
+      expect(link).not.toHaveAttribute('target')
+      expect(screen.getByText('Machine identity')).toBeInTheDocument()
+      fireEvent.click(link)
+      expect(onSelectDevice).not.toHaveBeenCalled()
+      expect(onSelectGateway).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
+    })
   })
 
   /** Dismissal. The panel is a popover in a header, not a dialog: no backdrop, no focus trap. */
