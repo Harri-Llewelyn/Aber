@@ -12,6 +12,9 @@
  *
  * A new account without a mail relay, and every new password, is minted here and returned once.
  * Nothing stores or logs it; GoTrue keeps only its hash.
+ *
+ * `add` takes an optional display name. It is checked before GoTrue makes the account, so a bad name
+ * refuses the whole add, and set with set_display_name() in the caller's session once the role is.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -22,6 +25,7 @@ import { resolveUserRole } from "../_shared/roles.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 // The validator CI keeps byte-identical with the frontend's; see mint-service-token.
 import { isUuid } from "../approve-quarantine/isUuid.ts";
+import { displayNameProblem, normaliseDisplayName } from "./displayName.ts";
 
 /** The four roles a person may hold; set_person_role() refuses anything else as well. */
 export const ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
@@ -125,6 +129,15 @@ async function addPerson(req: Request, body: Record<string, unknown>, caller: Cl
   if (!ROLES.includes(role)) {
     return json(400, { error: "Malformed request", details: `\`role\` must be one of ${ROLES.join(", ")}.` });
   }
+  // Optional. Refused here, before GoTrue makes anything, so a bad name refuses the whole add.
+  if (body.display_name !== undefined && body.display_name !== null && typeof body.display_name !== "string") {
+    return json(400, { error: "Malformed request", details: "`display_name` must be text." });
+  }
+  const nameProblem = displayNameProblem(body.display_name);
+  if (nameProblem) {
+    return json(400, { error: "The person was not added", details: nameProblem });
+  }
+  const displayName = normaliseDisplayName(body.display_name);
 
   // Asked first, because GoTrue's invitation to an address it already holds, unconfirmed, re-sends
   // to that account instead of refusing, and that account is not this request's to record or undo.
@@ -180,7 +193,26 @@ async function addPerson(req: Request, body: Record<string, unknown>, caller: Cl
     return dbRefusal(req, recordError, "The person was not added");
   }
 
-  return json(200, { user_id: userId, email, role, invited, ...(password ? { password } : {}) });
+  // The name, as the caller, so the audit row names them. The person exists by now, so a failure
+  // here is said beside the success rather than undoing it.
+  let nameError: string | null = null;
+  if (displayName) {
+    const { error: nameRefusal } = await caller.rpc("set_display_name", { p_user_id: userId, p_name: displayName });
+    if (nameRefusal) {
+      console.error(`manage-people: setting the display name of new account ${userId} failed:`, nameRefusal.message);
+      nameError = "Their display name was not set. Select Change Name on their row to set it.";
+    }
+  }
+
+  return json(200, {
+    user_id: userId,
+    email,
+    role,
+    invited,
+    display_name: nameError ? null : displayName,
+    ...(nameError ? { name_error: nameError } : {}),
+    ...(password ? { password } : {}),
+  });
 }
 
 async function removeAccess(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {

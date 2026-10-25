@@ -2246,7 +2246,10 @@ The People tab on Access Control is Administrator only, and has two halves.
   an account to remove access and lifts the ban to restore it. Each act calls a function in the
   caller's session: `record_person_added()` after GoTrue created the account (if it refuses, the
   account is deleted again), and `remove_person_access()` and `restore_person_access()` BEFORE
-  GoTrue changes anything, so their rules are decided first.
+  GoTrue changes anything, so their rules are decided first. `add` takes an optional display name
+  (`0203`): checked before GoTrue is asked, so a bad name refuses the whole add, then set with
+  `set_display_name()` once the role is. If only the name fails, the person stays added and the
+  answer's `name_error` says so.
 - **Removing access is immediate for every role check.** `remove_person_access()` deletes the
   person's `user_roles` row, which `has_role()`, `has_authority()`, the edge functions and the token
   hook all read, and keeps the role in `access_removals` so restoring gives it back. The ban then
