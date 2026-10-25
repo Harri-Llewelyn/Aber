@@ -83,6 +83,10 @@ python test-harness/test_log_pipeline.py
 # spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if
 # Traefik forwards one address for every client (deploy/k8s/traefik-config.yaml not applied).
 python supabase/test_auth_rate_limit.py
+# Sign Out ends one session (0205). Needs the stack up. It signs in twice as the seeded Auditor,
+# signs one session out as the dashboard does (scope=local), and reads through the gateway with
+# both tokens: the signed-out one gets 401 session_not_found, and the other is still served.
+python supabase/test_sign_out_ends_one_session.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
@@ -612,6 +616,11 @@ python supabase/migrations/test_service_token_revocation.py
 # subject arm is checked first so its message wins, and its uuid cast must fall THROUGH to the
 # token arm rather than return, or a junk `sub` would bypass the token denylist.
 python supabase/migrations/test_service_principal_revocation.py
+# An ended session (0205): the session arm of the same hook. A token whose GoTrue session has gone
+# is refused with 401 session_not_found, raised the way raise_not_found() raises its 404; the
+# person's other sessions, and every token that names no session, are still served. A removed
+# person is told their access was removed. Every test rolls back.
+python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
@@ -679,8 +688,8 @@ npm run dev:test -- --filter=i3x
 # every page navigation.jsx declares, an area plan and two 3D models it makes and then deletes,
 # and sign-out. Fails listing each refusal a page or one of its workers reports. Chrome is
 # --chrome=PATH, or CHROME. CI runs it after the stack lane. Chrome signs in as the walk's own
-# Administrator, csp-walk@aber.local, never as the seeded one: Sign Out ends every session of the
-# person who clicks it. The seeded Administrator (ABER_ADMIN_EMAIL) adds or restores that account
+# Administrator, csp-walk@aber.local, never as the seeded one, so the walk ends no session of a
+# person's. The seeded Administrator (ABER_ADMIN_EMAIL) adds or restores that account
 # and sets its password through the API first, and removes its access after; that API session
 # ends alone.
 node test-harness/csp-walk.mjs --base=http://app.localhost

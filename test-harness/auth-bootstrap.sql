@@ -110,3 +110,14 @@ ALTER TABLE auth.users
   ADD COLUMN IF NOT EXISTS phone_change               text DEFAULT '',
   ADD COLUMN IF NOT EXISTS phone_change_token         varchar(255) DEFAULT '',
   ADD COLUMN IF NOT EXISTS reauthentication_token     varchar(255) DEFAULT '';
+
+-- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
+-- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as
+-- GoTrue does. The chain reads only `id`; the other columns are GoTrue's, with its types.
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;

@@ -3,10 +3,11 @@ import { supabase, SUPABASE_URL, SUPABASE_GATEWAY_KEY } from '../lib/supabaseCli
 
 /**
  * Detecting and recovering from a session the auth server no longer recognises. `getSession()` only
- * reads localStorage and PostgREST only checks the JWT signature, so a token whose `auth.sessions`
- * row has gone still reads data. Edge Functions call `auth.getUser()` and fail with "Session from
- * session_id claim in JWT does not exist"; this module recognises that answer, asks the auth
- * server itself, and turns a rejected session into a sign-out.
+ * reads localStorage, so the stored token may belong to a session whose `auth.sessions` row has
+ * gone. The API refuses it with `session_not_found`, which lib/connectionState reads. Edge
+ * Functions call `auth.getUser()` and fail with "Session from session_id claim in JWT does not
+ * exist"; this module recognises that answer, asks the auth server itself, and turns a rejected
+ * session into a sign-out.
  */
 
 const INVALID_SESSION_SIGNATURES = [

@@ -11,9 +11,9 @@
  * Chrome is --chrome, else $CHROME or $CHROME_BIN (GitHub's Ubuntu runners set it), else the usual
  * install path.
  *
- * The browser never signs in as a real person. Sign Out ends every session of whoever clicks it, so
- * the walk signs in through the API as ABER_ADMIN_EMAIL / ABER_ADMIN_PASSWORD (values-dev.yaml's
- * seed by default) and, as them, gives its own account (CSP_WALK_ACCOUNT, csp-walk@aber.local) the
+ * The browser never signs in as a real person, so the walk ends no session of theirs. The walk
+ * signs in through the API as ABER_ADMIN_EMAIL / ABER_ADMIN_PASSWORD (values-dev.yaml's seed by
+ * default) and, as them, gives its own account (CSP_WALK_ACCOUNT, csp-walk@aber.local) the
  * Administrator role and a new password through manage-people. Chrome signs in as that account.
  * Afterwards its access is removed, as the People tab removes it, and the API session ends alone
  * (scope=local). The account is kept, banned, and restored by the next walk: an account is never
@@ -574,7 +574,7 @@ try {
     }
 
     // The dashboard's own Sign Out, which also fetches the Studio and forge doors' sign-out. It ends
-    // every session of the walk's account, and nobody else's.
+    // the walk's own session in this browser.
     current = '(sign-out)'
     await evaluate("document.querySelector('.user-menu-button').click()")
     await until("!!document.querySelector('.user-popover-action-danger')", 5000)
