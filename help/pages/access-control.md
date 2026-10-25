@@ -43,6 +43,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
+- An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
 - **Which address shows where.** People and the Audit Trail show the address the account has now. Approvals and Archived Entities keep the address the person had when they acted.
 - **Grafana** takes the new address at their next sign-in there. **The forge** keeps the address their forge account was made with. They still sign in to it as before. Do not give the old address to someone else.
 - **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Its role control, and those actions in your drawer, are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
