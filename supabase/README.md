@@ -1530,6 +1530,65 @@ every other column and not this one, that the pin holds, and that the column car
 comment. `test_a_cell_s_dashboard_address_is_one_of_its_links.py` holds the move, what is skipped,
 the duplicate, the audit row, a second boot, a deleted link staying deleted, and the refusals.
 
+### A person can have a display name (0203)
+
+Everywhere the dashboard showed a person, it showed their email. On a site whose addresses follow a
+scheme, or share a mailbox, that is a poor way to tell people apart. `person_profiles` holds one row
+per person who has a name. **No name is no row. The email stays the identifier.**
+
+- **Where it is kept.** A small table keyed on `auth.users(id)`, `ON DELETE CASCADE`. Not
+  `user_settings` (`0188`): that table is own-row only, and nobody else reads it, but a name is read
+  beside the work a person did. Not GoTrue's `user_metadata`: a person writes any JSON there through
+  `updateUser()`, with no CHECK the database can apply, and it rides in every access token. The
+  table is named for the person rather than the name, so a later column about the person has a
+  place.
+- **What a name may be.** Three CHECKs: trimmed (`btrim`), 1 to 80 characters, and none of
+  Unicode's control characters or bidirectional controls. A bidirectional control can make the
+  email printed beside a name read in another order. The character class is also in
+  `frontend/src/utils/displayName.js` and `functions/manage-people/displayName.ts`, which refuse a
+  name before it is sent; `scripts/check-mirror-drift.mjs` (check 15) holds the three together.
+- **One writer.** `set_display_name(p_user_id, p_name)` is SECURITY DEFINER. A person sets their
+  own; an Administrator sets anyone's; anything else is `42501`. It trims, and an empty or NULL
+  name deletes the row. A machine identity has no display name (`22023`): it is named under Machine
+  identities. A name the CHECKs refuse is re-raised as `22023` with a sentence, so the rule is
+  stated once, in the table. `authenticated` holds SELECT on the table and nothing else, so no
+  write can skip the audit row; the one policy returns the caller's own row.
+- **One audit row per change.** A trigger, `log_display_name_change()`, writes
+  `DISPLAY_NAME_CHANGED` on `entity_type = 'user_roles'`, keyed by the person, so it lands in the
+  person's lane in the security lane, beside `PERSON_ADDED` and `ROLE_GRANTED`. `old_data` and
+  `new_data` carry `display_name`, NULL for no name. The function writes nothing when the name is
+  the one already held, and the UPDATE trigger's `WHEN` holds that for any other writer. A row
+  deleted because its account was deleted writes nothing: that is not a rename.
+- **Who reads a name.** Each reader answers only where the caller can already see the person.
+  `list_people()` (Administrator) and `list_user_accounts()` (Administrator, Auditor) gain a
+  `display_name` column. `display_names_for(p_ids)` serves Approvals and Archived Entities, which
+  Operators and Shopfloor Managers read too. It answers for the caller's own id, for the proposer
+  of a change proposal the caller may read, and for the retirer of a retired entity the caller may
+  read. The tests are those tables' SELECT policies: Administrator or Shopfloor_Manager for
+  `change_proposals`, `archive:manage` or `audit_trail:read` for `retired_entities`. Any other id
+  is left out rather than refused, so the page shows the email alone.
+- **Read live, beside a stamped email.** `change_proposals.proposed_by_email` and
+  `retired_entities.retired_by_email` keep the address the person had when they acted. The name is
+  read when the page draws, so a renamed person shows under the new name everywhere, and the trail
+  keeps the old one in the rename row.
+- **The Audit Trail's search finds a name.** `audit_trail_user_ids_matching()` matches the display
+  name as well as the email. It is redeclared with 0001's signature and return type.
+
+**The two list functions change shape where they are declared.** `CREATE OR REPLACE` cannot change
+a return type, and `0001` and `0166` replay before this file on every boot. So the new column is
+declared in `0001` (`list_user_accounts()`) and `0166` (`list_people()`) themselves, as `0196`
+widened a CHECK in `0001`. Each declaration is preceded by a `DO` block that drops the function
+when its result differs from the new shape. That happens once, on the first boot after an upgrade;
+every later boot finds the shape matching and drops nothing. The grants follow in the same files.
+Both bodies name `person_profiles`, which this file creates later: PL/pgSQL resolves a table when
+the function first runs, not when it is declared. `display_name` is the last column of
+`list_people()`, so a reader taking the columns by position is unaffected.
+
+The file's self-check asserts the table's RLS and grants, its policy and triggers, who may execute
+each function, both list shapes, and the pin on the redeclared matcher.
+`test_a_person_can_have_a_display_name.py` holds the rules, the refusals, the audit rows, who reads
+a name, and the replay of `0001` and `0166` over the older shapes.
+
 ### The API refuses a token whose session has ended (0205)
 
 GoTrue writes the session's id into every access token it issues (`session_id`), and deletes the
@@ -1941,6 +2000,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `access_removals` | nobody — `list_people()` reads it for an `Administrator` | none — `remove_person_access()` and `restore_person_access()` (`0166`) |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
 | `user_settings` | own row only, `Administrator` included (`0188`) | own row: `INSERT`, `UPDATE`; no `DELETE` — the row goes with the account |
+| `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
@@ -2223,7 +2283,10 @@ The People tab on Access Control is Administrator only, and has two halves.
   an account to remove access and lifts the ban to restore it. Each act calls a function in the
   caller's session: `record_person_added()` after GoTrue created the account (if it refuses, the
   account is deleted again), and `remove_person_access()` and `restore_person_access()` BEFORE
-  GoTrue changes anything, so their rules are decided first.
+  GoTrue changes anything, so their rules are decided first. `add` takes an optional display name
+  (`0203`): checked before GoTrue is asked, so a bad name refuses the whole add, then set with
+  `set_display_name()` once the role is. If only the name fails, the person stays added and the
+  answer's `name_error` says so.
 - **Removing access is immediate for every role check.** `remove_person_access()` deletes the
   person's `user_roles` row, which `has_role()`, `has_authority()`, the edge functions and the token
   hook all read, and keeps the role in `access_removals` so restoring gives it back. The ban then
@@ -3114,7 +3177,9 @@ an audit trail must not do.
 Email and nothing else. It is the only human-readable identifier `auth.users` carries here —
 `raw_user_meta_data` is empty on every account this stack creates — and a read surface over the auth
 schema should return the least that does the job. It may be NULL, and the caller falls back to the
-id rather than being told the account does not exist.
+id rather than being told the account does not exist. Since `0203` it also returns the person's
+display name, NULL when they have none
+([A person can have a display name](#a-person-can-have-a-display-name-0203)).
 
 Every property that makes this safe is in the function body rather than in a grant, because
 `authenticated` holds EXECUTE and the function decides. A gate that stops working therefore fails

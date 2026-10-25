@@ -184,11 +184,23 @@ REVOKE ALL ON FUNCTION public.person_role_id(text) FROM PUBLIC, anon, authentica
 -- -------------------------------------------------------------------------------------------------
 
 -- Every person, never a machine identity. status is 'removed' while their access is removed (here
--- or by a GoTrue ban), 'invited' until they first sign in, and 'active' after.
+-- or by a GoTrue ban), 'invited' until they first sign in, and 'active' after. display_name is
+-- 0203's, NULL when they have none. A return type cannot be replaced in place, so a database
+-- holding the form without it drops it first; once the shape matches, a boot drops nothing.
+-- person_profiles is created by 0203: PL/pgSQL resolves the name when the function first runs.
+DO $shape$
+BEGIN
+  IF to_regprocedure('public.list_people()') IS NOT NULL
+     AND pg_get_function_result(to_regprocedure('public.list_people()')) NOT LIKE '%, display_name text)' THEN
+    DROP FUNCTION public.list_people();
+  END IF;
+END
+$shape$;
+
 CREATE OR REPLACE FUNCTION public.list_people()
 RETURNS TABLE(user_id uuid, email text, role text, status text, sign_in_blocked boolean,
               role_on_restore text, invited_at timestamptz, last_sign_in_at timestamptz,
-              created_at timestamptz)
+              created_at timestamptz, display_name text)
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
@@ -212,9 +224,11 @@ BEGIN
          (SELECT r.name FROM public.roles r WHERE r.id = a.role_id),
          u.invited_at,
          u.last_sign_in_at,
-         u.created_at
+         u.created_at,
+         p.display_name
     FROM auth.users u
     LEFT JOIN public.access_removals a ON a.user_id = u.id
+    LEFT JOIN public.person_profiles p ON p.user_id = u.id
    WHERE NOT public.is_machine_principal(u.id)
    ORDER BY u.email NULLS LAST, u.id;
 END
@@ -227,7 +241,8 @@ GRANT EXECUTE ON FUNCTION public.list_people() TO authenticated;
 COMMENT ON FUNCTION public.list_people() IS
   'Every person (auth.users that is not a machine principal) with their role, status (active, '
   'invited, removed), whether GoTrue blocks their sign-in, the role restoring access gives back, '
-  'and when they were invited and last signed in. Administrator only.';
+  'when they were invited and last signed in, and their display name (0203; NULL when they have '
+  'none). Administrator only.';
 
 -- Gives a person one of the four roles. Refuses the caller's own role, a person whose access is
 -- removed, and a change that would leave no Administrator with access. False when nothing changed.

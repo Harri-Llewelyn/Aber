@@ -1069,6 +1069,7 @@ function edgeFunctionNames() {
     'public.issue_gateway_enrollment_token': '0196 refuses a Third-party gateway as it refuses a Host one, because a bundle enrols Aber\'s gateway appliance; the baseline refused Host alone',
     'public.gateway_has_broker_credential': '0196 counts a Third-party gateway\'s CREDENTIAL_ISSUED row as a Host gateway\'s, so archiving it disables its account; the baseline counted Host alone',
     'public.proposable_columns': '0202 drops cells.grafana_url from the cell lane, since its values moved to Attached Links and the column is deprecated; the baseline admits it. It restates 0176\'s search_path pin, which the redeclaration would otherwise clear',
+    'public.audit_trail_user_ids_matching': '0203 matches a person\'s display name as well as their email, since the Audit Trail labels a person\'s lane with the name; the baseline matches the email alone. It restates 0176\'s search_path pin',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

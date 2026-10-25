@@ -800,6 +800,14 @@ export const SUITES = {
       'who can sign in, one role row per person, every act attributed in the security lane, and no ' +
       'role for a self-registered account.',
   },
+  'supabase/migrations/test_a_person_can_have_a_display_name.py': {
+    lanes: ['db'],
+    why:
+      "0203's display names. A person names only themselves and an Administrator anyone; the " +
+      "CHECKs refuse a long name or a control character; each change is one audit row and the " +
+      "same name none; display_names_for() answers only for people the caller already sees on " +
+      'Approvals and Archived Entities; and 0001 and 0166 bring the older list shapes forward.',
+  },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],
     why:

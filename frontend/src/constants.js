@@ -74,6 +74,9 @@ export const AUDIT_TRAIL_ACTIONS = {
   ACCESS_REMOVED:    'Access removed',
   ACCESS_RESTORED:   'Access restored',
   PASSWORD_SET:      'Password set',
+  // A person's display name set, changed or cleared (0203), by them or an Administrator: one row
+  // per change, in the person's lane, with the old and new name.
+  DISPLAY_NAME_CHANGED: 'Display name changed',
   // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
   // when an appliance reports a different flow hash: the digest before and after, and what the
   // forge's main held at that moment. Actor `ingestion`, no user.

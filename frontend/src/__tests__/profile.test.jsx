@@ -359,3 +359,70 @@ describe('Single-key shortcuts', () => {
     expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
   })
 })
+
+/* The person's own display name (0203): set and cleared here, with Save and Discard as on the other rows. */
+describe('Display name', () => {
+  const nameBox = () => screen.getByLabelText('Display name')
+
+  it('sits on Account, showing the saved name, with nothing to save until it changes', () => {
+    renderProfile({ displayName: 'Owain Operator', onSaveDisplayName: vi.fn() })
+    expect(nameBox()).toHaveValue('Owain Operator')
+    expect(within(row('Display name')).queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(row('Display name').querySelector('.setting-description')).toHaveTextContent(/email address beside it/)
+  })
+
+  it('is empty for a person with no name, and waits while it is read', () => {
+    renderProfile({ displayName: null, onSaveDisplayName: vi.fn() })
+    expect(nameBox()).toHaveValue('')
+    expect(nameBox()).toBeEnabled()
+    cleanup()
+    renderProfile({ displayName: undefined, onSaveDisplayName: vi.fn() })
+    expect(nameBox()).toBeDisabled()
+  })
+
+  it('saves the trimmed name on Save, and an empty one as no name', async () => {
+    const onSaveDisplayName = vi.fn().mockResolvedValue('Owain ap Rhys')
+    renderProfile({ displayName: 'Owain Operator', onSaveDisplayName })
+    fireEvent.change(nameBox(), { target: { value: '  Owain ap Rhys ' } })
+    expect(onSaveDisplayName).not.toHaveBeenCalled()
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaveDisplayName).toHaveBeenCalledWith('Owain ap Rhys'))
+
+    fireEvent.change(nameBox(), { target: { value: '   ' } })
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaveDisplayName).toHaveBeenLastCalledWith(null))
+  })
+
+  it('puts the saved name back on Discard', () => {
+    const onSaveDisplayName = vi.fn()
+    renderProfile({ displayName: 'Owain Operator', onSaveDisplayName })
+    fireEvent.change(nameBox(), { target: { value: 'Somebody Else' } })
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: /Discard/ }))
+    expect(nameBox()).toHaveValue('Owain Operator')
+    expect(onSaveDisplayName).not.toHaveBeenCalled()
+  })
+
+  it('refuses a name the database would refuse, saying why, before saving', () => {
+    const onSaveDisplayName = vi.fn()
+    renderProfile({ displayName: null, onSaveDisplayName })
+    fireEvent.change(nameBox(), { target: { value: 'N'.repeat(81) } })
+    expect(within(row('Display name')).getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(row('Display name')).toHaveTextContent('A display name is 80 characters at most.')
+    expect(onSaveDisplayName).not.toHaveBeenCalled()
+  })
+
+  it("shows the database's sentence when a save is refused, and keeps the draft", async () => {
+    const onSaveDisplayName = vi.fn().mockRejectedValue(new Error('A display name cannot contain a control character, such as a line break or a tab.'))
+    renderProfile({ displayName: null, onSaveDisplayName })
+    fireEvent.change(nameBox(), { target: { value: 'Owain' } })
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
+    expect(await within(row('Display name')).findByText(/cannot contain a control character/)).toBeInTheDocument()
+    expect(nameBox()).toHaveValue('Owain')
+  })
+
+  it('is not offered to a machine identity', () => {
+    renderProfile({ email: null, passwordBlocked: 'Machine identities have no password to change.' })
+    expect(screen.queryByLabelText('Display name')).toBeNull()
+    expect(row('Display name')).toHaveTextContent('a machine identity is named on the Access Control page')
+  })
+})

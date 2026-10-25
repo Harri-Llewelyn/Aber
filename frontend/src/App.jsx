@@ -25,6 +25,7 @@ import { describeResetError } from './utils/authErrors'
 import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
 import { useUserSettings } from './hooks/useUserSettings'
+import { useOwnDisplayName } from './hooks/useDisplayNames'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { useAlertFavicon } from './hooks/useAlertFavicon'
 import { Sidebar } from './components/common/Sidebar'
@@ -302,14 +303,15 @@ const SIDEBAR_SEGMENT_LOOK = {
 const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, description: m.description, ...SIDEBAR_SEGMENT_LOOK[m.id] }))
 
 /**
- * The account control at the foot of the rail: the avatar, with the address beside it whenever the
- * rail shows labels. Its menu's head states the address, role and version; the Light/Dark theme
+ * The account control at the foot of the rail: the avatar, with the person's display name beside it
+ * whenever the rail shows labels, or their address when they have no name. Its menu's head states
+ * the name, the address, the role and the version; the Light/Dark theme
  * switch and the Sidebar layout switch each have a section of their own under it; then come
  * Profile, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts an
  * irreversible action one stray movement away. The menu opens beside the rail (App.css).
  */
 function UserMenu({
-  persona, userRole, onSignOut, theme, onChangeTheme, sidebarMode, onChangeSidebarMode, onReportBug, onOpenProfile,
+  persona, displayName, userRole, onSignOut, theme, onChangeTheme, sidebarMode, onChangeSidebarMode, onReportBug, onOpenProfile,
   profileOpen = false,
 }) {
   const [open, setOpen] = useState(false)
@@ -337,28 +339,33 @@ function UserMenu({
   }, [open])
   const update = availableRelease(releaseCheck, release)
 
+  // The name with the address beside it, in the hover and the accessible name; the address alone
+  // when there is no name.
+  const signedInAs = displayName ? `${displayName} (${persona})` : persona
+
   return (
     <div className="user-menu" ref={wrapRef}>
-      {/* The address is a rail label, transparent while the rail is collapsed, so the accessible
-          name is stated rather than read from it: it leads with the address and the role. */}
-      <Tooltip text={`Signed in as ${persona} (${userRole}) — open account menu`}>
+      {/* The name or address is a rail label, transparent while the rail is collapsed, so the
+          accessible name is stated rather than read from it: it leads with the person and the role. */}
+      <Tooltip text={`Signed in as ${signedInAs} (${userRole}) — open account menu`}>
         <button
           type="button"
           className={`user-menu-button${open ? ' user-menu-button-open' : ''}${profileOpen ? ' active' : ''}`}
           onClick={() => setOpen(v => !v)}
           aria-expanded={open}
           aria-haspopup="menu"
-          aria-label={`Signed in as ${persona} (${userRole}) — open account menu`}
+          aria-label={`Signed in as ${signedInAs} (${userRole}) — open account menu`}
         >
           <span className="user-avatar" aria-hidden="true"><IconUser size={14} /></span>
-          <span className="sidebar-item-label user-menu-email">{persona}</span>
+          <span className="sidebar-item-label user-menu-email">{displayName ? <bdi>{displayName}</bdi> : persona}</span>
         </button>
       </Tooltip>
 
       {open && (
         <div className="user-popover" role="menu">
           <div className="user-popover-head">
-            <div className="user-popover-email">{persona}</div>
+            {displayName && <div className="user-popover-email"><bdi>{displayName}</bdi></div>}
+            <div className={displayName ? 'user-popover-address' : 'user-popover-email'}>{persona}</div>
             <div className="user-popover-role">{userRole}</div>
             {/* The version sits in the head with the other facts about the session, not among the
                 actions. Shown to every user so whoever hits a fault can name the build. */}
@@ -567,6 +574,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts above.
 
   const persona = session?.user?.email || 'Administrator'
+  // The person's own display name (0203), shown in the account menu and set on Profile > Account.
+  const { displayName, saveDisplayName } = useOwnDisplayName(session?.user?.email ? session.user.id : null)
   // A person signs in with an email address and a password. A machine identity has neither.
   const passwordBlocked = session?.user?.email
     ? null
@@ -576,6 +585,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const accountMenu = (
     <UserMenu
       persona={persona}
+      displayName={displayName}
       userRole={userRole}
       onSignOut={onSignOut}
       theme={theme}
@@ -759,6 +769,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 userRole={loadingPerms ? undefined : userRole}
                 passwordBlocked={passwordBlocked}
                 onChangePassword={() => setShowChangePassword(true)}
+                displayName={displayName}
+                onSaveDisplayName={saveDisplayName}
                 theme={theme}
                 onChangeTheme={setTheme}
                 sidebarMode={sidebarMode}

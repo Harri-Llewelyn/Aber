@@ -101,7 +101,7 @@ describe('People', () => {
   it('searches the email address', async () => {
     renderPage()
     await screen.findByText('me@site.test')
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by email' }), { target: { value: 'OPERATOR' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by name or email' }), { target: { value: 'OPERATOR' } })
     expect(listed()).toEqual(['operator.one@site.test', 'operator.two@site.test'])
     expect(query()).toEqual({ search: 'OPERATOR' })
   })
@@ -147,7 +147,7 @@ describe('People', () => {
     await screen.findByText('me@site.test')
     fireEvent.click(screen.getByRole('button', { name: 'Show removed (1)' }))
     fireEvent.change(screen.getByLabelText('Filter people by role'), { target: { value: 'Auditor' } })
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by email' }), { target: { value: 'nobody' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by name or email' }), { target: { value: 'nobody' } })
     expect(screen.getByText('No person matches these filters.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(3\)/ }))

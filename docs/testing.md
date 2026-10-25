@@ -443,6 +443,14 @@ python supabase/migrations/test_release_check.py
 # are never null; the first sign-in's seed never overwrites a row; and deleting the account
 # deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
+# A person can have a display name (0203). A person sets only their own and an Administrator
+# anyone's, never a machine identity's; the CHECKs refuse 81 characters and a control character,
+# with a sentence, and an empty or whitespace-only name clears it; each change writes one row in
+# the person's Audit Trail lane and the same name none; nothing writes person_profiles but
+# set_display_name(); display_names_for() answers only for the caller, the proposers and the
+# retirers they may already read; list_people() and list_user_accounts() carry the name; and
+# 0001 and 0166 bring a database holding the older list shapes forward. Every test rolls back.
+python supabase/migrations/test_a_person_can_have_a_display_name.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
