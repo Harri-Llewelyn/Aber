@@ -126,6 +126,7 @@ describe('the strip in the signed-in shell', () => {
   const ok = { data: [], error: null, status: 200 }
   const unreachable = { data: null, error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }, status: 0 }
   const expired = { data: null, error: { code: 'PGRST303', message: 'JWT expired', details: null, hint: null }, status: 401 }
+  const sessionEnded = { data: null, error: { code: 'session_not_found', message: 'this session has ended', details: 'session 3f1c2a9e-5b7d-4c1e-9a2f-6d8e0b4c7a15', hint: null }, status: 401 }
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -211,9 +212,19 @@ describe('the strip in the signed-in shell', () => {
     expect(screen.queryByText('Your session has ended.')).toBeNull()
   })
 
-  // The session's auth.sessions row has gone. PostgREST checks only the token's signature and goes
-  // on answering, so only the edge function, which asks the auth server, can tell; the page then
-  // asks the auth server itself before saying so.
+  // The session's auth.sessions row has gone (a Sign Out elsewhere, a new password), and the API
+  // refuses its token (0205).
+  it('turns the API refusing an ended session into Sign In Again', async () => {
+    await signedIn()
+    outcome = sessionEnded
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500 + STALE_AFTER_MS) })
+    expect(screen.getByText('Your session has ended.')).toBeInTheDocument()
+    expect(screen.queryByText(/Not updating since/)).toBeNull()
+  })
+
+  // An edge function asks the auth server, which refuses the ended session; the page then asks the
+  // auth server itself before saying so. Storage and Realtime check only the token's signature, so
+  // a refresh through them still works and must not clear it.
   it('turns an edge function refusing the session, once confirmed, into Sign In Again, while every refresh still works', async () => {
     await signedIn()
     functionsAnswer(401, { error: 'Invalid user token', details: 'Session from session_id claim in JWT does not exist' })

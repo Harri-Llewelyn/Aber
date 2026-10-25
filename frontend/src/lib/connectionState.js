@@ -43,10 +43,11 @@ const GATEWAY_FAILURE = /no healthy upstream|upstream connect error|upstream req
 // PostgREST's connection group (database unreachable, pool exhausted, schema cache not loaded),
 // and SQLSTATE connection exceptions and shutdowns, which PostgREST answers with a 503.
 const UNREACHABLE_CODE = /^(PGRST00\d|08[0-9A-Z]{3}|57P0[123])$/
-// PostgREST's JWT group: the token is malformed, expired or missing. All are a 401. The message
-// form is for an error rethrown as its message alone.
-const SESSION_CODE = /^PGRST30[123]$/
-const SESSION_MESSAGE = /jwt expired|jwserror|bad_jwt/i
+// PostgREST's JWT group (the token is malformed, expired or missing), and the API refusing a token
+// whose session has ended (0205), which uses GoTrue's code for it. All are a 401. The message form
+// is for an error rethrown as its message alone.
+const SESSION_CODE = /^(PGRST30[123]|session_not_found)$/
+const SESSION_MESSAGE = /jwt expired|jwserror|bad_jwt|this session has ended/i
 
 // Two flags, each cleared only by its own kind of success. A refresh failure counts at once. A
 // Realtime failure counts only once no refresh has worked for REALTIME_RECONCILE_WINDOW_MS: the
@@ -173,10 +174,10 @@ export function reportRefreshFailed(err) {
 
 /**
  * The auth server refused the session: an edge function, which asks it on every call, answered
- * that the session no longer exists. Shown at once, and kept until resetConnectionState():
- * PostgREST checks only the token's signature, so refreshes go on working on the dead session and
- * must not clear it, and no refreshed token can arrive, since the session's refresh tokens went
- * with it.
+ * that the session no longer exists. Shown at once, and kept until resetConnectionState(): Storage
+ * and Realtime check only the token's signature, so a refresh through them can still work on the
+ * dead session and must not clear it, and no refreshed token can arrive, since the session's
+ * refresh tokens went with it.
  */
 export function reportSessionRefused() {
   if (sessionRefusedAt === null) sessionRefusedAt = Date.now()

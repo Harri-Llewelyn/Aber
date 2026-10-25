@@ -155,8 +155,7 @@ describe('Access token and Publishable key', () => {
     renderProfile()
 
     expect(await within(tokenRow()).findByText('Valid until 14:32')).toBeInTheDocument()
-    expect(tokenRow().querySelector('.setting-description')).toHaveTextContent(/acts as you, with your role, until it expires/)
-    expect(tokenRow().querySelector('.setting-description')).toHaveTextContent(/signing out does not end it sooner/)
+    expect(tokenRow().querySelector('.setting-description')).toHaveTextContent(/acts as you, with your role, until it expires or you sign out/)
     expect(document.body.innerHTML).not.toContain(session.access_token)
     expect(document.body.innerHTML).not.toContain(session.refresh_token)
   })
