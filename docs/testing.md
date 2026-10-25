@@ -216,9 +216,10 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=.
 # and the room behind it: which team the forge put them in, that an Operator completes the flow and
 # meets the 403, that a forged identity header from outside is not a login, and that a role removed
 # mid-session is refused and unseated on the next request, that a session ended elsewhere is
-# sent back through the door, and that Gitea's own sign-out link signs the person out of the
-# platform. Needs the forge and one enrolled gateway (which creates the organisation), and skips
-# without them.
+# sent back through the door, and that Gitea's own sign-out link ends the door's session alone and
+# sends the browser to the dashboard's /sign-out, while the same person's session in another
+# browser is still served. Needs the forge and one enrolled gateway (which creates the
+# organisation), and skips without them.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
