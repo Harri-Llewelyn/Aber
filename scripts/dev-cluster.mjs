@@ -598,11 +598,11 @@ async function openRelay (f) {
     const child = spawnForward(f, port)
     live.add(child)
     child.on('exit', () => live.delete(child))
-    const ready = await forwardReady(child)
+    const opened = await forwardReady(child)
     pending--
-    if (!ready.ok || closed) {
-      if (!ready.ok && !closed) {
-        console.error(`  ${c.red('relay')} a forward for ${f.what} (${port} -> ${f.service}:${f.remote}) did not open: ${ready.reason}`)
+    if (!opened.ok || closed) {
+      if (!opened.ok && !closed) {
+        console.error(`  ${c.red('relay')} a forward for ${f.what} (${port} -> ${f.service}:${f.remote}) did not open: ${opened.reason}`)
       }
       child.kill()
       while (waiting.length && !pending) waiting.shift()(null)
