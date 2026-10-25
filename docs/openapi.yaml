@@ -5085,7 +5085,7 @@ components:
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
-                 PASSWORD_SET, DISPLAY_NAME_CHANGED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PASSWORD_SET, DISPLAY_NAME_CHANGED, EMAIL_CHANGED, SESSIONS_ENDED, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
@@ -5097,6 +5097,8 @@ components:
             are written by their gates, and `CAPTURE_DELETED` by a trigger on `captures`, so a
             replacement and a deleted subject's cascade are recorded too. `DISPLAY_NAME_CHANGED`
             (0203) is written by a trigger on `person_profiles`, in the person's `user_roles` lane.
+            `EMAIL_CHANGED` and `SESSIONS_ENDED` (0207) are written by `record_person_email_change()`
+            and `end_person_sessions()`, in the same lane.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
