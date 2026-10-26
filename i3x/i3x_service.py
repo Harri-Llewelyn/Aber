@@ -46,6 +46,7 @@ import io
 import json
 import logging
 import os
+import queue
 import re
 import select
 import hashlib
@@ -1344,13 +1345,14 @@ AUTH_CACHE_MAX = 1024
 
 
 class Caller:
-    """An accepted token: the principal its subscriptions belong to, and its `exp` if any."""
+    """An accepted token: the principal its subscriptions belong to, its `exp` and its `jti`."""
 
-    __slots__ = ("principal", "expires_at")
+    __slots__ = ("principal", "expires_at", "jti")
 
-    def __init__(self, principal: str, expires_at: Optional[float]):
+    def __init__(self, principal: str, expires_at: Optional[float], jti: Optional[str] = None):
         self.principal = principal
         self.expires_at = expires_at
+        self.jti = jti
 
 
 _auth_cache: "OrderedDict[str, tuple]" = OrderedDict()
@@ -1394,6 +1396,12 @@ def _expiry(claims: dict) -> Optional[float]:
     return None
 
 
+def _token_id(claims: dict) -> Optional[str]:
+    """The token's `jti`: a service token carries one; a person's session and an `sb_` key do not."""
+    jti = claims.get("jti")
+    return jti if isinstance(jti, str) and jti else None
+
+
 def _monotonic_deadline(expires_at: Optional[float]) -> float:
     if expires_at is None:
         return float("inf")
@@ -1432,14 +1440,20 @@ def _forget(key: str) -> None:
 
 
 def _authenticate(bearer: str, fresh: bool = False) -> Caller:
-    """Accept the token or raise Problem. `fresh` skips the cache: an open stream's re-check."""
+    """
+    Accept the token or raise Problem. `fresh` skips the cache: an open stream's re-check. Every
+    acceptance, cached or not, is a use of the token (`token_use`).
+    """
     key = _credential_key(bearer)
     if not fresh:
         with _auth_lock:
             hit = _auth_cache.get(key)
-            if hit is not None and hit[0] > time.monotonic():
+            cached = hit[1] if hit is not None and hit[0] > time.monotonic() else None
+            if cached is not None:
                 _auth_cache.move_to_end(key)
-                return hit[1]
+        if cached is not None:
+            token_use.note(bearer, cached.jti)
+            return cached
 
     claims = _unverified_claims(bearer)
     expires_at = _expiry(claims)
@@ -1454,7 +1468,7 @@ def _authenticate(bearer: str, fresh: bool = False) -> Caller:
         _forget(key)
         raise
 
-    caller = Caller(_principal(bearer, claims), expires_at)
+    caller = Caller(_principal(bearer, claims), expires_at, _token_id(claims))
     keep = AUTH_CACHE_SECONDS
     if expires_at is not None:
         keep = min(keep, expires_at - time.time())
@@ -1464,7 +1478,114 @@ def _authenticate(bearer: str, fresh: bool = False) -> Caller:
             _auth_cache.move_to_end(key)
             while len(_auth_cache) > AUTH_CACHE_MAX:
                 _auth_cache.popitem(last=False)
+    token_use.note(bearer, caller.jti)
     return caller
+
+
+# =================================================================================================
+# When a token was last used (README.md -> "Security")
+# =================================================================================================
+# Called as the caller once `_authenticate` has accepted the token, so the database reads the jti
+# from the verified token and records only one it minted. A POST: PostgREST runs a GET read-only.
+TOKEN_USE_PATH = "rpc/record_service_token_use"
+# One call per jti per hour per process. The database keeps the hour too, so another replica's call
+# in the same hour writes nothing.
+TOKEN_USE_HOUR_SECONDS = 3600
+# The (jti, hour) pairs already queued. Bounded and evicted least-recently-used, as the auth cache.
+TOKEN_USE_SEEN_MAX = 4096
+# Uses waiting for the recorder thread. When it is full a use is dropped and counted, so a slow
+# database never holds a request, and a later request in the same hour queues it again.
+TOKEN_USE_QUEUE_MAX = 256
+TOKEN_USE_TIMEOUT_SECONDS = 5.0
+
+
+def _post_token_use(bearer: str) -> None:
+    """One call to TOKEN_USE_PATH carrying the caller's token. Raises on anything but a 2xx."""
+    pg = PostgrestClient(bearer, timeout=TOKEN_USE_TIMEOUT_SECONDS)
+    resp = requests.post(f"{pg.base}/{TOKEN_USE_PATH}", json={}, headers=pg._headers(),
+                         timeout=pg.timeout)
+    if not resp.ok:
+        raise RuntimeError(f"{resp.status_code} from the data layer: {resp.text[:200]}")
+
+
+class TokenUseRecorder:
+    """
+    Records that a token with a `jti` was used, off the request path.
+
+    A request pays only for `note()`: a lookup under a lock and, once per jti per hour, a put on a
+    bounded queue. One thread (`run`) makes the calls. A failure is counted and logged once, until
+    a call succeeds again, and never reaches a request. The queue holds a bearer only until the
+    thread sends it.
+    """
+
+    def __init__(self, post=_post_token_use, clock=time.time,
+                 queue_max: int = TOKEN_USE_QUEUE_MAX, seen_max: int = TOKEN_USE_SEEN_MAX):
+        self._post = post
+        self._clock = clock
+        self._queue: "queue.Queue[str]" = queue.Queue(maxsize=queue_max)
+        self._seen: "OrderedDict[tuple, None]" = OrderedDict()
+        self._seen_max = seen_max
+        self._lock = threading.Lock()
+        self._failing = False
+        self.recorded = 0
+        self.dropped = 0
+        self.failed = 0
+
+    def note(self, bearer: str, jti: Optional[str]) -> None:
+        """Queue this token's use, unless this hour's is queued already."""
+        if not jti:
+            return
+        key = (jti, int(self._clock() // TOKEN_USE_HOUR_SECONDS))
+        with self._lock:
+            if key in self._seen:
+                self._seen.move_to_end(key)
+                return
+            self._seen[key] = None
+            while len(self._seen) > self._seen_max:
+                self._seen.popitem(last=False)
+        try:
+            self._queue.put_nowait(bearer)
+        except queue.Full:
+            with self._lock:
+                self._seen.pop(key, None)
+                self.dropped += 1
+
+    def queued(self) -> int:
+        return self._queue.qsize()
+
+    def record_next(self, timeout: Optional[float] = None) -> bool:
+        """Make the next queued call. False when none arrived within `timeout`."""
+        try:
+            bearer = self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return False
+        try:
+            self._post(bearer)
+        except Exception as exc:  # noqa: BLE001 -- whatever failed, the request is not told
+            with self._lock:
+                self.failed += 1
+                first, self._failing = not self._failing, True
+            if first:
+                logger.warning("could not record a token's use (%s); later failures are counted, "
+                               "not logged, until one succeeds", exc)
+        else:
+            with self._lock:
+                self.recorded += 1
+                recovered, self._failing = self._failing, False
+            if recovered:
+                logger.info("recording token use again (%d failed in all)", self.failed)
+        return True
+
+    def run(self) -> None:
+        while True:
+            self.record_next()
+
+
+token_use = TokenUseRecorder()
+
+
+def start_token_use_recorder():
+    threading.Thread(target=token_use.run, name="token-use", daemon=True).start()
 
 
 # =================================================================================================
@@ -3270,6 +3391,7 @@ def main():
 
     start_mqtt()
     start_reaper()
+    start_token_use_recorder()
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
     server.daemon_threads = True
     logger.info(

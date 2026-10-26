@@ -1288,6 +1288,14 @@ export const SUITES = {
       'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
       'still read.',
   },
+  'supabase/test_a_token_s_use_is_recorded.py': {
+    lanes: ['stack'],
+    why:
+      'A service token used through the i3X server shows when it was last used (0209). Only a ' +
+      'running stack has the whole path: the server accepting the token, its recorder thread ' +
+      'calling PostgREST as the caller, and the hook and the function behind it. Issues a token, ' +
+      'uses it, reads the hour back as an Administrator, then revokes it.',
+  },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],
     why:

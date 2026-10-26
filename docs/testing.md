@@ -87,6 +87,11 @@ python supabase/test_auth_rate_limit.py
 # signs one session out as the dashboard does (scope=local), and reads through the gateway with
 # both tokens: the signed-out one gets 401 session_not_found, and the other is still served.
 python supabase/test_sign_out_ends_one_session.py
+# A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
+# the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
+# request with it, and reads its row back: the identity and the current UTC hour. A second request
+# leaves the row as it was. Then it revokes the token and waits for the i3X server to refuse it.
+python supabase/test_a_token_s_use_is_recorded.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
