@@ -12,7 +12,8 @@ freshly installed stack has one within minutes; the suite waits up to BACKUP_WAI
 What it asserts is the chain an operator relies on: the run was recorded (the Historian Backup
 Stale alert reads that table), the repository agrees, and a WAL segment switched now arrives in the
 archive, which is what makes a restore reach past the backup. A backup asked for from the Backups
-page is taken once, by the sidecar's minute loop, and recorded.
+page is taken once, by the sidecar's loop, and recorded. The loop runs every BACKUP_POLL_SECONDS
+(timescaledb.physicalBackup.pollSeconds: 60, 10 in values-dev.yaml), read from the pod's spec.
 
 ScheduleTestCase is that loop's rules: when a slot is due (a missed one is taken late, once), which
 type it takes, one waiting request claimed once, and the schedule the page reads. It needs only
@@ -36,6 +37,10 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 NAMESPACE = os.getenv("ABER_NAMESPACE", "aber")
 WAIT = int(os.getenv("BACKUP_WAIT_SECONDS", "300"))
+# Beyond one pass of the sidecar's loop: for one more pass to be recorded, and for a claim, which
+# also waits out any backup the loop is taking when the request arrives.
+PASS_MARGIN = 10
+CLAIM_MARGIN = 120
 
 
 def pgbackrest_info():
@@ -45,6 +50,16 @@ def pgbackrest_info():
         capture_output=True, text=True, timeout=120, check=True,
     ).stdout
     return json.loads(out)[0]
+
+
+def poll_seconds():
+    """The sidecar loop's period as the pod runs it: BACKUP_POLL_SECONDS, or the script's 60."""
+    out = subprocess.run(
+        ["kubectl", "-n", NAMESPACE, "get", "pod", "timescaledb-0", "-o",
+         'jsonpath={.spec.containers[?(@.name=="pgbackrest")].env[?(@.name=="BACKUP_POLL_SECONDS")].value}'],
+        capture_output=True, text=True, timeout=60, check=True,
+    ).stdout.strip()
+    return int(out or 60)
 
 
 class PhysicalBackupTestCase(unittest.TestCase):
@@ -120,28 +135,36 @@ class PhysicalBackupTestCase(unittest.TestCase):
 
     def test_a_requested_backup_is_taken_once_and_recorded(self):
         # Asked the way the backup service asks, through the superuser-only gate; the sidecar's
-        # minute loop claims it and takes a differential.
+        # loop claims it on its next pass and takes a differential.
+        period = poll_seconds()
+        logs = f"kubectl -n {NAMESPACE} logs timescaledb-0 -c pgbackrest"
         (request,) = self.query("SELECT public.physical_backup_request('test_physical_backup.py')")[0]
+        deadline = time.time() + period + CLAIM_MARGIN
+        claimed = None
+        while claimed is None and time.time() < deadline:
+            (claimed,) = self.query(
+                "SELECT claimed_at FROM public.physical_backup_requests WHERE id = %s", request)[0]
+            if claimed is None:
+                time.sleep(1)
+        self.assertIsNotNone(
+            claimed, f"request {request} was not claimed within {period + CLAIM_MARGIN}s, the loop "
+                     f"running every {period}s. {logs}")
         deadline = time.time() + WAIT
         answer = []
         while time.time() < deadline:
-            (claimed,) = self.query(
-                "SELECT claimed_at FROM public.physical_backup_requests WHERE id = %s", request)[0]
-            if claimed is not None:
-                answer = self.query(
-                    "SELECT id, kind, succeeded, detail FROM public.physical_backup_runs "
-                    "WHERE kind <> 'check' AND finished_at >= %s ORDER BY finished_at", claimed)
-                if answer:
-                    break
-            time.sleep(5)
-        self.assertTrue(answer, f"request {request} was not answered within {WAIT}s. "
-                                f"kubectl -n {NAMESPACE} logs timescaledb-0 -c pgbackrest")
+            answer = self.query(
+                "SELECT id, kind, succeeded, detail FROM public.physical_backup_runs "
+                "WHERE kind <> 'check' AND finished_at >= %s ORDER BY finished_at", claimed)
+            if answer:
+                break
+            time.sleep(2)
+        self.assertTrue(answer, f"request {request} was claimed but not answered within {WAIT}s. {logs}")
         _, kind, succeeded, detail = answer[0]
         self.assertTrue(succeeded, detail)
         self.assertIn(kind, ("diff", "full"))
 
-        # Once: a minute's step later nothing more was taken for it, and nothing waits.
-        time.sleep(70)
+        # Once: a pass of the loop later nothing more was taken for it, and nothing waits.
+        time.sleep(period + PASS_MARGIN)
         runs = self.query("SELECT count(*) FROM public.physical_backup_runs "
                           "WHERE kind <> 'check' AND finished_at >= %s", claimed)[0][0]
         self.assertEqual(runs, 1, "the request was taken more than once")
