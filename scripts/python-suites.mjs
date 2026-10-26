@@ -967,6 +967,14 @@ export const SUITES = {
       'sessions survive, the dashboard token is still served, and a machine identity, a token ' +
       'naming nobody, anon and service_role are refused.',
   },
+  'supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0211 -- that ending one of your own sessions, or all but the one in use, writes one " +
+      'SESSIONS_ENDED row naming you; that Sign Out of All Other Sessions ends what GoTrue\'s ' +
+      'scope=others ended, services and doors included, with their refresh tokens, and no other ' +
+      "person's; and that a token naming no session of yours ends nothing.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

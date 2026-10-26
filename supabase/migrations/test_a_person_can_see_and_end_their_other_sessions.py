@@ -12,7 +12,8 @@ connection's time zone; end_my_session() ends one of the caller's sessions, afte
 auth_pre_request() refuses its token while the caller's own is still served; it refuses the
 session the caller is using, and answers another person's session exactly as one that does not
 exist; every person role may call both, and a machine identity, an account with no role, anon and
-service_role may not; and ending a session writes no Audit Trail row.
+service_role may not; and ending a session writes one Audit Trail row (0211, whose suite holds
+what the row says).
 
 EVERY TEST ROLLS BACK.
 """
@@ -296,12 +297,13 @@ class EndingASession(SessionsBase):
         self.assertEqual(nobodys_body["message"], f"session {missing} not found")
         self.assertTrue(self.exists(OTHER_PERSONS))
 
-    def test_ending_a_session_writes_no_audit_row(self):
+    def test_ending_a_session_writes_one_audit_row(self):
+        # What the row holds: test_ending_another_of_your_sessions_is_recorded.py (0211).
         self.cur.execute("SELECT coalesce(max(id), 0) FROM public.audit_trail;")
         before = self.cur.fetchone()[0]
         self.end(OTHER_BROWSER)
-        self.cur.execute("SELECT count(*) FROM public.audit_trail WHERE id > %s;", (before,))
-        self.assertEqual(self.cur.fetchone()[0], 0)
+        self.cur.execute("SELECT action FROM public.audit_trail WHERE id > %s;", (before,))
+        self.assertEqual(self.cur.fetchall(), [("SESSIONS_ENDED",)])
 
 
 class WhoMayCallThem(SessionsBase):

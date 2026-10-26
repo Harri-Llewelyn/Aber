@@ -18,8 +18,8 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
 - **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
-- **End**, on a row of the **Security** tab, signs that session out. The session you are using has no **End**: use **Sign Out** for it.
-- **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens.
+- **End**, on a row of the **Security** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
+- **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
 - **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
@@ -88,7 +88,7 @@ What ending a session does:
 - **Studio and the forge** refuse it on their next request.
 - **Node-RED's editor** signs you out within a minute.
 - **Grafana** signs you out when its access runs out: within an hour on a standard install.
-- **Nothing is written to the Audit Trail.** Ending your own session changes nothing for anyone else.
+- **The Audit Trail records it**, in your lane, with you as the person who did it. Administrators and Auditors can read it. **End** records the session it ended, named as this list names it. **Sign Out of All Other Sessions** records how many sessions it ended. **Sign Out** records nothing.
 
 **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
 

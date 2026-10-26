@@ -152,3 +152,27 @@ ALTER TABLE auth.sessions
   ADD COLUMN IF NOT EXISTS user_agent      text,
   ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
 GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;
+
+-- `auth.refresh_tokens` is GoTrue's: a session's refresh tokens, deleted with it by GoTrue's
+-- foreign key (ON DELETE CASCADE), which is what makes deleting a session end it (0206, 0207,
+-- 0211). The base image ships the table without `session_id`; GoTrue adds the column and the key.
+CREATE TABLE IF NOT EXISTS auth.refresh_tokens (
+  id         bigserial PRIMARY KEY,
+  token      varchar(255),
+  user_id    varchar(255),
+  revoked    boolean,
+  created_at timestamptz,
+  updated_at timestamptz
+);
+ALTER TABLE auth.refresh_tokens ADD COLUMN IF NOT EXISTS session_id uuid;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conrelid = 'auth.refresh_tokens'::regclass
+                    AND conname = 'refresh_tokens_session_id_fkey') THEN
+    ALTER TABLE auth.refresh_tokens ADD CONSTRAINT refresh_tokens_session_id_fkey
+      FOREIGN KEY (session_id) REFERENCES auth.sessions (id) ON DELETE CASCADE;
+  END IF;
+END
+$$;
+GRANT SELECT, INSERT, DELETE ON auth.refresh_tokens TO postgres;

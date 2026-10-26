@@ -3,6 +3,7 @@ import { useUrlState } from '../../hooks/useUrlState'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
+import { sessionLabel } from '../../utils/sessions'
 import { ContextPanel } from '../common/ContextPanel'
 import { Tooltip, TooltipBubble, useTooltip } from '../common/Tooltip'
 import { shortcutAllowed } from '../../shortcuts'
@@ -708,6 +709,16 @@ const formatValue = (v) => {
   return String(v)
 }
 
+/**
+ * A diff's new value as the drawer shows it. The session a person ended themselves (0211) holds
+ * what their Sessions list returned, and is named as that list names it; the raw facts stay in the
+ * payload below.
+ */
+const shownAfter = (action, d) =>
+  action === 'SESSIONS_ENDED' && d.field === 'session' && d.after && typeof d.after === 'object'
+    ? sessionLabel(d.after)
+    : formatValue(d.after)
+
 const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</span>
 
 /**
@@ -908,7 +919,7 @@ function EventDiff({ event, diff }) {
           <tbody>
             {diff.map(d => {
               const before = formatValue(d.before)
-              const after  = formatValue(d.after)
+              const after  = shownAfter(action, d)
               return (
                 <tr key={d.field}>
                   <th scope="row">{d.field}</th>
