@@ -1104,7 +1104,10 @@ export const SUITES = {
       'The backup service (0101): an Operator cannot ask and cannot read the tables; the ' +
       "service's gates answer no PostgREST role; a backup an Administrator asks for is taken, with " +
       'the files where the row says, as big as it says, with the digests it says, a manifest ' +
-      'restore-databases.sh can read and a forge archive carrying the host keys; the trail names ' +
+      'restore-databases.sh can read and a forge archive carrying the host keys; the storage ' +
+      'objects archived by a Job of their own, holding an object uploaded before the backup and ' +
+      'gone after it, while the service mounts no storage volume and Storage runs as 1000 and ' +
+      'still uploads and deletes; the trail names ' +
       'who asked and that the service wrote it; a queued request refuses a twin, can be cancelled ' +
       'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
       'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +

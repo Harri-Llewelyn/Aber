@@ -5,8 +5,11 @@ WHAT IS UNDER TEST, in order of what would be worst to get wrong: nobody but an 
 queue a backup, and no PostgREST role can call the service's gates; a backup an Administrator asks
 for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
 on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
-can read; the trail records who asked and that the service wrote it; a request nobody has
-claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
+can read; the storage objects are archived by a Job of their own, which holds an object uploaded
+before the backup and is gone after it, while the service mounts no storage volume and Storage
+runs as 1000 and still uploads and deletes; the trail records who asked and that the service
+wrote it; a request nobody has claimed is refused a twin, can be cancelled, and says why; a
+pinned backup is released once; a
 RUNNING job no service is running is failed, so a restored database does not refuse backups; a
 failed job is followed by a prune that leaves the newest three backups alone; with a MinIO of
 the test's own as the destination, a backup is copied off site encrypted to a key the stack never
@@ -15,14 +18,16 @@ slot queues that backup once, and does not retry it before the next slot when it
 backup the service reports df's figures for its volume and its schedule, which the Backups page's
 summary returns to an Administrator and refuses to an Operator.
 
-Needs the stack up with the backup-service container, the seeded personas and both keys. The
-cancel and catch-up tests stop the service container for a few seconds. The off-site test applies
+Needs the stack up with the backup-service container, backup.includeStorage, the seeded personas
+and both keys. The cancel and catch-up tests stop the service container for a few seconds. The
+storage tests upload to the model bucket under test-backup-service/. The off-site test applies
 test-harness/restore-rehearsal/minio.yaml and deletes its namespace afterwards; it skips on a stack
 that already has a destination, or NetworkPolicies with no backupService.offsiteEgress rule. Skips
 without the keys.
 
     SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 """
+import hashlib
 import json
 import os
 import re
@@ -32,10 +37,11 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "functions", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
-from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, rest, sign_in  # noqa: E402
+from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, rest, sign_in  # noqa: E402
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
 
 OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
@@ -54,6 +60,32 @@ OFFSITE_PREFIX = "test-backup-service"
 OFFSITE_AWS = ("AWS_ACCESS_KEY_ID=rehearsal", "AWS_SECRET_ACCESS_KEY=rehearsal-secret-key",
                "AWS_DEFAULT_REGION=us-east-1", "AWS_EC2_METADATA_DISABLED=true",
                "AWS_REQUEST_CHECKSUM_CALCULATION=when_required")
+
+
+# test_03's object, placed in Storage before the backup and looked for in its archive. In the model
+# bucket under a prefix of the suite's own, and deleted afterwards.
+STORAGE_BUCKET = "asset-3d-models"
+STORAGE_PREFIX = "test-backup-service"
+# The labels on the Jobs the service makes from the chart's storage archive CronJob.
+ARCHIVE_JOBS = f"app.kubernetes.io/component=backup-storage-archive,app.kubernetes.io/instance={stack_exec.RELEASE}"
+STORAGE_POD = f"app.kubernetes.io/component=supabase-storage,app.kubernetes.io/instance={stack_exec.RELEASE}"
+# What to do when Storage cannot write beside objects an earlier root server wrote.
+NO_WALK = ("the kubelet gave the storage volume no fsGroup walk: restart supabase-storage once no "
+           "backup Job is running (help/site/upgrading.md, From 1.7.0)")
+
+
+def storage(method, path, data=None, content_type=None):
+    """A Storage API call through the gateway, as service_role: (status, body)."""
+    req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1{path}", data=data, method=method)
+    req.add_header("apikey", PUBLISHABLE_KEY)
+    req.add_header("Authorization", f"Bearer {SERVICE_ROLE_KEY}")
+    if content_type:
+        req.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            return res.status, res.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
 
 
 def kubectl(*args, namespace=None, input=None, check=True):
@@ -96,6 +128,8 @@ class BackupServiceTests(unittest.TestCase):
         cls.admin = sign_in()
         if not stack_exec.running("backup-service"):
             raise unittest.SkipTest(f"{stack_exec.describe('backup-service')} is not running")
+        cls.marker = f"{STORAGE_PREFIX}/{uuid.uuid4()}.glb"
+        cls.marker_bytes = os.urandom(512)
         # A clean slate: a job left over from an earlier run would make the single-flight refusal
         # fire on the wrong test.
         psql("UPDATE public.backup_jobs SET status = 'CANCELLED', finished_at = now() WHERE status = 'PENDING'")
@@ -105,6 +139,7 @@ class BackupServiceTests(unittest.TestCase):
     def tearDownClass(cls):
         if not stack_exec.running("backup-service"):
             stack_exec.start("backup-service")
+        storage("DELETE", f"/object/{STORAGE_BUCKET}", json.dumps({"prefixes": [cls.marker]}).encode(), "application/json")
         # The backups this file took: files first, then the row, the way the service prunes.
         for line in psql(f"SELECT id || ' ' || location FROM public.backups WHERE note = '{NOTE}'").splitlines():
             backup_id, location = line.split(" ", 1)
@@ -155,6 +190,11 @@ class BackupServiceTests(unittest.TestCase):
                 self.assertIn(status, (401, 403, 404), f"{name} answered {status} to a PostgREST caller")
 
     def test_03_a_requested_backup_is_taken_and_recorded(self):
+        # An object in Storage before the backup, for the storage archive to hold.
+        status, body = storage("POST", f"/object/{STORAGE_BUCKET}/{self.marker}", self.marker_bytes, "model/gltf-binary")
+        self.assertIn(status, (200, 201), f"Storage refused an upload ({status}: {body[:300]!r}); "
+                                          f"an EACCES in its log means {NO_WALK}")
+
         status, job_id = rpc("request_backup", {"p_note": NOTE}, self.admin)
         self.assertEqual(status, 200, job_id)
 
@@ -180,7 +220,7 @@ class BackupServiceTests(unittest.TestCase):
         names = {c["name"] for c in backup["components"]}
         # The CA is present when the stack was installed with TLS (backup.ca.secretName), absent
         # otherwise; the historian's dump is absent while pgBackRest backs it up
-        # (timescaledb.physicalBackup); everything else the dev cluster mounts.
+        # (timescaledb.physicalBackup); everything else the dev cluster includes.
         dumps_historian = service("printenv", "DUMP_TIMESCALE", check=False).strip() != "false"
         expected = {"supabase-db", "vault-key", "storage-objects", "forge", "broker"}
         if dumps_historian:
@@ -220,6 +260,22 @@ class BackupServiceTests(unittest.TestCase):
         verbose = service("tar", "--numeric-owner", "-tvzf", f"{backup['location']}/{forge['file']}")
         database = next(line for line in verbose.splitlines() if line.endswith(" gitea/gitea.db"))
         self.assertEqual(database.split()[1], live_owner, database)
+
+        # The storage objects, tarred by a Job in the format restore-databases.sh and the runbook
+        # read, every member under ./, holding the object uploaded above byte for byte.
+        self.assertIn("storage=storage-objects-", manifest)
+        objects = next(c for c in backup["components"] if c["name"] == "storage-objects")
+        archive = f"{backup['location']}/{objects['file']}"
+        members = service("tar", "-tzf", archive).splitlines()
+        self.assertTrue(members and all(m.startswith("./") for m in members), members[:5])
+        name = self.marker.rsplit("/", 1)[-1]
+        files = [m for m in members if name in m and not m.endswith("/")]
+        self.assertTrue(files, f"the storage archive holds nothing for {self.marker}")
+        digests = [service("sh", "-c", 'tar -xzOf "$1" "$2" | sha256sum', "sh", archive, m).split()[0] for m in files]
+        self.assertIn(hashlib.sha256(self.marker_bytes).hexdigest(), digests, files)
+        # By the Job the service made for this backup, not by the service.
+        logs = kubectl("logs", "deploy/backup-service", namespace=stack_exec.NAMESPACE, check=False)
+        self.assertRegex(logs, rf"storage-objects: Job \S+-{backup['stamp'].lower()} on node ")
 
         # pgsodium's root key, as the file on the data volume holds it: Vault is ciphertext under it.
         self.assertIn("vault_key=vault-key-", manifest)
@@ -276,6 +332,52 @@ class BackupServiceTests(unittest.TestCase):
         self.assertEqual(status, 200, summary)
         self.assertEqual(summary["service"]["volume_total_bytes"], total)
         self.assertGreaterEqual(summary["backups_held"], 1)
+
+    def test_03c_no_pod_holds_the_storage_volume_and_storage_runs_as_1000(self):
+        """The service mounts no storage volume and its Job is gone after the backup, so the kubelet
+        gives Storage its fsGroup at a start: Storage runs as 1000 and writes beside what it holds."""
+        finished = psql("SELECT max(finished_at) FROM public.backup_jobs WHERE status = 'COMPLETED'")
+        self.assertTrue(finished, "test_03 took no backup")
+        ns = stack_exec.NAMESPACE
+
+        # The Job is deleted before the backup is recorded, and its pod follows within a minute.
+        self.assertEqual(kubectl("get", "jobs", "-l", ARCHIVE_JOBS, "-o", "name", namespace=ns).strip(), "")
+        pods = kubectl("get", "pods", "-l", ARCHIVE_JOBS, "-o", "name", namespace=ns).strip()
+        deadline = time.time() + 60
+        while pods and time.time() < deadline:
+            time.sleep(2)
+            pods = kubectl("get", "pods", "-l", ARCHIVE_JOBS, "-o", "name", namespace=ns).strip()
+        self.assertEqual(pods, "", "a storage archive Job's pod outlived its Job")
+
+        # The service's pod mounts the backup volume and not the storage volume.
+        claim = kubectl("get", "pods", "-l", STORAGE_POD, "-o",
+                        "jsonpath={.items[0].spec.volumes[?(@.name=='data')].persistentVolumeClaim.claimName}",
+                        namespace=ns).strip()
+        self.assertTrue(claim, "the storage pod has no volume claim, so there is nothing to archive")
+        claims = kubectl("get", "pods", "-l",
+                         f"app.kubernetes.io/component=backup-service,app.kubernetes.io/instance={stack_exec.RELEASE}",
+                         "-o", "jsonpath={.items[*].spec.volumes[*].persistentVolumeClaim.claimName}", namespace=ns).split()
+        self.assertTrue(claims, "the backup service's pod has no volume claim at all")
+        self.assertNotIn(claim, claims)
+        self.assertEqual(service("sh", "-c", "test -e /storage && echo mounted || echo absent").strip(), "absent")
+
+        # Storage runs as its image's user, 1000.
+        self.assertEqual(kubectl("get", "pods", "-l", STORAGE_POD, "-o",
+                                 "jsonpath={.items[0].spec.securityContext.runAsUser}", namespace=ns).strip(), "1000")
+        self.assertEqual(kubectl("exec", "deploy/supabase-storage", "-c", "storage", "--", "id", "-u", namespace=ns).strip(), "1000")
+
+        # And it uploads and deletes beside the objects it holds, after a backup.
+        path = f"{STORAGE_PREFIX}/{uuid.uuid4()}.glb"
+        status, body = storage("POST", f"/object/{STORAGE_BUCKET}/{path}", b"after a backup", "model/gltf-binary")
+        self.assertIn(status, (200, 201), f"an upload after a backup: {status} {body[:300]!r}; {NO_WALK}")
+        status, body = storage("DELETE", f"/object/{STORAGE_BUCKET}",
+                               json.dumps({"prefixes": [path, self.marker]}).encode(), "application/json")
+        self.assertEqual(status, 200, f"a delete after a backup: {body[:300]!r}; {NO_WALK}")
+        self.assertEqual({o.get("name") for o in json.loads(body)}, {path, self.marker})
+        # The runbook's check: no directory on the volume that 1000 cannot write.
+        unwritable = kubectl("exec", "deploy/supabase-storage", "-c", "storage", "--", "sh", "-c",
+                             "find /var/lib/storage -type d ! -user 1000 ! -perm -g+w | head", namespace=ns).strip()
+        self.assertEqual(unwritable, "", f"{NO_WALK}:\n{unwritable}")
 
     def test_04_a_queued_request_refuses_a_twin_and_can_be_cancelled(self):
         stack_exec.stop("backup-service")
