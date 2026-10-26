@@ -1639,6 +1639,11 @@ archive-push and archive-get, and the backup sidecar's.
 {{- if or (lt $h 0) (gt $h 23) (lt $d 0) (gt $d 6) -}}
 {{- fail (printf "\n\naber: %s.physicalBackup.hourUtc is %v and fullOn is %v; they are 0-23 and 0-6 (0 = Sunday).\n" $key $b.hourUtc $b.fullOn) -}}
 {{- end -}}
+{{- /* At most 60: the Backups page says a requested backup is taken within a minute. */ -}}
+{{- $p := int $b.pollSeconds -}}
+{{- if or (lt $p 1) (gt $p 60) (ne (toString $b.pollSeconds) (toString $p)) -}}
+{{- fail (printf "\n\naber: %s.physicalBackup.pollSeconds is %v; it is a whole number of seconds, 1-60.\n" $key $b.pollSeconds) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

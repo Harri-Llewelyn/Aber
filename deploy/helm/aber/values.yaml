@@ -319,10 +319,13 @@ timescaledb:
     enabled: false
     # The hour (UTC, 0-23) the daily backup starts, and the day of the week (0 = Sunday) it is a
     # full backup; a differential on the other six, or a full whenever the newest is over seven
-    # days old. Not a cron string: the sidecar checks the clock once a minute, so an hour missed
+    # days old. Not a cron string: the sidecar checks the clock every pollSeconds, so an hour missed
     # while the historian was down is taken late, once, when it is back.
     hourUtc: 1
     fullOn: 0
+    # How often (1-60 seconds) the sidecar asks whether a backup is due, or was asked for on the
+    # Backups page. values-dev.yaml shortens it so the stack lane waits less.
+    pollSeconds: 60
     # Full backups kept. Each full carries the differentials and the WAL taken after it, so 2 keeps
     # between one and two weeks of restore points.
     retainFull: 2
@@ -422,10 +425,11 @@ supabaseDb:
   # or cross-version restore needs.
   physicalBackup:
     enabled: false
-    # As timescaledb.physicalBackup: the hour (UTC, 0-23) of the daily backup, and the weekday
-    # (0 = Sunday) it is a full one.
+    # As timescaledb.physicalBackup: the hour (UTC, 0-23) of the daily backup, the weekday
+    # (0 = Sunday) it is a full one, and how often (1-60 seconds) the sidecar checks the clock.
     hourUtc: 1
     fullOn: 0
+    pollSeconds: 60
     # Full backups kept, each with the differentials and the WAL taken after it.
     retainFull: 2
     # A WAL segment is archived when it fills or after this many seconds, whichever is first, so
