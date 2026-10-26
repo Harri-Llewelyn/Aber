@@ -8,7 +8,7 @@ The settings for the whole site are on the **Settings** page, not here.
 
 ## What the controls do
 
-- **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on the **Access Control** page.
+- **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on **Access Control › People**. That is true for an Administrator too: another Administrator changes yours.
 - **Display name**, on the **Account** tab, is the name other people see you by. Type it, then select **Save**. To remove it, empty the box and select **Save**. **Your display name**, below, says where it shows.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.

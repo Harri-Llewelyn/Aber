@@ -276,6 +276,10 @@ export function ProfileTab({
   const [shortcutsDraft, setShortcutsDraft] = useState(null)
   const shownShortcuts = shortcutsDraft ?? singleKeyShortcuts
   const shortcutsDirty = shortcutsDraft !== null && shortcutsDraft !== singleKeyShortcuts
+  // Nobody changes their own address or role, an Administrator included: another one does it on People.
+  const whoChangesThis = userRole === 'Administrator'
+    ? 'Another Administrator can change this, on Access Control › People'
+    : 'Only an Administrator can change this'
 
   return (
     <div className="page-layout page-fill">
@@ -303,7 +307,7 @@ export function ProfileTab({
                 label="Email address"
                 description="The address you sign in with."
                 value={email || 'None: this identity signs in with a token'}
-                actions={email ? <span className="setting-fixed">Only an Administrator can change this</span> : undefined}
+                actions={email ? <span className="setting-fixed">{whoChangesThis}</span> : undefined}
               />
               <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
               <ProfileRow
@@ -311,7 +315,7 @@ export function ProfileTab({
                 label="Role"
                 description="What you may see and change across the site. A page your role cannot use is left out of the sidebar."
                 value={userRole === undefined ? 'Loading…' : userRole ? userRole.replace(/_/g, ' ') : 'No role'}
-                actions={<span className="setting-fixed">Only an Administrator can change this</span>}
+                actions={<span className="setting-fixed">{whoChangesThis}</span>}
               />
               <ProfileRow
                 id="password"
