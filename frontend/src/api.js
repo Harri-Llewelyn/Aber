@@ -984,8 +984,9 @@ const apiMethods = {
   },
 
   /**
-   * End one of your own sessions (`end_my_session()`, 0206). The database refuses the one in use
-   * and answers another person's as not found; its sentence is the error.
+   * End one of your own sessions (`end_my_session()`, 0206), recorded in the Audit Trail (0211).
+   * The database refuses the one in use and answers another person's as not found; its sentence
+   * is the error.
    */
   endMySession: async (sessionId) => {
     const { error } = await supabase.rpc('end_my_session', { p_session_id: sessionId });
@@ -993,12 +994,14 @@ const apiMethods = {
   },
 
   /**
-   * End every session you hold but this browser's: GoTrue's `scope=others`. auth-js keeps this
-   * browser's session whatever GoTrue answers, and reports no error for a 401, 403 or 404.
+   * End every session you hold but this browser's (`end_my_other_sessions()`, 0211): the rows
+   * GoTrue's `scope=others` deletes, recorded in the Audit Trail. Resolves to how many ended. A
+   * token naming no session of yours is refused, and its sentence is the error.
    */
   signOutOtherSessions: async () => {
-    const { error } = await supabase.auth.signOut({ scope: 'others' });
+    const { data, error } = await supabase.rpc('end_my_other_sessions');
     if (error) throw new Error(error.message || 'Could not sign out of your other sessions');
+    return typeof data === 'number' ? data : 0;
   },
 
   /**

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
-import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
@@ -10,17 +9,52 @@ import { ColumnHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { tabUrl } from '../../routes'
-import { formatDateTime, formatRelative } from '../../utils/format'
+import { formatDate, formatDateTime, formatRelative, plural } from '../../utils/format'
 import { sessionLabel, sortSessions } from '../../utils/sessions'
 
 /** Where every message about a session links: this list. */
 const SESSIONS_URL = tabUrl('profile', 'security')
 
+/** How long ago, in words for a sentence: "5 minutes ago", "2 days ago", "on 25 Sept 2026". */
+function agoInWords(ts, now) {
+  const t = new Date(ts ?? NaN).getTime()
+  if (Number.isNaN(t)) return null
+  const seconds = Math.max(0, Math.round((now - t) / 1000))
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${plural(Math.floor(seconds / 60), 'minute')} ago`
+  if (seconds < 86400) return `${plural(Math.floor(seconds / 3600), 'hour')} ago`
+  const days = Math.floor(seconds / 86400)
+  return days < 30 ? `${plural(days, 'day')} ago` : `on ${formatDate(t)}`
+}
+
+/**
+ * The End dialog's question: the session as the Where column names it, when it was last active,
+ * and what has to sign in again, a browser, a program or a service. Reads sessionLabel()'s words:
+ * "A program (…)", "A browser on …" and "Not recorded" are describeUserAgent()'s.
+ */
+export function endSessionQuestion(session, now = Date.now()) {
+  const label = sessionLabel(session)
+  const when = agoInWords(session?.last_active_at, now)
+  const lastActive = when ? `, last active ${when}` : ''
+  if (session?.service_name) {
+    return `End the session in ${label}${lastActive}? ${label} has to sign you in again.`
+  }
+  if (label === 'Not recorded') {
+    return `End the session with no browser recorded${lastActive}? Whatever used it has to sign in again.`
+  }
+  const lowered = label.replace(/^A /, 'a ')
+  if (label.startsWith('A program')) {
+    return `End the session of ${lowered}${lastActive}? That program has to sign in again.`
+  }
+  return `End the session in ${lowered}${lastActive}? That browser has to sign in again.`
+}
+
 /**
  * The Security tab's Sessions section: every session the signed-in person holds, in every browser
  * and service (`list_my_sessions()`, 0206), the one in use first. End ends one other session
- * (`end_my_session()`); Sign Out of All Other Sessions ends all of them at once (GoTrue's
- * `scope=others`), after a dialog that says what that ends. Each act reads the list again.
+ * (`end_my_session()`), and Sign Out of All Other Sessions ends all of them at once
+ * (`end_my_other_sessions()`, 0211), each after a dialog that says what it ends. Both are
+ * recorded in the Audit Trail. Each act reads the list again.
  *
  * `isPerson` is false for a machine identity, which signs in with a token and has nothing to list.
  */
@@ -28,7 +62,8 @@ export function SessionsSection({ isPerson = true, showToast }) {
   // undefined while the first read runs; the rows stay on screen while a later one does.
   const [sessions, setSessions] = useState(undefined)
   const [error, setError] = useState(null)
-  const [ending, setEnding] = useState(null)
+  // The session End asks about, while its dialog is open.
+  const [confirmingEnd, setConfirmingEnd] = useState(null)
   const [confirmingOthers, setConfirmingOthers] = useState(false)
 
   const load = useCallback(async () => {
@@ -42,23 +77,27 @@ export function SessionsSection({ isPerson = true, showToast }) {
 
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
-  const end = async (session) => {
-    setEnding(session.id)
+  const end = async () => {
+    const session = confirmingEnd
     try {
       await api.endMySession(session.id)
       showToast?.(`Session ended: ${sessionLabel(session)}.`, 'success', { to: SESSIONS_URL })
     } catch (err) {
       showToast?.(err.message, 'error')
     } finally {
-      setEnding(null)
+      setConfirmingEnd(null)
       await load()
     }
   }
 
   const endOthers = async () => {
     try {
-      await api.signOutOtherSessions()
-      showToast?.('Signed out of all your other sessions.', 'success', { to: SESSIONS_URL })
+      const ended = await api.signOutOtherSessions()
+      showToast?.(
+        ended > 0 ? `Signed out of ${plural(ended, 'other session')}.` : 'You had no other sessions to sign out of.',
+        ended > 0 ? 'success' : 'info',
+        { to: SESSIONS_URL },
+      )
     } catch (err) {
       showToast?.(err.message, 'error')
     } finally {
@@ -145,16 +184,14 @@ export function SessionsSection({ isPerson = true, showToast }) {
                     </td>
                     <td className="row-actions">
                       {!s.is_current && (
-                        <ActionButton
+                        <button
+                          type="button"
                           className="btn btn-ghost btn-sm"
-                          pending={ending === s.id}
-                          pendingLabel="Ending…"
-                          disabled={ending !== null}
-                          onClick={() => end(s)}
+                          onClick={() => setConfirmingEnd(s)}
                           aria-label={`End the session: ${label}`}
                         >
                           End
-                        </ActionButton>
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -165,12 +202,24 @@ export function SessionsSection({ isPerson = true, showToast }) {
         </div>
       )}
 
+      {confirmingEnd && (
+        <ConfirmModal
+          title="End Session"
+          icon={<IconLogOut size={18} />}
+          message={endSessionQuestion(confirmingEnd)}
+          confirmLabel="End Session"
+          pendingLabel="Ending…"
+          onConfirm={end}
+          onCancel={() => setConfirmingEnd(null)}
+        />
+      )}
+
       {confirmingOthers && (
         <ConfirmModal
           title="Sign Out of All Other Sessions"
           icon={<IconLogOut size={18} />}
           message="This ends every session but the one you are using: your other browsers and programs, and your Grafana, Node-RED, Studio and forge sign-ins, in this browser too. This browser stays signed in to the dashboard."
-          confirmLabel="Sign Out Others"
+          confirmLabel="Sign Out of All Other Sessions"
           pendingLabel="Signing out…"
           onConfirm={endOthers}
           onCancel={() => setConfirmingOthers(false)}
