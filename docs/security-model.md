@@ -154,9 +154,10 @@ people's accounts in GoTrue, and it is narrow by construction.
   an Administrator. The `manage-people` edge function resolves the caller's role from `user_roles`
   before it makes any admin call. Every database function behind the tab (`list_people()`,
   `set_person_role()`, `record_person_added()`, `remove_person_access()`,
-  `restore_person_access()`, `record_person_password_set()`, and `0207`'s
+  `restore_person_access()`, `record_person_password_set()`, `0207`'s
   `end_person_sessions()`, `person_session_summary()`, `check_person_email_change()` and
-  `record_person_email_change()`) checks `has_role(ARRAY['Administrator'])` again in its own body.
+  `record_person_email_change()`, and `0212`'s `person_sessions()` and `end_person_session()`)
+  checks `has_role(ARRAY['Administrator'])` again in its own body.
 - **Two rules no Administrator can break.** Nobody changes their own role, access, password or
   email address here, or ends their own sessions, and no act may leave the site without an
   Administrator who can sign in (a banned one does not count). Both are checked in SQL under one
@@ -191,8 +192,10 @@ people's accounts in GoTrue, and it is narrow by construction.
   refuses each access token at its next request. The other surfaces follow on the schedule in
   [An ended session keeps Storage, Realtime and Grafana until its token expires](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires).
   The person keeps their role and may sign in again; Remove Access is what stops them. An
-  Administrator sees how many sessions a person holds and when one was last active, never which
-  browsers or services they are.
+  Administrator also lists a person's sessions and ends one (`0212`), for a lost laptop. The list
+  shows what the person's own Security tab shows them: the browser and system or the service, when
+  it started and when it was last active. Never an address or a token. Ending one writes the same
+  `SESSIONS_ENDED` row, with a count of 1 and that session's facts.
 - **A new email address, set by an Administrator** (`0207`). Sign-in autoconfirms and a site may
   have no mail relay, so nothing can prove a person owns an address they type: only an
   Administrator changes one, never their own. `manage-people` asks `check_person_email_change()`
@@ -387,6 +390,9 @@ ends when:
   Each act writes one `SESSIONS_ENDED` row in the person's lane of the Audit Trail, with the person
   as the actor (`0211`): End's names the session, the other says how many ended. Sign Out writes
   none.
+- an Administrator ends it from the person's drawer on People: **End** on one row of their list of
+  sessions (`end_person_session()`, `0212`), or **End Sessions** for all of them (`0207`). Each
+  writes one `SESSIONS_ENDED` row in the person's lane, with the Administrator as the actor.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open

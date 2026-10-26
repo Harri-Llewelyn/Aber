@@ -33,7 +33,9 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
 - Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, and **Remove Access** or **Restore Access**.
 - The drawer shows their email address, display name, role, status and last sign-in.
-- **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used. It does not say which browser or service.
+- **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used.
+- Select **Show sessions**, under the count, to list them. Each row says where the session is: a browser and system, a program, or a service. It says when the session started and when it was last active. No address is shown.
+- **End**, on a row of that list, signs them out of that one session. A dialog asks first, naming the session and when it was last active. Select **End Session** to end it. Their other sessions stay signed in, so use it for a lost laptop.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
 - **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
@@ -42,14 +44,14 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - The new role applies from their next request. Node-RED follows within a minute, and Grafana when they next sign in to it. Their own dashboard catches up when it next reloads. A person whose access is removed needs **Restore Access** first.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
-- **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a lost laptop or a shared screen left signed in. They keep their role, and can sign in again.
+- **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a shared screen left signed in, or when you cannot tell which session to end. They keep their role, and can sign in again.
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
 - An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
 - **Which address shows where.** People and the Audit Trail show the address the account has now. Approvals and Archived Entities keep the address the person had when they acted.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
-- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
+- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Security** tab lists your own sessions and ends them, so your drawer has no list.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Each act here is recorded in the Audit Trail. That covers adding a person, a new role, name or address, removing or restoring access, a new password and ended sessions. The record names the person and who made the change. A new address is recorded with the old one. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.

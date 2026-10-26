@@ -1333,6 +1333,38 @@ paths:
         '403': { description: 'Not an Administrator, or your own password.' }
         '404': { description: 'No such person (`P0002`).' }
 
+  /rest/v1/rpc/end_person_session:
+    post:
+      tags: [Auth]
+      summary: End one of a person's sessions
+      description: |
+        End on a row of the session list in a person's drawer on People (`0212`). Deletes that one
+        `auth.sessions` row, so nothing refreshes it again and `auth_pre_request()` refuses its
+        access token at the API on the next request (401 `session_not_found`). The person's other
+        sessions are untouched. Writes one `SESSIONS_ENDED` row in the person's lane of the Audit
+        Trail, with you in `changed_by`: their email, a count of 1 and the session's service name,
+        user agent, start and last activity, as `end_my_session()` writes them (`0211`). A removed
+        person's session may be ended. Administrator only.
+
+        Refused, with no row written: a session that is not that person's, answered exactly as one
+        that does not exist (404); your own session (403; end it on the Profile page's Security
+        tab); a machine identity (400, `22023`); an unknown person (404).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_session_id]
+              properties:
+                p_user_id:    { type: string, format: uuid }
+                p_session_id: { type: string, format: uuid }
+      responses:
+        '204': { description: The session has ended. }
+        '400': { description: 'A machine identity (`22023`).' }
+        '403': { description: 'Not an Administrator, or your own session (`42501`).' }
+        '404': { description: 'No such person, or no session of theirs with that id (`P0002`).' }
+
   /rest/v1/rpc/end_person_sessions:
     post:
       tags: [Auth]
@@ -1345,8 +1377,9 @@ paths:
         Audit Trail: their email and how many sessions ended. They keep their role. A removed
         person's sessions may be ended. Administrator only.
 
-        Refused, with the reason in the message: your own sessions (403; Sign Out ends this
-        browser's); a machine identity (400, `22023`).
+        Refused, with the reason in the message: your own sessions (403; Sign Out of All Other
+        Sessions on the Profile page's Security tab ends the others, `0212`); a machine identity
+        (400, `22023`). To end one session, call `/rest/v1/rpc/end_person_session`.
       requestBody:
         required: true
         content:
@@ -1372,8 +1405,8 @@ paths:
       summary: Count a person's sessions, and say when one was last active
       description: |
         For a person's drawer on People (`0207`). How many `auth.sessions` rows the person holds,
-        and the latest time one was refreshed, updated or started. No list: which browsers and
-        services they are is the person's own to see. Administrator only.
+        and the latest time one was refreshed, updated or started. The list is
+        `/rest/v1/rpc/person_sessions` (`0212`). Administrator only.
       requestBody:
         required: true
         content:
@@ -1395,6 +1428,43 @@ paths:
                   properties:
                     open_sessions:  { type: integer }
                     last_active_at: { type: string, format: date-time, nullable: true, description: 'NULL when they hold none.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/person_sessions:
+    post:
+      tags: [Auth]
+      summary: List a person's sessions, in every browser and service
+      description: |
+        For the session list in a person's drawer on People (`0212`). One row per GoTrue session the
+        person holds, newest activity first, with the columns `/rest/v1/rpc/list_my_sessions`
+        returns the person, except `is_current`: your token names your session, never theirs. No
+        address is recorded. No rows for a person holding none, or an id that names nobody.
+        Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Their sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:             { type: string, format: uuid }
+                    service_name:   { type: string, nullable: true, description: "The OAuth client's name for a service's session; null for a dashboard or password sign-in." }
+                    user_agent:     { type: string, nullable: true }
+                    created_at:     { type: string, format: date-time }
+                    last_active_at: { type: string, format: date-time, description: 'The latest of its last refresh, last update and start.' }
+                    not_after:      { type: string, format: date-time, nullable: true, description: 'When GoTrue ends it regardless, if ever.' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /rest/v1/rpc/check_person_email_change:
@@ -5430,7 +5500,9 @@ components:
             `EMAIL_CHANGED` and `SESSIONS_ENDED` (0207) are written by `record_person_email_change()`
             and `end_person_sessions()`, in the same lane. A person ending their own other sessions
             writes `SESSIONS_ENDED` too, through `end_my_session()` and `end_my_other_sessions()`
-            (0211), with themselves in `changed_by`.
+            (0211), with themselves in `changed_by`. An Administrator ending one of a person's
+            sessions writes it through `end_person_session()` (0212), in the shape
+            `end_my_session()` writes.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
