@@ -122,14 +122,24 @@ seccomp profile every pod in the chart runs under unless that value names its ow
 {{- end -}}
 
 {{/*
-"true" when a backup pod mounts the storage objects' volume: the backup service, or the CronJob in
-its place, with backup.includeStorage on a file-backend PVC. Empty otherwise. Both mount it on this
-answer and the storage pod runs as root on it, so the three cannot disagree.
+"true" when a backup pod mounts the storage objects' volume: the backup service's archive Job, or
+the CronJob in its place, with backup.includeStorage on a file-backend PVC. Empty otherwise. Both
+mount it on this answer, so they cannot disagree. The storage pod's user does not depend on it.
   {{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
 */}}
 {{- define "aber.backupMountsStorage" -}}
 {{- if and .Values.backup.enabled .Values.backup.includeStorage .Values.supabaseStorage.enabled
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+"true" when the backup service archives the storage objects through one Job per backup, made from
+the suspended CronJob in jobs/backup-storage-archive.yaml. Empty otherwise, the CronJob path too.
+*/}}
+{{- define "aber.backupStorageArchiveJob" -}}
+{{- if and (include "aber.backupMountsStorage" .) .Values.backupService.enabled -}}
 true
 {{- end -}}
 {{- end -}}

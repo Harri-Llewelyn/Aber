@@ -765,8 +765,9 @@ supabaseStorage:
   # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: at
   # each start the kubelet makes every object directory group-writable, so 1000 can add and delete
   # beside objects a root server wrote at 0755. It walks every object (deploy/k8s/README.md, Users).
-  # While a backup pod mounts the volume (backup.includeStorage), the pod runs as root instead,
-  # with this fsGroup and OnRootMismatch.
+  # It does not on a `local` volume another pod has mounted: a backup's archive Job, or the backup
+  # CronJob (backup.includeStorage), for as long as its tar takes. The storage archive Job reads
+  # objects with fsGroup as a supplementary group.
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
@@ -1786,7 +1787,9 @@ backup:
   # files are gone. Off by default because the PVC is
   # ReadWriteOnce: the Job must land on the storage pod's node (the chart adds a podAffinity),
   # and on a full or cordoned node it stays Pending. Check the first run completed. Prefer
-  # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations).
+  # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations). With the backup
+  # service, a Job per backup mounts the volume for its tar (backupService.storageArchive), and
+  # the service follows the storage pod's node; the CronJob mounts it while it runs.
   includeStorage: false
   # The backup PVC, the only place the CronJob writes. The off-site copy is the backup service's.
   persistence:
@@ -1838,6 +1841,14 @@ backupService:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 1Gi }
+  # The Job that archives the storage objects for one backup (backup.includeStorage;
+  # jobs/backup-storage-archive.yaml). A Job still running after timeoutSeconds is stopped and its
+  # backup fails, saying so. Raise it for a bucket that takes longer than that to tar and gzip.
+  storageArchive:
+    timeoutSeconds: 3600
+    resources:
+      requests: { cpu: 50m, memory: 32Mi }
+      limits: { memory: 256Mi }
 
 # The release check (jobs/release-check-cronjob.yaml). Once a day, one pod asks GitHub's API for the
 # latest Aber release and records the answer, and the account menu says "Aber X.Y.Z is available"

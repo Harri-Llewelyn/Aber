@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 // The backup service: a queued backup_jobs row becomes a tier 1 backup on the backup volume. It is the
 // one process beside the volumes holding a superuser credential, so it can pg_dump both databases,
-// tar the storage objects and the broker's document, copy the forge consistently and archive the
-// keys. It serves nothing but /healthz and hands no bytes to anybody: restore is a runbook run from
-// a shell against the volume or the bucket. When the Backups page names an S3 destination it copies
+// tar the broker's document, copy the forge consistently and archive the keys; the storage objects
+// are tarred by a Job it starts per backup. It serves nothing but /healthz and hands no bytes to
+// anybody: restore is a runbook run from a shell against the volume or the bucket. When the Backups
+// page names an S3 destination it copies
 // every backup there, each file encrypted with age. Runs on an image built from the database's own,
 // so pg_dump is at least the server's version. Reasoning: supabase/README.md, "Backup and Recovery",
 // "How the service takes a backup", "An encrypted copy off site".
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync,
-  rmSync, statSync, statfsSync, writeFileSync, copyFileSync,
+  chmodSync, chownSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync,
+  readFileSync, renameSync, rmSync, statSync, statfsSync, writeFileSync, copyFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { archiveApi, archiveInJob, sweepArchiveJobs } from './lib/backup-storage-archive.mjs';
 
 const BACKUP_DIR = process.env.BACKUP_DIR || '/backups';
 const RETENTION_DAYS = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || '14', 10);
@@ -50,6 +52,14 @@ const TIMESCALE = {
 const STORAGE_PATH = process.env.STORAGE_PATH ?? '/storage';
 const FORGE_PATH = process.env.FORGE_PATH ?? '/forge';
 const BROKER_PATH = process.env.BROKER_PATH ?? '/broker';
+// The storage objects through one Job per backup instead: the chart's suspended CronJob of this
+// name is the Job's template. It mounts the storage volume read-only and this pod's backup volume,
+// on this pod's node, so no pod holds the storage volume between backups. Empty: no Job.
+const STORAGE_ARCHIVE_CRONJOB = process.env.STORAGE_ARCHIVE_CRONJOB || '';
+const STORAGE_ARCHIVE_TIMEOUT_SECONDS = Math.max(60,
+  Number.parseInt(process.env.STORAGE_ARCHIVE_TIMEOUT_SECONDS || '3600', 10) || 3600);
+const POD_NAMESPACE = process.env.POD_NAMESPACE || '';
+const NODE_NAME = process.env.NODE_NAME || '';
 // The CA behind the broker's and the databases' certificates, read from its Secret through the API
 // with the pod's ServiceAccount. Either empty: no CA to keep (TLS is off).
 const CA_SECRET_NAME = process.env.CA_SECRET_NAME || '';
@@ -84,6 +94,10 @@ if (FORMAT !== 'plain' && FORMAT !== 'custom') {
 }
 if (!existsSync(BACKUP_DIR)) {
   console.error(`[backup-service] BACKUP_DIR ${BACKUP_DIR} is not mounted; refusing to write backups into the container`);
+  process.exit(2);
+}
+if (STORAGE_ARCHIVE_CRONJOB && (!POD_NAMESPACE || !NODE_NAME)) {
+  console.error('[backup-service] STORAGE_ARCHIVE_CRONJOB needs POD_NAMESPACE and NODE_NAME: the Job is made in this namespace, on this node');
   process.exit(2);
 }
 
@@ -277,30 +291,44 @@ async function archiveForge(dir, stamp) {
   }
 }
 
-// Through the API with the pod's ServiceAccount. The token is read on every call: a projected
-// token is short-lived and rotated in place.
-function readSecret(namespace, name) {
+// One call to the API with the pod's ServiceAccount, answered as { status, json, text }. The
+// token is read on every call: a projected token is short-lived and rotated in place.
+function kube(method, path, body) {
   const token = readFileSync(join(SA_DIR, 'token'), 'utf8').trim();
   const ca = readFileSync(join(SA_DIR, 'ca.crt'));
+  const payload = body === undefined ? null : JSON.stringify(body);
   return new Promise((resolvePromise, reject) => {
     const req = httpsRequest({
       host: process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc',
       port: process.env.KUBERNETES_SERVICE_PORT || 443,
-      path: `/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets/${encodeURIComponent(name)}`,
-      method: 'GET',
+      path,
+      method,
       ca,
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      timeout: 30000,
+      headers: {
+        Authorization: `Bearer ${token}`, Accept: 'application/json',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+      },
     }, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
-        if (res.statusCode === 200) resolvePromise(JSON.parse(data));
-        else reject(new Error(`GET secret ${namespace}/${name} -> ${res.statusCode}: ${data.slice(0, 200)}`));
+        let json = null;
+        try { json = data ? JSON.parse(data) : null; } catch { json = null; }
+        resolvePromise({ status: res.statusCode, json, text: data });
       });
     });
+    req.on('timeout', () => req.destroy(new Error(`${method} ${path}: no answer in 30 s`)));
     req.on('error', reject);
+    if (payload) req.write(payload);
     req.end();
   });
+}
+
+async function readSecret(namespace, name) {
+  const r = await kube('GET', `/api/v1/namespaces/${encodeURIComponent(namespace)}/secrets/${encodeURIComponent(name)}`);
+  if (r.status === 200 && r.json) return r.json;
+  throw new Error(`GET secret ${namespace}/${name} -> ${r.status}: ${r.text.slice(0, 200)}`);
 }
 
 // The CA's key pair as cert-manager keeps it (tls.crt, tls.key, ca.crt), staged at 0600. A named
@@ -325,6 +353,26 @@ async function archiveCa(dir, stamp) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const archive = archiveApi(kube, POD_NAMESPACE);
+
+// The Job writes the partial directory as the user its template states, which the non-root service
+// already is. As root, with no CAP_CHOWN, the service may still give a directory it owns to a group
+// it is in (supplementalGroups), and make it group-writable.
+function shareWithArchiveJob(dir, { uid, gid }) {
+  const st = statSync(dir);
+  if (st.uid === uid) return;
+  if (st.gid !== gid) chownSync(dir, st.uid, gid);
+  chmodSync(dir, 0o2775);
+}
+
+// The storage objects, by one Job on this node (scripts/lib/backup-storage-archive.mjs).
+const archiveStorageObjects = (dir, stamp) => archiveInJob({
+  api: archive, cronJobName: STORAGE_ARCHIVE_CRONJOB, nodeName: NODE_NAME, backupDir: BACKUP_DIR, dir, stamp,
+  timeoutSeconds: STORAGE_ARCHIVE_TIMEOUT_SECONDS, share: shareWithArchiveJob, digest: sha256, log, sleep,
+  onJob: (name) => { if (current) current.archiveJob = name; },
+});
+
 // Read through the dump's own superuser session: pg_read_file resolves a relative path against the
 // data directory. A dump without it restores a Vault nothing can decrypt, since a fresh server mints
 // its own key. Written as read, with no newline, so a restore puts it back byte for byte.
@@ -337,7 +385,7 @@ async function archiveVaultKey(dir, stamp) {
   return { name: 'vault-key', file, size_bytes: statSync(out).size, sha256: await sha256(out) };
 }
 
-let current = null; // { job, stamp, partialDir }
+let current = null; // { job, stamp, partialDir, archiveJob }
 let lastRun = null;
 
 // One directory per backup, named by the UTC stamp, written under .partial-<stamp> and renamed on
@@ -346,7 +394,7 @@ async function takeBackup(job) {
   const stamp = stampNow();
   const partialDir = join(BACKUP_DIR, `.partial-${stamp}`);
   const finalDir = join(BACKUP_DIR, stamp);
-  current = { job, stamp, partialDir };
+  current = { job, stamp, partialDir, archiveJob: null };
   mkdirSync(partialDir, { recursive: true });
   log(`backup ${stamp} for job ${job.id} (${job.origin}${job.note ? `: ${job.note}` : ''})`);
 
@@ -365,7 +413,10 @@ async function takeBackup(job) {
     log('vault key: no file named; component absent');
   }
 
-  if (STORAGE_PATH && existsSync(STORAGE_PATH) && statSync(STORAGE_PATH).isDirectory()) {
+  if (STORAGE_ARCHIVE_CRONJOB) {
+    log('archiving the storage objects, in a Job');
+    components.push(await archiveStorageObjects(partialDir, stamp));
+  } else if (STORAGE_PATH && existsSync(STORAGE_PATH) && statSync(STORAGE_PATH).isDirectory()) {
     log('archiving the storage objects');
     components.push(await tarDirectory('storage-objects', STORAGE_PATH, partialDir, stamp));
   } else {
@@ -727,6 +778,12 @@ async function waitForDatabase() {
 
 async function main() {
   await waitForDatabase();
+  if (STORAGE_ARCHIVE_CRONJOB) {
+    log(`storage objects: one Job per backup from cronjob ${STORAGE_ARCHIVE_CRONJOB}, on node ${NODE_NAME}, within ${STORAGE_ARCHIVE_TIMEOUT_SECONDS}s`);
+    try {
+      await sweepArchiveJobs({ api: archive, cronJobName: STORAGE_ARCHIVE_CRONJOB, log });
+    } catch (err) { log(`storage archive Jobs: ${err.message}`); }
+  }
   sweepPartials();
   // The schedule is this process's: registered with pg_cron at start, or removed when empty, so a
   // stack with no service queues nothing nobody will take.
@@ -760,9 +817,13 @@ createServer((req, res) => {
 }).listen(PORT, () => log(`healthz on :${PORT}`));
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.on(signal, () => {
+  process.on(signal, async () => {
     stopping = true;
+    const archiveJob = current?.archiveJob;
     abandon('the backup service was stopped while this backup was running');
+    // The Job holds the storage volume: asked to go, for up to five seconds, so it does not
+    // outlive this process. The next start removes any that does.
+    if (archiveJob) await Promise.race([archive.deleteJob(archiveJob).catch(() => {}), sleep(5000)]);
     process.exit(0);
   });
 }

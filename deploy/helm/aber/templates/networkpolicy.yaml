@@ -496,8 +496,9 @@ spec:
 {{- if .Values.observability.enabled }}{{- $apiClients = append $apiClients "alloy" -}}{{- end -}}
 {{- /* The broker pod's credential sidecar patches the playback delivery Secret through the API. */ -}}
 {{- if .Values.gatewayCredential.enabled }}{{- $apiClients = append $apiClients "mosquitto" -}}{{- end -}}
-{{- /* The backup service reads the CA's Secret through the API when backup.ca names one. */ -}}
-{{- if and .Values.backup.enabled .Values.backupService.enabled .Values.backup.ca.secretName .Values.backup.ca.namespace }}{{- $apiClients = append $apiClients "backup-service" -}}{{- end -}}
+{{- /* The backup service reads the CA's Secret through the API when backup.ca names one, and makes
+     and reads its storage archive Jobs there. The Jobs reach nothing and are named by no edge. */ -}}
+{{- if or (and .Values.backup.enabled .Values.backupService.enabled .Values.backup.ca.secretName .Values.backup.ca.namespace) (include "aber.backupStorageArchiveJob" .) }}{{- $apiClients = append $apiClients "backup-service" -}}{{- end -}}
 {{- /* The forge pod's gitea-token init container writes the machine account's token into its Secret. */ -}}
 {{- if include "aber.forgeTokenSecretName" . }}{{- $apiClients = append $apiClients "gitea" -}}{{- end -}}
 {{- if and $apiClients .Values.networkPolicy.apiServerCidr }}
@@ -513,7 +514,9 @@ is issued but never reaches the playback worker (ECONNREFUSED in the sidecar's l
 the whole broker pod, since a NetworkPolicy cannot select one container; only that sidecar holds a
 token. `gitea`'s gitea-token init container patches the platform's forge token into its Secret;
 dropped, it retries for a minute and fails, and the forge does not start until it can. The same
-holds there: the rule covers the pod, and only that init container holds a token.
+holds there: the rule covers the pod, and only that init container holds a token. `backup-service`
+reads the CA's Secret and starts the storage archive Job through it; dropped, a backup that
+includes either fails, its error saying the API gave no answer.
 
 THE ADDRESS IS ENVIRONMENT-SPECIFIC AND CANNOT BE SELECTED: NetworkPolicy has no selector for the
 API server, so this is an ipBlock. Default 0.0.0.0/0 on the API ports only; set

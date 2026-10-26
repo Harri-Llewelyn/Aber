@@ -6992,8 +6992,9 @@ const OPERATOR_PAIRS = [
 // connects to. Under a NetworkPolicy a new pod's first connections are refused for about a second,
 // until the policy controller admits the pod, so a run that connects at once fails, or reads no
 // settings and carries on without them. The wait is aber.waitFor or aber.waitForPostgres. An
-// exception is listed with the text in its template that does the waiting instead, which must still
-// be there. The helm-test pods are not Jobs, and each retries in its own script.
+// exception is listed with the text in its template that does the waiting instead, or that shows it
+// connects to nothing, which must still be there. The helm-test pods are not Jobs, and each retries
+// in its own script.
 // -------------------------------------------------------------------------------------------------
 {
   const TEMPLATES = 'deploy/helm/aber/templates/';
@@ -7005,6 +7006,8 @@ const OPERATOR_PAIRS = [
       'its first init container polls the API server until the validate Job has passed'],
     'jobs/timescaledb-maintenance.yaml': [/initContainers:\s*- name: wait-for-telemetry-table\b/,
       'its first init container retries psql until the historian holds the telemetry hypertable'],
+    'jobs/backup-storage-archive.yaml': [/^\s*tar -czf "\/backups\/\$ARCHIVE_FILE" -C \/storage \. /m,
+      'it connects to nothing: its one command tars one volume into another'],
   };
   const indent = (l) => l.match(/^ */)[0].length;
   const skip = (l) => !l.trim() || /^\s*#/.test(l) || /^\s*\{\{.*\}\}\s*$/.test(l);

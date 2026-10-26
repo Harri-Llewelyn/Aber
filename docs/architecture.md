@@ -95,6 +95,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `area-plan-sweep` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: hourly, deletes the area plans no area names |
 | `backup` | `supabase/postgres:17.6.1.175` | the nightly CronJob, when the backup service is off |
 | `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
+| `backup-storage-archive` | `ghcr.io/harri-llewelyn/aber/backup-service` | a suspended CronJob the backup service makes one Job from per backup, to tar the storage objects (`backup.includeStorage`) |
 | `claim-templates` | `ghcr.io/harri-llewelyn/aber/ingestion` | pre-upgrade hook Job: replaces a database StatefulSet whose claim templates a release relabelled ([`help/site/upgrading.md`](../help/site/upgrading.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)) |
 | `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
 | `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |

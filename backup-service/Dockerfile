@@ -32,5 +32,6 @@ USER 100:101
 # THE SERVICE, baked in rather than mounted from a ConfigMap: Helm stores the chart archive and the
 # rendered manifest in one release Secret under a 1 MiB cap. No CMD: the chart runs
 # `node /opt/aber/backup-service.mjs`, so an edit to it needs this image rebuilt, which the dev loop
-# does on `up`.
+# does on `up`. It imports the storage archive Job's library from ./lib/.
 COPY scripts/backup-service.mjs /opt/aber/backup-service.mjs
+COPY scripts/lib/backup-storage-archive.mjs /opt/aber/lib/

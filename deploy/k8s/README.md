@@ -912,7 +912,7 @@ together.
 | gateway-credential | 1883:1883 | the `mosquitto` pod: `assemble-config` and `gateway-credential` |
 | timescaledb | 70:70 | `timescaledb`, the `timescaledb-maintenance` Job |
 | db-init | 100:101 | the `db-init` Job |
-| backup-service | 100:101 | `backup-service`; as root with `backup.includeForge` or `backup.includeBroker` |
+| backup-service | 100:101 | `backup-service`, as root with `backup.includeForge` or `backup.includeBroker`; the `backup-storage-archive` Jobs it starts |
 | supabase-db | root | `supabase-db`, which drops to 100:101; its sidecars run as 100:101 |
 
 Two images the chart does not run follow the same rule. The Remote gateway appliance runs as
@@ -931,9 +931,8 @@ init containers:
 - **Envoy** (`supabase-envoy`) as `envoy`, 101:101, `render-config` too. Started as 101, the image's
   entrypoint neither hands `/dev/stdout` to that user nor drops to it, so the container gets no
   capability back. The container runtime gives a non-root process its own log streams.
-- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too, unless a
-  backup pod mounts its volume (below). It writes the objects' volume; see *Volumes written by an
-  earlier release*, below.
+- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too. It writes
+  the objects' volume; see *Volumes written by an earlier release*, below.
 - **postgres-meta** (`supabase-meta`) as `node`, 1000:1000. It writes nothing to disk.
 - **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
   to `emptyDir` volumes. Its Edge Functions folder is read, never written.
@@ -951,10 +950,6 @@ These pods still start a container as root, each for the reason given:
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
   entrypoint gives it to postgres and drops to that uid. Measured: on a volume postgres already owns,
   the image also starts as 100.
-- **`supabase-storage`**, with `backup.includeStorage` (and `backup.enabled`): the backup service,
-  or the CronJob in its place, mounts its volume. On a `local` volume the kubelet then does not
-  give it `fsGroup` (below), so objects stored as root stay root's at 0755. Started as root, as in
-  1.3.0, storage-api can still add and delete beside them.
 - **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
   uids own at 0600.
 
@@ -985,8 +980,11 @@ except the ones listed above. *baseline* admits every pod except Alloy, as befor
   with a very large bucket can set `supabaseStorage.podSecurityContext.fsGroupChangePolicy:
   OnRootMismatch` once this prints nothing:
   `kubectl exec deploy/supabase-storage -- find /var/lib/storage -type d ! -user 1000 ! -perm -g+w`.
-  While a backup pod mounts the volume, the pod runs as root with 1.3.0's context instead: `fsGroup`
-  1000, `OnRootMismatch`. One helper, `aber.backupMountsStorage`, decides the mount and the user.
+  It runs as 1000 with `backup.includeStorage` too, since 1.7.0. The backup service never mounts
+  the volume: for each backup it starts one `backup-storage-archive` Job, which mounts it read-only
+  for as long as its tar takes, on the backup service's node, and is deleted when it ends. Before
+  1.7.0 the service held the volume for as long as it ran, so the pod ran as root with 1.3.0's
+  context.
 
 What happens if the kubelet does not apply `fsGroup` to the storage volume while storage-api runs as
 1000: reads keep working, and every upload, replacement and delete in an existing directory fails
@@ -997,11 +995,16 @@ a message. The `find` above lists the directories. It has two causes:
   before April 2024 (k3s 1.29.4). What to do: give the volume's files to 1000 once, as root:
   `chown -R 1000:1000` on the volume's directory.
 - **Another pod holding a `local` volume**, which `local-path` makes now: the kubelet applies
-  `fsGroup` only when no other pod has the volume mounted. This can happen when a site turns
-  `backup.includeStorage` off. The same upgrade moves storage-api to 1000 and takes the volume from
-  the backup service, and nothing orders the two rollouts, so the old backup-service pod can still
-  hold the volume when the new storage pod starts. What to do: once `kubectl rollout status
-  deploy/backup-service` returns, run `kubectl rollout restart deploy/supabase-storage`.
+  `fsGroup` only when no other pod has the volume mounted. With `backup.includeStorage`, a storage
+  pod that starts while a backup's archive Job runs, or while the backup CronJob (in the backup
+  service's place) runs, gets no walk. That matters only while directories written as root remain,
+  and the first walk gives them to group 1000. The upgrade to 1.7.0 is the likely case: it takes
+  the volume from the backup service and restarts storage-api as 1000, and nothing orders the two
+  rollouts, so the old backup-service pod can still hold the volume when the new storage pod
+  starts. Turning `backup.includeStorage` off before 1.7.0 did the same. What to do: once `kubectl
+  rollout status deploy/backup-service` returns and `kubectl get jobs -l
+  app.kubernetes.io/component=backup-storage-archive` lists no Job, run `kubectl rollout restart
+  deploy/supabase-storage`.
 
 What happens on a storage class that neither applies `fsGroup` nor creates a new volume
 world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root
@@ -1069,7 +1072,9 @@ dumps, it holds:
 Retention (`backup.retentionDays`) applies to scheduled backups. A requested backup is pinned until
 someone releases it on the page. Each `include*` flag mounts a ReadWriteOnce PVC, so each one pins the
 backup pod to the node of the pod that owns that volume. If those pods sit on different nodes, enable
-only the ones that share a node. The mechanism, the tables and the restore runbook are in
+only the ones that share a node. The storage objects are tarred by a Job the service starts for each
+backup, `backup-storage-archive`, on the service's node. It mounts the storage volume only while it
+runs, so storage-api gets its `fsGroup` when it starts ([Users](#users)). The mechanism, the tables and the restore runbook are in
 [`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-archived-migration-0101).
 
 **A copy off site, from the same service.** Set a destination on the **Backups** page: an S3
@@ -1560,7 +1565,9 @@ dumps. It carries a **podAffinity onto the storage pod's node**, because the PVC
 RWO lets several pods share a volume only within one node. Without the affinity, the Job is scheduled
 elsewhere and sits on `Multi-Attach error for volume`. That looks like a broken volume, not a
 scheduling rule. It is also why the setting is off by default: a backup that silently stops running
-is worse than one never enabled.
+is worse than one never enabled. With the backup service, the service carries the podAffinity, and
+each backup's `backup-storage-archive` Job is pinned to the service's node. The Job is stopped after
+`backupService.storageArchive.timeoutSeconds` (an hour), and its backup fails saying so.
 
 ### Trimming the Audit Trail
 

@@ -1,0 +1,104 @@
+{{- if eq (include "aber.backupStorageArchiveJob" .) "true" }}
+{{- $component := "backup-storage-archive" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $archive := .Values.backupService.storageArchive -}}
+{{/*
+=================================================================================================
+The storage objects' archive, one Job per backup: the template the backup service makes each Job
+from (scripts/backup-service.mjs, archiveStorageObjects). SUSPENDED, and on a schedule that never
+comes (31 February), so it never runs by itself. For a backup that includes the storage objects
+the service reads it, adds that backup's paths and a required affinity to its own node, creates the
+Job, waits for it and deletes it.
+
+A JOB, NOT THE SERVICE'S OWN MOUNT: on a `local` volume the kubelet gives a pod its fsGroup only
+when no other pod has the volume mounted, so a service holding the storage volume for its whole life
+left supabase-storage's objects as an earlier root server wrote them. This holds the volume for one
+tar (deploy/k8s/README.md, Users).
+
+THE SERVICE'S NODE: the backup volume and the storage volume are both ReadWriteOnce. The service
+follows the storage pod onto its node (its podAffinity), and the Job follows the service.
+
+NOTHING ON THE NETWORK: no NetworkPolicy edge names it, so under networkPolicy.enabled the
+default-deny holds it, DNS apart. No ServiceAccount token.
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-backup-storage-archive" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  suspend: true
+  schedule: "0 0 31 2 *"
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      # One attempt: the next backup is the retry. The service waits a minute longer than the
+      # deadline, and deletes the Job; the TTL removes one a stopped service left.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ int $archive.timeoutSeconds }}
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The backup image's postgres user, the user the backup service gives the backup's
+          # directory to. The storage pod's fsGroup as a supplementary group, so an object only that
+          # group may read is read. No fsGroup: the kubelet changes neither volume for this pod.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            supplementalGroups:
+              - {{ dig "fsGroup" 1000 (.Values.supabaseStorage.podSecurityContext | default dict) | int }}
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: archive
+              image: {{ include "aber.image" (dict "ctx" . "image" .Values.backupService.image) | quote }}
+              imagePullPolicy: {{ .Values.backupService.image.pullPolicy }}
+              # The tar the service runs for every other archive, so restore-databases.sh and the
+              # runbook read it unchanged. The service passes both paths, relative to the backup
+              # volume. GNU tar's exit 1 is "file changed as we read it": a warning in the log.
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  : "${ARCHIVE_FILE:?}" "${ARCHIVE_LOG:?}"
+                  : > "/backups/$ARCHIVE_LOG" || exit 2
+                  tar -czf "/backups/$ARCHIVE_FILE" -C /storage . 2>>"/backups/$ARCHIVE_LOG"
+                  status=$?
+                  if [ "$status" -eq 1 ]; then exit 0; fi
+                  exit "$status"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml $archive.resources | nindent 16 }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                - name: storage-objects
+                  mountPath: /storage
+                  readOnly: true
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ printf "%s-backup" $fullname }}
+            - name: storage-objects
+              persistentVolumeClaim:
+                claimName: {{ printf "%s-storage" $fullname }}
+                readOnly: true
+{{- end }}
