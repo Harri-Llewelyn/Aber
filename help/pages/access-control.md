@@ -25,18 +25,21 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - If this site has a mail relay, the person gets an invitation by email. They choose their own password from the link in it.
 - Without a mail relay, Aber makes a password for them and shows it once. Copy it before you close the dialog. Give it to them in person, or by a channel you trust. Nothing in Aber keeps a copy.
 - If that password is lost, it cannot be shown again. Open their row and select **Set New Password** instead.
-- **Role** is a list on each row. Choosing another role changes it straight away. Their own dashboard catches up when it next reloads. Each person holds one role.
+- **Role** is shown on each row, and in the person's drawer. Each person holds one role. To change it, select **Change Role** in their drawer.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
 - **Operator** reads the shopfloor and its live readings, and can propose changes.
 - **Auditor** reads the Audit Trail, including who was given access.
-- **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it. Every action for that person, other than their role, is in the drawer.
+- **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
+- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, and **Remove Access** or **Restore Access**.
 - The drawer shows their email address, display name, role, status and last sign-in.
 - **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used. It does not say which browser or service.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
 - **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
 - A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
+- **Change Role** lists the roles, starting on theirs. Choose another, and the dialog says what it lets them do. Nothing changes until you select **Change Role** in the dialog.
+- The new role applies from their next request. Node-RED follows within a minute, and Grafana when they next sign in to it. Their own dashboard catches up when it next reloads. A person whose access is removed needs **Restore Access** first.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
 - **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a lost laptop or a shared screen left signed in. They keep their role, and can sign in again.
@@ -46,7 +49,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
 - **Which address shows where.** People and the Audit Trail show the address the account has now. Approvals and Archived Entities keep the address the person had when they acted.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
-- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Its role control, and those actions in your drawer, are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
+- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Each act here is recorded in the Audit Trail. That covers adding a person, a new role, name or address, removing or restoring access, a new password and ended sessions. The record names the person and who made the change. A new address is recorded with the old one. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
@@ -89,6 +92,10 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - To deal with it, select **Issue Token** on the identity's row, and put the new token in the client that uses the old one. Then open **Tokens** and select **Revoke** on the old token. The alert clears once the old token is revoked.
 - An identity with no **Issue Token** button is renewed by the command its **Copy Command** copies. Run it, then revoke the old token in the same way.
 - Only a token Aber recorded can warn. The keys those three identities were given when Aber was installed were not recorded, so their first expiry gives no warning. `npm run keys:check` says how long they have left.
+- **Last Used**, in the token list, says when a client last used each token through the i3X server. It shows the hour, or **Never**.
+- It covers i3X Explorer, MCP clients and any other client of the i3X server. A script that calls the API directly is not recorded, so its token can read **Never** while it is in use.
+- The three identities with no **Issue Token** button read **Not recorded**. Their services call the API directly, never through the i3X server.
+- Select the **Last Used** heading to bring the unused tokens to the top. If a token has read **Never** for weeks, and you know no script calls the API with it, revoke it.
 - **Withdraw** takes a whole machine identity out of use, with an optional reason. **Reinstate** puts it back. **New Machine Identity**, **Issue Token**, **Withdraw** and **Reinstate** are each recorded in the Audit Trail.
 - **Rules** on a broker role is the number of rules the broker reports for it. To see the rules exactly as the broker holds them, click the role's row, or press Enter or Space on it. They open in a side panel. A row ending in a chevron opens a panel. Leaving the **Broker roles** tab closes the panel.
 - Each role's purpose is declared in `mosquitto/dynsec-roles.json`, and checked when Aber is built.

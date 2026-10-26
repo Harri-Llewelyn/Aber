@@ -44,10 +44,16 @@ export function describeUserAgent(userAgent) {
   return `A program (${program.length > PROGRAM_NAME_MAX ? `${program.slice(0, PROGRAM_NAME_MAX)}…` : program})`
 }
 
-/** A service's name without the site's prefix: "Aber Grafana" is "Grafana". */
+/**
+ * Short names the help uses where dropping the prefix is not enough, keyed on the client name 0002
+ * seeds. The client names stay as they are: the consent page shows them.
+ */
+const SERVICE_SHORT_NAMES = new Map([['Aber Supabase Studio', 'Studio']])
+
+/** A service's name as the help says it: "Aber Grafana" is "Grafana", "Aber Supabase Studio" is "Studio". */
 export function serviceLabel(serviceName) {
   const name = String(serviceName ?? '').trim()
-  return name.replace(/^Aber\s+/, '') || name
+  return SERVICE_SHORT_NAMES.get(name) ?? (name.replace(/^Aber\s+/, '') || name)
 }
 
 /** What the Where column says for a session: its service, or its browser. */

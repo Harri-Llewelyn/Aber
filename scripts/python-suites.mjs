@@ -720,6 +720,15 @@ export const SUITES = {
       'platform_alerts takes a service_identity alert, a replay of 0001 keeps both widened CHECKs ' +
       'over one, and only an Administrator reads it.',
   },
+  'supabase/migrations/test_a_service_token_shows_when_it_was_last_used.py': {
+    lanes: ['db'],
+    why:
+      '0209. A call made as PostgREST makes it records a minted token\'s use to the hour, and a ' +
+      'second call in the same hour writes nothing, not even a row lock. A jti with no mint, ' +
+      'another identity\'s token, a person\'s session, a key and anon record nothing. The hook ' +
+      'refuses a revoked token first. Only an Administrator or an Auditor reads it, and a replay ' +
+      'keeps it.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:
@@ -1311,6 +1320,14 @@ export const SUITES = {
       'gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the ' +
       'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
       'still read.',
+  },
+  'supabase/test_a_token_s_use_is_recorded.py': {
+    lanes: ['stack'],
+    why:
+      'A service token used through the i3X server shows when it was last used (0209). Only a ' +
+      'running stack has the whole path: the server accepting the token, its recorder thread ' +
+      'calling PostgREST as the caller, and the hook and the function behind it. Issues a token, ' +
+      'uses it, reads the hour back as an Administrator, then revokes it.',
   },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],

@@ -878,6 +878,68 @@ paths:
                     reason:       { type: string, nullable: true, description: Free text supplied at revocation. }
         '403': { description: Role is neither Administrator nor Auditor. }
 
+  /rest/v1/service_token_last_use:
+    get:
+      tags: [Audit]
+      summary: When each service token was last used through the i3X server
+      description: |
+        One row per service token the i3X server has accepted (`0209`): its `jti`, its identity
+        and `last_used_at`, the start of the latest UTC hour in which the i3X server accepted it.
+        A token with no row has never been presented there. A client calling the REST API
+        directly is not recorded, so no row is not proof that a token is unused.
+
+        **Written only by `/rest/v1/rpc/record_service_token_use`**, which the i3X server calls
+        as the token's own caller. No write policy exists, and nothing is audited: the token's
+        `TOKEN_MINTED` entry in `/rest/v1/audit_trail` stays its record.
+
+        Read is `Administrator` and `Auditor`, as for the token list's other parts; any other
+        role reads an empty array, and `anon` is granted nothing.
+      parameters:
+        - { name: jti, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` for one token.' }
+        - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` for one identity''s tokens.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: The recorded tokens, or an empty array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    jti:          { type: string, description: The token's jti, as its TOKEN_MINTED row records it. }
+                    principal_id: { type: string, format: uuid }
+                    last_used_at: { type: string, format: date-time, description: The start of the latest UTC hour in which the i3X server accepted the token. }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/record_service_token_use:
+    post:
+      tags: [Audit]
+      summary: Record that your own service token was used this hour
+      description: |
+        The i3X server calls this with the caller's own token after accepting it (`0209`). It
+        takes no argument: the `jti` and `sub` come from the verified token, so a caller can
+        record only its own. It records a token whose `jti` has a `TOKEN_MINTED` row for that
+        `sub`, at the start of the current UTC hour. Anything else, a person's session token or a
+        key, records nothing. A second call in the same hour writes nothing.
+
+        A POST: PostgREST runs a GET read-only. Granted to `authenticated`, not `anon` or
+        `service_role`. A revoked token is refused before the call, as on every request.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, maxProperties: 0 }
+      responses:
+        '200':
+          description: '`true` when this call recorded the hour, `false` when there was nothing to record.'
+          content:
+            application/json:
+              schema: { type: boolean }
+        '401': { description: 'Not authenticated, or the token was revoked; `anon` may not call it.' }
+
   /rest/v1/machine_principals:
     get:
       tags: [Audit]

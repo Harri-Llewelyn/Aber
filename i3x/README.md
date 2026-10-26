@@ -129,6 +129,25 @@ role is removed (a GoTrue sign-out for that user): the token check would then fa
 interval and the user would be signed out everywhere, at the cost of changing how every role change
 works.
 
+**The server records when each service token was last used,** for the Last Used column of the
+token list on Access Control. Once `_authenticate` accepts a token that carries a `jti`, the server
+calls `rpc/record_service_token_use` with the caller's own token. It does so once per token per
+hour in each replica. A cached acceptance and an open stream's re-check count as uses. The call is
+a POST with no argument: the database reads the `jti` from the verified token, records only a
+token it minted, and writes nothing on a second call in the same hour
+([`supabase/README.md`](../supabase/README.md#a-service-token-shows-when-it-was-last-used-0209)).
+
+- **It is off the request path.** A request puts the use on a bounded queue (256), and one thread
+  makes the calls. When the queue is full the use is dropped and counted, and a later request in
+  the same hour queues it again.
+- **It never fails or slows a request.** A failed call is counted and logged once, then not again
+  until a call succeeds.
+- **It covers this server's clients only,** MCP hosts through it included. A client that calls the
+  REST API directly never reaches this server, so its use is not recorded.
+
+`test_i3x_service.py` holds the hourly limit, the queue's bound and a failing call.
+`supabase/test_a_token_s_use_is_recorded.py` holds a real use on a running stack.
+
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
 check. It reports capabilities and nothing about the address space. A CORS preflight (`OPTIONS`) is
 answered without a token too, because a browser sends it with no credentials; it returns headers

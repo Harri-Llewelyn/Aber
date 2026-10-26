@@ -1,4 +1,5 @@
 import React from 'react'
+import { HelpTip } from './HelpTip'
 import { IconChevronDown, IconChevronUp, IconChevronsUpDown } from './Icons'
 import { Tooltip } from './Tooltip'
 
@@ -13,9 +14,12 @@ import { Tooltip } from './Tooltip'
  * A header that cannot be sorted (actions, an icon column) is a plain `<th>`, or a ColumnHeader
  * when it has something to say.
  *
+ * `help` puts a HelpTip ("?") after the label, named by `helpLabel`, for a column whose meaning
+ * needs more than the tooltip and must reach a touch screen, where a tap on the label sorts.
+ *
  *   <SortHeader sort={sort} column="name" title="The name people see; the Sparkplug id is under it">Name</SortHeader>
  */
-export function SortHeader({ sort, column, title, className, style, children }) {
+export function SortHeader({ sort, column, title, help, helpLabel, className, style, children }) {
   const active = sort.column === column
   const direction = active ? (sort.descending ? 'descending' : 'ascending') : undefined
   const Arrow = !active ? IconChevronsUpDown : sort.descending ? IconChevronDown : IconChevronUp
@@ -27,6 +31,7 @@ export function SortHeader({ sort, column, title, className, style, children }) 
           <Arrow size={12} aria-hidden="true" className={active ? 'sort-arrow' : 'sort-arrow sort-arrow-idle'} />
         </button>
       </Tooltip>
+      {help && <HelpTip text={help} label={helpLabel || 'What this column means'} size={12} />}
     </th>
   )
 }

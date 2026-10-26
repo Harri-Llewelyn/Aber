@@ -6,7 +6,8 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import {
-  IconArchive, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw, IconShieldAlert, IconUser,
+  IconArchive, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw, IconShieldAlert, IconShieldCheck,
+  IconUser,
 } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
@@ -18,6 +19,7 @@ import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ChangeEmailModal } from '../modals/ChangeEmailModal'
+import { ChangeRoleModal } from '../modals/ChangeRoleModal'
 import { DisplayNameModal } from '../modals/DisplayNameModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
@@ -55,9 +57,9 @@ const personKey = (p) => p.email || p.user_id
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, re-address, sign out, remove or restore, or to give a new
- * password. A row is the person, their role (changed in place), status and last sign-in; a click
- * or Enter opens their drawer (`?person=<email>`), which holds every other action. A person is
- * drawn by their display name with their email beside it, or by the email alone.
+ * password. A row is the person, their role, status and last sign-in; a click or Enter opens their
+ * drawer (`?person=<email>`), which holds every action. A person is drawn by their display name
+ * with their email beside it, or by the email alone.
  *
  * Roles go through set_person_role(), names through set_display_name(), and ending sessions
  * through end_person_sessions(); adding, removing, restoring, a new password and a new address go
@@ -82,11 +84,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   const [confirming, setConfirming] = useState(null)
   // { email, password } while a new password is on screen; gone when its dialog closes.
   const [newPassword, setNewPassword] = useState(null)
-  // The person whose name, or address, the Change Name or Change Email dialog is open for.
+  // The person whose name, address or role the Change Name, Change Email or Change Role dialog is open for.
   const [naming, setNaming] = useState(null)
   const [readdressing, setReaddressing] = useState(null)
-  // The user_id whose role is being saved, so its select shows the wait.
-  const [savingRole, setSavingRole] = useState(null)
+  const [reroling, setReroling] = useState(null)
   // The open drawer's session count, for the person it was read for.
   const [sessions, setSessions] = useState({ userId: null, summary: null, error: null })
   const [search, setSearch] = useUrlState('search')
@@ -142,20 +143,6 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   useEffect(() => {
     if (!loading && !error && showRemoved && removedCount === 0) setShowRemoved(false)
   }, [loading, error, showRemoved, removedCount, setShowRemoved])
-
-  const changeRole = useCallback(async (person, role) => {
-    if (!role || role === person.role) return
-    setSavingRole(person.user_id)
-    try {
-      await api.setPersonRole(person.user_id, role)
-      showToast?.(`${personLabel(person)} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.email) })
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
-      setSavingRole(null)
-      load()
-    }
-  }, [load, showToast])
 
   // The address is the drawer's key in the URL. The list takes the new one first, committed at
   // once, so the drawer and a search for the old address move with it rather than being tidied away.
@@ -216,6 +203,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           : `${read.summary.open_sessions} open${read.summary.last_active_at
             ? `, last active ${formatDateTime(read.summary.last_active_at)}` : ''}`
     const emailBlocked = p ? emailChangeBlocked(p, currentUserId) : null
+    const roleBlocked = p ? roleChangeBlocked(p, people, currentUserId) : null
     const passwordBlocked = p ? passwordSetBlocked(p, currentUserId) : null
     const sessionsBlocked = p ? sessionsEndBlocked(p, currentUserId) : null
     const removeBlocked = p ? removalBlocked(p, people, currentUserId) : null
@@ -264,6 +252,12 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             onClick: () => setReaddressing(p),
             disabled: !!emailBlocked,
             title: emailBlocked || 'Give them a new address to sign in with. Their sessions end, so they sign in again.',
+          },
+          {
+            label: 'Change Role', icon: <IconShieldCheck size={13} />,
+            onClick: () => setReroling(p),
+            disabled: !!roleBlocked,
+            title: roleBlocked || 'Give them another role. You see what it lets them do before anything changes.',
           },
           // Your own password is changed on Profile, so your drawer links there instead.
           isSelf ? {
@@ -394,12 +388,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             <tbody>
               {shown.map(p => {
                 const status = personStatus(p)
-                const roleBlocked = roleChangeBlocked(p, people, currentUserId)
                 const removed = p.status === 'removed'
                 const isSelf = p.user_id === currentUserId
                 const key = personKey(p)
-                // A click on the row, or Enter or Space on it, opens the drawer; the role select
-                // and anything else inside keep their own clicks and keys.
+                // A click on the row, or Enter or Space on it, opens the drawer.
                 const toggle = () => setOpenPerson(open => (open === key ? '' : key))
                 return (
                   <tr
@@ -419,22 +411,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
                       {isSelf && <Badge size="sm" className="badge-follow" title="The account you are signed in with">YOU</Badge>}
                     </td>
                     <td>
-                      {/* Says why it cannot change, or what the role chosen allows: an option's
-                          own description never reaches a keyboard. */}
-                      <Tooltip text={roleBlocked || PERSON_ROLES.find(r => r.name === p.role)?.description}>
-                        <select
-                          className="form-control"
-                          aria-label={`Role for ${personLabel(p)}`}
-                          value={p.role || ''}
-                          disabled={!!roleBlocked || savingRole === p.user_id}
-                          onChange={e => changeRole(p, e.target.value)}
-                        >
-                          {!p.role && <option value="" disabled>No role</option>}
-                          {PERSON_ROLES.map(r => (
-                            <option key={r.name} value={r.name}>{r.label}</option>
-                          ))}
-                        </select>
-                      </Tooltip>
+                      {/* Changed from the drawer, through Change Role, which asks first. */}
+                      {personRoleLabel(p.role)}
                       {removed && p.role_on_restore && (
                         <div className="cell-meta">{personRoleLabel(p.role_on_restore)} when restored</div>
                       )}
@@ -475,6 +453,15 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           person={readdressing}
           onClose={() => setReaddressing(null)}
           onChanged={result => emailChanged(readdressing, result)}
+          showToast={showToast}
+        />
+      )}
+
+      {reroling && (
+        <ChangeRoleModal
+          person={reroling}
+          onClose={() => setReroling(null)}
+          onChanged={load}
           showToast={showToast}
         />
       )}

@@ -307,6 +307,155 @@ class TestSubscriptionsAuthenticateEveryRequest(unittest.TestCase):
         self.assertFalse(sub.stream_open)
 
 
+class TestATokensUseIsRecorded(unittest.TestCase):
+    """
+    Each accepted token with a `jti` is recorded once per hour, off the request path: a request
+    queues the call, and one thread makes it as the caller. A failure is counted and logged once,
+    and never reaches the request. Driven with a fake clock and a fake call, and through a real
+    HTTP server with the PostgREST probe faked, as the class above does.
+    """
+
+    HOUR = i3x_service.TOKEN_USE_HOUR_SECONDS
+
+    def setUp(self):
+        now = int(time.time())
+        self.clock = FakeClock()
+        self.clock.now = 1_800_000_000.0
+        self.posts = []
+        self.minted = _jwt(sub="5e000000-0000-4000-8000-000000000001", role="authenticated",
+                           exp=now + 3600, jti="3a1f0000-0000-4000-8000-0000000000aa")
+        self.session = _jwt(sub="a1ice000-0000-4000-8000-000000000001", role="authenticated",
+                            exp=now + 3600, session_id="5e550000-0000-4000-8000-000000000001")
+        self.key = "Bearer sb_secret_key_a"
+        self.accepted = {self.minted, self.session, self.key}
+
+        def fake_probe(bearer):
+            if bearer not in self.accepted:
+                raise i3x_service.Problem(401, "Unauthorized", "The data layer refused this token.")
+
+        self._saved = (i3x_service._probe, i3x_service.token_use, i3x_service.registry)
+        i3x_service._probe = fake_probe
+        self.recorder = i3x_service.TokenUseRecorder(post=self.posts.append, clock=self.clock)
+        i3x_service.token_use = self.recorder
+        i3x_service.registry = SubscriptionRegistry()
+        i3x_service._auth_cache.clear()
+
+    def tearDown(self):
+        i3x_service._probe, i3x_service.token_use, i3x_service.registry = self._saved
+        i3x_service._auth_cache.clear()
+
+    def drain(self, recorder=None):
+        recorder = recorder or self.recorder
+        while recorder.record_next(timeout=0):
+            pass
+
+    def test_a_token_is_recorded_once_an_hour(self):
+        for _ in range(3):
+            i3x_service._authenticate(self.minted)
+        self.drain()
+        self.assertEqual(self.posts, [self.minted], "a second use in the hour was recorded")
+
+        # An open stream's re-check bypasses the cache, and is a use like any other.
+        i3x_service._authenticate(self.minted, fresh=True)
+        self.drain()
+        self.assertEqual(len(self.posts), 1)
+
+        self.clock.advance(self.HOUR)
+        i3x_service._authenticate(self.minted, fresh=True)
+        self.drain()
+        self.assertEqual(self.posts, [self.minted, self.minted])
+
+    def test_a_cached_acceptance_counts_as_a_use(self):
+        i3x_service._authenticate(self.minted)
+        self.clock.advance(self.HOUR)
+        i3x_service._authenticate(self.minted)  # inside AUTH_CACHE_SECONDS: no probe, still a use
+        self.drain()
+        self.assertEqual(len(self.posts), 2)
+
+    def test_nothing_is_recorded_without_a_jti(self):
+        for bearer in (self.session, self.key):
+            i3x_service._authenticate(bearer)
+        with self.assertRaises(i3x_service.Problem):
+            i3x_service._authenticate(_jwt(sub="x", jti="refused-token"))
+        self.drain()
+        self.assertEqual(self.posts, [], "a token with no jti, or a refused one, was recorded")
+
+    def test_the_queue_is_bounded_and_a_dropped_use_is_queued_again(self):
+        recorder = i3x_service.TokenUseRecorder(post=self.posts.append, clock=self.clock, queue_max=2)
+        for n in range(5):
+            recorder.note(f"Bearer t{n}", f"jti-{n}")
+        self.assertEqual((recorder.queued(), recorder.dropped), (2, 3))
+        self.drain(recorder)
+        recorder.note("Bearer t4", "jti-4")  # dropped earlier in this hour, so not marked recorded
+        recorder.note("Bearer t0", "jti-0")  # queued earlier in this hour
+        self.drain(recorder)
+        self.assertEqual(self.posts, ["Bearer t0", "Bearer t1", "Bearer t4"])
+
+    def test_the_hours_already_queued_are_bounded(self):
+        recorder = i3x_service.TokenUseRecorder(post=self.posts.append, clock=self.clock, seen_max=3)
+        for n in range(5):
+            recorder.note(f"Bearer t{n}", f"jti-{n}")
+        self.assertEqual(len(recorder._seen), 3)
+
+    def call(self, server, auth):
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        try:
+            conn.request("POST", "/v1/subscriptions", body=json.dumps({"clientId": "c"}).encode(),
+                         headers={"Content-Type": "application/json", "Authorization": auth})
+            resp = conn.getresponse()
+            return resp.status, json.loads(resp.read() or b"{}")
+        finally:
+            conn.close()
+
+    def test_a_failing_record_neither_fails_nor_holds_the_request(self):
+        release = threading.Event()
+
+        def failing_post(bearer):
+            release.wait(10)
+            raise ConnectionError("the data layer is unreachable")
+
+        self.recorder = i3x_service.TokenUseRecorder(post=failing_post, clock=self.clock)
+        i3x_service.token_use = self.recorder
+        worker = threading.Thread(target=self.recorder.record_next, daemon=True)
+        worker.start()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        started = time.monotonic()
+        status, payload = self.call(server, self.minted)
+        self.assertEqual(status, 200, payload)
+        self.assertLess(time.monotonic() - started, 5, "the request waited for the record")
+        self.assertTrue(worker.is_alive(), "the record was made on the request's thread")
+
+        with self.assertLogs(i3x_service.logger, "WARNING") as logs:
+            release.set()
+            worker.join(10)
+            self.clock.advance(self.HOUR)
+            self.assertEqual(self.call(server, self.minted)[0], 200)
+            self.recorder.record_next(timeout=5)
+        self.assertEqual(self.recorder.failed, 2)
+        self.assertEqual(len([r for r in logs.records if r.levelname == "WARNING"]), 1,
+                         "every failure was logged, not the first")
+
+    def test_the_call_is_a_post_carrying_the_callers_own_token(self):
+        response = mock.Mock(ok=True, status_code=200, text="true")
+        with mock.patch.object(i3x_service.requests, "post", return_value=response) as post:
+            i3x_service._post_token_use(self.minted)
+        url, = post.call_args.args
+        self.assertTrue(url.endswith("/rest/v1/" + i3x_service.TOKEN_USE_PATH), url)
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], self.minted)
+        self.assertEqual(post.call_args.kwargs["json"], {})
+
+        refused = mock.Mock(ok=False, status_code=401, text='{"message":"this token has been revoked"}')
+        with mock.patch.object(i3x_service.requests, "post", return_value=refused):
+            with self.assertRaises(RuntimeError):
+                i3x_service._post_token_use(self.minted)
+
+
 class TestStrictTransportSecurity(unittest.TestCase):
     """The value the chart sets under https goes on every response, refusals and the base class's
     own error page included; empty, as over http, sends nothing."""
