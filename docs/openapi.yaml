@@ -1077,6 +1077,64 @@ paths:
                     user_id:      { type: string, format: uuid }
                     display_name: { type: string }
 
+  /rest/v1/rpc/list_my_sessions:
+    post:
+      tags: [Auth]
+      summary: List your own sessions, in every browser and service
+      description: |
+        For the Security tab on the Profile page (`0206`). One row per GoTrue session you hold: a
+        sign-in to the dashboard, a script's password sign-in, or a service's (Grafana, Node-RED,
+        Studio, the forge). The session your token names comes first, then the most recently
+        active. Any person role; an account with no role, such as a machine identity, is refused.
+
+        A service session carries `service_name` and GoTrue's own client as its `user_agent`: the
+        service's server signed you in, so no device is known for it. No address is recorded.
+      responses:
+        '200':
+          description: Your sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:             { type: string, format: uuid }
+                    service_name:   { type: string, nullable: true, description: "The OAuth client's name for a service's session; null for a dashboard or password sign-in." }
+                    user_agent:     { type: string, nullable: true }
+                    created_at:     { type: string, format: date-time }
+                    last_active_at: { type: string, format: date-time, description: 'The latest of its last refresh, last update and start.' }
+                    not_after:      { type: string, format: date-time, nullable: true, description: 'When GoTrue ends it regardless, if ever.' }
+                    is_current:     { type: boolean, description: "True for the session this request's token belongs to." }
+        '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
+
+  /rest/v1/rpc/end_my_session:
+    post:
+      tags: [Auth]
+      summary: End one of your own sessions
+      description: |
+        Deletes the session (`0206`), as a sign-out does: nothing refreshes it again, and the API
+        refuses its access token from the next request (401 `session_not_found`, `0205`). Grafana
+        and Node-RED notice on their own schedule. No Audit Trail row is written.
+
+        The session your token belongs to is refused (400, `22023`): sign out to end it. To end
+        all the others at once, call GoTrue's `POST /auth/v1/logout?scope=others`. A session that
+        is not yours is answered exactly as one that does not exist (404).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_session_id]
+              properties:
+                p_session_id: { type: string, format: uuid }
+      responses:
+        '204': { description: The session has ended. }
+        '400': { description: 'The session this token belongs to (`22023`).' }
+        '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
+        '404': { description: 'No session of yours with that id (`P0002`).' }
+
   /rest/v1/rpc/set_person_role:
     post:
       tags: [Auth]
@@ -1216,6 +1274,135 @@ paths:
         '204': { description: Allowed, and recorded when `p_check_only` is false. }
         '400': { description: 'A machine identity, or a person whose access is removed.' }
         '403': { description: 'Not an Administrator, or your own password.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/end_person_sessions:
+    post:
+      tags: [Auth]
+      summary: End every session a person holds
+      description: |
+        End Sessions in a person's drawer on People (`0207`). Deletes every `auth.sessions` row the
+        person holds, in every browser and every service, so none of their refresh tokens works and
+        `auth_pre_request()` refuses their access tokens at the API on the next request
+        (401 `session_not_found`). Writes one `SESSIONS_ENDED` row in the person's lane of the
+        Audit Trail: their email and how many sessions ended. They keep their role. A removed
+        person's sessions may be ended. Administrator only.
+
+        Refused, with the reason in the message: your own sessions (403; Sign Out ends this
+        browser's); a machine identity (400, `22023`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: How many sessions ended; 0 when they held none.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A machine identity.' }
+        '403': { description: 'Not an Administrator, or your own sessions.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/person_session_summary:
+    post:
+      tags: [Auth]
+      summary: Count a person's sessions, and say when one was last active
+      description: |
+        For a person's drawer on People (`0207`). How many `auth.sessions` rows the person holds,
+        and the latest time one was refreshed, updated or started. No list: which browsers and
+        services they are is the person's own to see. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: One row.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    open_sessions:  { type: integer }
+                    last_active_at: { type: string, format: date-time, nullable: true, description: 'NULL when they hold none.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/check_person_email_change:
+    post:
+      tags: [Auth]
+      summary: Decide whether a person's email address may change
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session (`0207`), BEFORE GoTrue
+        changes the address. Writes nothing, and answers with the address the person has now.
+        The new address is trimmed and lower-cased first. Administrator only.
+
+        Refused, with the reason in the message: your own address (403); a person whose access is
+        removed, until it is restored (400, `P0001`); an address another account holds (400,
+        `P0001`, naming the address and not the account); the address they already have, or one
+        that is not an address (400, `22023`); a machine identity (400, `22023`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_email]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_email:   { type: string, format: email }
+      responses:
+        '200':
+          description: The address the person has now.
+          content:
+            application/json:
+              schema: { type: string }
+        '400': { description: 'A machine identity, a removed person, a taken address, or not a new address.' }
+        '403': { description: 'Not an Administrator, or your own address.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_person_email_change:
+    post:
+      tags: [Auth]
+      summary: Record a person's new email address, and end their sessions
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session (`0207`), AFTER GoTrue
+        changed the address. Refuses unless the account holds `p_email` now. Writes one
+        `EMAIL_CHANGED` row (the old and the new address), then ends every session the person
+        holds through `end_person_sessions()`, which writes `SESSIONS_ENDED` in the same
+        transaction: their access token still carries the old address. Administrator only, and
+        never your own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_old_email, p_email]
+              properties:
+                p_user_id:   { type: string, format: uuid }
+                p_old_email: { type: string, description: 'The address check_person_email_change() answered.' }
+                p_email:     { type: string, format: email }
+      responses:
+        '200':
+          description: How many sessions ended.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'The account does not hold the new address, or no old address was given.' }
+        '403': { description: 'Not an Administrator, or your own address.' }
         '404': { description: 'No such person (`P0002`).' }
 
   # ------------------------------------------------------------ Registry ----
@@ -3257,9 +3444,9 @@ paths:
   /functions/v1/manage-people:
     post:
       tags: [Edge Functions]
-      summary: Add a person, remove their access, restore it, or set a new password
+      summary: Add a person, remove their access, restore it, set a new password or change their email address
       description: |
-        The GoTrue half of the People tab (`0166`, `0167`). A function because GoTrue's admin API takes the
+        The GoTrue half of the People tab (`0166`, `0167`, `0207`). A function because GoTrue's admin API takes the
         service-role key, which is not in the database. Requires `Administrator`, checked here
         before any admin call and again by the database function each act calls in the caller's
         session, which also writes the audit row.
@@ -3282,8 +3469,15 @@ paths:
           a 500 that withholds the password: it was changed, nobody has seen it, and setting it
           again records it. GoTrue ends the person's sessions; an access token already issued lasts
           until it expires.
+        - **`change-email`**: `email` is trimmed and lower-cased, and refused (400) unless it is an
+          address. `check_person_email_change()` decides first and answers with the address held (a
+          removed person or a taken address is a 409). GoTrue's admin update then changes it with
+          `email_confirm`, so it is in use at once and nothing is mailed. Then
+          `record_person_email_change()` writes `EMAIL_CHANGED` and ends every session the person
+          holds. If GoTrue fails, nothing changed (502). If the record fails, the answer is a 500
+          that says the address did change and the sessions did not end.
 
-        Your own access or password is refused (403); you change your own password with
+        Your own access, password or address is refused (403); you change your own password with
         `PUT /auth/v1/user`. A refusal the caller can act on (4xx) carries the database's or GoTrue's
         sentence in `details`. A failure that is not one (500, 502) answers a fixed sentence and a
         request id, and the error goes to the log.
@@ -3295,11 +3489,11 @@ paths:
               type: object
               required: [action]
               properties:
-                action:  { type: string, enum: [add, remove, restore, set-password] }
-                email:   { type: string, format: email, description: '`add` only.' }
+                action:  { type: string, enum: [add, remove, restore, set-password, change-email] }
+                email:   { type: string, format: email, description: '`add`, and the new address for `change-email`.' }
                 role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
                 display_name: { type: string, nullable: true, description: '`add` only, optional. Up to 80 characters after trimming, no control characters.' }
-                user_id: { type: string, format: uuid, description: '`remove`, `restore` and `set-password`.' }
+                user_id: { type: string, format: uuid, description: '`remove`, `restore`, `set-password` and `change-email`.' }
       responses:
         '200':
           description: 'Done. Sent with `Cache-Control: no-store`.'
@@ -3309,7 +3503,9 @@ paths:
                 type: object
                 properties:
                   user_id:  { type: string, format: uuid }
-                  email:    { type: string, description: '`add`.' }
+                  email:    { type: string, description: '`add`, and the new address after `change-email`.' }
+                  previous_email: { type: string, nullable: true, description: '`change-email`: the address the person had.' }
+                  sessions_ended: { type: integer, description: '`change-email`: how many sessions the change ended.' }
                   role:     { type: string, nullable: true, description: '`add`, and the role `restore` gave back.' }
                   invited:  { type: boolean, description: '`add`: true when an invitation was sent.' }
                   display_name: { type: string, nullable: true, description: '`add`: the name set, or null.' }
@@ -3318,13 +3514,13 @@ paths:
                   access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Requires Administrator; or your own access or password.' }
+        '403': { description: 'Requires Administrator; or your own access, password or address.' }
         '404': { description: No such person. }
-        '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
+        '409': { description: 'The address is already in use, the last Administrator, a removed person, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
-            GoTrue failed or did not answer. For `add` and `set-password` nothing was changed. For
+            GoTrue failed or did not answer. For `add`, `set-password` and `change-email` nothing was changed. For
             `remove` and `restore` the database act was done but the ban was not made or lifted;
             repeat it. A fixed sentence and a request id, as for a 500.
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
@@ -5158,7 +5354,7 @@ components:
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
-                 PASSWORD_SET, DISPLAY_NAME_CHANGED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PASSWORD_SET, DISPLAY_NAME_CHANGED, EMAIL_CHANGED, SESSIONS_ENDED, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
@@ -5170,6 +5366,8 @@ components:
             are written by their gates, and `CAPTURE_DELETED` by a trigger on `captures`, so a
             replacement and a deleted subject's cascade are recorded too. `DISPLAY_NAME_CHANGED`
             (0203) is written by a trigger on `person_profiles`, in the person's `user_roles` lane.
+            `EMAIL_CHANGED` and `SESSIONS_ENDED` (0207) are written by `record_person_email_change()`
+            and `end_person_sessions()`, in the same lane.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

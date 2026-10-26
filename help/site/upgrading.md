@@ -1209,7 +1209,8 @@ Every workload rolls once, as at every release. Beyond that:
 
 **Sign Out** in the dashboard used to end every session the person held, in every browser and
 service. It now ends the dashboard's session in that browser only. It still signs that browser out
-of Studio and the forge.
+of Studio and the forge. To end the others, a person selects **Sign Out of All Other Sessions** on
+the Profile page's **Security** tab, which lists every session they hold.
 
 The API now refuses a token whose session has ended. It answers 401 with the code
 `session_not_found`. Before, it accepted the token until it expired, up to an hour later. A session
@@ -1278,6 +1279,22 @@ For an API client, `grafana_url` on `/rest/v1/cells` is deprecated (#1090):
 - **A web address written to it still reaches Attached Links**, at the next restart.
 - **A change proposal can no longer name it.**
 - **It is removed no sooner than 1.8.0.** Change any script that reads or writes it before then.
+
+### From 1.7.0, the forge does not find a person by email address
+
+Before 1.7.0, the forge could sign a person in as another forge account. It happened on their first
+visit, when their forge account could not be made because another account held their address. From
+1.7.0, an Administrator can change a person's address on the **People** tab, which frees the old
+address for someone else. So the chart now sets `GITEA__service__ENABLE_REVERSE_PROXY_EMAIL` to
+`false`, and the forge finds people by their account alone.
+
+- A forge account made before the upgrade keeps its address.
+- A forge account made from 1.7.0 on has a placeholder address, `<random id>@localhost`. Its full
+  name is still the person's address, so the forge still shows who they are.
+- A commit authored with a person's own address links to their forge profile once they add that
+  address in the forge's settings.
+
+There is nothing to set. It is not a chart value.
 
 ---
 

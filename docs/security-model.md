@@ -154,13 +154,13 @@ people's accounts in GoTrue, and it is narrow by construction.
   an Administrator. The `manage-people` edge function resolves the caller's role from `user_roles`
   before it makes any admin call. Every database function behind the tab (`list_people()`,
   `set_person_role()`, `record_person_added()`, `remove_person_access()`,
-  `restore_person_access()`, `record_person_password_set()`) checks
-  `has_role(ARRAY['Administrator'])` again in its own body.
-- **Two rules no Administrator can break.** Nobody changes their own role, access or password here,
-  and no act may
-  leave the site without an Administrator who can sign in (a banned one does not count). Both are
-  checked in SQL under one lock on `user_roles`, so two Administrators cannot demote each other at
-  once. The function refuses your own access before calling the database, and calls the database
+  `restore_person_access()`, `record_person_password_set()`, and `0207`'s
+  `end_person_sessions()`, `person_session_summary()`, `check_person_email_change()` and
+  `record_person_email_change()`) checks `has_role(ARRAY['Administrator'])` again in its own body.
+- **Two rules no Administrator can break.** Nobody changes their own role, access, password or
+  email address here, or ends their own sessions, and no act may leave the site without an
+  Administrator who can sign in (a banned one does not count). Both are checked in SQL under one
+  lock on `user_roles`, so two Administrators cannot demote each other at once. The function refuses your own access before calling the database, and calls the database
   before GoTrue, so a refused act never reaches GoTrue.
 - **The secret key stays in the edge function.** GoTrue's admin API needs the service-role key.
   `manage-people` holds it, granted in `main/index.ts` beside two settings, and uses it for GoTrue
@@ -185,6 +185,35 @@ people's accounts in GoTrue, and it is narrow by construction.
   writes `PASSWORD_SET` (email and method, no password). If that record fails, the answer is a 500
   that withholds the password: it was changed, nobody has seen it, and setting it again records it.
   So no password anyone holds was set without a row in the trail.
+- **Ending a person's sessions** (`0207`). End Sessions, in a person's drawer, deletes every
+  `auth.sessions` row they hold, for every browser and service, and writes one `SESSIONS_ENDED`
+  row naming who ended whose and how many. None of their refresh tokens works again, and the API
+  refuses each access token at its next request. The other surfaces follow on the schedule in
+  [An ended session keeps Storage, Realtime and Grafana until its token expires](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires).
+  The person keeps their role and may sign in again; Remove Access is what stops them. An
+  Administrator sees how many sessions a person holds and when one was last active, never which
+  browsers or services they are.
+- **A new email address, set by an Administrator** (`0207`). Sign-in autoconfirms and a site may
+  have no mail relay, so nothing can prove a person owns an address they type: only an
+  Administrator changes one, never their own. `manage-people` asks `check_person_email_change()`
+  first, which refuses a removed person and an address another account holds without naming that
+  account's role. GoTrue's admin update then changes the address with `email_confirm`, which
+  sends no mail and clears GoTrue's pending recovery and invitation links. `record_person_email_change()`
+  writes `EMAIL_CHANGED` with both addresses and ends every session the person holds, in one
+  transaction, because their access token carries the old address and `stamp_proposal_author()`
+  stamps `proposed_by_email` from it. Grafana matches a person by account id and takes the new
+  address, as its login too, at their next sign-in there. The forge matches them by account id too,
+  and keeps the address its forge account was made with.
+- **The forge never finds a person by email address** (1.7.0). Gitea's
+  `ENABLE_REVERSE_PROXY_EMAIL` is off. With it on, a first visit whose forge account could not be
+  made, because another forge user held the address, was signed in as that user, found by
+  `X-WEBAUTH-EMAIL`. A change of address frees the old one for someone else, so that made the
+  old holder's forge account reachable by the new one. It also let a forge user add someone else's
+  address to their own account, unconfirmed, before that person's first visit. Forge accounts made
+  before 1.7.0 keep their address. A new one holds Gitea's `<uuid>@localhost` placeholder, and
+  its full name is still the person's address. A commit authored with the person's address links
+  to their forge profile only once they add the address in the forge's settings, which Gitea
+  accepts without confirmation. That is attribution only: no sign-in reads it.
 - **A person's own password.** Change Password, on the Profile page, sends the current password
   with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
   sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
@@ -349,6 +378,11 @@ ends when:
 
 - the person selects **Sign Out**. That ends the dashboard's session in that browser alone, and
   clears the Studio and forge doors' cookies there. Their other browsers and services keep theirs.
+- the person ends it on the Profile page's Security tab, which lists every session they hold
+  (`list_my_sessions()`, `0206`). **End** ends one (`end_my_session()`), never the one in use;
+  **Sign Out of All Other Sessions** ends every one but that (GoTrue's `scope=others`). A person
+  sees and ends only their own: another person's session is answered as one that does not exist.
+  Ending one writes no Audit Trail row.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open
@@ -367,6 +401,11 @@ access token an ended session issued is refused:
 | Storage and Realtime | When the access token expires, at most `supabaseAuth.jwtExpiry`. They verify the token themselves and do not run `auth_pre_request()` |
 
 Unlike a removal, the person keeps their role.
+
+The Security tab shows what GoTrue records, and no more. A service's session (Grafana, Node-RED,
+Studio, the forge) was started by the service's server, so it carries no device, only the service's
+name. No session carries an address: `auth.sessions.ip` is empty. The Studio and forge sessions
+are listed by service like the others, and the person can end any of them.
 
 **Accepted because** the API, where every write that matters goes, refuses the token at once;
 Storage and Realtime only read; and Grafana's window is bounded by the token's expiry. A new

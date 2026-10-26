@@ -12,9 +12,9 @@ import { formatDate } from './format'
  */
 
 /**
- * The platform roles in `mosquitto/dynsec-roles.json`, with the purpose the page shows beside the
- * live rules. `writes` is the fallback for a page rendered without an inventory; with one, it is
- * read off the role's rules.
+ * The roles in `mosquitto/dynsec-roles.json` other than the gateway's, with the purpose the page
+ * shows beside the live rules and beside each account holding one. `writes` is the fallback for a
+ * page rendered without an inventory; with one, it is read off the role's rules.
  */
 export const BROKER_PRINCIPALS = [
   {
@@ -32,6 +32,13 @@ export const BROKER_PRINCIPALS = [
     role: 'i3x',
     purpose: 'The i3X server. Reads the whole namespace to assemble its address space and publishes '
       + 'nothing.',
+    writes: false,
+  },
+  {
+    role: 'subscriber',
+    purpose: 'A consumer outside Aber that only reads, such as a SCADA system or a dashboard. Reads '
+      + 'every Sparkplug topic and the Unified Namespace across the whole site, never the Directory, '
+      + 'and publishes nothing. No account holds it until an operator creates one.',
     writes: false,
   },
   {

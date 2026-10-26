@@ -270,6 +270,12 @@ Its other options:
 - `--network-policy` turns the NetworkPolicy layer on, as a site's values do. CI's k8s-validation
   runs with it.
 
+`up` builds up to four images at once. Each build's output prints as one block when it ends, and
+the step ends with each image's build time. `test-runner` waits for `ingestion`, the image it
+extends. The environment variable `ABER_BUILD_JOBS` sets how many build at once:
+`ABER_BUILD_JOBS=1` builds them one after another, each one's output as it comes. Lower it if the
+builds and a running stack crowd the machine's memory.
+
 On an upgrade, `up` sets `e2e.suspend` and starts the Jobs only once every workload has rolled out.
 That way they test the new pods, not the ones being replaced. Helm creates those Jobs during the
 upgrade, before `up` restarts the workloads whose image it rebuilt under the same tag. Deleting a
@@ -1213,10 +1219,11 @@ asynchronously, spooling on its own data volume. A segment is pushed when it fil
 The `pgbackrest` sidecar in the pod takes the daily backup at `hourUtc`, and a full one on `fullOn`.
 It records each run in `public.physical_backup_runs`.
 
-- **A missed hour is taken late, once.** The sidecar checks the clock every minute rather than
-  sleeping until the hour. If the latest `hourUtc` has passed and no backup has been attempted since,
-  it takes one and logs `missed the <date> 01:00 UTC backup; taking it now`. This covers a pod that
-  was down, a suspended host and a restart across the hour.
+- **A missed hour is taken late, once.** The sidecar checks the clock every `pollSeconds` (60
+  seconds; the dev values use 10) rather than sleeping until the hour. If the latest `hourUtc` has
+  passed and no backup has been attempted since, it takes one and logs
+  `missed the <date> 01:00 UTC backup; taking it now`. This covers a pod that was down, a suspended
+  host and a restart across the hour.
 - **A failed run counts as the attempt.** It is not retried until the next day's hour, and
   Historian Backup Stale reports it.
 - **A full whenever the newest is over seven days old**, whatever the day. So `retainFull` keeps

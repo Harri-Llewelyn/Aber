@@ -50,6 +50,10 @@ const TABLES = {
     fixed: ['A form: each setting in its tab\'s order, with its own Save and Discard.']
   },
   'components/tabs/SchemasTab.jsx': { sortable: 1 },
+  'components/tabs/SessionsSection.jsx': {
+    sortable: 0,
+    fixed: ['A person\'s own sessions, a handful: the one in use first, then the most recently active.']
+  },
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']

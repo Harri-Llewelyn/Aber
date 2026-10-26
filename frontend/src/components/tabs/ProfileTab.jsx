@@ -12,6 +12,7 @@ import { formatClockTime, formatDateTime, NO_VALUE } from '../../utils/format'
 import { supabase } from '../../lib/supabaseClient'
 import { SUPABASE_GATEWAY_KEY } from '../../config'
 import { Tooltip } from '../common/Tooltip'
+import { SessionsSection } from './SessionsSection'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = PROFILE_TABS
@@ -245,7 +246,7 @@ function ProfileTable({ children }) {
 
 /**
  * The signed-in person's own page: who they are signed in as, the token and key that call the API as
- * them, and how the dashboard looks to them.
+ * them, how the dashboard looks to them, and where they are signed in (Security).
  * Reached from the account menu at the foot of the sidebar, not from the page list. Appearance is
  * the person's `user_settings` row (useUserSettings.js), so it follows them to any browser.
  *
@@ -255,12 +256,13 @@ function ProfileTable({ children }) {
  * `userRole` is undefined while it is still being read, and null for an account with no role.
  * `displayName` is the person's own (undefined while read, null for none); `onSaveDisplayName`
  * saves it and rejects with the database's sentence.
+ * `showToast` is App's; the Security tab says through it what was ended.
  * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
   email, userRole, passwordBlocked = null, onChangePassword, displayName, onSaveDisplayName,
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
-  singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account',
+  singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account', showToast,
 }) {
   const [section, setSection, sectionHref] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
@@ -282,7 +284,7 @@ export function ProfileTab({
           <CardHeading
             icon={<IconUser size={15} />}
             title="Profile"
-            description="Your account, and how the dashboard looks to you."
+            description="Your account, how the dashboard looks to you, and where you are signed in."
             note="Applies to you, on any browser."
           />
 
@@ -301,6 +303,7 @@ export function ProfileTab({
                 label="Email address"
                 description="The address you sign in with."
                 value={email || 'None: this identity signs in with a token'}
+                actions={email ? <span className="setting-fixed">Only an Administrator can change this</span> : undefined}
               />
               <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
               <ProfileRow
@@ -425,6 +428,9 @@ export function ProfileTab({
               />
             </ProfileTable>
           </>)}
+
+          {/* A section per subject, each with its own heading: Sessions is the first. */}
+          {section === 'security' && <SessionsSection isPerson={!!email} showToast={showToast} />}
         </div>
       </div>
     </div>

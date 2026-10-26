@@ -513,6 +513,20 @@ describe('AccessControlTab', () => {
     expect(screen.queryByText('No gateway')).toBeNull()
   })
 
+  /** An account an operator made for an outside consumer holds `subscriber`, and reads its purpose. */
+  it('lists an account holding the subscriber role with that role’s purpose', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [{ username: 'scada-reader', roles: ['subscriber'], disabled: false }],
+      roles: [],
+    })
+    await renderTab('Broker accounts')
+
+    const row = (await screen.findByRole('button', { name: /scada-reader/ })).closest('tr')
+    expect(within(row).getByText(/A consumer outside Aber that only reads/)).toBeTruthy()
+    expect(within(row).queryByText('No gateway')).toBeNull()
+  })
+
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
   it('lists a principal the dashboard has no description for, rather than hiding it', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -795,13 +809,14 @@ describe('AccessControlTab', () => {
     // Role names, not usernames: the page renders the policy's roles.
     await waitFor(() => expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy())
     expect(screen.getByText('i3x', { selector: 'td' })).toBeTruthy()
+    expect(screen.getByText('subscriber', { selector: 'td' })).toBeTruthy()
     expect(screen.getByText('monitor', { selector: 'td' })).toBeTruthy()
     expect(screen.getByText('admin', { selector: 'td' })).toBeTruthy()
     expect(screen.getByText('gateway', { selector: 'td' })).toBeTruthy()
     // With no live inventory the writes flag is the declared fallback: ingestion, admin and every
     // gateway, under its own edge node, publish.
     expect(screen.getAllByText('CAN PUBLISH').length).toBe(3)
-    expect(screen.getAllByText('READ ONLY').length).toBe(2)
+    expect(screen.getAllByText('READ ONLY').length).toBe(3)
   })
 
   /** One role confines every gateway, so the drawer says what its %u is. */
@@ -929,7 +944,7 @@ describe('AccessControlTab', () => {
     api.listBrokerInventory.mockRejectedValue(new Error('credential service unreachable'))
     await renderTab('Broker roles')
 
-    await waitFor(() => expect(screen.getAllByText('Not read').length).toBe(5))
+    await waitFor(() => expect(screen.getAllByText('Not read').length).toBe(6))
     expect(document.querySelector('tr.row-selectable')).toBeNull()
     expect(document.querySelector('tr[tabindex]')).toBeNull()
   })
@@ -1276,7 +1291,7 @@ describe('AccessControlTab card composition', () => {
     await waitFor(() => expect(screen.getByText('The broker was not read, so its accounts cannot be listed.')).toBeTruthy())
     fireEvent.click(tabLink('Broker roles'))
     expect(card().querySelector('.callout-warning')).toBeTruthy()
-    expect(card().querySelectorAll('tbody tr')).toHaveLength(5)
+    expect(card().querySelectorAll('tbody tr')).toHaveLength(6)
   })
 
   it('names the machine identity as the noun, never a principal or a service identity', async () => {
@@ -1312,7 +1327,7 @@ describe('Access Control: sorting by a column (#801)', () => {
   /**
    * The broker's live rules for three roles. Admin is declared as publishing, but the broker
    * reports no publish rule for it, so it reads READ ONLY; its denial is not a rule the Rules column
-   * counts. i3x and gateway are not reported: Not read.
+   * counts. i3x, subscriber and gateway are not reported: Not read.
    */
   const LIVE = {
     clients: [],
@@ -1445,17 +1460,17 @@ describe('Access Control: sorting by a column (#801)', () => {
     // CAN PUBLISH first: ingestion by its live rules, gateway by its declaration. Admin's live
     // rules hold no publish, so it reads READ ONLY whatever was declared.
     sortBy('Access')
-    expect(firstCells()).toEqual(['ingestion', 'gateway', 'i3x', 'monitor', 'admin'])
+    expect(firstCells()).toEqual(['ingestion', 'gateway', 'i3x', 'subscriber', 'monitor', 'admin'])
     sortBy('Access')
-    expect(firstCells()).toEqual(['i3x', 'monitor', 'admin', 'ingestion', 'gateway'])
+    expect(firstCells()).toEqual(['i3x', 'subscriber', 'monitor', 'admin', 'ingestion', 'gateway'])
 
-    // 1, 2 and 3 allowed rules; the two the broker did not report go last either way.
+    // 1, 2 and 3 allowed rules; the three the broker did not report go last either way.
     sortBy('Rules')
-    expect(firstCells()).toEqual(['monitor', 'admin', 'ingestion', 'i3x', 'gateway'])
+    expect(firstCells()).toEqual(['monitor', 'admin', 'ingestion', 'i3x', 'subscriber', 'gateway'])
     expect(header('Rules')).toHaveAttribute('aria-sort', 'ascending')
     expect(address()).toBe('/access-control/roles?sort=rules')
     sortBy('Rules')
-    expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'gateway'])
+    expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'subscriber', 'gateway'])
     expect(header('Rules')).toHaveAttribute('aria-sort', 'descending')
     expect(address()).toBe('/access-control/roles?sort=-rules')
   })
@@ -1470,7 +1485,7 @@ describe('Access Control: sorting by a column (#801)', () => {
     at('/access-control/roles?sort=-rules')
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'gateway']))
+    await waitFor(() => expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'subscriber', 'gateway']))
     expect(header('Rules')).toHaveAttribute('aria-sort', 'descending')
     expect(address()).toBe('/access-control/roles?sort=-rules')
   })

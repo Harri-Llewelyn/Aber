@@ -36,6 +36,8 @@ import {
   directoryTopicFilter,
   unsTopicFilter,
   withUnsGrant,
+  withUnsReadGrant,
+  UNS_READER_ROLE,
 } from './mosquitto-dynsec.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -538,6 +540,92 @@ describe('the Unified Namespace grant follows the root the deployment names', ()
     const writes = all.roles.find((r) => r.rolename === 'ingestion').acls
       .filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
     for (const topic of ['spBv1.0/STATE/Site-One', 'Plant-7/Directory/v1/#', 'plant/uns/#']) assert.ok(writes.includes(topic), topic);
+  });
+});
+
+describe('the subscriber role reads the plant and writes nothing', () => {
+  // The boot reconcile's order: every derived grant, the subscriber's read last.
+  const booted = (policy = POLICY) => withUnsReadGrant(
+    withUnsGrant(withDirectoryGrant(withPrimaryHostGrant(policy, 'Site-One'), 'Plant-7/Directory/v1'), 'plant/uns'),
+    'plant/uns',
+  );
+  const subscriberOf = (policy) => policy.roles.find((r) => r.rolename === UNS_READER_ROLE);
+  const pairs = (role) => role.acls.map((a) => [a.acltype, a.topic]).sort();
+
+  test('the shipped role reads spBv1.0/# and holds no publish at all', () => {
+    const role = subscriberOf(POLICY);
+    assert.ok(role, 'dynsec-roles.json declares no subscriber role');
+    assert.deepEqual(pairs(role), [['publishClientReceive', 'spBv1.0/#'], ['subscribePattern', 'spBv1.0/#']]);
+  });
+
+  test('at boot it gains subscribe and receive on <root>/#, from the root it is given, and nothing else', () => {
+    assert.deepEqual(pairs(subscriberOf(booted())), [
+      ['publishClientReceive', 'plant/uns/#'], ['publishClientReceive', 'spBv1.0/#'],
+      ['subscribePattern', 'plant/uns/#'], ['subscribePattern', 'spBv1.0/#'],
+    ]);
+  });
+
+  test('it publishes nowhere and reads no Directory, whatever else the boot grants', () => {
+    const role = subscriberOf(booted());
+    assert.ok(!role.acls.some((a) => a.acltype === 'publishClientSend'), 'the subscriber role may publish');
+    assert.ok(!role.acls.some((a) => a.topic.includes('/Directory/')), 'the subscriber role reaches the Directory');
+  });
+
+  test('the writer keeps the write alone: reading the tree is the subscriber role\'s, not the daemon\'s', () => {
+    const ingestion = booted().roles.find((r) => r.rolename === 'ingestion');
+    assert.deepEqual(
+      ingestion.acls.filter((a) => a.topic === 'plant/uns/#').map((a) => a.acltype),
+      ['publishClientSend'],
+    );
+  });
+
+  test('the root is trimmed and refused exactly as the writer\'s is', () => {
+    const role = subscriberOf(withUnsReadGrant(POLICY, ' /plant/uns/ '));
+    assert.ok(role.acls.some((a) => a.acltype === 'subscribePattern' && a.topic === 'plant/uns/#'));
+    for (const bad of ['a/+/b', 'a/#', 'a b', '', '/', null, undefined]) {
+      assert.throws(() => withUnsReadGrant(POLICY, bad), (e) => e.code === 'invalid_uns_root', `${bad}`);
+    }
+  });
+
+  test('applying it twice is a no-op, and the argument is not mutated', () => {
+    const before = JSON.stringify(POLICY);
+    const once = withUnsReadGrant(POLICY, 'uns');
+    assert.deepEqual(withUnsReadGrant(once, 'uns'), once);
+    assert.equal(JSON.stringify(POLICY), before);
+  });
+
+  test('a role holding half the pair gains only the other half', () => {
+    const half = {
+      ...POLICY,
+      roles: POLICY.roles.map((r) => (r.rolename === UNS_READER_ROLE
+        ? { ...r, acls: [...r.acls, { acltype: 'subscribePattern', topic: 'uns/#', allow: true }] }
+        : r)),
+    };
+    const onRoot = subscriberOf(withUnsReadGrant(half, 'uns')).acls.filter((a) => a.topic === 'uns/#');
+    assert.deepEqual(onRoot.map((a) => a.acltype).sort(), ['publishClientReceive', 'subscribePattern']);
+  });
+
+  test('a policy with no subscriber role is refused rather than silently ungranted', () => {
+    const stripped = { ...POLICY, roles: POLICY.roles.filter((r) => r.rolename !== UNS_READER_ROLE) };
+    assert.throws(() => withUnsReadGrant(stripped, 'uns'), (e) => e.code === 'invalid_policy');
+  });
+
+  test('an account an operator made holding it survives the boot, and a widened stored role is replaced', () => {
+    // No account holds the role from the environment: an operator creates one over the control API,
+    // and the reconcile keeps it as it keeps any client it does not manage.
+    const stored = {
+      clients: [clientFromPasswordEntry(entry('scada-reader'), [UNS_READER_ROLE])],
+      roles: [{ rolename: UNS_READER_ROLE, acls: [{ acltype: 'publishClientSend', topic: '#', allow: true }] }],
+      groups: [],
+    };
+    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion'))];
+    const { config, report } = reconcile(stored, booted(), managed);
+    const kept = config.clients.find((c) => c.username === 'scada-reader');
+    assert.deepEqual(kept.roles, [{ rolename: UNS_READER_ROLE }]);
+    assert.ok(report.unmanaged.includes('scada-reader'));
+    const role = config.roles.find((r) => r.rolename === UNS_READER_ROLE);
+    assert.ok(!role.acls.some((a) => a.acltype === 'publishClientSend'), 'the stored publish survived the boot');
+    assert.equal(role.acls.length, 4);
   });
 });
 

@@ -423,9 +423,10 @@ because PostgreSQL grants it on creation; the sidecar connects as the superuser.
 falls back to the first recorded run, then to the server's start, so a stack that has just
 switched backup on is not reported as a day late.
 
-**The schedule is two questions the sidecar asks every minute.** `physical_backup_missed_slot()`
-returns the latest daily slot at `hourUtc` when no `full`, `diff` or `incr` run started at or
-after it, so a slot missed while the pod was down or the host was suspended is taken late, once.
+**The schedule is two questions the sidecar asks on each pass of its loop,** every `pollSeconds`
+(60 by default). `physical_backup_missed_slot()` returns the latest daily slot at `hourUtc` when no
+`full`, `diff` or `incr` run started at or after it, so a slot missed while the pod was down or the
+host was suspended is taken late, once.
 A failed run is that slot's attempt: retrying on every check would fill the table with failures,
 and reporting a failing backup is Historian Backup Stale's job. `physical_backup_type()` names the
 type: full on `fullOn`, or whenever the repository's newest full stopped more than seven days ago,
@@ -439,9 +440,11 @@ say when the next backup is due (`frontend/src/utils/historianBackupSchedule.js`
 the sidecar started with (`physical_backup_record_schedule()`), so the page can say when the next
 backup is due. `physical_backup_requests` holds the backups the page asked for: the backup service
 inserts one through `physical_backup_request()` when it claims a requested platform backup, one
-waits at a time (a partial unique index), and the sidecar's minute loop claims it
+waits at a time (a partial unique index), and the sidecar's loop claims it on its next pass
 (`physical_backup_claim_request()`) and takes a differential; the first run recorded after the claim
-is its answer. All three gates are superuser only. The platform maps the three tables as foreign
+is its answer. `pollSeconds` is at most 60 because the page says a requested backup is taken within
+a minute; values-dev.yaml sets 10, so the stack lane's wait for one more pass is short. All three
+gates are superuser only. The platform maps the three tables as foreign
 tables (archived migration 0157), and `fdw_reader` may read them, granted in `roles.sql` because this file
 runs before `roles.sql` creates the role on a fresh volume.
 

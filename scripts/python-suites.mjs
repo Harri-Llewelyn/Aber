@@ -826,6 +826,14 @@ export const SUITES = {
       "same name none; display_names_for() answers only for people the caller already sees on " +
       'Approvals and Archived Entities; and 0001 and 0166 bring the older list shapes forward.',
   },
+  'supabase/migrations/test_an_administrator_ends_a_person_s_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0207's People acts. Only an Administrator ends a person's sessions or counts them, never " +
+      'their own; every session the person holds ends and the API refuses its token; one ' +
+      'SESSIONS_ENDED row; and an email change is decided before GoTrue, recorded only once the ' +
+      'account holds the new address, and ends the sessions in the same transaction.',
+  },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],
     why:
@@ -943,6 +951,13 @@ export const SUITES = {
       '0205 -- that a token whose session has ended is refused with the 401 the dashboard signs ' +
       'in again on, and that every token naming a live session, or none, is still served: a ' +
       'false refusal here is the whole API down.',
+  },
+  'supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0206 -- that a person lists and ends their own sessions and nobody else's, that the " +
+      'session in use is refused, that another person\'s session is answered as a missing one, ' +
+      'that an ended session\'s token is then refused, and that no machine identity may call either.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],

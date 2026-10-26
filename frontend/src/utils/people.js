@@ -105,6 +105,25 @@ export function passwordSetBlocked(person, currentUserId) {
   return null
 }
 
+/** ensure_first_administrator()'s, manage-people's and check_person_email_change()'s test of an address. */
+export const EMAIL = /^[^@\s]+@[^@\s]+$/
+
+/** An address as manage-people keeps it: trimmed and lower-cased. */
+export const normaliseEmail = (value) => String(value ?? '').trim().toLowerCase()
+
+/** Why this person's email address cannot be changed here, or null. */
+export function emailChangeBlocked(person, currentUserId) {
+  if (person.user_id === currentUserId) return 'You cannot change your own email address. Ask another Administrator.'
+  if (person.status === 'removed') return 'Their access is removed. Restore it first, then change their email address.'
+  return null
+}
+
+/** Why this person's sessions cannot be ended here, or null. A removed person's can be. */
+export function sessionsEndBlocked(person, currentUserId) {
+  if (person.user_id === currentUserId) return 'You cannot end your own sessions here. Use Sign Out in the account menu.'
+  return null
+}
+
 /** Why this person's access cannot be removed here, or null. */
 export function removalBlocked(person, people, currentUserId) {
   if (person.user_id === currentUserId) return 'You cannot remove your own access. Ask another Administrator.'

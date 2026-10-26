@@ -24,24 +24,36 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - If the display name is too long, or holds a line break or a tab, Add Person refuses it before anything is made. It can be up to 80 characters.
 - If this site has a mail relay, the person gets an invitation by email. They choose their own password from the link in it.
 - Without a mail relay, Aber makes a password for them and shows it once. Copy it before you close the dialog. Give it to them in person, or by a channel you trust. Nothing in Aber keeps a copy.
-- If that password is lost, it cannot be shown again. Select **Set New Password** on their row instead.
+- If that password is lost, it cannot be shown again. Open their row and select **Set New Password** instead.
 - **Role** is a list on each row. Choosing another role changes it straight away. Their own dashboard catches up when it next reloads. Each person holds one role.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
 - **Operator** reads the shopfloor and its live readings, and can propose changes.
 - **Auditor** reads the Audit Trail, including who was given access.
+- **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it. Every action for that person, other than their role, is in the drawer.
+- The drawer shows their email address, display name, role, status and last sign-in.
+- **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used. It does not say which browser or service.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
-- **Change Name** sets or changes a person's display name, on any row. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
+- **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
 - A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
-- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**. Its role and removal controls are greyed out: hover over one to see why. In place of **Set New Password**, your row has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
+- **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a lost laptop or a shared screen left signed in. They keep their role, and can sign in again.
+- **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
+- Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
+- An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
+- An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
+- **Which address shows where.** People and the Audit Trail show the address the account has now. Approvals and Archived Entities keep the address the person had when they acted.
+- **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
+- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Its role control, and those actions in your drawer, are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
-- Adding a person, changing a role, changing a display name, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
+- Each act here is recorded in the Audit Trail. That covers adding a person, a new role, name or address, removing or restoring access, a new password and ended sessions. The record names the person and who made the change. A new address is recorded with the old one. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
 
 **A removed person loses their sessions within a minute, except in Grafana.** Their role goes straight away. An open dashboard gets nothing more from the database. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within the hour. They cannot sign in again. If they held Administrator, check Node-RED's flows, Grafana and the Audit Trail afterwards.
+
+**Ending their sessions, or changing their address, signs them out of everything, some of it later.** The API refuses them straight away. Studio and the forge sign them out at their next request. Node-RED does within a minute, and Grafana within the hour. They keep their role. To stop them signing in again, use **Remove Access**.
 
 **A new password ends their other sessions, some of them later.** Their old password stops working straight away. Studio and the forge sign them out at their next request. Node-RED and an open dashboard do within a minute, and Grafana within the hour. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
 

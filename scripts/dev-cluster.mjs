@@ -15,6 +15,8 @@
  *
  * Options:  --no-build          reuse the images already built (`up`)
  *           --only=a,b          build and import only these images (`up`)
+ *           ABER_BUILD_JOBS=<n> an environment variable: how many images build at once, default 4;
+ *                               1 builds them one after another, each one's output as it comes (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
  *           --network-policy    install with the NetworkPolicy layer on (networkPolicy.enabled), as
  *                               values-prod.yaml.example has it; k3s's kube-system holds DNS and
@@ -57,6 +59,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { buildJobs, runQueue } from './lib/build-queue.mjs'
 import { INIT_JOBS, apiPort, createClusterArgs, describeMissing, missingTools } from './lib/k3d.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -92,8 +95,8 @@ export const IMAGES = [
   { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase' },
   // Carries docs/openapi.yaml and docs/i3x-openapi.yaml, so a spec edit needs this rebuild.
   { name: 'swagger-ui', file: 'swagger-ui/Dockerfile', context: '.' },
-  // Extends the ingestion image, so it is built last and told which one.
-  { name: 'test-runner', file: 'test-harness/Dockerfile', context: '.', args: [`INGESTION_IMAGE=${IMG_NS}/ingestion:VERSION`] },
+  // Extends the ingestion image, so it starts once that one has built, and is told which one.
+  { name: 'test-runner', file: 'test-harness/Dockerfile', context: '.', after: 'ingestion', args: [`INGESTION_IMAGE=${IMG_NS}/ingestion:VERSION`] },
 ]
 
 // The forge's SSH port on the host, values-dev.yaml's gitea.ssh.external.port: the clone URLs `up`
@@ -272,25 +275,90 @@ export function ensureCertManager () {
 // ---------------------------------------------------------------------------------------------
 // Images
 // ---------------------------------------------------------------------------------------------
-export function buildImages (version, only) {
-  const describe = describeVersion()
-  step(`build ${only ? only.join(', ') : `the ${IMAGES.length} images`} as ${IMG_NS}/<name>:${version}`)
-  for (const img of IMAGES) {
-    if (only && !only.includes(img.name)) continue
-    const args = ['build', '-f', img.file, '-t', `${IMG_NS}/${img.name}:${version}`]
-    // Substituted in the value, never the name: `VITE_APP_VERSION` ends in `VERSION`, so replacing
-    // across the whole `NAME=value` rewrites the name itself, and Docker only warns at an
-    // unrecognised --build-arg.
-    for (const a of img.args || []) {
-      const eq = a.indexOf('=')
-      const value = a.slice(eq + 1).replace('VERSION', version).replace('DESCRIBE', describe)
-      args.push('--build-arg', `${a.slice(0, eq)}=${value}`)
-    }
-    for (const named of img.contexts || []) args.push('--build-context', named)
-    args.push(img.context)
-    console.log(`  ${c.dim(`docker ${args.join(' ')}`)}`)
-    must('docker', args, `the ${img.name} image did not build`)
+/** `docker build`'s arguments for one IMAGES entry, tagged `version`. */
+export function dockerBuildArgs (img, version, describe) {
+  const args = ['build', '-f', img.file, '-t', `${IMG_NS}/${img.name}:${version}`]
+  // Substituted in the value, never the name: `VITE_APP_VERSION` ends in `VERSION`, so replacing
+  // across the whole `NAME=value` rewrites the name itself, and Docker only warns at an
+  // unrecognised --build-arg.
+  for (const a of img.args || []) {
+    const eq = a.indexOf('=')
+    const value = a.slice(eq + 1).replace('VERSION', version).replace('DESCRIBE', describe)
+    args.push('--build-arg', `${a.slice(0, eq)}=${value}`)
   }
+  for (const named of img.contexts || []) args.push('--build-context', named)
+  args.push(img.context)
+  return args
+}
+
+/** ABER_BUILD_JOBS as a number; any value but a positive integer stops the run. */
+function buildJobsFromEnv () {
+  try {
+    return buildJobs(process.env.ABER_BUILD_JOBS)
+  } catch (e) {
+    die(e.message)
+  }
+}
+
+// One `docker build`. Its output is held and returned, so builds running side by side do not
+// interleave; `live` streams it instead, for builds that run one at a time.
+function dockerBuild (args, live) {
+  const started = Date.now()
+  return new Promise(resolve => {
+    const chunks = []
+    const child = spawn('docker', args, { cwd: REPO, stdio: live ? 'inherit' : ['ignore', 'pipe', 'pipe'] })
+    if (!live) for (const out of [child.stdout, child.stderr]) out.on('data', chunk => chunks.push(chunk))
+    const end = (status, error) => resolve({
+      ok: status === 0, status, seconds: Math.round((Date.now() - started) / 1000),
+      output: Buffer.concat(chunks).toString('utf8') + (error ? `${error.message}\n` : ''),
+    })
+    child.on('error', error => end(null, error))
+    child.on('close', status => end(status))
+  })
+}
+
+/**
+ * Builds the images, up to ABER_BUILD_JOBS at once (scripts/lib/build-queue.mjs): an image waits for
+ * the one it is `after`, and after a failure the running builds finish and nothing new starts. Each
+ * build's output prints as one block when it ends; a failed one's prints last, above the reason.
+ */
+export async function buildImages (version, only) {
+  const describe = describeVersion()
+  const jobs = buildJobsFromEnv()
+  const images = IMAGES.filter(img => !only || only.includes(img.name))
+  const live = jobs === 1
+  step(`build ${only ? only.join(', ') : `the ${IMAGES.length} images`} as ${IMG_NS}/<name>:${version}`)
+  console.log(`  building ${images.length} image(s), up to ${Math.min(jobs, images.length)} at once`)
+  const started = Date.now()
+  const argv = new Map(images.map(img => [img.name, dockerBuildArgs(img, version, describe)]))
+  const command = name => c.dim(`docker ${argv.get(name).join(' ')}`)
+  const head = (name, r) => `\n${c.bold(`-- ${name}`)}${r ? `: ${r.ok ? 'built' : c.red('FAILED')} in ${r.seconds} s` : ''}`
+  const block = (name, r) => `${head(name, r)}\n  ${command(name)}\n${r.output}${r.output.endsWith('\n') ? '' : '\n'}`
+  let outcome
+  try {
+    outcome = await runQueue(images, jobs, async img => {
+      if (live) console.log(`${head(img.name)}\n  ${command(img.name)}`)
+      const r = await dockerBuild(argv.get(img.name), live)
+      if (live) console.log(head(img.name, r))
+      else if (r.ok) process.stdout.write(block(img.name, r))
+      else console.log(`${head(img.name, r)}; its output prints once the builds still running have ended`)
+      return r
+    })
+  } catch (e) {
+    die(e.message)
+  }
+  const { results, failed, notStarted } = outcome
+  console.log(`\n  build times, ${Math.round((Date.now() - started) / 1000)} s in all:`)
+  for (const { name } of images) {
+    const r = results.get(name)
+    console.log(`    ${name.padEnd(20)} ${r ? `${String(r.seconds).padStart(4)} s${r.ok ? '' : '  FAILED'}` : '   -    not started'}`)
+  }
+  if (!failed.length) return
+  if (!live) for (const name of failed) process.stdout.write(block(name, results.get(name)))
+  const and = names => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
+  die(`the ${and(failed)} image${failed.length > 1 ? 's' : ''} did not build` +
+      `${notStarted.length ? `; ${notStarted.length} did not start (${notStarted.join(', ')})` : ''}\n` +
+      failed.map(name => `  docker ${argv.get(name).join(' ')} exited ${results.get(name).status}`).join('\n'))
 }
 
 function imagesInNode (cluster = CLUSTER) {
@@ -846,13 +914,15 @@ async function up () {
     const unknown = only.filter(n => !IMAGES.some(i => i.name === n))
     if (unknown.length) die(`--only names no image: ${unknown.join(', ')}. Known: ${IMAGES.map(i => i.name).join(', ')}`)
   }
+  // Refused before the cluster, not after minutes of it.
+  if (!flag('no-build')) buildJobsFromEnv()
   ensureCluster()
   await ensureTraefikConfig()
   if (tls) ensureCertManager()
   if (flag('no-build')) {
     assertImagesPresent(version)
   } else {
-    buildImages(version, only)
+    await buildImages(version, only)
     importImages(version, only)
   }
   // An upgrade creates the e2e Jobs suspended, to start once the workloads have rolled out. An

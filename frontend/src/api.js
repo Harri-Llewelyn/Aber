@@ -973,6 +973,35 @@ const apiMethods = {
   },
 
   /**
+   * The signed-in person's own sessions, in every browser and service: `{ id, service_name,
+   * user_agent, created_at, last_active_at, not_after, is_current }` from `list_my_sessions()`
+   * (0206). An account with no role is refused, with the database's sentence.
+   */
+  listMySessions: async () => {
+    const { data, error } = await supabase.rpc('list_my_sessions');
+    if (error) throw new Error(error.message || 'Could not list your sessions');
+    return data || [];
+  },
+
+  /**
+   * End one of your own sessions (`end_my_session()`, 0206). The database refuses the one in use
+   * and answers another person's as not found; its sentence is the error.
+   */
+  endMySession: async (sessionId) => {
+    const { error } = await supabase.rpc('end_my_session', { p_session_id: sessionId });
+    if (error) throw new Error(error.message || 'Could not end the session');
+  },
+
+  /**
+   * End every session you hold but this browser's: GoTrue's `scope=others`. auth-js keeps this
+   * browser's session whatever GoTrue answers, and reports no error for a 401, 403 or 404.
+   */
+  signOutOtherSessions: async () => {
+    const { error } = await supabase.auth.signOut({ scope: 'others' });
+    if (error) throw new Error(error.message || 'Could not sign out of your other sessions');
+  },
+
+  /**
    * Give a person one of the four roles. The database refuses your own role, a person whose access
    * is removed, and the last Administrator who can sign in, and its sentence is the error.
    */
@@ -1008,6 +1037,35 @@ const apiMethods = {
       throw await functionFailure(new Error(withReference(result?.details || result?.error || `The request failed (${res.status})`, result)), res.status, result);
     }
     return result;
+  },
+
+  /**
+   * A new email address for someone else, in use at once, through manage-people: GoTrue's admin
+   * API needs the secret key. The change ends every session they hold. Resolves to `{ user_id,
+   * email, previous_email, sessions_ended }`.
+   */
+  changePersonEmail: (userId, email) => api.managePeople({ action: 'change-email', user_id: userId, email }),
+
+  /**
+   * How many sessions a person holds, and when one was last active: `{ open_sessions,
+   * last_active_at }` from `person_session_summary()` (0207). Administrator only. No list: which
+   * browsers and services they are is the person's own to see.
+   */
+  personSessionSummary: async (userId) => {
+    const { data, error } = await supabase.rpc('person_session_summary', { p_user_id: userId })
+    if (error) throw new Error(error.message || 'Could not read their sessions')
+    const row = Array.isArray(data) ? data[0] : data
+    return { open_sessions: row?.open_sessions ?? 0, last_active_at: row?.last_active_at ?? null }
+  },
+
+  /**
+   * End every session a person holds, in every browser and service (`end_person_sessions()`,
+   * 0207). Resolves to how many ended. The database refuses your own, and its sentence is the error.
+   */
+  endPersonSessions: async (userId) => {
+    const { data, error } = await supabase.rpc('end_person_sessions', { p_user_id: userId })
+    if (error) throw new Error(error.message || 'Could not end their sessions')
+    return typeof data === 'number' ? data : 0
   },
 
   // The name is optional; manage-people refuses a bad one before the account exists.

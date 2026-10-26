@@ -456,6 +456,15 @@ python supabase/migrations/test_user_settings.py
 # retirers they may already read; list_people() and list_user_accounts() carry the name; and
 # 0001 and 0166 bring a database holding the older list shapes forward. Every test rolls back.
 python supabase/migrations/test_a_person_can_have_a_display_name.py
+# An Administrator ends a person's sessions and changes their email address (0207). Only an
+# Administrator ends or counts a person's sessions, never their own; every session the person
+# holds ends, nobody else's, and the API refuses the ended sessions' tokens at once; one
+# SESSIONS_ENDED row names who, whose and how many; a removed person's may be ended; the count's
+# time reads GoTrue's zone-less refreshed_at as UTC. An email change is refused for your own
+# address, a removed person, a taken address, the same address and a non-address before GoTrue
+# acts, recorded only once the account holds the new address, with both addresses, and ends the
+# person's sessions in the same transaction. Every test rolls back.
+python supabase/migrations/test_an_administrator_ends_a_person_s_sessions.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
@@ -654,6 +663,12 @@ python supabase/migrations/test_service_principal_revocation.py
 # person's other sessions, and every token that names no session, are still served. A removed
 # person is told their access was removed. Every test rolls back.
 python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py
+# A person's own sessions (0206). list_my_sessions() returns the caller's and nobody else's, the
+# one their token names first, a service's by its name, refreshed_at read as UTC, and no address
+# or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses
+# the session in use, and answers another person's as a missing one. Every person role may call
+# both; a machine identity, an account with no role, anon and service_role may not. No audit row.
+python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

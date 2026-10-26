@@ -20,6 +20,9 @@ vi.mock('../api', () => ({
     restorePersonAccess: vi.fn(),
     managePeople: vi.fn(),
     setDisplayName: vi.fn(),
+    personSessionSummary: vi.fn(),
+    endPersonSessions: vi.fn(),
+    changePersonEmail: vi.fn(),
     // The rest of the page's reads, answered empty: this suite is about the People tab.
     listGatewayCredentials: vi.fn(),
     listBrokerInventory: vi.fn(),
@@ -61,7 +64,10 @@ const PEOPLE = [
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // The open drawer is in the address, so each test starts on the bare page.
+  window.history.replaceState(null, '', '/access-control')
   api.listPeople.mockResolvedValue(PEOPLE)
+  api.personSessionSummary.mockResolvedValue({ open_sessions: 2, last_active_at: '2026-10-24T10:00:00Z' })
   api.listGatewayCredentials.mockResolvedValue([])
   api.listBrokerInventory.mockResolvedValue({ clients: [], roles: [] })
   api.listServicePrincipals.mockResolvedValue([])
@@ -75,9 +81,19 @@ function renderPeople(showToast = vi.fn()) {
   return showToast
 }
 
-/** The table row holding this email. */
+/** The table row holding this email. An open drawer shows the email too, so only the table is searched. */
 async function row(email) {
-  return (await screen.findByText(email)).closest('tr')
+  const table = await screen.findByRole('table')
+  return (await within(table).findByText(email)).closest('tr')
+}
+
+/** The person drawer, while it is open: a closed one is hidden from assistive technology. */
+const queryDrawer = () => screen.queryByRole('complementary', { name: / person$/ })
+
+/** Opens a person's drawer by clicking their row, and returns queries bound to it. */
+async function openDrawer(email) {
+  fireEvent.click(await row(email))
+  return within(await screen.findByRole('complementary', { name: / person$/ }))
 }
 
 /** Removed accounts are left off People until this toggle is on. */
@@ -136,11 +152,10 @@ describe('the People tab', () => {
 
   it('disables your own role and access, saying why', async () => {
     renderPeople()
-    const mine = await row('me@site.test')
-    const select = within(mine).getByRole('combobox')
+    const select = within(await row('me@site.test')).getByRole('combobox')
     expect(select).toBeDisabled()
     expect(select).toHaveAccessibleDescription('You cannot change your own role. Ask another Administrator.')
-    const remove = within(mine).getByRole('button', { name: 'Remove Access' })
+    const remove = (await openDrawer('me@site.test')).getByRole('button', { name: 'Remove Access' })
     expect(remove).toBeDisabled()
     expect(remove).toHaveAccessibleDescription('You cannot remove your own access. Ask another Administrator.')
     fireEvent.click(remove)
@@ -150,7 +165,8 @@ describe('the People tab', () => {
   it('removes access only after it is confirmed', async () => {
     api.removePersonAccess.mockResolvedValue({ user_id: OPERATOR, access: 'removed' })
     const toast = renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Remove Access' }))
+    const drawer = await openDrawer('operator@site.test')
+    fireEvent.click(drawer.getByRole('button', { name: 'Remove Access' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Remove access for operator@site.test')
@@ -158,7 +174,7 @@ describe('the People tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.removePersonAccess).not.toHaveBeenCalled()
 
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Remove Access' }))
+    fireEvent.click(drawer.getByRole('button', { name: 'Remove Access' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove Access' }))
     await waitFor(() => expect(api.removePersonAccess).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith('operator@site.test can no longer sign in', 'success',
@@ -169,10 +185,10 @@ describe('the People tab', () => {
     api.restorePersonAccess.mockResolvedValue({ user_id: REMOVED, access: 'active', role: 'Shopfloor_Manager' })
     const toast = renderPeople()
     await showRemoved()
-    const removed = await row('removed@site.test')
-    expect(within(removed).getByRole('combobox')).toBeDisabled()
-    expect(within(removed).queryByRole('button', { name: 'Remove Access' })).toBeNull()
-    fireEvent.click(within(removed).getByRole('button', { name: 'Restore Access' }))
+    expect(within(await row('removed@site.test')).getByRole('combobox')).toBeDisabled()
+    const drawer = await openDrawer('removed@site.test')
+    expect(drawer.queryByRole('button', { name: 'Remove Access' })).toBeNull()
+    fireEvent.click(drawer.getByRole('button', { name: 'Restore Access' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('as Shopfloor Manager')
@@ -185,10 +201,10 @@ describe('the People tab', () => {
 
   it('offers removal again when sign-in was not blocked', async () => {
     renderPeople()
-    const half = await row('half@site.test')
-    expect(within(half).getByText('Sign-in still open')).toBeInTheDocument()
-    expect(within(half).getByRole('button', { name: 'Remove Access' })).toBeEnabled()
-    expect(within(half).getByRole('button', { name: 'Restore Access' })).toBeEnabled()
+    expect(within(await row('half@site.test')).getByText('Sign-in still open')).toBeInTheDocument()
+    const drawer = await openDrawer('half@site.test')
+    expect(drawer.getByRole('button', { name: 'Remove Access' })).toBeEnabled()
+    expect(drawer.getByRole('button', { name: 'Restore Access' })).toBeEnabled()
   })
 })
 
@@ -356,7 +372,7 @@ describe('display names', () => {
     api.listPeople.mockResolvedValue(NAMED)
     api.setDisplayName.mockResolvedValue('Owain ap Rhys')
     const toast = renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Change the name for operator@site.test')
     const input = within(dialog).getByLabelText('Display name')
@@ -374,7 +390,7 @@ describe('display names', () => {
     api.listPeople.mockResolvedValue(NAMED)
     api.setDisplayName.mockResolvedValue(null)
     const toast = renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: '   ' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
@@ -385,7 +401,7 @@ describe('display names', () => {
 
   it('refuses a name the database would refuse before sending it', async () => {
     renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
     const input = within(dialog).getByLabelText('Display name')
     fireEvent.change(input, { target: { value: 'N'.repeat(81) } })
@@ -399,7 +415,7 @@ describe('display names', () => {
   it('keeps the dialog open with the database\'s sentence when it is refused', async () => {
     api.setDisplayName.mockRejectedValue(new Error('A display name is 80 characters at most.'))
     renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Owain' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
@@ -429,7 +445,7 @@ describe('display names', () => {
     api.addPerson.mockResolvedValue({
       user_id: 'n0000000-0000-4000-8000-000000000004', email: 'new@site.test', role: 'Operator',
       invited: true, display_name: null,
-      name_error: 'Their display name was not set. Select Change Name on their row to set it.',
+      name_error: 'Their display name was not set. Open their row and select Change Name to set it.',
     })
     const toast = renderPeople()
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
@@ -438,7 +454,7 @@ describe('display names', () => {
     fireEvent.change(within(dialog).getByLabelText('Display name (optional)'), { target: { value: 'Nia' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'Their display name was not set. Select Change Name on their row to set it.', 'warning',
+      'Their display name was not set. Open their row and select Change Name to set it.', 'warning',
       { to: personUrl('new@site.test') }))
   })
 })
@@ -446,16 +462,16 @@ describe('display names', () => {
 describe('setting a new password', () => {
   const MINTED = 'h3k9qp-x2a7bn-c4d8ef-gm2jk6'
 
-  it('is offered on each row, except your own and a removed person, saying why', async () => {
+  it('is offered in each drawer, except your own and a removed person\'s, saying why', async () => {
     renderPeople()
-    expect(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
-    expect(within(await row('invited@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
-    // Your own row links to Profile, where your own password is changed, instead of a dead button.
-    const mine = within(await row('me@site.test'))
+    expect((await openDrawer('operator@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
+    expect((await openDrawer('invited@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
+    // Your own drawer links to Profile, where your own password is changed, instead of a dead button.
+    const mine = await openDrawer('me@site.test')
     expect(mine.queryByRole('button', { name: 'Set New Password' })).toBeNull()
     expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
     await showRemoved()
-    const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
+    const removed = (await openDrawer('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()
     expect(removed).toHaveAccessibleDescription(expect.stringMatching(/Restore it first/))
   })
@@ -463,7 +479,8 @@ describe('setting a new password', () => {
   it('sets one only after it is confirmed, then shows it once', async () => {
     api.managePeople.mockResolvedValue({ user_id: OPERATOR, password: MINTED })
     const toast = renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+    const drawer = await openDrawer('operator@site.test')
+    fireEvent.click(drawer.getByRole('button', { name: 'Set New Password' }))
 
     const confirm = await screen.findByRole('dialog')
     expect(confirm).toHaveTextContent('Set a new password for operator@site.test')
@@ -471,7 +488,7 @@ describe('setting a new password', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
     expect(api.managePeople).not.toHaveBeenCalled()
 
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+    fireEvent.click(drawer.getByRole('button', { name: 'Set New Password' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Set New Password' }))
     await waitFor(() =>
       expect(api.managePeople).toHaveBeenCalledWith({ action: 'set-password', user_id: OPERATOR }))
@@ -493,12 +510,199 @@ describe('setting a new password', () => {
   it('shows the refusal, and no password dialog, when none was set', async () => {
     api.managePeople.mockRejectedValue(new Error("this person's access is removed. Restore it first, then set a new password."))
     const toast = renderPeople()
-    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Set New Password' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
       "this person's access is removed. Restore it first, then set a new password.", 'error'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(screen.queryByLabelText('Password')).toBeNull()
+  })
+})
+
+describe('a person\'s drawer', () => {
+  it('opens on a click on the row, shows who they are, and closes on a second click', async () => {
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, display_name: 'Owain Operator' } : p)))
+    renderPeople()
+    const drawer = await openDrawer('operator@site.test')
+    // The name is the title, and the email is always there beside it.
+    expect(screen.getByRole('complementary', { name: 'Owain Operator person' })).toBeInTheDocument()
+    expect(drawer.getByText('Email').nextElementSibling).toHaveTextContent('operator@site.test')
+    expect(drawer.getByText('Display name').nextElementSibling).toHaveTextContent('Owain Operator')
+    expect(drawer.getByText('Role').nextElementSibling).toHaveTextContent('Operator')
+    expect(drawer.getByText('Status').nextElementSibling).toHaveTextContent('Active')
+    expect(await drawer.findByText(/^2 open, last active /)).toBeInTheDocument()
+    expect(api.personSessionSummary).toHaveBeenCalledWith(OPERATOR)
+    expect((await row('operator@site.test')).className).toContain('row-selected')
+    expect(window.location.search).toBe('?person=operator%40site.test')
+
+    fireEvent.click(await row('operator@site.test'))
+    await waitFor(() => expect(queryDrawer()).toBeNull())
+    expect(window.location.search).toBe('')
+  })
+
+  it('opens with Enter on the row, and not from the role select', async () => {
+    renderPeople()
+    const select = within(await row('operator@site.test')).getByRole('combobox')
+    fireEvent.click(select)
+    fireEvent.keyDown(select, { key: 'Enter' })
+    expect(queryDrawer()).toBeNull()
+    fireEvent.keyDown(await row('operator@site.test'), { key: 'Enter' })
+    expect(await screen.findByRole('complementary', { name: 'operator@site.test person' })).toBeInTheDocument()
+  })
+
+  it('opens from the address personUrl() writes, a removed person\'s with the removed', async () => {
+    window.history.replaceState(null, '', personUrl('removed@site.test', true))
+    renderPeople()
+    const drawer = within(await screen.findByRole('complementary', { name: 'removed@site.test person' }))
+    expect(drawer.getByText('Status').nextElementSibling).toHaveTextContent('Access removed')
+    expect(drawer.getByText('Shopfloor Manager when restored')).toBeInTheDocument()
+    expect(within(await row('removed@site.test')).getByText('Access removed')).toBeInTheDocument()
+  })
+
+  it('tidies away an address for nobody on the list', async () => {
+    window.history.replaceState(null, '', '/access-control?person=nobody%40site.test')
+    renderPeople()
+    await row('operator@site.test')
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(queryDrawer()).toBeNull()
+  })
+
+  it('offers every action, two to a row, with Remove Access last and on its own', async () => {
+    renderPeople()
+    const drawer = await openDrawer('operator@site.test')
+    const names = drawer.getAllByRole('button').map(b => b.textContent.trim()).filter(Boolean)
+    expect(names).toEqual(['Change Name', 'Change Email', 'Set New Password', 'End Sessions', 'Remove Access'])
+    expect(drawer.getByRole('button', { name: 'Remove Access' })).toHaveClass('context-action-danger')
+    for (const name of names) expect(drawer.getByRole('button', { name })).toBeEnabled()
+    // The row keeps no action of its own but the role.
+    expect(within(await row('operator@site.test')).queryAllByRole('button')).toEqual([])
+  })
+
+  it('in your own drawer, refuses what is refused for yourself and says why', async () => {
+    renderPeople()
+    const mine = await openDrawer('me@site.test')
+    expect(screen.getByRole('complementary', { name: 'me@site.test person' })).toHaveTextContent('YOU')
+    expect(mine.getByRole('button', { name: 'Change Name' })).toBeEnabled()
+    const email = mine.getByRole('button', { name: 'Change Email' })
+    expect(email).toBeDisabled()
+    expect(email).toHaveAccessibleDescription('You cannot change your own email address. Ask another Administrator.')
+    const end = mine.getByRole('button', { name: 'End Sessions' })
+    expect(end).toBeDisabled()
+    expect(end).toHaveAccessibleDescription('You cannot end your own sessions here. Use Sign Out in the account menu.')
+    expect(mine.getByRole('button', { name: 'Remove Access' })).toBeDisabled()
+    expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
+  })
+
+  it('for a removed person, offers Restore Access and End Sessions, and no new address', async () => {
+    renderPeople()
+    await showRemoved()
+    const drawer = await openDrawer('removed@site.test')
+    expect(drawer.getByRole('button', { name: 'Restore Access' })).toBeEnabled()
+    expect(drawer.getByRole('button', { name: 'End Sessions' })).toBeEnabled()
+    const email = drawer.getByRole('button', { name: 'Change Email' })
+    expect(email).toBeDisabled()
+    expect(email).toHaveAccessibleDescription(expect.stringMatching(/Restore it first/))
+    expect(drawer.queryByRole('button', { name: 'Remove Access' })).toBeNull()
+  })
+
+  it('says None when the person holds no session, and Not read when the count fails', async () => {
+    api.personSessionSummary.mockResolvedValueOnce({ open_sessions: 0, last_active_at: null })
+    renderPeople()
+    const drawer = await openDrawer('operator@site.test')
+    await waitFor(() => expect(drawer.getByText('Sessions').nextElementSibling).toHaveTextContent('None'))
+
+    api.personSessionSummary.mockRejectedValueOnce(new Error('insufficient privileges to read a person\'s sessions'))
+    const other = await openDrawer('invited@site.test')
+    await waitFor(() => expect(other.getByText('Sessions').nextElementSibling).toHaveTextContent('Not read'))
+  })
+})
+
+describe('ending a person\'s sessions', () => {
+  it('asks first, says what ends, then ends them all and reads the count again', async () => {
+    api.endPersonSessions.mockResolvedValue(3)
+    const toast = renderPeople()
+    const drawer = await openDrawer('operator@site.test')
+    fireEvent.click(drawer.getByRole('button', { name: 'End Sessions' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('End every session for operator@site.test')
+    expect(dialog).toHaveTextContent('the dashboard in each browser, and Studio, the forge, Node-RED and Grafana')
+    expect(dialog).toHaveTextContent('The API refuses their access at once')
+    expect(dialog).toHaveTextContent('Grafana within the hour')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(api.endPersonSessions).not.toHaveBeenCalled()
+
+    api.personSessionSummary.mockResolvedValue({ open_sessions: 0, last_active_at: null })
+    fireEvent.click(drawer.getByRole('button', { name: 'End Sessions' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
+    await waitFor(() => expect(api.endPersonSessions).toHaveBeenCalledWith(OPERATOR))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(
+      'operator@site.test is signed out everywhere: 3 sessions ended', 'success', { to: personUrl('operator@site.test') }))
+    await waitFor(() => expect(drawer.getByText('Sessions').nextElementSibling).toHaveTextContent('None'))
+  })
+
+  it('shows the database refusing it', async () => {
+    api.endPersonSessions.mockRejectedValue(new Error('insufficient privileges to end a person\'s sessions'))
+    const toast = renderPeople()
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'End Sessions' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('insufficient privileges to end a person\'s sessions', 'error'))
+  })
+})
+
+describe('changing a person\'s email address', () => {
+  async function openChangeEmail() {
+    const drawer = await openDrawer('operator@site.test')
+    fireEvent.click(drawer.getByRole('button', { name: 'Change Email' }))
+    return within(await screen.findByRole('dialog'))
+  }
+
+  it('says they will sign in again, sends the address trimmed and lower-cased, and the drawer follows it', async () => {
+    api.changePersonEmail.mockResolvedValue({
+      user_id: OPERATOR, email: 'owain@site.test', previous_email: 'operator@site.test', sessions_ended: 2,
+    })
+    window.history.replaceState(null, '', personUrl('operator@site.test'))
+    const toast = renderPeople()
+    await screen.findByRole('complementary', { name: 'operator@site.test person' })
+    fireEvent.click(within(queryDrawer()).getByRole('button', { name: 'Change Email' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByText(/they will have to sign in again/)).toBeInTheDocument()
+    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, email: 'owain@site.test' } : p)))
+    fireEvent.change(dialog.getByLabelText('New email address'), { target: { value: '  Owain@Site.TEST ' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Change Email' }))
+    await waitFor(() => expect(api.changePersonEmail).toHaveBeenCalledWith(OPERATOR, 'owain@site.test'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now owain@site.test. They sign in again with it.', 'success',
+      { to: personUrl('owain@site.test') })
+    // The drawer and the search move to the new address rather than closing.
+    expect(await screen.findByRole('complementary', { name: 'owain@site.test person' })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('person')).toBe('owain@site.test')
+    expect(new URLSearchParams(window.location.search).get('search')).toBe('owain@site.test')
+    expect(await row('owain@site.test')).toBeTruthy()
+  })
+
+  it('refuses before sending an address that is not one, or the one they have', async () => {
+    renderPeople()
+    const dialog = await openChangeEmail()
+    const input = dialog.getByLabelText('New email address')
+    fireEvent.change(input, { target: { value: 'not an address' } })
+    expect(dialog.getByText('That is not an email address.')).toBeInTheDocument()
+    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+    fireEvent.change(input, { target: { value: 'OPERATOR@site.test' } })
+    expect(dialog.getByText('That is already their email address.')).toBeInTheDocument()
+    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+    expect(api.changePersonEmail).not.toHaveBeenCalled()
+  })
+
+  it('keeps the dialog open with the reason when it is refused', async () => {
+    api.changePersonEmail.mockRejectedValue(new Error('second@site.test already belongs to another account'))
+    renderPeople()
+    const dialog = await openChangeEmail()
+    fireEvent.change(dialog.getByLabelText('New email address'), { target: { value: 'second@site.test' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Change Email' }))
+    expect(await dialog.findByText('second@site.test already belongs to another account')).toBeInTheDocument()
   })
 })
 

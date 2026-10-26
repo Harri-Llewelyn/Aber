@@ -61,10 +61,10 @@ describe('the page', () => {
     expect(document.querySelector('.card-heading-note')).toHaveTextContent('Applies to you, on any browser.')
   })
 
-  it('has two tabs, Account then Appearance, with the ids the routing names', () => {
+  it('has three tabs, Account, Appearance then Security, with the ids the routing names', () => {
     renderProfile()
-    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance'])
-    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance'])
+    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance', 'Security'])
+    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance', 'security'])
   })
 
   /* The user's rule: every tab has the header row, even a tab of one or two rows. */
@@ -88,6 +88,7 @@ describe('Account', () => {
   it('shows the address and the role, and who can change the role', () => {
     renderProfile()
     expect(within(row('Email address')).getByText('operator@site.test')).toBeInTheDocument()
+    expect(within(row('Email address')).getByText('Only an Administrator can change this')).toBeInTheDocument()
     expect(within(row('Role')).getByText('Shopfloor Manager')).toBeInTheDocument()
     expect(within(row('Role')).getByText('Only an Administrator can change this')).toBeInTheDocument()
   })
