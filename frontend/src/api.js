@@ -1092,24 +1092,37 @@ const apiMethods = {
    * so two mints are two live credentials. tokenStatus() counts the unexpired ones. Only
    * TOKEN_MINTED rows and only the columns the status derivation reads, since `audit_trail`
    * cannot be pruned.
+   *
+   * Each token also carries `principal_id` and `lastUsedAt`: the start of the latest UTC hour in
+   * which the i3X server accepted it (`service_token_last_use`, 0209), null when it never has, and
+   * undefined when that read failed, which the dialog must not show as Never. Read beside the mints,
+   * not after them, and its failure does not fail the list.
    */
   listServiceTokens: async () => {
-    const { data, error } = await supabase
-      .from('audit_trail')
-      .select('entity_id,recorded_at,new_data')
-      .eq('action', 'TOKEN_MINTED')
-      .eq('entity_type', 'service_principals')
-      .order('recorded_at', { ascending: false });
+    const [minted, used] = await Promise.all([
+      supabase
+        .from('audit_trail')
+        .select('entity_id,recorded_at,new_data')
+        .eq('action', 'TOKEN_MINTED')
+        .eq('entity_type', 'service_principals')
+        .order('recorded_at', { ascending: false }),
+      supabase.from('service_token_last_use').select('jti,last_used_at'),
+    ]);
+    const { data, error } = minted;
 
     if (error) throw new Error(error.message || 'Could not read token history');
 
+    const lastUse = used.error ? null : new Map((used.data || []).map(r => [r.jti, r.last_used_at]));
     const byPrincipal = new Map();
     for (const row of data || []) {
       if (!byPrincipal.has(row.entity_id)) byPrincipal.set(row.entity_id, []);
+      const jti = row.new_data?.jti || null;
       byPrincipal.get(row.entity_id).push({
         issued_at: row.new_data?.issued_at || row.recorded_at,
         expires_at: row.new_data?.expires_at || null,
-        jti: row.new_data?.jti || null,
+        jti,
+        principal_id: row.entity_id,
+        lastUsedAt: lastUse ? ((jti && lastUse.get(jti)) || null) : undefined,
       });
     }
     return byPrincipal;
