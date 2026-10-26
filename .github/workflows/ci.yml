@@ -1739,11 +1739,12 @@ jobs:
 
       # THE SAME LOOP A DEVELOPER RUNS. scripts/dev-cluster.mjs creates the cluster (port 80 for
       # Traefik, 1883 and 8883 for the broker), installs cert-manager and the internal CA, builds the
-      # twelve images and imports them into the node -- verified in the node, since `k3d image import`
-      # can report success it did not achieve (docs/incidents.md) -- installs the chart with the dev
-      # values plus broker TLS, the backup service and the in-cluster conformance Jobs, waits for
-      # every hook and rollout and for the daemon to be subscribed, and runs `helm test`. With
-      # --e2e it then waits for the two conformance Jobs and prints their logs.
+      # twelve images four at a time (the log ends the builds with each one's time) and imports them
+      # into the node -- verified in the node, since `k3d image import` can report success it did
+      # not achieve (docs/incidents.md) -- installs the chart with the dev values plus broker TLS,
+      # the backup service and the in-cluster conformance Jobs, waits for every hook and rollout and
+      # for the daemon to be subscribed, and runs `helm test`. With --e2e it then waits for the two
+      # conformance Jobs and prints their logs.
       #
       # --network-policy: every step below runs under the NetworkPolicy layer, as a site's values
       # turn it on, so a flow the edge list does not name fails here. The layer-off default is held
