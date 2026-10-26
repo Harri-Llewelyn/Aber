@@ -8,7 +8,9 @@ Mosquitto authenticates and authorises every client through its Dynamic Security
 roles are declared in [`dynsec-roles.json`](dynsec-roles.json), each ACL with a `why` naming what
 uses it ([*No check finds an unused ACL*](#no-check-finds-an-unused-acl)), and applied at every boot; the
 clients are the platform principals from the environment plus one account per gateway, issued by
-the credential service and persisted by the plugin in `/mosquitto/data/dynamic-security.json`.
+the credential service, and any account an operator makes for a consumer that only reads
+([*Giving a consumer a read-only account*](#giving-a-consumer-a-read-only-account)), all persisted
+by the plugin in `/mosquitto/data/dynamic-security.json`.
 [`mosquitto.conf`](mosquitto.conf) is the listener policy and [`mosquitto-tls.conf`](mosquitto-tls.conf)
 the optional MQTTS listener; the chart's initContainer assembles the two, and rebinds 1883 to
 loopback once no client outside the broker's pod dials it. The document is the only copy of every
@@ -47,6 +49,8 @@ default), and reads neither. The i3X server
 reads `spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
 monitoring account reads `$SYS/#` and publishes nothing. No gateway and no platform account reads
 the Directory or the UNS: either is the whole plant behind one credential, and reading is silent.
+Reading the UNS is what the `subscriber` role is for, and no account holds it until an operator
+decides one should (below).
 
 **The Directory's grant is not in this file either, and for the same reason.** Its subtree is
 named after the site's Sparkplug group (`ingestion.sparkplugGroup`, held by `sparkplug.group_id`
@@ -78,6 +82,31 @@ the grant twice is a no-op, which is what keeps the boot reconcile idempotent.
 `admin` with `$CONTROL/dynamic-security/#` only. The role `mosquitto_ctrl dynsec init` would have
 written also reads `#` and `$SYS/#`, which is every gateway's traffic; it is not used.
 
+**A consumer outside the platform holds `subscriber`, and only reads.** A SCADA system, a dashboard
+or an analytics client subscribes to and receives `spBv1.0/#` and the Unified Namespace's
+`<root>/#`. The role holds no `publishClientSend` at all, so the default denies every publish it
+makes, the plugin's control topic included. It does not read the Directory: publishing the
+Directory is a deployment's own exposure decision
+([`ingestion/README.md`, *The Directory on MQTT*](../ingestion/README.md#the-directory-on-mqtt)).
+It is site-wide by design: it reads every area's readings and every edge node's commands, and
+area-scoped roles would not reach it ([issue #310](https://github.com/Harri-Llewelyn/Aber/issues/310)).
+Its UNS pair is not in the file either: `withUnsReadGrant()` derives it at boot from the root the
+writer's grant uses. Like that grant, it does not follow `ingestion.unsMqttEnabled`, which the
+reconcile never sees; with the bridge off, the subtree is empty. **No account holds the role until
+an operator creates one** ([*Giving a consumer a read-only account*](#giving-a-consumer-a-read-only-account)).
+
+**A `subscriber` account cannot be a Sparkplug Host Application.** Sparkplug 3.0.0 gives that name
+to any client that consumes Sparkplug messages, and requires one to publish a STATE birth and
+register a STATE will (tck-id-components-ph-state, tck-id-host-topic-phid-birth-required,
+tck-id-operational-behavior-host-application-connect-will). This role publishes nothing. A consumer
+configured as a Host Application still connects and reads, because 2.1.2 checks a will's ACL when
+the will fires, not at CONNECT; its STATE birth and will reach nobody. No edge node waits on it:
+the site's primary host is the ingestion daemon. Nor can it send the rebirth NCMD a Host
+Application uses, so a consumer that joins between births cannot resolve an edge node's metric
+aliases, where it uses them, until its next birth. The UNS carries names and needs neither. A
+consumer that must be a Host Application needs a role that writes its own STATE topic, declared
+like any other ([*Adding a principal*](#adding-a-principal)).
+
 **This is the broker tier of a two-tier defence.** The broker cannot know which device belongs to
 which gateway; the daemon cannot stop a forged message reaching other subscribers. Neither is
 sufficient alone.
@@ -100,6 +129,13 @@ tags, and `renovate.json` proposes the next one.
   `subscribeLiteral` and `unsubscribeLiteral`, which this policy does not use. On 2.0.x it was a
   literal that matched nothing, which is why 1.3 and earlier generated a role per gateway.
 - A wildcard subscription is granted to a confined gateway and filtered per message at delivery.
+- **A `subscriber` account reads and cannot write.** Holding that role alone, it receives a
+  gateway's DDATA and the UNS under a two-level root that is not the default, and not the
+  Directory. Its NCMD, NDATA, primary-host STATE, UNS and Directory publishes reach no observer,
+  and it cannot read `$SYS`. Its `createGroup` on `$CONTROL/dynamic-security/v1` takes no effect,
+  and the admin's identical command, sent the same way, does. That one is judged by effect: a
+  `$CONTROL/` publish the ACL allows goes to the plugin and is never delivered to any subscriber
+  (2.1.2's `handle_publish.c`), so no observer could see it either way.
 - **`disableClient` disconnects a live session** and refuses the next CONNECT; `enableClient`
   admits it again. This is what the ACL file could not do: revocation used to take effect only
   when the appliance next reconnected.
@@ -249,7 +285,8 @@ are restarted by hand after a rename.
 `disableClient` to revoke, `listClients` and `listRoles` for the Access Control page. It speaks
 `mosquitto_rr` from the broker's own image, so the protocol and the binary match the broker. The
 operator CLI (`scripts/mosquitto-provision-gateway.mjs`) and the orphan sweep send the same
-commands through `kubectl exec` into the broker pod.
+commands through `kubectl exec` into the broker pod. An operator giving a consumer an account
+sends them by hand ([*Giving a consumer a read-only account*](#giving-a-consumer-a-read-only-account)).
 
 ## The credential service and the boot reconcile
 
@@ -323,10 +360,11 @@ could not be reached, and the caller publishing a trust bundle has to tell those
 writes one. An issue on such a stack returns `ca_cert: null` rather than failing, since Remote
 gateways need the CA but a plaintext-only stack can still issue.
 
-**Three grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
+**Four grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
 primary host's write on `spBv1.0/STATE/<id>`, and the writes on the Directory's `<prefix>/#` and the
 Unified Namespace's `<root>/#`, are named by the deployment rather than by this repository, so the
-reconcile adds them to the `ingestion` role from the environment. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
+reconcile adds them to the `ingestion` role from the environment. The fourth is the `subscriber`
+role's subscribe and receive on the same `<root>/#`, from the same value. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
 a wildcard would let this principal announce the death of a host id belonging to someone else,
 and every gateway reads that subtree. All three values are required rather than defaulted: the
 ingestion daemon refuses to start without the same host id, so a broker reconciled without the
@@ -363,7 +401,10 @@ overwritten, since it is the fleet's credentials.
 
 ## Adding a principal
 
-A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`, each ACL
+A consumer outside the platform that only reads needs none of this: it holds `subscriber`
+([*Giving a consumer a read-only account*](#giving-a-consumer-a-read-only-account)).
+
+A new service this repository deploys is a role in `dynsec-roles.json`, each ACL
 with a `why` naming what uses it; a
 `secrets.mqtt<Name>User` / `secrets.mqtt<Name>Password` pair in the chart's values, rendered as
 `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` by the chart's `templates/secret.yaml`; the name in
@@ -374,6 +415,42 @@ same set as `aber.mqttPrincipals`; a purpose
 line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
 `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.
+
+## Giving a consumer a read-only account
+
+A SCADA system, a dashboard or an analytics client that only reads gets an account of its own,
+holding `subscriber`. Nothing in the repository creates one. Until the Access Control page can
+([issue #296](https://github.com/Harri-Llewelyn/Aber/issues/296), step 2), an operator makes it
+by hand with the plugin's own `mosquitto_ctrl`, inside the broker pod:
+
+```bash
+POD=$(kubectl -n aber get pods -l app.kubernetes.io/component=mosquitto \
+  --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}')
+kubectl -n aber exec -it "$POD" -c mosquitto -- \
+  mosquitto_ctrl -h 127.0.0.1 -p 1883 -u dynsec-admin dynsec createClient scada-reader
+kubectl -n aber exec -it "$POD" -c mosquitto -- \
+  mosquitto_ctrl -h 127.0.0.1 -p 1883 -u dynsec-admin dynsec addClientRole scada-reader subscriber
+```
+
+Each command asks for the admin's password: `MQTT_DYNSEC_ADMIN_PASSWORD` in the release Secret
+(`aber-secrets`), whose username is `MQTT_DYNSEC_ADMIN_USER`, `dynsec-admin` by default.
+`createClient` also asks for the new account's password, twice. Neither password goes on the
+command line, so neither shows in a process list.
+
+- **Pick a username that is not a gateway id or a platform principal.** The boot reconcile gives
+  any username of `gwy` plus 21 lowercase hex characters the `gateway` role, and replaces the admin
+  and the platform principals (`aber_ingestion`, `aber_i3x` and `aber_monitor` by default) from the
+  environment. Any other account it keeps as it is, so this one survives every restart.
+- **It takes effect at once.** Nothing is reloaded, and the consumer connects as a gateway outside
+  the cluster does ([`docs/remote-gateways.md`](../docs/remote-gateways.md)).
+- **The Access Control page lists it** under *Broker accounts*, with the `subscriber` role's
+  purpose. It has no name or description of its own.
+- **To stop it, disable it:** `dynsec disableClient scada-reader`, the same way. That drops its live
+  session at once and refuses its next connect. `deleteClient` has not been measured against a live
+  session on 2.1.2, so delete only an account that is disabled and shows *Not connected*.
+
+Making the consumer a platform principal instead ([*Adding a principal*](#adding-a-principal)) is a
+change to the repository and an image rebuild, and the stack would then claim the account as its own.
 
 ## No check finds an unused ACL
 
@@ -409,7 +486,9 @@ It hit both failures the issue set out. The allow-list swallowed the two roles w
 widest. And it answered wrongly on a real path, in the direction that hides an over-grant. Special
 cases bring it to five of the eight, at the price of more of them in a regex reader of four formats.
 
-**What the `why`s say today.** Each one names a platform process. Until 1.7 four grants had none:
+**What the `why`s say today.** Each one names a platform process, except the `subscriber` role's,
+which name the consumer an operator gives an account and the check that reads as one. Until 1.7
+four grants had none:
 the ingestion role's subscribe and receive on the UNS and Directory subtrees, which the reconcile
 granted beside each write. Only `check-broker-config.mjs` read both trees as that account, to see
 the publishes delivered. `capture.py --topic` could have subscribed, and refuses every message that
@@ -470,6 +549,7 @@ So each principal is confined, holding a role from
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 | `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
+| an account an operator makes, holding `subscriber` | read `spBv1.0/#` and the Unified Namespace; not the Directory. Publishes nothing. None exists until an operator creates one |
 
 **The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway role
 confines it to the edge-node segment its username names, and that segment must equal the gateway row's *generated*
