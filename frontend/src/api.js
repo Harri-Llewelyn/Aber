@@ -3275,7 +3275,8 @@ const apiMethods = {
     /**
      * Upsert a device's nameplate. An empty field clears the column rather than being skipped, so
      * a wrong serial number can be blanked. The row is deleted when every field is empty: "no
-     * nameplate data" is modelled as no row, and the exporter omits an empty submodel.
+     * nameplate data" is modelled as no row, and the exporter omits an empty submodel. Who saved it
+     * and when are not sent: the database stamps both (device_nameplate_stamp).
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
       const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
@@ -3292,15 +3293,9 @@ const apiMethods = {
         return null;
       }
 
-      const { data: session } = await supabase.auth.getSession();
       const { data, error } = await supabase
         .from('device_nameplate')
-        .upsert({
-          device_id: deviceId,
-          ...patch,
-          updated_at: new Date().toISOString(),
-          updated_by: session?.session?.user?.id ?? null
-        }, { onConflict: 'device_id' })
+        .upsert({ device_id: deviceId, ...patch }, { onConflict: 'device_id' })
         .select();
       if (error) throw error;
       return data?.[0] || null;

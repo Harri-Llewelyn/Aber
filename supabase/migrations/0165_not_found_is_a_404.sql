@@ -132,6 +132,8 @@ BEGIN
 
         SELECT * INTO v_plate_new FROM jsonb_populate_record(v_plate, v_proposal.patch);
 
+        -- updated_by and updated_at are stamped by device_nameplate_stamp() (0210): the approver,
+        -- now. The proposer is the proposal's proposed_by.
         UPDATE public.device_nameplate
            SET manufacturer_name                = v_plate_new.manufacturer_name,
                manufacturer_product_designation = v_plate_new.manufacturer_product_designation,
@@ -143,11 +145,7 @@ BEGIN
                firmware_version                 = v_plate_new.firmware_version,
                software_version                 = v_plate_new.software_version,
                country_of_origin                = v_plate_new.country_of_origin,
-               uri_of_the_product               = v_plate_new.uri_of_the_product,
-               updated_at                       = now(),
-               -- The proposer: a nameplate is an assertion about the asset, and who made it is
-               -- part of the record.
-               updated_by                       = v_proposal.proposed_by
+               uri_of_the_product               = v_plate_new.uri_of_the_product
          WHERE device_id = v_proposal.entity_id;
 
     ELSIF v_proposal.entity_type = 'areas' THEN

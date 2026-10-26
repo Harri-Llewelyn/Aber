@@ -652,26 +652,34 @@ class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
 
     def test_a_save_that_moved_only_the_bookkeeping_columns_is_not(self):
         """
-        THE NEGATIVE CASE, AND IT IS NOT HYPOTHETICAL. The editor upserts the whole row and stamps
-        `updated_at` on every save, so an operator who opens the form and saves it unchanged writes
-        a different row. Without the WHEN clause that files an event whose two snapshots are
-        identical but for a timestamp -- into an append-only table, so it could never be tidied up.
+        THE NEGATIVE CASE, AND IT IS NOT HYPOTHETICAL. The editor upserts the whole row and the
+        database stamps `updated_by` and `updated_at` on every save (0210), so a person who opens
+        the form and saves it unchanged writes a different row. Without the WHEN clause that files
+        an event whose two snapshots are identical but for the stamp -- into an append-only table,
+        so it could never be tidied up.
 
         audit_telemetry_columns() cannot cover this: it names the columns a gateway HEARTBEAT
         rewrites, and widening it to `updated_at` would silence that column on every table.
         """
         self.cur.execute(self.NAMEPLATE, (self.device_id,))
         self._mark()
-        # `now()` is TRANSACTION-scoped, so writing it here would reproduce the value the
-        # INSERT above already stored and the function's own no-op guard would swallow the write
-        # -- leaving this test passing with the WHEN clause removed. An explicitly different
-        # timestamp is what makes it measure the clause it is about.
+        # `now()` is TRANSACTION-scoped, so the stamped time equals the INSERT's, and an unchanged
+        # save by the same caller would be swallowed by the function's own no-op guard -- leaving
+        # this test passing with the WHEN clause removed. A save by somebody else moves
+        # `updated_by`, which is what makes it measure the clause it is about. A real account, so
+        # an audit row naming it would be written and counted rather than refused by its key.
+        editor = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO auth.users (id, email) VALUES (%s, %s)",
+                         (editor, f"{editor}@guard.test"))
+        self.cur.execute("SELECT set_config('request.jwt.claims', %s, true)",
+                         ('{"sub": "%s"}' % editor,))
         self.cur.execute(
-            "UPDATE public.device_nameplate "
-            "   SET updated_at = now() + interval '1 hour', updated_by = NULL "
-            " WHERE device_id = %s",
+            "UPDATE public.device_nameplate SET serial_number = serial_number WHERE device_id = %s",
             (self.device_id,),
         )
+        self.cur.execute("SELECT updated_by IS NOT NULL FROM public.device_nameplate WHERE device_id = %s",
+                         (self.device_id,))
+        self.assertTrue(self.cur.fetchone()[0], "the save did not move the stamp, so it measured nothing")
         self.assertEqual(self.audit_count("device_nameplate"), 0,
                          "a save that changed no nameplate field was recorded as an event")
 
@@ -738,6 +746,7 @@ class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
         self.cur.execute(
             "SELECT tgname FROM pg_trigger "
             " WHERE tgrelid = 'public.device_nameplate'::regclass AND NOT tgisinternal "
+            "   AND tgfoid = 'public.log_audit_trail_event()'::regprocedure "
             " ORDER BY tgname"
         )
         self.assertEqual(

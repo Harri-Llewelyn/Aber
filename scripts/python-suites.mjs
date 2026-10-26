@@ -958,6 +958,15 @@ export const SUITES = {
       'sessions survive, the dashboard token is still served, and a machine identity, a token ' +
       'naming nobody, anon and service_role are refused.',
   },
+  'supabase/migrations/test_a_nameplate_names_the_person_the_server_signed_in.py': {
+    lanes: ['db'],
+    why:
+      "0210 -- that a nameplate's updated_by and updated_at are the caller and the database's " +
+      "time, whatever the request names: a Shopfloor Manager's and an Administrator's insert, " +
+      'update and upsert naming another person and a past time are stored as theirs, now, and ' +
+      'a write with no person behind it stores NULL. A wrong value here is silent: the record ' +
+      'names somebody who never touched the asset.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

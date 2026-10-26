@@ -1809,6 +1809,43 @@ Where `auth.sessions` exists, it also asserts the `oauth_client_id` column and t
 delete from the table. `test_signing_out_ends_the_person_s_door_sessions.py` holds the rest in the
 db lane.
 
+### A nameplate names the person the server signed in (0210)
+
+`device_nameplate.updated_by` records who last edited a device's nameplate, because a nameplate is
+an assertion about an asset and who made it is part of the record. It held whatever the request
+carried. The dashboard sent its own user id and the browser's clock as `updated_at`, and the write
+policies (`device_nameplate_insert_privileged`, `device_nameplate_update_privileged`) check only
+the caller's role. So an Administrator or Shopfloor Manager calling the API could save an edit "by"
+any uuid, or by nobody, at any time. The Audit Trail was right throughout: `log_audit_trail_event()`
+takes `changed_by` from the token.
+
+- **`device_nameplate_stamp()`**, a `BEFORE INSERT OR UPDATE ... FOR EACH ROW` trigger, sets
+  `updated_by := auth.uid()` and `updated_at := now()`, whatever the request carried. It is shaped
+  like `system_settings_stamp()`: PL/pgSQL, `SECURITY INVOKER` so `auth.uid()` reads the caller's
+  own token, `search_path` pinned, and no API role may execute it. A write with no person behind it
+  (a migration, `service_role`) records `NULL`, as `system_settings` does.
+- **The dashboard sends neither column.** `api.js`'s nameplate save upserts the fields alone, so
+  the request says only what the person changed.
+- **An approved proposal records the approver.** `approve_proposal()` set `updated_by` to the
+  proposer, as archived migration 0086 decided. It runs with the approver's token and writes the
+  row as it is now, so the trigger stamps the approver, and the function no longer sets either
+  column (`0165`'s body). The proposer is still `change_proposals.proposed_by`, and the approval's
+  `PROPOSAL_APPLIED` audit row carries both.
+- **A restore keeps what was recorded.** A backup is a whole-database dump, and `pg_restore` and a
+  plain replay create a table's triggers after loading its rows. `test-db.mjs --with-history` loads
+  under `session_replication_role = replica`, where the trigger does not fire. Nothing else writes
+  the table: the AAS exporter reads it, i3X and ingestion never touch it, and no archive or restore
+  path copies a nameplate back.
+- **The Audit Trail shows what it did before.** The audit trigger is `AFTER`, so its snapshots hold
+  the stamped values. Its `WHEN` clause already ignores a save that moved only `updated_by` and
+  `updated_at`, and the Audit Trail's diff hides `updated_at` but shows `updated_by` changing from
+  one person to the next, as it did when the browser sent the value.
+
+The file's self-check fails the boot if the trigger is missing or disabled, is not `BEFORE INSERT
+OR UPDATE FOR EACH ROW`, its function lost its `search_path` pin or became `SECURITY DEFINER`, or
+an API role may execute the function. `test_a_nameplate_names_the_person_the_server_signed_in.py`
+holds the rest in the db lane.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -4747,7 +4784,9 @@ open it and add to it.
 **Who the record names.** `device_nameplate.updated_by` becomes the **proposer** — the column's own
 comment says a nameplate is an assertion about an asset, so who made it is part of the record —
 while the `audit_trail` row names the **approver** in `changed_by` and carries `proposed_by` in
-its payload. Both are in the record; neither column has to hold both.
+its payload. Both are in the record; neither column has to hold both. Since
+[`0210`](#a-nameplate-names-the-person-the-server-signed-in-0210) the database stamps `updated_by`
+on every nameplate write, so an approval records the approver there too.
 
 **The timer is not a person.** An open proposal nobody acts on closes after
 `proposals.open_expiry_days`, whose floor is 1: zero would auto-close every proposal at the moment
