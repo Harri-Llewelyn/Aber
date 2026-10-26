@@ -270,6 +270,12 @@ Its other options:
 - `--network-policy` turns the NetworkPolicy layer on, as a site's values do. CI's k8s-validation
   runs with it.
 
+`up` builds up to four images at once. Each build's output prints as one block when it ends, and
+the step ends with each image's build time. `test-runner` waits for `ingestion`, the image it
+extends. The environment variable `ABER_BUILD_JOBS` sets how many build at once:
+`ABER_BUILD_JOBS=1` builds them one after another, each one's output as it comes. Lower it if the
+builds and a running stack crowd the machine's memory.
+
 On an upgrade, `up` sets `e2e.suspend` and starts the Jobs only once every workload has rolled out.
 That way they test the new pods, not the ones being replaced. Helm creates those Jobs during the
 upgrade, before `up` restarts the workloads whose image it rebuilt under the same tag. Deleting a

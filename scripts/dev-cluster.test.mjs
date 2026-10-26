@@ -1,15 +1,17 @@
 // =================================================================================================
-// scripts/dev-cluster.mjs: how a port-forward that does not open says why
+// scripts/dev-cluster.mjs: how a port-forward that does not open says why, and what each image's
+// build is given
 //
 // forwardReady() against stand-ins for kubectl (node children that write what kubectl writes), and
 // forwardOnFreePort()'s second attempt, taken only when the port was taken. The forwards themselves
-// need a cluster: `npm run dev:test` and the rehearsals run them.
+// need a cluster: `npm run dev:test` and the rehearsals run them. The builds need docker; the order
+// they run in is scripts/lib/build-queue.test.mjs's.
 // =================================================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 
-import { forwardOnFreePort, forwardReady } from './dev-cluster.mjs';
+import { IMAGES, IMG_NS, dockerBuildArgs, forwardOnFreePort, forwardReady } from './dev-cluster.mjs';
 
 /** A node child standing in for kubectl, running `code`, with both outputs piped as the forwards pipe them. */
 function standIn(code) {
@@ -119,4 +121,27 @@ test('a Service with no ready pod, or a forward that never opens, fails on the f
   children.forEach((child) => child.kill());
   assert.equal(children.length, 1);
   assert.match(silent.reason, /^no "Forwarding from" after 0\.3 s/);
+});
+
+test('every image that waits for another names one the list builds', () => {
+  const names = new Set(IMAGES.map((img) => img.name));
+  const waiting = IMAGES.filter((img) => img.after);
+  assert.deepEqual(waiting.map((img) => [img.name, img.after]), [['test-runner', 'ingestion']]);
+  for (const img of waiting) assert.ok(names.has(img.after), `${img.name} waits for ${img.after}, which IMAGES does not build`);
+});
+
+test('the build is given the version in a value and never in a name, and the named contexts before the context', () => {
+  const byName = Object.fromEntries(IMAGES.map((img) => [img.name, img]));
+  assert.deepEqual(dockerBuildArgs(byName['test-runner'], '1.7.0', 'v1.6.0-3-gabc'), [
+    'build', '-f', 'test-harness/Dockerfile', '-t', `${IMG_NS}/test-runner:1.7.0`,
+    '--build-arg', `INGESTION_IMAGE=${IMG_NS}/ingestion:1.7.0`, '.',
+  ]);
+  assert.deepEqual(dockerBuildArgs(byName.frontend, '1.7.0', 'v1.6.0-3-gabc'), [
+    'build', '-f', 'frontend/Dockerfile', '-t', `${IMG_NS}/frontend:1.7.0`,
+    '--build-arg', 'VITE_RUNTIME_CONFIG=true', '--build-arg', 'VITE_APP_VERSION=v1.6.0-3-gabc',
+    '--build-context', 'help=./help', 'frontend',
+  ]);
+  assert.deepEqual(dockerBuildArgs(byName.timescaledb, '1.7.0', ''), [
+    'build', '-f', 'timescaledb/Dockerfile', '-t', `${IMG_NS}/timescaledb:1.7.0`, 'timescaledb',
+  ]);
 });
