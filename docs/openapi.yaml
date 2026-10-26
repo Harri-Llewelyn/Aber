@@ -1053,11 +1053,13 @@ paths:
       description: |
         Deletes the session (`0206`), as a sign-out does: nothing refreshes it again, and the API
         refuses its access token from the next request (401 `session_not_found`, `0205`). Grafana
-        and Node-RED notice on their own schedule. No Audit Trail row is written.
+        and Node-RED notice on their own schedule. One `SESSIONS_ENDED` row in your lane of the
+        Audit Trail names you, with a count of 1 and the session's service name, user agent, start
+        and last activity (`0211`).
 
         The session your token belongs to is refused (400, `22023`): sign out to end it. To end
-        all the others at once, call GoTrue's `POST /auth/v1/logout?scope=others`. A session that
-        is not yours is answered exactly as one that does not exist (404).
+        all the others at once, call `/rest/v1/rpc/end_my_other_sessions`. A session that is not
+        yours is answered exactly as one that does not exist (404). A refused call writes no row.
       requestBody:
         required: true
         content:
@@ -1072,6 +1074,35 @@ paths:
         '400': { description: 'The session this token belongs to (`22023`).' }
         '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
         '404': { description: 'No session of yours with that id (`P0002`).' }
+
+  /rest/v1/rpc/end_my_other_sessions:
+    post:
+      tags: [Auth]
+      summary: End every session you hold but the one in use
+      description: |
+        Sign Out of All Other Sessions on the Profile page's Security tab (`0211`). Deletes every
+        GoTrue session you hold except the one your token belongs to: other browsers, programs, and
+        the Grafana, Node-RED, Studio and forge sign-ins. GoTrue's `POST /auth/v1/logout?scope=others`
+        deletes the same rows. Their refresh tokens go with them, and the API refuses their access
+        tokens from the next request (401 `session_not_found`, `0205`). Grafana and Node-RED notice
+        on their own schedule.
+
+        Writes one `SESSIONS_ENDED` row in your lane of the Audit Trail with how many ended, and
+        none when nothing did. A token that names no session of yours is refused (400, `22023`) and
+        ends nothing.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: How many sessions ended.
+          content:
+            application/json:
+              schema: { type: integer, minimum: 0 }
+        '400': { description: 'The token names no session of yours (`22023`).' }
+        '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
 
   /rest/v1/rpc/end_my_door_sessions:
     post:
@@ -5335,7 +5366,9 @@ components:
             replacement and a deleted subject's cascade are recorded too. `DISPLAY_NAME_CHANGED`
             (0203) is written by a trigger on `person_profiles`, in the person's `user_roles` lane.
             `EMAIL_CHANGED` and `SESSIONS_ENDED` (0207) are written by `record_person_email_change()`
-            and `end_person_sessions()`, in the same lane.
+            and `end_person_sessions()`, in the same lane. A person ending their own other sessions
+            writes `SESSIONS_ENDED` too, through `end_my_session()` and `end_my_other_sessions()`
+            (0211), with themselves in `changed_by`.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

@@ -380,10 +380,13 @@ ends when:
   every Studio and forge door session the person holds (`0208`). Their other browsers keep the
   dashboard, and Grafana and Node-RED keep theirs.
 - the person ends it on the Profile page's Security tab, which lists every session they hold
-  (`list_my_sessions()`, `0206`). **End** ends one (`end_my_session()`), never the one in use;
-  **Sign Out of All Other Sessions** ends every one but that (GoTrue's `scope=others`). A person
+  (`list_my_sessions()`, `0206`). **End** ends one (`end_my_session()`), never the one in use,
+  after a dialog that names it; **Sign Out of All Other Sessions** ends every one but that
+  (`end_my_other_sessions()`, `0211`, the same rows GoTrue's `scope=others` deletes). A person
   sees and ends only their own: another person's session is answered as one that does not exist.
-  Ending one writes no Audit Trail row.
+  Each act writes one `SESSIONS_ENDED` row in the person's lane of the Audit Trail, with the person
+  as the actor (`0211`): End's names the session, the other says how many ended. Sign Out writes
+  none.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open

@@ -655,7 +655,8 @@ python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.
 # one their token names first, a service's by its name, refreshed_at read as UTC, and no address
 # or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses
 # the session in use, and answers another person's as a missing one. Every person role may call
-# both; a machine identity, an account with no role, anon and service_role may not. No audit row.
+# both; a machine identity, an account with no role, anon and service_role may not. Ending one
+# writes one audit row (0211).
 python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
 
 # Door sessions at Sign Out (0208): end_my_door_sessions() ends the caller's Studio and forge door
@@ -663,6 +664,13 @@ python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
 # sessions and other people's door sessions survive, and the dashboard's token is still served. A
 # machine identity, a token naming nobody, anon and service_role are refused. Every test rolls back.
 python supabase/migrations/test_signing_out_ends_the_person_s_door_sessions.py
+# Ending your own sessions is recorded (0211). End writes one SESSIONS_ENDED row in the person's
+# lane, naming them, with a count of 1 and the session's service, user agent and times, never an
+# address or a token. end_my_other_sessions() ends every session but the one the token names,
+# services and the Studio and forge doors included, with their refresh tokens; another person's
+# are untouched, the API refuses the ended tokens, and one row says how many, none for nothing
+# ended. A token naming no session of the caller's ends nothing. Sign Out's call writes no row.
+python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
