@@ -980,11 +980,11 @@ except the ones listed above. *baseline* admits every pod except Alloy, as befor
   with a very large bucket can set `supabaseStorage.podSecurityContext.fsGroupChangePolicy:
   OnRootMismatch` once this prints nothing:
   `kubectl exec deploy/supabase-storage -- find /var/lib/storage -type d ! -user 1000 ! -perm -g+w`.
-  It runs as 1000 with `backup.includeStorage` too, since 1.7.0. The backup service never mounts
-  the volume: for each backup it starts one `backup-storage-archive` Job, which mounts it read-only
-  for as long as its tar takes, on the backup service's node, and is deleted when it ends. Before
-  1.7.0 the service held the volume for as long as it ran, so the pod ran as root with 1.3.0's
-  context.
+  storage-api runs as 1000 with `backup.includeStorage` too, since 1.7.0. The backup service never
+  mounts the volume: for each backup it starts one `backup-storage-archive` Job, which mounts it
+  read-only for as long as its tar takes, on the backup service's node, and is deleted when it
+  ends. Before 1.7.0 the service held the volume for as long as it ran, so the pod ran as root with
+  1.3.0's context.
 
 What happens if the kubelet does not apply `fsGroup` to the storage volume while storage-api runs as
 1000: reads keep working, and every upload, replacement and delete in an existing directory fails

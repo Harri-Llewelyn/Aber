@@ -4,10 +4,10 @@
 // tar the broker's document, copy the forge consistently and archive the keys; the storage objects
 // are tarred by a Job it starts per backup. It serves nothing but /healthz and hands no bytes to
 // anybody: restore is a runbook run from a shell against the volume or the bucket. When the Backups
-// page names an S3 destination it copies
-// every backup there, each file encrypted with age. Runs on an image built from the database's own,
-// so pg_dump is at least the server's version. Reasoning: supabase/README.md, "Backup and Recovery",
-// "How the service takes a backup", "An encrypted copy off site".
+// page names an S3 destination it copies every backup there, each file encrypted with age. Runs on
+// an image built from the database's own, so pg_dump is at least the server's version. Reasoning:
+// supabase/README.md, "Backup and Recovery", "How the service takes a backup", "An encrypted copy
+// off site".
 import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
