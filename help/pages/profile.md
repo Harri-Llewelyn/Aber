@@ -20,7 +20,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
 - **End**, on a row of the **Security** tab, signs that session out. The session you are using has no **End**: use **Sign Out** for it.
 - **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens.
-- **Sign Out**, in the account menu, signs you out of this browser. It signs this browser out of Studio and the forge too. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
+- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself

@@ -459,9 +459,9 @@ The chart builds the policy from the addresses it hands the dashboard in `/confi
 | `frame-ancestors`, `form-action`, `base-uri`, `object-src` | nothing else | No page may frame the dashboard, and no form posts elsewhere |
 
 **If the policy leaves out an address the dashboard uses, part of a page stops working.** The page
-still opens. Tables may stay empty, live updates stop, an area plan or a 3D model does not appear,
-or sign-out leaves Studio signed in. The browser's console (F12) names the cause in a line that
-mentions the Content Security Policy.
+still opens. Tables may stay empty, live updates stop, or an area plan or a 3D model does not
+appear. The browser's console (F12) names the cause in a line that mentions the Content Security
+Policy.
 
 This happens when browsers reach the API at an address the chart does not know, such as a reverse
 proxy with a hostname of its own. Set `publicUrls.supabase` to the address browsers use.

@@ -709,8 +709,8 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
                         # Gitea's own sign-out is a no-op under reverse-proxy authentication, so it routes to
-                        # forge-signout, which ends every GoTrue session the caller holds and answers 302 to
-                        # /oauth2/signout. The token is kept on this route because the revocation names the person.
+                        # forge-signout, which ends the door's GoTrue session and answers 302 to the dashboard's
+                        # /sign-out. The token is kept on this route because the sign-out names that session.
                         - match: { path: "/user/logout" }
                           route:
                             cluster: functions-v1

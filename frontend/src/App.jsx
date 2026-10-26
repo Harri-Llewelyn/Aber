@@ -15,7 +15,7 @@ import { CONNECTION_OK } from './lib/connectionState'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { askAuthServer, clearInvalidSession } from './utils/sessionError'
 import { useSessionRecheck } from './hooks/useSessionRecheck'
-import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
+import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
 import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
@@ -44,6 +44,9 @@ import { SingleKeyShortcutsContext, singleKeyShortcutAllowed, stepPageTab } from
 const OAUTH_CONSENT_PATH = '/oauth/consent'
 // Where a password-reset email sends the browser. Must be allowed by GOTRUE_URI_ALLOW_LIST.
 const RESET_PASSWORD_PATH = '/reset-password'
+// Signs this browser out, with or without a session, and shows the sign-in page. The forge's sign-out
+// (supabase/functions/forge-signout) sends the browser here with `?from=forge`.
+const SIGN_OUT_PATH = '/sign-out'
 
 import {
   IconKeyboard,
@@ -105,7 +108,13 @@ const BackupsTab       = lazy(() => import('./components/tabs/BackupsTab').then(
 const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
 const ProfileTab       = lazy(() => import('./components/tabs/ProfileTab').then(m => ({ default: m.ProfileTab })))
 
-function AuthScreen({ onLoginSuccess, notice }) {
+/** The sign-in page's notice colours: a warning for a session that ended, success for a sign-out. */
+const NOTICE_TONES = {
+  warning: { background: 'var(--warning-tint)', border: '1px solid var(--warning)', color: 'var(--warning-text)' },
+  success: { background: 'var(--success-tint)', border: '1px solid var(--success)', color: 'var(--success-text)' },
+}
+
+function AuthScreen({ onLoginSuccess, notice, noticeTone = 'warning' }) {
   // Its own theme handle: this renders instead of Dashboard, never beside it.
   const { theme, toggleTheme } = useTheme()
   /* Empty by design: authScreenCredentials.test.jsx asserts both fields render empty, and
@@ -178,7 +187,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
         : 'Sign in with your platform account'}
     >
       {notice && !authError && (
-        <div role="status" style={{ background: 'var(--warning-tint)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+        <div role="status" style={{ ...(NOTICE_TONES[noticeTone] || NOTICE_TONES.warning), padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
           {notice}
         </div>
       )}
@@ -812,15 +821,21 @@ const AUTH_CHECK_TIMEOUT_MS = 10000
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  // What the sign-in screen says, as { text, tone }, or null.
   const [authNotice, setAuthNotice] = useState(null)
   // True while a password-reset link is being honoured: from the reset URL, or from the
   // PASSWORD_RECOVERY event supabase-js raises after exchanging the link's token for a session.
   const [recovering, setRecovering] = useState(() => window.location.pathname === RESET_PASSWORD_PATH)
+  // A visit to /sign-out, as the notice to show once it has run. Read once: the route replaces its
+  // own address.
+  const [signOutRequest] = useState(() => (window.location.pathname === SIGN_OUT_PATH
+    ? { notice: signedOutNotice(window.location.search) }
+    : null))
 
   // A session the auth server rejected: a local sign-out, then the sign-in screen with its notice.
   const endRejectedSession = useCallback(async (error) => {
     console.warn('[auth] session rejected by the auth server:', error?.message)
-    setAuthNotice(await clearInvalidSession())
+    setAuthNotice({ text: await clearInvalidSession(), tone: 'warning' })
     setSession(null)
   }, [])
 
@@ -866,7 +881,23 @@ export default function App() {
       return answer.current
     }
 
-    restoreSession()
+    // /sign-out: this browser signs out whether or not a session is stored, then the sign-in screen
+    // shows the notice. The address is replaced first, so Back or a reload does not run it again. A
+    // sign-out the auth server did not complete leaves the session stored, which is restored instead.
+    const signOutHere = async () => {
+      window.history.replaceState({}, '', '/')
+      const { error } = await signOutOfThisBrowser()
+      if (cancelled) return null
+      if (error) {
+        console.warn('[auth] could not sign this browser out:', error.message)
+        return restoreSession()
+      }
+      setAuthNotice({ text: signOutRequest.notice, tone: 'success' })
+      return null
+    }
+
+    const firstLoad = signOutRequest ? signOutHere() : restoreSession()
+    firstLoad
       .catch(err => {
         console.warn('[auth] could not restore the stored session:', err?.message)
         return null
@@ -909,7 +940,7 @@ export default function App() {
       cancelled = true
       subscription.unsubscribe()
     }
-  }, [endRejectedSession])
+  }, [endRejectedSession, signOutRequest])
 
   /* The notification history is one person's. It goes whenever the tab is left without a session,
      whether by Sign Out, a sign-out from another tab or a rejected stored session, so the next
@@ -933,7 +964,7 @@ export default function App() {
   }
 
   if (loading) {
-    return <div className="loading-wrap"><div className="spinner" /> Connecting to Supabase Auth…</div>
+    return <div className="loading-wrap"><div className="spinner" /> {signOutRequest ? 'Signing out…' : 'Connecting to Supabase Auth…'}</div>
   }
 
   if (recovering) {
@@ -952,19 +983,21 @@ export default function App() {
   }
 
   if (!session) {
-    return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
+    return (
+      <AuthScreen
+        notice={authNotice?.text}
+        noticeTone={authNotice?.tone}
+        onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }}
+      />
+    )
   }
 
-  // Three sessions end here. signOut() ends this browser's dashboard session only (scope 'local');
-  // the person's other browsers and services keep theirs. Studio and the forge sit behind sessions
-  // the gateway owns, so a beacon clears each cookie alongside it. All start in the same tick so a
-  // slow console cannot delay the sign-out, and signOut() is called synchronously on click, which
-  // navigationShell.test.jsx asserts.
+  // The account menu's Sign Out is the /sign-out route's: this browser's sessions only.
   return <Dashboard
     session={session}
-    onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut({ scope: 'local' })])}
+    onSignOut={signOutOfThisBrowser}
     /* The rejected-session path above: a local sign-out, then the sign-in screen with its notice.
        setSession too, because signOut() cannot always clear an expired session it fails to refresh. */
-    onSignInAgain={async () => { setAuthNotice(await clearInvalidSession()); setSession(null) }}
+    onSignInAgain={async () => { setAuthNotice({ text: await clearInvalidSession(), tone: 'warning' }); setSession(null) }}
   />
 }

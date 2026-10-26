@@ -34,8 +34,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // blank as "not supplied" and constants.js then falls back to localhost:3002, which is a wrong link
   // on a cluster but is exactly as wrong as the alternative and does not throw.
   VITE_GRAFANA_URL: %q,
-  // Studio's door, and the dashboard uses it for ONE thing: ending Studio's own gateway-held
-  // session at sign-out. The same helper the studio Ingress host is built from, so the address the
+  // Studio's door, and the dashboard uses it for ONE thing: asking the door to clear its cookie at
+  // sign-out (src/utils/studioSignOut.js). The same helper the studio Ingress host is built from, so the address the
   // beacon uses is the address the session was opened on -- which matters more here than for the
   // link above, because a host mismatch answers 302 and clears nothing.
   //
