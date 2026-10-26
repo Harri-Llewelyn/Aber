@@ -1715,13 +1715,16 @@ a service sign-in can be ended without changing the password.
   no machine identity holds one. `anon` and `service_role` hold no `EXECUTE`. Both are `SECURITY
   DEFINER` with `search_path` pinned: `postgres` reads `auth.sessions` and `auth.oauth_clients`, and
   deletes from `auth.sessions`, by GoTrue's grants.
-- **No Audit Trail row.** A person ending their own sign-in changes nothing about the platform, and
-  a Sign Out writes none either. GoTrue's own log (`auth.audit_log_entries`) records a Sign Out,
-  but not a row deleted here. Revisit if a site needs to show who ended which session.
+- **No Audit Trail row, at first.** This file wrote none, reasoning that a person ending their own
+  sign-in changes nothing about the platform. GoTrue's own log (`auth.audit_log_entries`) does not
+  see a row deleted here either. A lost laptop showed why a record matters, so `0211` adds one:
+  see [Ending another of your sessions is recorded
+  (0211)](#ending-another-of-your-sessions-is-recorded-0211).
 
-**Sign Out of All Other Sessions**, on the same tab, is GoTrue's `/logout?scope=others`
+**Sign Out of All Other Sessions**, on the same tab, was GoTrue's `/logout?scope=others`
 (`signOut({ scope: 'others' })`). It deletes every one of the person's rows but the current one, and
-leaves this browser signed in. It needs no function here.
+leaves this browser signed in. Since `0211` it is `end_my_other_sessions()`, which deletes the same
+rows and writes the Audit Trail row.
 
 The file's self-check asserts both functions' `SECURITY DEFINER` and pin, who may execute them,
 that a request with no identity is refused, and, where GoTrue's tables exist, that their owner may
@@ -1898,6 +1901,53 @@ The file's self-check fails the boot if the trigger is missing or disabled, is n
 OR UPDATE FOR EACH ROW`, its function lost its `search_path` pin or became `SECURITY DEFINER`, or
 an API role may execute the function. `test_a_nameplate_names_the_person_the_server_signed_in.py`
 holds the rest in the db lane.
+
+### Ending another of your sessions is recorded (0211)
+
+`0206` let a person end their own sessions on the Profile page's Security tab, and recorded
+nothing. An Administrator's End Sessions writes `SESSIONS_ENDED` (`0207`). So after a lost laptop
+the Audit Trail showed an Administrator ending the person's sessions, but not the person ending
+the laptop's session themselves, and nobody looking back could tell when, or whether, it ended.
+Both ways a person ends their other sessions now write the same row, in their own lane.
+
+- **`end_my_session(p_session_id)`** keeps `0206`'s checks and its delete, and writes one
+  `SESSIONS_ENDED` row in the same transaction, on `entity_type = 'user_roles'` with the person as
+  both the entity and `changed_by`. `new_data` holds the person's email, `sessions_ended: 1` and
+  `session`: what `list_my_sessions()` returned for it before the delete (`service_name`,
+  `user_agent`, `created_at`, `last_active_at`). Never `ip`, the tag or a token column. A refused
+  call writes nothing.
+- **The row keeps the raw facts, not a label.** The words "Chrome on Windows" or "Grafana" come
+  from the dashboard's `sessionLabel()` (`frontend/src/utils/sessions.js`), and the Audit Trail's
+  drawer names the row's session with the same function. A second copy of the user-agent parsing
+  in SQL would drift from it.
+- **`end_my_other_sessions()`** is Sign Out of All Other Sessions. It deletes every
+  `auth.sessions` row the caller holds except the one the token's `session_id` claim names, which is
+  the `DELETE` GoTrue's `/logout?scope=others` runs. So it ends the same sessions: other browsers,
+  programs, and every OAuth client's (Grafana, Node-RED, the Studio and forge doors). GoTrue's
+  foreign key takes each session's refresh tokens with it (`ON DELETE CASCADE`), and `0205`'s arm
+  refuses the access tokens. It writes one `SESSIONS_ENDED` row with how many ended, none when
+  nothing did, and returns the number. GoTrue's own log no longer records this act; the Audit
+  Trail does.
+- **It never ends them all.** A token whose `session_id` is missing, is not a uuid, or names no
+  session of the caller's is refused (`22023`) before anything is deleted. Through the API,
+  `auth_pre_request()` already refuses a token whose session has gone, so that guards a direct
+  call.
+- **Who may call them.** `0206`'s check, unchanged: any person role, Auditor included. No caller
+  and every machine identity are `42501`; `anon` and `service_role` hold no `EXECUTE`. Both are
+  `SECURITY DEFINER` with `search_path` pinned.
+- **Sign Out still writes nothing.** It ends the session in the browser in use, through GoTrue,
+  and the door sessions through `end_my_door_sessions()` (`0208`). Ending a session somewhere else
+  is the act worth recording.
+- **The same action as an Administrator's.** One `SESSIONS_ENDED` type; `changed_by` says who
+  ended it. A row a person wrote has `changed_by = entity_id`.
+
+The file's self-check asserts both functions' `SECURITY DEFINER` and pin, who may execute them,
+and that a request with no identity is refused. Where `auth.sessions` exists, it asserts that the
+owner may read and delete it, and, once GoTrue has added `auth.refresh_tokens.session_id`, that the
+column cascades from `auth.sessions`. The test database's fixture
+(`test-harness/auth-bootstrap.sql`) gives `auth.refresh_tokens` that column and GoTrue's key.
+`test_ending_another_of_your_sessions_is_recorded.py` holds the rows, the refusals, and that Sign
+Out of All Other Sessions ends what `scope=others` ended and no other person's.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
