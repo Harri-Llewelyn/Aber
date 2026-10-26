@@ -140,6 +140,11 @@ timescaledb:
       memory: 128Mi
     limits:
       memory: 1Gi
+  # The backup sidecar checks every 10 s rather than every minute, so the stack lane's wait for one
+  # more pass of it is short (timescaledb/test_physical_backup.py reads the value from the pod).
+  # `npm run dev:up` turns the backup itself on.
+  physicalBackup:
+    pollSeconds: 10
 
 supabaseDb:
   persistence:
@@ -150,6 +155,9 @@ supabaseDb:
       memory: 256Mi
     limits:
       memory: 2Gi
+  # As the historian's, so the two sidecars run alike.
+  physicalBackup:
+    pollSeconds: 10
 
 # The dev loop reaches both databases through port-forwards on `localhost`, which the certificate
 # has to name for a host-side client to verify it. `npm run dev:up` turns the TLS itself on.

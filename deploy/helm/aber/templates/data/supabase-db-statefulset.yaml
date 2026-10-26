@@ -281,6 +281,8 @@ spec:
               value: {{ .Values.supabaseDb.physicalBackup.hourUtc | quote }}
             - name: BACKUP_FULL_ON
               value: {{ .Values.supabaseDb.physicalBackup.fullOn | quote }}
+            - name: BACKUP_POLL_SECONDS
+              value: {{ .Values.supabaseDb.physicalBackup.pollSeconds | quote }}
             {{- include "aber.physicalBackupEnv" . | nindent 12 }}
           securityContext:
             runAsUser: 100

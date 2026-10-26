@@ -265,6 +265,8 @@ spec:
               value: {{ .Values.timescaledb.physicalBackup.hourUtc | quote }}
             - name: BACKUP_FULL_ON
               value: {{ .Values.timescaledb.physicalBackup.fullOn | quote }}
+            - name: BACKUP_POLL_SECONDS
+              value: {{ .Values.timescaledb.physicalBackup.pollSeconds | quote }}
             {{- include "aber.physicalBackupEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.timescaledb.physicalBackup.resources | nindent 12 }}

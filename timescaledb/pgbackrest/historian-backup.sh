@@ -3,13 +3,14 @@
 #
 # At start: waits for the server and for the maintenance Job's physical_backup.sql, creates the
 # stanza (a no-op once it exists), checks that WAL archiving reaches the repository, and takes a
-# full backup if the repository holds none. Then, once a minute, asks physical_backup_missed_slot()
-# whether the day's BACKUP_HOUR_UTC slot has passed with no backup attempted since, and if so takes
-# one: the type physical_backup_type() names (full on BACKUP_FULL_ON, 0 = Sunday, or when the
-# newest full is over seven days old; a differential otherwise). A restart, a suspended host and a
-# missed hour all meet the same rule, so a missed slot is taken late, once. The same step takes a
-# differential when the Backups page has asked for one (physical_backup_requests). pgBackRest
-# expires what retention no longer needs at the end of each backup.
+# full backup if the repository holds none. Then, every BACKUP_POLL_SECONDS (60 by default), asks
+# physical_backup_missed_slot() whether the day's BACKUP_HOUR_UTC slot has passed with no backup
+# attempted since, and if so takes one: the type physical_backup_type() names (full on
+# BACKUP_FULL_ON, 0 = Sunday, or when the newest full is over seven days old; a differential
+# otherwise). A restart, a suspended host and a missed hour all meet the same rule, so a missed
+# slot is taken late, once. The same step takes a differential when the Backups page has asked for
+# one (physical_backup_requests). pgBackRest expires what retention no longer needs at the end of
+# each backup.
 #
 # Every run is recorded in public.physical_backup_runs, which the Historian Backup Stale alert
 # reads. A failed run is recorded and counts as the slot's attempt.
@@ -21,10 +22,16 @@ set -u
 STANZA=historian
 HOUR=${BACKUP_HOUR_UTC:-1}
 FULL_ON=${BACKUP_FULL_ON:-0}
+POLL=${BACKUP_POLL_SECONDS:-60}
 SOCKET=/var/run/postgresql
 OUT=/tmp/historian-backup.$$
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) historian-backup: $*"; }
+
+# The loop's period. The chart validates it too; this stops a sidecar started by other means.
+case "$POLL" in
+  *[!0-9]*|0*) log "BACKUP_POLL_SECONDS is '$POLL'; it must be a whole number of seconds, 1 or more" >&2; exit 1 ;;
+esac
 
 psql_run() {
   psql -X -q -At -v ON_ERROR_STOP=1 -h "$SOCKET" -U "${POSTGRES_USER:-postgres}" \
@@ -151,6 +158,6 @@ while :; do
     announced=1
   fi
   # In the background and waited on, so the TERM trap runs without waiting out the sleep.
-  sleep 60 &
+  sleep "$POLL" &
   wait $!
 done

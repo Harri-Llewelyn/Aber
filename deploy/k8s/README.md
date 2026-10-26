@@ -1219,10 +1219,11 @@ asynchronously, spooling on its own data volume. A segment is pushed when it fil
 The `pgbackrest` sidecar in the pod takes the daily backup at `hourUtc`, and a full one on `fullOn`.
 It records each run in `public.physical_backup_runs`.
 
-- **A missed hour is taken late, once.** The sidecar checks the clock every minute rather than
-  sleeping until the hour. If the latest `hourUtc` has passed and no backup has been attempted since,
-  it takes one and logs `missed the <date> 01:00 UTC backup; taking it now`. This covers a pod that
-  was down, a suspended host and a restart across the hour.
+- **A missed hour is taken late, once.** The sidecar checks the clock every `pollSeconds` (60
+  seconds; the dev values use 10) rather than sleeping until the hour. If the latest `hourUtc` has
+  passed and no backup has been attempted since, it takes one and logs
+  `missed the <date> 01:00 UTC backup; taking it now`. This covers a pod that was down, a suspended
+  host and a restart across the hour.
 - **A failed run counts as the attempt.** It is not retried until the next day's hour, and
   Historian Backup Stale reports it.
 - **A full whenever the newest is over seven days old**, whatever the day. So `retainFull` keeps
