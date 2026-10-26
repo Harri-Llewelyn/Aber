@@ -975,6 +975,15 @@ export const SUITES = {
       'scope=others ended, services and doors included, with their refresh tokens, and no other ' +
       "person's; and that a token naming no session of yours ends nothing.",
   },
+  'supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0212 -- that an Administrator lists a person's sessions with the columns the person's own " +
+      'list has, but which one is in use, and ends one: that session and its refresh tokens go, ' +
+      "the person's others and other people's stay, and one SESSIONS_ENDED row names the " +
+      "Administrator and the session; and that another person's session, a missing one and your " +
+      'own are refused with no row.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

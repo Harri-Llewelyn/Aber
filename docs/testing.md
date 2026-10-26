@@ -685,6 +685,16 @@ python supabase/migrations/test_signing_out_ends_the_person_s_door_sessions.py
 # are untouched, the API refuses the ended tokens, and one row says how many, none for nothing
 # ended. A token naming no session of the caller's ends nothing. Sign Out's call writes no row.
 python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
+# An Administrator ends one of a person's sessions (0212). person_sessions() lists what the
+# person's own list shows them, but which one is in use, newest activity first; only an
+# Administrator may call it. end_person_session() ends that one session with its refresh tokens,
+# leaves the person's others and other people's alone, and the API refuses the ended token. One
+# SESSIONS_ENDED row in the person's lane names the Administrator, with a count of 1 and the
+# session as the list showed it, the shape end_my_session() writes. Another person's session, a
+# missing one, your own, an unknown person and a machine identity are refused with no row; a
+# removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
+# Other Sessions. Every test rolls back.
+python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
