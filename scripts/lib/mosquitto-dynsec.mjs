@@ -94,16 +94,18 @@ export function directoryTopicFilter(prefix) {
   return `${clean}/#`;
 }
 
-// Publish on `topic` for one role, and nothing else: the role writes the tree and nothing on the
-// platform reads it as that role. Returns a NEW policy; applying it twice is a no-op. reconcile
+// `acltypes` on `topic` for one role, and nothing else: publish alone by default, for a role that
+// writes the tree and never reads it. Returns a NEW policy; applying it twice is a no-op. reconcile
 // replaces a stored role whole, so a broker loses an ACL at the first boot after this stops
 // granting it.
-function withSubtreeGrant(policy, rolename, topic, what) {
+function withSubtreeGrant(policy, rolename, topic, what, acltypes = ['publishClientSend']) {
   const roles = (policy?.roles || []).map((role) => {
     if (role.rolename !== rolename) return role;
     const acls = role.acls || [];
-    const already = acls.some((a) => a.acltype === 'publishClientSend' && a.topic === topic);
-    return already ? role : { ...role, acls: [...acls, { acltype: 'publishClientSend', topic, allow: true }] };
+    const missing = acltypes.filter((acltype) => !acls.some((a) => a.acltype === acltype && a.topic === topic));
+    return missing.length === 0
+      ? role
+      : { ...role, acls: [...acls, ...missing.map((acltype) => ({ acltype, topic, allow: true }))] };
   });
   if (!roles.some((r) => r.rolename === rolename)) {
     throw new CredentialError(
@@ -138,6 +140,17 @@ export function unsTopicFilter(root) {
 
 export function withUnsGrant(policy, root) {
   return withSubtreeGrant(policy, UNS_ROLE, unsTopicFilter(root), 'the Unified Namespace');
+}
+
+// The role a consumer outside the platform holds, and its read of the same subtree: subscribe and
+// receive, never publish, from the root the writer's grant is derived from.
+export const UNS_READER_ROLE = 'subscriber';
+
+export function withUnsReadGrant(policy, root) {
+  return withSubtreeGrant(
+    policy, UNS_READER_ROLE, unsTopicFilter(root), 'the Unified Namespace read',
+    ['subscribePattern', 'publishClientReceive'],
+  );
 }
 
 // A role generated per gateway before 2.1: gateway-<sparkplug_id>, and nothing near it.
