@@ -1566,14 +1566,14 @@ class TokenUseRecorder:
                 self.failed += 1
                 first, self._failing = not self._failing, True
             if first:
-                logger.warning("could not record a token's use (%s); later failures are counted, "
+                logger.warning("Last Used could not be recorded (%s); later failures are counted, "
                                "not logged, until one succeeds", exc)
         else:
             with self._lock:
                 self.recorded += 1
                 recovered, self._failing = self._failing, False
             if recovered:
-                logger.info("recording token use again (%d failed in all)", self.failed)
+                logger.info("Last Used is recorded again (%d failed in all)", self.failed)
         return True
 
     def run(self) -> None:
