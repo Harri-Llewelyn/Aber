@@ -210,6 +210,36 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 25. A session a person ended themselves. end_my_session() records the session as
+// list_my_sessions() returned it, and the Audit Trail names it with sessionLabel()
+// (utils/sessions.js), the Sessions list's own words. A field sessionLabel() reads that the row
+// lacks makes every recorded session "Not recorded"; a field the list does not return is one the
+// row was never meant to keep, such as an address.
+{
+  const list = lastDefinition('CREATE OR REPLACE FUNCTION public.list_my_sessions()', '$$;', 'list_my_sessions() in the applied chain');
+  const returned = list && need(list.body, /RETURNS TABLE\(([\s\S]*?)\)\s*LANGUAGE/, `the columns list_my_sessions() returns (${list.file})`);
+  const columns = returned ? returned[1].split(',').map((c) => c.trim().split(/\s+/)[0]) : null;
+  const end = lastDefinition('CREATE OR REPLACE FUNCTION public.end_my_session(', '$$;', 'end_my_session() in the applied chain');
+  const built = end && need(end.body, /jsonb_build_object\(([^;]*?)\)\s*INTO v_session/, `the session end_my_session() records (${end.file})`);
+  const recorded = built ? [...built[1].matchAll(/'([a-z_]+)'\s*,/g)].map((m) => m[1]) : null;
+  const labelBody = need(read('frontend/src/utils/sessions.js'), /export function sessionLabel\(session\) \{([\s\S]*?)\n\}/, 'sessionLabel() in frontend/src/utils/sessions.js');
+  const labelReads = labelBody ? [...new Set([...labelBody[1].matchAll(/session\??\.([a-z_]+)/g)].map((m) => m[1]))] : null;
+  need(read('frontend/src/components/tabs/AuditTrailTab.jsx'), /import \{ sessionLabel \} from '\.\.\/\.\.\/utils\/sessions'/, 'the Audit Trail naming a recorded session with sessionLabel()');
+  if (columns && recorded && labelReads) {
+    const before = problems.length;
+    for (const key of recorded.filter((k) => !columns.includes(k))) {
+      problems.push(`sessionsEnded: end_my_session() (${end.file}) records ${key}, which list_my_sessions() (${list.file}) does not return`);
+    }
+    for (const field of labelReads.filter((f) => !recorded.includes(f))) {
+      problems.push(`sessionsEnded: sessionLabel() reads ${field}, which end_my_session() (${end.file}) does not record`);
+    }
+    if (recorded.length === 0) problems.push(`sessionsEnded: found no field end_my_session() (${end.file}) records`);
+    if (problems.length === before) {
+      ok.push(`sessionsEnded: end_my_session() records ${recorded.join(', ')} of list_my_sessions()'s columns, and sessionLabel() reads ${labelReads.join(', ')}`);
+    }
+  }
+}
+
 // 2. Gateway staleness, derived at read time on both sides, so the two thresholds must agree. The
 // view is built inside `ensure_gateway_status_view()`, which later migrations call after adding a
 // gateways column; the latest redeclaration is the one that runs.
