@@ -1,0 +1,34 @@
+# The disk every k3d job reclaims before it creates its cluster: ci.yml's three and the restore
+# rehearsal's. One action, so the four delete the same folders.
+#
+# The runner starts with ~14 GB free; the built images, their copies in the k3d node's containerd
+# and the pulled images do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as
+# `context deadline exceeded` on `helm install`, or as ImagePullBackOff for an imported image the
+# kubelet's image GC deleted. Removing unused toolchains frees ~22 GB.
+name: Reclaim Runner Disk
+description: >-
+  Delete the runner's unused toolchains, all at once, then prune Docker's images, printing the free
+  space before and after.
+runs:
+  using: composite
+  steps:
+    - name: Reclaim Runner Disk
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "--- before"
+        df -h / | tail -1
+        # The deletes run side by side. The runner image changes between releases, so a delete
+        # never fails the step: `rm -f` passes over a missing folder, and `wait` with no operand
+        # returns 0 whatever each delete returned.
+        sudo rm -rf /usr/local/lib/android      &   # ~9 GB
+        sudo rm -rf /usr/share/dotnet           &   # ~2 GB
+        sudo rm -rf /opt/ghc                    &   # ~1 GB
+        sudo rm -rf /usr/local/.ghcup           &   # ~2 GB
+        sudo rm -rf /opt/hostedtoolcache/CodeQL &   # ~6 GB
+        sudo rm -rf /usr/local/share/powershell &   # ~1 GB
+        sudo rm -rf /usr/share/swift            &   # ~1 GB
+        wait
+        docker image prune -af || true
+        echo "--- after"
+        df -h / | tail -1

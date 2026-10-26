@@ -1728,25 +1728,11 @@ jobs:
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
-      # This job is disk-bound and the failure does not look like it. The runner starts with ~14 GB
-      # free; twelve built images, a second copy in the k3d node's containerd, and a dozen pulled images
-      # do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as `context deadline
-      # exceeded` on `helm install`. Removing unused toolchains costs seconds. `|| true` on each: the
-      # runner image changes between releases.
+      # This job is disk-bound and the failure does not look like it: twelve built images, a second
+      # copy in the k3d node's containerd, and a dozen pulled images do not fit in what the runner
+      # starts with. The action lists what it deletes and what running short looks like.
       - name: Reclaim Runner Disk Before Creating The Cluster
-        run: |
-          echo "--- before"
-          df -h / | tail -1
-          sudo rm -rf /usr/local/lib/android      || true   # ~9 GB
-          sudo rm -rf /usr/share/dotnet           || true   # ~2 GB
-          sudo rm -rf /opt/ghc                    || true   # ~1 GB
-          sudo rm -rf /usr/local/.ghcup           || true   # ~2 GB
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true   # ~6 GB
-          sudo rm -rf /usr/local/share/powershell || true   # ~1 GB
-          sudo rm -rf /usr/share/swift            || true   # ~1 GB
-          docker image prune -af                  || true
-          echo "--- after"
-          df -h / | tail -1
+        uses: ./.github/actions/reclaim-runner-disk
 
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
@@ -2040,12 +2026,7 @@ jobs:
       # The same reclaim as k8s-validation, for the same reason: the built images, their copies in
       # the node and the pulled ones do not fit in what the runner starts with.
       - name: Reclaim Runner Disk Before Creating The Cluster
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true
-          docker image prune -af || true
-          df -h / | tail -1
+        uses: ./.github/actions/reclaim-runner-disk
 
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
@@ -2102,12 +2083,7 @@ jobs:
           version: v3.16.3
 
       - name: Reclaim Runner Disk Before Creating The Cluster
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true
-          docker image prune -af || true
-          df -h / | tail -1
+        uses: ./.github/actions/reclaim-runner-disk
 
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
