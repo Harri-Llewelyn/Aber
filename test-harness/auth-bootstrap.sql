@@ -111,18 +111,44 @@ ALTER TABLE auth.users
   ADD COLUMN IF NOT EXISTS phone_change_token         varchar(255) DEFAULT '',
   ADD COLUMN IF NOT EXISTS reauthentication_token     varchar(255) DEFAULT '';
 
+-- `auth.oauth_clients` is GoTrue's: one row per service that signs people in through it (Grafana,
+-- Node-RED, Studio, the forge). A session a service started names its client (0206 lists it by
+-- the client's name). The columns are the subset the chain reads, with GoTrue's types; 0197
+-- deletes a `dynamic` client, so DELETE as well.
+DO $$
+BEGIN
+  CREATE TYPE auth.oauth_registration_type AS ENUM ('dynamic', 'manual');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$$;
+CREATE TABLE IF NOT EXISTS auth.oauth_clients (
+  id                uuid PRIMARY KEY,
+  registration_type auth.oauth_registration_type NOT NULL,
+  client_name       text,
+  deleted_at        timestamptz
+);
+GRANT SELECT, INSERT, DELETE ON auth.oauth_clients TO postgres;
+
 -- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
 -- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as
--- GoTrue does. The chain reads `id`, `user_id` and `oauth_client_id`; every column is GoTrue's,
--- with its types.
+-- GoTrue does. The columns are the ones the chain reads (0206, 0208), with GoTrue's types:
+-- `refreshed_at` has no time zone (GoTrue writes UTC). `oauth_client_id` names the OAuth client a
+-- session was issued to, NULL for a sign-in to the dashboard itself. GoTrue references
+-- auth.oauth_clients; the fixture does not, so a suite can start a door session without registering
+-- the client. The ALTER gives a kept container (`--reuse`) the columns added after it was made.
 CREATE TABLE IF NOT EXISTS auth.sessions (
-  id         uuid PRIMARY KEY,
-  user_id    uuid NOT NULL,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  id              uuid PRIMARY KEY,
+  user_id         uuid NOT NULL,
+  created_at      timestamptz DEFAULT now(),
+  updated_at      timestamptz DEFAULT now(),
+  not_after       timestamptz,
+  refreshed_at    timestamp,
+  user_agent      text,
+  oauth_client_id uuid
 );
+ALTER TABLE auth.sessions
+  ADD COLUMN IF NOT EXISTS not_after       timestamptz,
+  ADD COLUMN IF NOT EXISTS refreshed_at    timestamp,
+  ADD COLUMN IF NOT EXISTS user_agent      text,
+  ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
 GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;
--- The OAuth client a session was issued to, NULL for a sign-in to the dashboard itself: how 0208
--- tells the Studio and forge doors' sessions apart. GoTrue references auth.oauth_clients; the
--- fixture does not, so a suite can start a door session without registering the client.
-ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS oauth_client_id uuid;

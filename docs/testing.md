@@ -642,6 +642,13 @@ python supabase/migrations/test_service_principal_revocation.py
 # person's other sessions, and every token that names no session, are still served. A removed
 # person is told their access was removed. Every test rolls back.
 python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py
+# A person's own sessions (0206). list_my_sessions() returns the caller's and nobody else's, the
+# one their token names first, a service's by its name, refreshed_at read as UTC, and no address
+# or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses
+# the session in use, and answers another person's as a missing one. Every person role may call
+# both; a machine identity, an account with no role, anon and service_role may not. No audit row.
+python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
+
 # Door sessions at Sign Out (0208): end_my_door_sessions() ends the caller's Studio and forge door
 # sessions, in every browser, and says how many. The caller's dashboard, Grafana and Node-RED
 # sessions and other people's door sessions survive, and the dashboard's token is still served. A

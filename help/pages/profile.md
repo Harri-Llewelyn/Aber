@@ -1,6 +1,6 @@
 ## What this page is for
 
-This page is yours. It shows the account you are signed in with, and how the dashboard looks to you. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
+This page is yours. It shows the account you are signed in with, how the dashboard looks to you, and where you are signed in. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
 
 To open it, select your avatar at the foot of the sidebar, then select **Profile**.
 
@@ -17,7 +17,10 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
-- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, change your password.
+- **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
+- **End**, on a row of the **Security** tab, signs that session out. The session you are using has no **End**: use **Sign Out** for it.
+- **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens.
+- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself
@@ -67,6 +70,27 @@ Your display name is shown first wherever you appear. Your email address stays t
 **A new name shows everywhere at once.** Pages read the name when they open. So a person who changes their name is shown under the new one, even beside things they did before.
 
 **The email address beside it is the one they had at the time.** Approvals keeps the address a proposal was made from. Archived Entities keeps the address of the person who deleted the entity. The Audit Trail and People show the address the account has now.
+
+## Your sessions
+
+A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED, Studio and the forge, and any program that signs in as you.
+
+The **Security** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
+
+- **Where** names the browser and the system, such as "Chrome on Windows". A script or other program shows as "A program". Point at the name to see what the browser reported in full.
+- **A service's session** shows the service, such as "Grafana", marked **Service**. Studio and the forge are listed the same way. The service signed you in from its own server, so the list cannot say which device you used.
+- **No address is recorded** for any session.
+- **Started** is when you signed in. **Last active** is when the session last renewed its access. An open dashboard renews about once an hour.
+
+What ending a session does:
+
+- **The API refuses it at once.** A dashboard open with that session asks for a sign-in on its next request.
+- **Studio and the forge** refuse it on their next request.
+- **Node-RED's editor** signs you out within a minute.
+- **Grafana** signs you out when its access runs out: within an hour on a standard install.
+- **Nothing is written to the Audit Trail.** Ending your own session changes nothing for anyone else.
+
+**A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
 
 ## What is not here
 
