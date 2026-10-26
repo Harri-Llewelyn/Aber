@@ -803,7 +803,9 @@ security policy that pins uids must now allow 101 for Envoy too.
 
 **With `backup.includeStorage` on (and `backup.enabled`), Storage is unchanged.** The backup service
 mounts the storage volume, and while it does the kubelet cannot make the volume writable for another
-user. So Storage keeps 1.3.x's pod context and runs as root. There is nothing to do.
+user. So Storage keeps 1.3.x's pod context and runs as root. There is nothing to do. 1.7.0 runs it as
+1000 here too: see
+[From 1.7.0, Storage runs as 1000 with `backup.includeStorage` too](#from-170-storage-runs-as-1000-with-backupincludestorage-too).
 
 **Without it, Storage runs as 1000, and keeps using the objects 1.3.x stored as root.** At each start
 the kubelet makes them writable by group 1000 (`fsGroupChangePolicy: Always`), at about a second per
@@ -1250,6 +1252,40 @@ calls it before then.
 The identity it issues tokens for by default was called **MCP read-only client** on the Access
 Control page. It is now **Read-only API client**. Its id has not changed, so a token already issued
 keeps working.
+
+### From 1.7.0, Storage runs as 1000 with `backup.includeStorage` too
+
+Before 1.7.0, a site with `backup.includeStorage` on (and `backup.enabled`) ran Storage as root. From
+1.7.0, Storage runs as uid 1000 on every site.
+
+**With the backup service on (`backupService.enabled`), restart Storage once after the upgrade.**
+Wait until the backup service has rolled and no backup Job is running, then restart:
+
+```bash
+kubectl -n aber rollout status deploy/backup-service
+kubectl -n aber get jobs -l app.kubernetes.io/component=backup-storage-archive   # wait for "No resources found"
+kubectl -n aber rollout restart deploy/supabase-storage
+```
+
+Why: at each start, the kubelet makes the files Storage holds writable by uid 1000. It skips that
+step if another pod has the volume mounted. The old backup service kept the volume mounted for as
+long as it ran, and the upgrade can start the new Storage before the old backup service has gone.
+Uploads and deletes beside older files would then fail with `EACCES`. The restart fixes that, and it
+is needed once.
+
+**With the nightly job instead of the backup service, there is nothing to do,** unless the upgrade
+ran while that job was running. Then restart Storage once the job has finished.
+
+What else changes:
+
+- The backup service no longer mounts the storage volume. For each backup it starts one short Job,
+  `backup-storage-archive`, which archives the files and is then deleted. The backup's files, its
+  manifest and the restore steps are unchanged.
+- The backup service may now create, read and delete Jobs, and list pods, in the release's
+  namespace.
+- A Job still running after `backupService.storageArchive.timeoutSeconds` (an hour) is stopped, and
+  its backup fails, saying so.
+- A namespace that enforces Pod Security *restricted* now admits Storage.
 
 ### From 1.7.0, a cell's dashboard address is one of its Attached Links
 

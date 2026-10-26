@@ -52,8 +52,9 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 - **As a site deploys it:** the example as it stands.
 - **Every workload on:** the example with `scripts/lint/config-scan-every-workload.yaml` on top.
   That file turns on each workload the example leaves off: the backup service (with every volume
-  it can archive, and the Role that reads the CA), the release check, the load test, the
-  conformance Jobs, the Alloy log forward and both databases' physical backups.
+  it can archive, the storage archive CronJob, and the Roles that read the CA and make the Jobs),
+  the release check, the load test, the conformance Jobs, the Alloy log forward and both
+  databases' physical backups.
 - **The workloads a switch replaces:** the second render with
   `scripts/lint/config-scan-replaced-workloads.yaml` on top. That file turns off each switch that
   replaces part of a workload, so the part renders with everything else on:

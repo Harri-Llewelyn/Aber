@@ -9,8 +9,9 @@
 # Any other value is a placeholder the chart refuses to render without.
 
 backup:
-  # Each mounts a PVC into the backup service; the forge and the broker run it as root. The backup
-  # CronJob gives way to the backup service: the third render has it, with the storage volume.
+  # The forge and the broker each mount a PVC into the backup service and run it as root; the
+  # storage objects render the suspended CronJob its archive Jobs are made from, and its Role. The
+  # backup CronJob gives way to the backup service: the third render has it, with the storage volume.
   includeStorage: true
   includeForge: true
   includeBroker: true

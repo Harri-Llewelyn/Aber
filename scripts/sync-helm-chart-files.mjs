@@ -157,7 +157,8 @@ const MIRRORS = [
   // NOR ARE THE BROKER'S RECONCILE, THE CREDENTIAL SERVICE OR THE BACKUP SERVICE, for the same
   // reason: gateway-credential/Dockerfile copies scripts/mosquitto-dynsec-init.mjs,
   // scripts/gateway-credential-service.mjs and the three scripts/lib/mosquitto-*.mjs they import,
-  // and backup-service/Dockerfile copies scripts/backup-service.mjs.
+  // and backup-service/Dockerfile copies scripts/backup-service.mjs and the
+  // scripts/lib/backup-storage-archive.mjs it imports.
   {
     source: 'loki',
     dest: 'loki',

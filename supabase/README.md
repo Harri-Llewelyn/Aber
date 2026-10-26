@@ -6362,7 +6362,7 @@ directory per backup on its own volume (the backup PVC), named by the UTC stamp:
   supabase-db-20260911T143000Z.dump         # or .sql.gz, with backupService.format=plain
   timescaledb-20260911T143000Z.dump
   vault-key-20260911T143000Z.txt            # pgsodium's root key, read through the dump's session
-  storage-objects-20260911T143000Z.tar.gz   # absent when no storage volume is mounted
+  storage-objects-20260911T143000Z.tar.gz   # absent without backup.includeStorage
   forge-20260911T143000Z.tar.gz             # absent when no forge volume is mounted
   broker-20260911T143000Z.tar.gz            # absent when no broker volume is mounted
   ca-20260911T143000Z.tar.gz                # absent when backup.ca names no Secret
@@ -6808,6 +6808,36 @@ plain format is what lets a restore replace the auth and storage schemas the ima
 custom format carries the same as a flag at restore time. A component whose directory is not
 mounted is absent from the backup and the manifest says so; an empty path variable disables one
 deliberately.
+
+**The storage objects are tarred by a Job, not by the service** (`backup.includeStorage`). On a
+`local` volume the kubelet applies a pod's `fsGroup` only when no other pod has the volume
+mounted. A service holding the storage volume for its whole life therefore left `supabase-storage`
+with objects an earlier root server wrote, and the chart ran it as root until 1.7.0
+(deploy/k8s/README.md, *Users*). Now the volume is mounted for one tar per backup:
+
+- The service reads a suspended CronJob the chart renders, `<release>-backup-storage-archive`, and
+  creates one Job from its template. The Job's name carries the backup's stamp. It gets a required
+  node affinity on the service's own node, since both volumes are ReadWriteOnce and the service
+  follows the storage pod's node, and the two paths it writes. The pod spec stays in the chart,
+  where the values, the scans and the drift checks read it.
+- The Job runs as 100:101, with the storage pod's group as a supplementary group, no token and no
+  network. Its one command is the tar the service runs for every other archive, into the backup's
+  partial directory, so the archive, its name and the manifest are what they were. A service
+  running as root (the forge or the broker included) has no `CAP_CHOWN`, so it gives that
+  directory to group 101, which it is a member of.
+- tar's stderr goes to a file beside the archive, which the service reads and removes. Exit 1,
+  "file changed as we read it", is a warning in the service's log, as before. A failed Job, or one
+  past `backupService.storageArchive.timeoutSeconds` (its `activeDeadlineSeconds`; the service
+  waits a minute longer), fails the backup with tar's last lines, the Job's reason and its pod's
+  state.
+- The service deletes the Job however it ends. Jobs a stopped service left are deleted at its next
+  start, and their TTL is an hour.
+- Its Role in the release's namespace: `get` on that CronJob by name, `create`, `get`, `list` and
+  `delete` on Jobs, and `list` on pods. No `pods/exec`. RBAC cannot narrow `create` to one pod
+  spec, so creating Jobs reaches as far as creating pods in the namespace.
+
+A storage pod that starts while a Job runs still gets no walk. That matters only until the first
+walk after the upgrade to 1.7.0, which gives every directory to group 1000.
 
 **The forge's SQLite database** is copied with sqlite3's online backup, which is consistent while
 Gitea writes, into a staging directory, and appended at `gitea/gitea.db` inside the archive where a
