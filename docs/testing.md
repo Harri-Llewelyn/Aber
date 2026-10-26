@@ -529,6 +529,15 @@ python supabase/migrations/test_a_cell_s_dashboard_address_is_one_of_its_links.p
 # a service_identity alert with no wire id, a replay of 0001 keeps both widened CHECKs over one, and
 # only an Administrator reads it there and in platform_alerts_active. Every test rolls back.
 python supabase/migrations/test_a_service_token_warns_before_it_expires.py
+# A service token shows when it was last used (0209). Each call runs as PostgREST runs it, the hook
+# and then record_service_token_use() with the token's claims: a minted token's use is recorded to
+# the hour, a second call in the same hour leaves the row's version and lock alone, a later hour
+# moves it forward and nothing moves it back. A jti with no mint, another identity's jti, a
+# person's session token, a key and claims naming nobody record nothing, and anon and service_role
+# are refused. The hook refuses a revoked token and a withdrawn identity first. An Administrator
+# and an Auditor read the table, nobody else does, and nobody writes it directly. A replay of 0209
+# keeps what was recorded. Every test rolls back.
+python supabase/migrations/test_a_service_token_shows_when_it_was_last_used.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,

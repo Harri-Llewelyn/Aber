@@ -1687,6 +1687,49 @@ the hook's owner may read it and that a session that does not exist is refused w
 db lane. `test_sign_out_ends_one_session.py` holds it through the gateway in the stack lane, with the
 person's other session still served.
 
+### A service token shows when it was last used (0209)
+
+An Administrator looking at a machine identity's active tokens could not tell which ones a client
+still presents, so could not withdraw the forgotten ones with confidence. The token list now has a
+**Last Used** column. The i3X server records it: the first time it accepts each token in each hour,
+it calls the database as the caller. So it covers the i3X server's clients, MCP hosts through it
+included. A client that calls PostgREST directly is not recorded.
+
+- **`service_token_last_use` has one row per token ever recorded:** its `jti`, its identity
+  (`principal_id`) and `last_used_at`, the start of the latest UTC hour in which the i3X server
+  accepted it. It is not audited. An audit row per token per hour is the write this avoids, and
+  `audit_trail` only grows. The token's `TOKEN_MINTED` row stays its record.
+- **`record_service_token_use()` is the one writer.** The i3X server calls it through
+  `POST /rest/v1/rpc/record_service_token_use` with the caller's own token. PostgREST runs a GET
+  read-only, so it is a POST. It takes no argument. It reads `jti` and `sub` from the verified
+  claims, so a caller records its own token and nothing else.
+- **It records only a minted token.** The `jti` needs a `TOKEN_MINTED` row whose `entity_id` is
+  the token's `sub`. A person's session token, the publishable and secret keys and a token minted
+  for another identity record nothing. It reads `TOKEN_MINTED` rows as `0204` does: the
+  `security` lane's last `service_token_max_days() + 1` days, through `idx_audit_trail_domain`.
+- **A second call in the same hour writes nothing.** The function reads the token's row first and
+  returns when it already names this hour. That takes no row lock either, and skips the audit read.
+  Two replicas racing on a new hour meet the upsert's `WHERE`, so the second writes nothing.
+  `last_used_at` never moves back.
+- **The hook answers first.** PostgREST runs `auth_pre_request()` before the call, so a revoked
+  token, a withdrawn identity and an ended session are refused before anything is recorded.
+- **Granted to `authenticated` only.** Machine identities' tokens carry that role.
+  `anon` and `service_role` may not call it, and nobody writes the table directly.
+- **An Administrator or an Auditor reads it,** under the policy
+  `service_token_last_use_select_privileged`: the same people who read the token list's other
+  parts, the `security` lane of the Audit Trail and `revoked_service_tokens`. The dashboard reads
+  it beside the `TOKEN_MINTED` rows in `listServiceTokens()`.
+
+The three environment-key identities (Service_Ingestor, Service_Playback and Service_ReleaseCheck)
+call PostgREST directly and never through i3X. The token list shows their Last Used as **Not
+recorded**, rather than Never, so nobody revokes a live daemon key thinking it unused.
+
+The file's self-check asserts the table's RLS, policy and grants, that the function is a volatile
+`SECURITY DEFINER` with its `search_path` pinned, that only `authenticated` may run it, and that a
+call with no claims, or naming no recorded token, records nothing.
+`test_a_service_token_shows_when_it_was_last_used.py` holds it in the db lane, and
+`test_a_token_s_use_is_recorded.py` holds it through the i3X server in the stack lane.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -2066,6 +2109,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes as `service_role` |
+| `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
 ### The two privileged roles, and what separates them (archived migration 0069)

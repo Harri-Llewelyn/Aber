@@ -720,6 +720,15 @@ export const SUITES = {
       'platform_alerts takes a service_identity alert, a replay of 0001 keeps both widened CHECKs ' +
       'over one, and only an Administrator reads it.',
   },
+  'supabase/migrations/test_a_service_token_shows_when_it_was_last_used.py': {
+    lanes: ['db'],
+    why:
+      '0209. A call made as PostgREST makes it records a minted token\'s use to the hour, and a ' +
+      'second call in the same hour writes nothing, not even a row lock. A jti with no mint, ' +
+      'another identity\'s token, a person\'s session, a key and anon record nothing. The hook ' +
+      'refuses a revoked token first. Only an Administrator or an Auditor reads it, and a replay ' +
+      'keeps it.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:
