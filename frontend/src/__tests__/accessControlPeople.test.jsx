@@ -21,7 +21,9 @@ vi.mock('../api', () => ({
     managePeople: vi.fn(),
     setDisplayName: vi.fn(),
     personSessionSummary: vi.fn(),
+    personSessions: vi.fn(),
     endPersonSessions: vi.fn(),
+    endPersonSession: vi.fn(),
     changePersonEmail: vi.fn(),
     // The rest of the page's reads, answered empty: this suite is about the People tab.
     listGatewayCredentials: vi.fn(),
@@ -81,9 +83,12 @@ function renderPeople(showToast = vi.fn()) {
   return showToast
 }
 
-/** The table row holding this email. An open drawer shows the email too, so only the table is searched. */
+/**
+ * The table row holding this email. An open drawer shows the email too, and may hold a table of
+ * sessions, so only the People table is searched.
+ */
 async function row(email) {
-  const table = await screen.findByRole('table')
+  const table = (await screen.findAllByRole('table')).find(t => !t.closest('.context-panel'))
   return (await within(table).findByText(email)).closest('tr')
 }
 
@@ -554,7 +559,8 @@ describe('a person\'s drawer', () => {
   it('offers every action, two to a row, with Remove Access last and on its own', async () => {
     renderPeople()
     const drawer = await openDrawer('operator@site.test')
-    const names = drawer.getAllByRole('button').map(b => b.textContent.trim()).filter(Boolean)
+    const actions = within(drawer.getByText('Actions').closest('.context-panel-actions'))
+    const names = actions.getAllByRole('button').map(b => b.textContent.trim()).filter(Boolean)
     expect(names).toEqual(['Change Name', 'Change Email', 'Change Role', 'Set New Password', 'End Sessions', 'Remove Access'])
     expect(drawer.getByRole('button', { name: 'Remove Access' })).toHaveClass('context-action-danger')
     expect(drawer.getByRole('button', { name: 'Change Role' })).not.toHaveClass('context-action-danger')
@@ -576,7 +582,8 @@ describe('a person\'s drawer', () => {
     expect(mine.getByRole('button', { name: 'Change Role' })).toBeDisabled()
     const end = mine.getByRole('button', { name: 'End Sessions' })
     expect(end).toBeDisabled()
-    expect(end).toHaveAccessibleDescription('You cannot end your own sessions here. Use Sign Out in the account menu.')
+    expect(end).toHaveAccessibleDescription(
+      'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Security tab.')
     expect(mine.getByRole('button', { name: 'Remove Access' })).toBeDisabled()
     expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
   })
@@ -636,6 +643,166 @@ describe('ending a person\'s sessions', () => {
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'End Sessions' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith('insufficient privileges to end a person\'s sessions', 'error'))
+  })
+})
+
+describe('a person\'s sessions, listed in their drawer', () => {
+  const CHROME = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+  const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0'
+  const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000).toISOString()
+  // As person_sessions() returns them: no is_current, since none is the Administrator's browser.
+  const theirs = () => [
+    { id: 's-wall', service_name: null, user_agent: FIREFOX, created_at: '2026-10-17T09:00:00Z', last_active_at: minutesAgo(30), not_after: null },
+    { id: 's-laptop', service_name: null, user_agent: CHROME, created_at: '2026-10-21T09:00:00Z', last_active_at: minutesAgo(5), not_after: null },
+    { id: 's-grafana', service_name: 'Aber Grafana', user_agent: 'Node-oauth', created_at: '2026-10-25T09:00:00Z', last_active_at: minutesAgo(120), not_after: null },
+  ]
+  const where = (tr) => tr.querySelector('.session-where').textContent
+  const listOf = (label) => screen.findByRole('region', { name: `${label}'s sessions` })
+  const rowsIn = async (list) => within(await within(list).findByRole('table')).getAllByRole('row').slice(1)
+
+  beforeEach(() => {
+    api.personSessions.mockResolvedValue(theirs())
+    api.endPersonSession.mockResolvedValue(undefined)
+  })
+
+  /** Opens their drawer and its list of sessions, and returns the drawer and the list. */
+  async function openList(email, label = email) {
+    const drawer = await openDrawer(email)
+    fireEvent.click(await drawer.findByRole('button', { name: /Show sessions/ }))
+    return { drawer, list: await listOf(label) }
+  }
+
+  it('are read only when the Sessions row is opened, newest first, in the Security tab\'s columns', async () => {
+    renderPeople()
+    const drawer = await openDrawer('operator@site.test')
+    await drawer.findByText(/^2 open, last active /)
+    expect(api.personSessions).not.toHaveBeenCalled()
+    const show = drawer.getByRole('button', { name: /Show sessions/ })
+    expect(show).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(show)
+    const list = await listOf('operator@site.test')
+    expect(api.personSessions).toHaveBeenCalledWith(OPERATOR)
+    expect(within(list).getAllByRole('columnheader').map(h => h.textContent)).toEqual(['Where', 'Started', 'Last active', 'Actions'])
+    const rows = await rowsIn(list)
+    expect(rows.map(where)).toEqual(['Chrome on Windows', 'Firefox on Linux', 'Grafana'])
+    expect(within(rows[2]).getByText('Service')).toBeInTheDocument()
+    // None of theirs is this browser, so every one has End.
+    expect(within(list).queryByText('This browser')).toBeNull()
+    for (const row of rows) {
+      expect(within(row).getByRole('button', { name: `End the session: ${where(row)}` })).toHaveTextContent('End')
+    }
+    // The summary stays above the list.
+    expect(drawer.getByText(/^2 open, last active /)).toBeInTheDocument()
+
+    const hide = drawer.getByRole('button', { name: /Hide sessions/ })
+    expect(hide).toHaveAttribute('aria-expanded', 'true')
+    expect(hide).toHaveAttribute('aria-controls', list.id)
+    fireEvent.click(hide)
+    await waitFor(() => expect(screen.queryByRole('region', { name: "operator@site.test's sessions" })).toBeNull())
+    expect(api.personSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it('is not offered for a person holding none, and says why it could not be read', async () => {
+    api.personSessionSummary.mockResolvedValueOnce({ open_sessions: 0, last_active_at: null })
+    renderPeople()
+    const none = await openDrawer('operator@site.test')
+    await waitFor(() => expect(none.getByText('Sessions').nextElementSibling).toHaveTextContent('None'))
+    expect(none.queryByRole('button', { name: /Show sessions/ })).toBeNull()
+
+    api.personSessions.mockRejectedValueOnce(new Error('insufficient privileges to list a person\'s sessions'))
+    const { list } = await openList('second@site.test')
+    expect(await within(list).findByText('insufficient privileges to list a person\'s sessions')).toBeInTheDocument()
+    expect(within(list).queryByRole('table')).toBeNull()
+  })
+
+  it('shuts when another person\'s drawer opens, and is not read for them', async () => {
+    renderPeople()
+    await openList('operator@site.test')
+    const other = await openDrawer('second@site.test')
+    expect(await other.findByRole('button', { name: /Show sessions/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('region', { name: /'s sessions$/ })).toBeNull()
+    expect(api.personSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it('lists a removed person\'s, which may be ended', async () => {
+    renderPeople()
+    await showRemoved()
+    const { list } = await openList('removed@site.test')
+    expect(api.personSessions).toHaveBeenCalledWith(REMOVED)
+    expect(within(list).getAllByRole('button', { name: /^End the session: / })[0]).toBeEnabled()
+  })
+
+  it('is not in your own drawer, which points to the Security tab on Profile instead', async () => {
+    renderPeople()
+    const mine = await openDrawer('me@site.test')
+    await mine.findByText(/^2 open, last active /)
+    expect(mine.queryByRole('button', { name: /Show sessions/ })).toBeNull()
+    const link = mine.getByRole('link', { name: 'Listed on Profile › Security' })
+    expect(link).toHaveAttribute('href', '/profile/security')
+    expect(link).toHaveAccessibleDescription('Your own sessions are listed on your Profile page\'s Security tab, where you can end one.')
+    expect(api.personSessions).not.toHaveBeenCalled()
+  })
+
+  it('End asks first, naming the person and the session, and ends nothing when cancelled', async () => {
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, display_name: 'Owain Operator' } : p)))
+    renderPeople()
+    const { list } = await openList('operator@site.test', 'Owain Operator')
+    fireEvent.click(within(list).getByRole('button', { name: 'End the session: Chrome on Windows' }))
+    const dialog = await screen.findByRole('dialog', { name: 'End a session for Owain Operator (operator@site.test)' })
+    expect(dialog).toHaveAccessibleDescription(
+      'End Owain Operator\'s session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.')
+    expect(within(dialog).getByRole('button', { name: 'End Session' })).toBeInTheDocument()
+    expect(document.activeElement).toBe(dialog)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(api.endPersonSession).not.toHaveBeenCalled()
+  })
+
+  it('ends that one session on End Session, says which, and reads the list and the count again', async () => {
+    const toast = renderPeople()
+    const { drawer, list } = await openList('operator@site.test')
+    await rowsIn(list)
+    api.personSessions.mockResolvedValue(theirs().filter(s => s.id !== 's-grafana'))
+    api.personSessionSummary.mockResolvedValue({ open_sessions: 1, last_active_at: '2026-10-24T10:00:00Z' })
+
+    fireEvent.click(within(list).getByRole('button', { name: 'End the session: Grafana' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveAccessibleDescription(/^End operator@site\.test's session in Grafana, last active 2 hours ago\? Grafana has to sign them in again\.$/)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'End Session' }))
+
+    await waitFor(() => expect(api.endPersonSession).toHaveBeenCalledWith(OPERATOR, 's-grafana'))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(
+      'Session ended for operator@site.test: Grafana', 'success', { to: personUrl('operator@site.test') }))
+    await waitFor(async () => expect((await rowsIn(list)).map(where)).toEqual(['Chrome on Windows', 'Firefox on Linux']))
+    await waitFor(() => expect(drawer.getByText(/^1 open, last active /)).toBeInTheDocument())
+    expect(api.personSessions).toHaveBeenCalledTimes(2)
+    expect(api.endPersonSessions).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows the database refusing it, and reads the list again', async () => {
+    const refusal = 'session s-laptop not found: it has ended, or it is not this person\'s'
+    api.endPersonSession.mockRejectedValue(new Error(refusal))
+    const toast = renderPeople()
+    const { list } = await openList('operator@site.test')
+    fireEvent.click(within(list).getByRole('button', { name: 'End the session: Chrome on Windows' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Session' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(refusal, 'error'))
+    await waitFor(() => expect(api.personSessions).toHaveBeenCalledTimes(2))
+  })
+
+  it('is read again after End Sessions ends them all', async () => {
+    api.endPersonSessions.mockResolvedValue(3)
+    renderPeople()
+    const { drawer, list } = await openList('operator@site.test')
+    await rowsIn(list)
+    api.personSessions.mockResolvedValue([])
+    fireEvent.click(drawer.getByRole('button', { name: 'End Sessions' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
+    expect(await within(list).findByText('They have no open sessions.')).toBeInTheDocument()
+    expect(api.personSessions).toHaveBeenCalledTimes(2)
   })
 })
 

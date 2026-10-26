@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { api } from '../../api'
 import { Badge } from '../common/Badge'
@@ -6,12 +6,14 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import {
-  IconArchive, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw, IconShieldAlert, IconShieldCheck,
-  IconUser,
+  IconArchive, IconChevronDown, IconChevronUp, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw,
+  IconShieldAlert, IconShieldCheck, IconUser,
 } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
+import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
+import { SessionsTable } from '../common/SessionsTable'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn, severityRank } from '../../utils/tableSort'
@@ -26,6 +28,7 @@ import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
 import { personUrl, tabUrl } from '../../routes'
 import { personLabel } from '../../utils/displayName'
+import { endSessionQuestion, sessionLabel, sortSessions } from '../../utils/sessions'
 import {
   NO_ROLE,
   PERSON_ROLES,
@@ -54,6 +57,12 @@ const PEOPLE_SORT = {
 /** What a person is found by in the address (`?person=`): their email, which personUrl() writes. */
 const personKey = (p) => p.email || p.user_id
 
+/** A person in a few words, as the drawer's title names them: their name, else their email. */
+const nameOf = (p) => p.display_name || p.email || p.user_id
+
+/** The drawer's list of sessions, shut. */
+const CLOSED_LIST = { userId: null, rows: undefined, error: null }
+
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, re-address, sign out, remove or restore, or to give a new
@@ -62,10 +71,12 @@ const personKey = (p) => p.email || p.user_id
  * with their email beside it, or by the email alone.
  *
  * Roles go through set_person_role(), names through set_display_name(), and ending sessions
- * through end_person_sessions(); adding, removing, restoring, a new password and a new address go
- * through manage-people, which holds GoTrue's secret key. The database refuses your own role,
- * access, password, address and sessions, and the last Administrator who can sign in; the
- * controls are disabled for those with the reason as their tooltip.
+ * through end_person_sessions() or, one at a time from the drawer's list of them,
+ * end_person_session(); adding, removing, restoring, a new password and a new address go through
+ * manage-people, which holds GoTrue's secret key. The database refuses your own role, access,
+ * password, address and sessions, and the last Administrator who can sign in; the controls are
+ * disabled for those with the reason as their tooltip, and your own drawer points to Profile for
+ * your sessions.
  *
  * The list is searched by name and email and filtered by role and status, in the browser:
  * list_people() returns every account, and a site has tens of them. A removed account is hidden until Show
@@ -80,7 +91,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [adding, setAdding] = useState(false)
-  // { act: 'remove' | 'restore' | 'password' | 'sessions', person } while the confirmation is open.
+  // { act: 'remove' | 'restore' | 'password' | 'sessions', person } while the confirmation is
+  // open, or { act: 'session', person, session } for one session from the drawer's list.
   const [confirming, setConfirming] = useState(null)
   // { email, password } while a new password is on screen; gone when its dialog closes.
   const [newPassword, setNewPassword] = useState(null)
@@ -90,6 +102,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   const [reroling, setReroling] = useState(null)
   // The open drawer's session count, for the person it was read for.
   const [sessions, setSessions] = useState({ userId: null, summary: null, error: null })
+  // The drawer's list of sessions while it is open: whose, the rows (undefined until the first read
+  // answers) and why the last read failed. Read when opened, not with every drawer.
+  const [sessionList, setSessionList] = useState(CLOSED_LIST)
+  const sessionListId = useId()
   const [search, setSearch] = useUrlState('search')
   const [roleFilter, setRoleFilter] = useUrlState('role', '', { allowed: [...PERSON_ROLES.map(r => r.name), NO_ROLE] })
   const [showRemoved, setShowRemoved] = useUrlState('removed', false)
@@ -123,6 +139,33 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   const selectedId = selected?.user_id || null
   useEffect(() => { readSessions(selectedId) }, [selectedId, readSessions])
 
+  // The list, read when the Sessions row is opened and again after an act that ends a session. The
+  // rows stay on screen while a new read runs for the same person.
+  const readSessionList = useCallback((userId) => {
+    api.personSessions(userId)
+      .then(rows => setSessionList(l => (l.userId === userId ? { userId, rows: sortSessions(rows), error: null } : l)))
+      .catch(e => setSessionList(l => (l.userId === userId
+        ? { ...l, error: e?.message || 'Could not list their sessions.' }
+        : l)))
+  }, [])
+  const listedFor = sessionList.userId
+  const toggleSessionList = useCallback((userId) => {
+    if (listedFor === userId) {
+      setSessionList(CLOSED_LIST)
+      return
+    }
+    setSessionList({ userId, rows: undefined, error: null })
+    readSessionList(userId)
+  }, [listedFor, readSessionList])
+  // Another person's drawer starts with the list shut.
+  useEffect(() => { setSessionList(l => (l.userId === selectedId ? l : CLOSED_LIST)) }, [selectedId])
+
+  // Both reads, after an act that can end sessions: the list only while it is open for them.
+  const rereadSessions = useCallback((userId) => {
+    readSessions(userId)
+    if (listedFor === userId) readSessionList(userId)
+  }, [listedFor, readSessions, readSessionList])
+
   const removedCount = useMemo(() => people.filter(accessRemoved).length, [people])
   // What the role and status options count: everyone the removed toggle lets in.
   const listed = useMemo(() => people.filter(p => showRemoved || !accessRemoved(p)), [people, showRemoved])
@@ -150,12 +193,12 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
     flushSync(() => setPeople(ps => ps.map(p => (p.user_id === person.user_id ? { ...p, email: result.email } : p))))
     if (openPerson === person.email) setOpenPerson(result.email)
     if (search.trim().toLowerCase() === String(person.email || '').toLowerCase()) setSearch(result.email)
-    readSessions(person.user_id)
+    rereadSessions(person.user_id)
     load()
-  }, [openPerson, setOpenPerson, search, setSearch, readSessions, load])
+  }, [openPerson, setOpenPerson, search, setSearch, rereadSessions, load])
 
   const confirmAct = useCallback(async () => {
-    const { act, person } = confirming
+    const { act, person, session } = confirming
     try {
       if (act === 'remove') {
         await api.removePersonAccess(person.user_id)
@@ -173,6 +216,13 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           'success',
           { to: personUrl(person.email, accessRemoved(person)) }
         )
+      } else if (act === 'session') {
+        await api.endPersonSession(person.user_id, session.id)
+        showToast?.(
+          `Session ended for ${personLabel(person)}: ${sessionLabel(session)}`,
+          'success',
+          { to: personUrl(person.email, accessRemoved(person)) }
+        )
       } else {
         const result = await api.restorePersonAccess(person.user_id)
         showToast?.(
@@ -186,10 +236,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
     } finally {
       setConfirming(null)
       // Each act can end sessions: a new password ends them all, and so does a removal's ban.
-      readSessions(person.user_id)
+      rereadSessions(person.user_id)
       load()
     }
-  }, [confirming, load, readSessions, showToast])
+  }, [confirming, load, rereadSessions, showToast])
 
   const drawer = (() => {
     const p = selected
@@ -202,6 +252,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
         : read.summary.open_sessions === 0 ? 'None'
           : `${read.summary.open_sessions} open${read.summary.last_active_at
             ? `, last active ${formatDateTime(read.summary.last_active_at)}` : ''}`
+    // Another person's sessions open as a list below the fields. Your own are on Profile, which
+    // marks the one in use and ends one; this drawer cannot.
+    const list = p && !isSelf && sessionList.userId === p.user_id ? sessionList : null
+    const offerList = !!list || (!isSelf && read?.summary?.open_sessions > 0)
     const emailBlocked = p ? emailChangeBlocked(p, currentUserId) : null
     const roleBlocked = p ? roleChangeBlocked(p, people, currentUserId) : null
     const passwordBlocked = p ? passwordSetBlocked(p, currentUserId) : null
@@ -214,7 +268,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
         subject="person"
         onCopy={showToast}
         // A name is anyone's to type, so the email is always in the drawer beside it.
-        title={p ? p.display_name || p.email || p.user_id : ''}
+        title={p ? nameOf(p) : ''}
         icon={<IconUser size={16} />}
         subtitle={isSelf && <Badge size="sm" className="badge-follow" title="The account you are signed in with">YOU</Badge>}
         fields={p ? [
@@ -235,10 +289,61 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           { label: 'Last sign-in', value: p.last_sign_in_at ? formatDateTime(p.last_sign_in_at) : 'Never' },
           {
             label: 'Sessions',
-            value: sessionText,
-            help: 'Each sign-in, to the dashboard in one browser or to a service such as Grafana, is a session. How many they hold, and when one was last used.',
+            value: (
+              <>
+                {sessionText}
+                {isSelf ? (
+                  <div>
+                    <RouteLink
+                      className="count-link"
+                      to={tabUrl('profile', 'security')}
+                      title="Your own sessions are listed on your Profile page's Security tab, where you can end one."
+                    >
+                      Listed on Profile › Security
+                    </RouteLink>
+                  </div>
+                ) : offerList && (
+                  <div>
+                    <button
+                      type="button"
+                      className="count-link"
+                      aria-expanded={!!list}
+                      aria-controls={sessionListId}
+                      onClick={() => toggleSessionList(p.user_id)}
+                    >
+                      {list
+                        ? <>Hide sessions <IconChevronUp size={11} /></>
+                        : <>Show sessions <IconChevronDown size={11} /></>}
+                    </button>
+                  </div>
+                )}
+              </>
+            ),
+            help: 'Each sign-in, to the dashboard in one browser or to a service such as Grafana, is a session. How many they hold, and when one was last used. '
+              + (isSelf ? 'Your Profile page lists yours.' : 'Show sessions lists them, to end one.'),
           },
         ] : []}
+        beforeActions={list && (
+          <section id={sessionListId} className="person-sessions" aria-label={`${nameOf(p)}'s sessions`}>
+            {list.error ? (
+              <div className="callout callout-danger" role="status">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>{list.error}</div>
+              </div>
+            ) : list.rows === undefined ? (
+              <div className="context-field-empty" role="status">Reading their sessions…</div>
+            ) : list.rows.length === 0 ? (
+              <div className="context-field-empty">They have no open sessions.</div>
+            ) : (
+              <SessionsTable
+                sessions={list.rows}
+                theirs
+                onEnd={session => setConfirming({ act: 'session', person: p, session })}
+                className="person-sessions-table"
+              />
+            )}
+          </section>
+        )}
         actions={p ? [
           {
             label: 'Change Name', icon: <IconPencil size={13} />,
@@ -517,6 +622,19 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             </>
           )}
           confirmLabel="End Sessions"
+          pendingLabel="Ending…"
+          confirmClassName="btn btn-primary"
+          onConfirm={confirmAct}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.act === 'session' && (
+        <ConfirmModal
+          title={`End a session for ${personLabel(confirming.person)}`}
+          icon={<IconLogOut size={18} />}
+          message={endSessionQuestion(confirming.session, Date.now(), nameOf(confirming.person))}
+          confirmLabel="End Session"
           pendingLabel="Ending…"
           confirmClassName="btn btn-primary"
           onConfirm={confirmAct}

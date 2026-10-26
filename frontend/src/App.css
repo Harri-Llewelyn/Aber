@@ -5825,6 +5825,16 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .session-where { color: var(--text-primary); }
 .session-badge { margin-left: 8px; }
 
+/* A person's sessions in their People drawer: the Security tab's table, narrowed to the drawer.
+   Headers and cells wrap rather than scroll, and the outer columns line up with the fields. */
+.person-sessions-table th,
+.person-sessions-table td { padding: 8px 6px; font-size: 12px; }
+.person-sessions-table th { white-space: normal; font-size: 11px; letter-spacing: 0.4px; }
+.person-sessions-table th:first-child,
+.person-sessions-table td:first-child { padding-left: 0; }
+.person-sessions-table th:last-child,
+.person-sessions-table td:last-child { padding-right: 0; }
+
 
 /* The sign-in screen's theme toggle. In App.css rather than inline because it needs :hover and
    :focus-visible. Every colour is a token and none has a fallback literal, the rule
