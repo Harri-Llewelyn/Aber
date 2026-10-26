@@ -641,8 +641,9 @@ Value, Actions), header row and all, so the two read alike.
 - **Security is a tab of sections, each with its own heading, About tip and line under it.** The
   first is Sessions (`components/tabs/SessionsSection.jsx`): every session the person holds
   (`list_my_sessions()`, `supabase/README.md` `0206`), the one in use first and marked This browser,
-  then by last activity. Where is the browser and system from the user agent, or the service
-  without the "Aber " prefix (`utils/sessions.js`, no parsing library). End calls
+  then by last activity. Where is the browser and system from the user agent, or the service by
+  the name the help uses (`utils/sessions.js`, no parsing library): the OAuth client's name without
+  "Aber ", and "Studio" for "Aber Supabase Studio", whose name the consent page still shows. End calls
   `end_my_session()` on any other row; Sign Out of All Other Sessions is
   `signOut({ scope: 'others' })`, which auth-js answers without touching this browser's session.
   Each act toasts with a link back to the tab and reads the list again.
@@ -675,8 +676,13 @@ Value, Actions), header row and all, so the two read alike.
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
-- **There is no display name.** The account is named by its email address everywhere, the menu and
-  Profile included.
+- **A person may have a display name** (`supabase/README.md`, `0203`). Profile's Account tab has a
+  Display name row (`DisplayNameRow` in `ProfileTab.jsx`), where the person sets or clears it. The
+  account menu shows the name with the email address under it. People, the Audit Trail, Approvals
+  and the other pages that say who did something show it beside the address
+  (`hooks/useDisplayNames.js`, and `personLabel()` in `utils/displayName.js` for "Name (email)").
+  The email address stays the account's identifier: where a page says who someone is, the name
+  never stands without it.
 
 ---
 

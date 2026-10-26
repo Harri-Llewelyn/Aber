@@ -1,7 +1,9 @@
 /**
  * The words the Sessions list uses (utils/sessions.js): a browser and system from a user agent,
- * a service without the site's prefix, a short fallback for anything else, and the order.
+ * a service by the name the help uses, a short fallback for anything else, and the order.
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { describeUserAgent, serviceLabel, sessionLabel, sortSessions } from '../utils/sessions'
@@ -48,10 +50,22 @@ describe('serviceLabel and sessionLabel', () => {
   it("drops the site's prefix from a service's name", () => {
     expect(serviceLabel('Aber Grafana')).toBe('Grafana')
     expect(serviceLabel('Aber Node-RED')).toBe('Node-RED')
-    expect(serviceLabel('Aber Supabase Studio')).toBe('Supabase Studio')
     expect(serviceLabel('Aber Forge')).toBe('Forge')
     expect(serviceLabel('Another Service')).toBe('Another Service')
     expect(serviceLabel('Aber')).toBe('Aber')
+  })
+
+  it('calls Studio "Studio", as the help and the dialogs do', () => {
+    expect(serviceLabel('Aber Supabase Studio')).toBe('Studio')
+    expect(sessionLabel({ service_name: 'Aber Supabase Studio', user_agent: null })).toBe('Studio')
+    // A name only shortens when it is the whole client name.
+    expect(serviceLabel('Supabase Studio')).toBe('Supabase Studio')
+    expect(serviceLabel('constructor')).toBe('constructor')
+  })
+
+  it("maps the client name 0002 seeds for Studio's door", () => {
+    const seed = fs.readFileSync(path.resolve(__dirname, '../../../supabase/migrations/0002_seed_data.sql'), 'utf8')
+    expect(seed).toContain("'Aber Supabase Studio',")
   })
 
   it('labels a service session by its service and any other by its browser', () => {
