@@ -89,6 +89,10 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - To deal with it, select **Issue Token** on the identity's row, and put the new token in the client that uses the old one. Then open **Tokens** and select **Revoke** on the old token. The alert clears once the old token is revoked.
 - An identity with no **Issue Token** button is renewed by the command its **Copy Command** copies. Run it, then revoke the old token in the same way.
 - Only a token Aber recorded can warn. The keys those three identities were given when Aber was installed were not recorded, so their first expiry gives no warning. `npm run keys:check` says how long they have left.
+- **Last Used**, in the token list, says when a client last used each token through the i3X server. It shows the hour, or **Never**.
+- It covers i3X Explorer, MCP clients and any other client of the i3X server. A script that calls the API directly is not recorded, so its token can read **Never** while it is in use.
+- The three identities with no **Issue Token** button read **Not recorded**. Their services call the API directly, never through the i3X server.
+- Select the **Last Used** heading to bring the unused tokens to the top. If a token has read **Never** for weeks, and you know no script calls the API with it, revoke it.
 - **Withdraw** takes a whole machine identity out of use, with an optional reason. **Reinstate** puts it back. **New Machine Identity**, **Issue Token**, **Withdraw** and **Reinstate** are each recorded in the Audit Trail.
 - **Rules** on a broker role is the number of rules the broker reports for it. To see the rules exactly as the broker holds them, click the role's row, or press Enter or Space on it. They open in a side panel. A row ending in a chevron opens a panel. Leaving the **Broker roles** tab closes the panel.
 - Each role's purpose is declared in `mosquitto/dynsec-roles.json`, and checked when Aber is built.
