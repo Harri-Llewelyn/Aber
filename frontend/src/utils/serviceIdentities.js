@@ -211,6 +211,15 @@ export function isMintableFromPage(meta) {
 }
 
 /**
+ * Whether the i3X server can record when this identity's tokens were last used. The identities
+ * `npm run keys:rotate` renews hold keys their daemons present to the REST API directly, never
+ * through i3X, so Never would be wrong for them and invite revoking a live key.
+ */
+export function lastUseIsRecorded(principalId) {
+  return KNOWN_PRINCIPALS[principalId]?.mintCommand !== 'npm run keys:rotate'
+}
+
+/**
  * What one permission reaches for a machine, which passes `has_authority()` and never
  * `has_role()`. A line that grants a write says so first. `scripts/check-docs-drift.mjs` (11f)
  * holds each line to the policies and functions that decide it.

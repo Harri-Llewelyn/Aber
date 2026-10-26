@@ -5,32 +5,46 @@
  * a disabled control says why.
  */
 
-/** In the order the dashboard lists roles everywhere (DEFAULT_ROLE_PERMISSIONS_MAP's). */
+/**
+ * In the order the dashboard lists roles everywhere (DEFAULT_ROLE_PERMISSIONS_MAP's). Add Person and
+ * Change Role show `description` under the role chosen; Change Role says `consequence` before it
+ * sets one. Both state only what the role's grants and has_role() checks allow.
+ */
 export const PERSON_ROLES = [
   {
     name: 'Administrator',
     label: 'Administrator',
     description: 'Everything, including who has access, backups and settings.',
+    consequence: 'They can do everything, including who has access, backups and settings, from their next request.',
   },
   {
     name: 'Shopfloor_Manager',
     label: 'Shopfloor Manager',
     description: 'Manages areas, cells, gateways and devices, and decides the quarantine queue.',
+    consequence: 'They can manage areas, cells, gateways and devices, and decide the quarantine queue and proposed changes, from their next request.',
   },
   {
     name: 'Operator',
     label: 'Operator',
     description: 'Reads the shopfloor and its live telemetry, and proposes changes.',
+    consequence: 'They can read the shopfloor and its live telemetry and propose changes, but change nothing themselves, from their next request.',
   },
   {
     name: 'Auditor',
     label: 'Auditor',
     description: 'Reads the Audit Trail, including who was given access and when.',
+    consequence: 'They can read the Audit Trail, including who was given access, and change nothing, from their next request.',
   },
 ]
 
 export function personRoleLabel(role) {
   return PERSON_ROLES.find(r => r.name === role)?.label || (role ? String(role) : 'No role')
+}
+
+/** A role's label after "a" or "an", as a sentence says it: "an Auditor", "a Shopfloor Manager". */
+export function personRoleWithArticle(role) {
+  const label = personRoleLabel(role)
+  return `${/^[AEIOU]/.test(label) ? 'an' : 'a'} ${label}`
 }
 
 /** The Status column: a key (the People filter's value), a label, a Badge tone and what it means. */

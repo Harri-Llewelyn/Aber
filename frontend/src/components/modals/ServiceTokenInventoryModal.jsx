@@ -5,10 +5,30 @@ import { Badge } from '../common/Badge'
 import { Modal } from '../common/Modal'
 import { IconShieldAlert } from '../common/Icons'
 import { SortHeader } from '../common/SortHeader'
+import { Tooltip } from '../common/Tooltip'
 import { useLocalSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
-import { NO_VALUE, formatDate } from '../../utils/format'
+import { NO_VALUE, formatDate, formatDateTime } from '../../utils/format'
+import { lastUseIsRecorded } from '../../utils/serviceIdentities'
 import { identityUrl } from '../../routes'
+
+const LAST_USED_HELP = 'When a client last presented this token to the i3X server, to the hour. '
+  + 'Calls straight to the REST API are not recorded, so Never does not prove a token is unused.'
+
+const NOT_RECORDED_HINT = 'This identity’s service calls the REST API directly, never through the '
+  + 'i3X server, so its use is not recorded.'
+
+/**
+ * What a token's Last Used cell says. Never sorts as the oldest use, so ascending brings the tokens
+ * nobody presents to the top. Not recorded and a last use that could not be read are empty, and
+ * sort last either way.
+ */
+function lastUse(t) {
+  if (t.lastUsedAt) return { text: formatDateTime(t.lastUsedAt), sortKey: t.lastUsedAt }
+  if (t.lastUsedAt === undefined) return { text: NO_VALUE, sortKey: null, hint: 'Last use could not be read.' }
+  if (!lastUseIsRecorded(t.principal_id)) return { text: 'Not recorded', sortKey: null, hint: NOT_RECORDED_HINT }
+  return { text: 'Never', sortKey: 0 }
+}
 
 /**
  * One machine identity's tokens, and the only place a token can be revoked. An identity has N
@@ -71,6 +91,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     jti: { type: 'text', value: t => t.jti },
     issued: { type: 'time', value: t => t.issued_at },
     expires: { type: 'time', value: t => t.expiresAtMs },
+    lastUsed: { type: 'time', value: t => lastUse(t).sortKey },
     state: { type: 'rank', value: t => severityRank(tokenState(t).tone) }
   }), [tokenState])
   const [rows, sort] = useLocalSortableRows(newestFirst, sortColumns)
@@ -108,6 +129,9 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                 <SortHeader sort={sort} column="jti">Token ID (jti)</SortHeader>
                 <SortHeader sort={sort} column="issued">Issued</SortHeader>
                 <SortHeader sort={sort} column="expires">Expires</SortHeader>
+                <SortHeader sort={sort} column="lastUsed" help={LAST_USED_HELP} helpLabel="What Last Used means">
+                  Last Used
+                </SortHeader>
                 <SortHeader sort={sort} column="state">State</SortHeader>
                 <th className="row-actions">Actions</th>
               </tr>
@@ -117,12 +141,18 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                 const revoked = t.revoked || justRevoked.has(t.jti)
                 const expired = t.expiresAtMs <= now
                 const state = tokenState(t)
+                const used = lastUse(t)
                 const error = errors.get(t.jti)
                 return (
                   <tr key={t.jti || `${t.issued_at}-${t.expiresAtMs}`}>
                     <td className="mono">{t.jti || NO_VALUE}</td>
                     <td className="cell-meta">{t.issued_at ? formatDate(t.issued_at) : NO_VALUE}</td>
                     <td className="cell-meta">{formatDate(t.expiresAtMs)}</td>
+                    <td className="cell-meta">
+                      {used.hint
+                        ? <Tooltip text={used.hint}><span className="column-hint" tabIndex={0}>{used.text}</span></Tooltip>
+                        : used.text}
+                    </td>
                     <td>
                       <Badge size="sm" tone={state.tone}>{state.label}</Badge>
                       {error && <div className="form-hint hint-danger">{error}</div>}

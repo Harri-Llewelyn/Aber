@@ -522,11 +522,15 @@ the address (see [Routing](#routing)), which is why the page has no Refresh: eve
 list again, and a reload returns to the same view.
 
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
-`userRole` Administrator, and the page opens on it. A row keeps the person, the role select (the
-commonest change), status and last sign-in; a click or Enter opens the person's drawer, in the
-address as `?person=<email>` (`personUrl()` writes it beside the search), which holds every other
-action. The drawer is drawn into an element `AccessControlTab` renders beside its card, where the
-broker-role drawer sits, so it pushes the table as every page's drawer does. Roles go through
+`userRole` Administrator, and the page opens on it. A row shows the person, their role as text,
+status and last sign-in; a click or Enter opens the person's drawer, in the address as
+`?person=<email>` (`personUrl()` writes it beside the search), which holds every action. The drawer
+is drawn into an element `AccessControlTab` renders beside its card, where the broker-role drawer
+sits, so it pushes the table as every page's drawer does. A role changes only through the drawer's
+Change Role (`ChangeRoleModal`), which starts on the person's role and says what the chosen one lets
+them do (`consequence` in `PERSON_ROLES`) before anything is sent. A role change can take access
+away from the person's next request, so it asks first, as the drawer's other changes do; a select
+on the row saved a stray click or arrow key at once. Roles go through
 `set_person_role()` and ending sessions through `end_person_sessions()`; adding, removing,
 restoring, Set New Password and Change Email go through `manage-people`, because GoTrue's admin API
 needs the secret key. The drawer's session count is `person_session_summary()`, a number and a time
@@ -641,8 +645,9 @@ Value, Actions), header row and all, so the two read alike.
 - **Security is a tab of sections, each with its own heading, About tip and line under it.** The
   first is Sessions (`components/tabs/SessionsSection.jsx`): every session the person holds
   (`list_my_sessions()`, `supabase/README.md` `0206`), the one in use first and marked This browser,
-  then by last activity. Where is the browser and system from the user agent, or the service
-  without the "Aber " prefix (`utils/sessions.js`, no parsing library). End calls
+  then by last activity. Where is the browser and system from the user agent, or the service by
+  the name the help uses (`utils/sessions.js`, no parsing library): the OAuth client's name without
+  "Aber ", and "Studio" for "Aber Supabase Studio", whose name the consent page still shows. End calls
   `end_my_session()` on any other row; Sign Out of All Other Sessions is
   `signOut({ scope: 'others' })`, which auth-js answers without touching this browser's session.
   Each act toasts with a link back to the tab and reads the list again.
@@ -675,8 +680,13 @@ Value, Actions), header row and all, so the two read alike.
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
-- **There is no display name.** The account is named by its email address everywhere, the menu and
-  Profile included.
+- **A person may have a display name** (`supabase/README.md`, `0203`). Profile's Account tab has a
+  Display name row (`DisplayNameRow` in `ProfileTab.jsx`), where the person sets or clears it. The
+  account menu shows the name with the email address under it. People, the Audit Trail, Approvals
+  and the other pages that say who did something show it beside the address
+  (`hooks/useDisplayNames.js`, and `personLabel()` in `utils/displayName.js` for "Name (email)").
+  The email address stays the account's identifier: where a page says who someone is, the name
+  never stands without it.
 
 ---
 

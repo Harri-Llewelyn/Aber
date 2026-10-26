@@ -7,7 +7,7 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
 import {
-  PERSON_ROLES, administratorsWithAccess, passwordSetBlocked, removalBlocked, roleChangeBlocked,
+  PERSON_ROLES, administratorsWithAccess, passwordSetBlocked, personRoleWithArticle, removalBlocked, roleChangeBlocked,
 } from '../utils/people'
 import { findTabLink, queryTabLink, tabLinks } from '../test/tabBar'
 
@@ -130,32 +130,20 @@ describe('the People tab', () => {
     expect(within(removed).getByText('Access removed')).toBeInTheDocument()
     expect(within(removed).getByText('Shopfloor Manager when restored')).toBeInTheDocument()
     expect(within(await row('me@site.test')).getByText('YOU')).toBeInTheDocument()
-    expect(within(await row('operator@site.test')).getByRole('combobox')).toHaveValue('Operator')
-  })
-
-  it('sets a role through the database and reads the list again', async () => {
-    api.setPersonRole.mockResolvedValue(true)
-    const toast = renderPeople()
-    const select = within(await row('operator@site.test')).getByRole('combobox')
-    fireEvent.change(select, { target: { value: 'Auditor' } })
-    await waitFor(() => expect(api.setPersonRole).toHaveBeenCalledWith(OPERATOR, 'Auditor'))
-    await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
-    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success', { to: personUrl('operator@site.test') })
-  })
-
-  it('shows the database refusing a role change', async () => {
-    api.setPersonRole.mockRejectedValue(new Error('this would leave no Administrator who can sign in.'))
-    const toast = renderPeople()
-    fireEvent.change(within(await row('second@site.test')).getByRole('combobox'), { target: { value: 'Operator' } })
-    await waitFor(() => expect(toast).toHaveBeenCalledWith('this would leave no Administrator who can sign in.', 'error'))
+    // The role is text on the row; Change Role in the drawer changes it.
+    const operator = await row('operator@site.test')
+    expect(operator.cells[1]).toHaveTextContent(/^Operator$/)
+    expect(within(operator).queryByRole('combobox')).toBeNull()
+    expect(removed.cells[1]).toHaveTextContent(/^No roleShopfloor Manager when restored$/)
   })
 
   it('disables your own role and access, saying why', async () => {
     renderPeople()
-    const select = within(await row('me@site.test')).getByRole('combobox')
-    expect(select).toBeDisabled()
-    expect(select).toHaveAccessibleDescription('You cannot change your own role. Ask another Administrator.')
-    const remove = (await openDrawer('me@site.test')).getByRole('button', { name: 'Remove Access' })
+    const mine = await openDrawer('me@site.test')
+    const role = mine.getByRole('button', { name: 'Change Role' })
+    expect(role).toBeDisabled()
+    expect(role).toHaveAccessibleDescription('You cannot change your own role. Ask another Administrator.')
+    const remove = mine.getByRole('button', { name: 'Remove Access' })
     expect(remove).toBeDisabled()
     expect(remove).toHaveAccessibleDescription('You cannot remove your own access. Ask another Administrator.')
     fireEvent.click(remove)
@@ -185,8 +173,8 @@ describe('the People tab', () => {
     api.restorePersonAccess.mockResolvedValue({ user_id: REMOVED, access: 'active', role: 'Shopfloor_Manager' })
     const toast = renderPeople()
     await showRemoved()
-    expect(within(await row('removed@site.test')).getByRole('combobox')).toBeDisabled()
     const drawer = await openDrawer('removed@site.test')
+    expect(drawer.getByRole('button', { name: 'Change Role' })).toBeDisabled()
     expect(drawer.queryByRole('button', { name: 'Remove Access' })).toBeNull()
     fireEvent.click(drawer.getByRole('button', { name: 'Restore Access' }))
 
@@ -540,12 +528,8 @@ describe('a person\'s drawer', () => {
     expect(window.location.search).toBe('')
   })
 
-  it('opens with Enter on the row, and not from the role select', async () => {
+  it('opens with Enter on the row', async () => {
     renderPeople()
-    const select = within(await row('operator@site.test')).getByRole('combobox')
-    fireEvent.click(select)
-    fireEvent.keyDown(select, { key: 'Enter' })
-    expect(queryDrawer()).toBeNull()
     fireEvent.keyDown(await row('operator@site.test'), { key: 'Enter' })
     expect(await screen.findByRole('complementary', { name: 'operator@site.test person' })).toBeInTheDocument()
   })
@@ -571,11 +555,14 @@ describe('a person\'s drawer', () => {
     renderPeople()
     const drawer = await openDrawer('operator@site.test')
     const names = drawer.getAllByRole('button').map(b => b.textContent.trim()).filter(Boolean)
-    expect(names).toEqual(['Change Name', 'Change Email', 'Set New Password', 'End Sessions', 'Remove Access'])
+    expect(names).toEqual(['Change Name', 'Change Email', 'Change Role', 'Set New Password', 'End Sessions', 'Remove Access'])
     expect(drawer.getByRole('button', { name: 'Remove Access' })).toHaveClass('context-action-danger')
+    expect(drawer.getByRole('button', { name: 'Change Role' })).not.toHaveClass('context-action-danger')
     for (const name of names) expect(drawer.getByRole('button', { name })).toBeEnabled()
-    // The row keeps no action of its own but the role.
-    expect(within(await row('operator@site.test')).queryAllByRole('button')).toEqual([])
+    // The row holds no control of its own, the role included.
+    const operator = await row('operator@site.test')
+    expect(within(operator).queryAllByRole('button')).toEqual([])
+    expect(within(operator).queryAllByRole('combobox')).toEqual([])
   })
 
   it('in your own drawer, refuses what is refused for yourself and says why', async () => {
@@ -586,6 +573,7 @@ describe('a person\'s drawer', () => {
     const email = mine.getByRole('button', { name: 'Change Email' })
     expect(email).toBeDisabled()
     expect(email).toHaveAccessibleDescription('You cannot change your own email address. Ask another Administrator.')
+    expect(mine.getByRole('button', { name: 'Change Role' })).toBeDisabled()
     const end = mine.getByRole('button', { name: 'End Sessions' })
     expect(end).toBeDisabled()
     expect(end).toHaveAccessibleDescription('You cannot end your own sessions here. Use Sign Out in the account menu.')
@@ -602,6 +590,7 @@ describe('a person\'s drawer', () => {
     const email = drawer.getByRole('button', { name: 'Change Email' })
     expect(email).toBeDisabled()
     expect(email).toHaveAccessibleDescription(expect.stringMatching(/Restore it first/))
+    expect(drawer.getByRole('button', { name: 'Change Role' })).toBeDisabled()
     expect(drawer.queryByRole('button', { name: 'Remove Access' })).toBeNull()
   })
 
@@ -706,9 +695,121 @@ describe('changing a person\'s email address', () => {
   })
 })
 
+describe('changing a person\'s role', () => {
+  const NAMED = PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, display_name: 'Owain Operator' } : p))
+
+  async function openChangeRole(email = 'operator@site.test') {
+    fireEvent.click((await openDrawer(email)).getByRole('button', { name: 'Change Role' }))
+    return within(await screen.findByRole('dialog'))
+  }
+
+  it('asks first, starting on their role, and says what the chosen one changes before anything is sent', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    renderPeople()
+    const dialog = await openChangeRole()
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Change the role for Owain Operator (operator@site.test)')
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription(/Nothing changes until you select Change Role/)
+
+    // The four roles, theirs chosen and focused, with its description under it as Add Person shows.
+    const select = dialog.getByLabelText('Role')
+    expect(select).toHaveFocus()
+    expect(select).toHaveValue('Operator')
+    expect(within(select).getAllByRole('option').map(o => o.textContent))
+      .toEqual(['Administrator', 'Shopfloor Manager', 'Operator', 'Auditor'])
+    expect(select).toHaveAccessibleDescription(PERSON_ROLES.find(r => r.name === 'Operator').description)
+    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    expect(dialog.queryByText(/becomes/)).toBeNull()
+
+    fireEvent.change(select, { target: { value: 'Auditor' } })
+    expect(select).toHaveAccessibleDescription(PERSON_ROLES.find(r => r.name === 'Auditor').description)
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'Owain Operator becomes an Auditor. They can read the Audit Trail, including who was given access, and '
+      + 'change nothing, from their next request. Node-RED follows within a minute, and Grafana when they next '
+      + 'sign in to it.')
+    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeEnabled()
+
+    // Back to their own role, Change Role waits again.
+    fireEvent.change(select, { target: { value: 'Operator' } })
+    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    expect(dialog.queryByText(/becomes/)).toBeNull()
+
+    fireEvent.change(select, { target: { value: 'Shopfloor_Manager' } })
+    expect(screen.getByRole('dialog')).toHaveTextContent('Owain Operator becomes a Shopfloor Manager.')
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(api.setPersonRole).not.toHaveBeenCalled()
+  })
+
+  it('sets it through the database, with the toast the row\'s select gave, and reads the list again', async () => {
+    api.setPersonRole.mockResolvedValue(true)
+    const toast = renderPeople()
+    const dialog = await openChangeRole()
+    fireEvent.change(dialog.getByLabelText('Role'), { target: { value: 'Auditor' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Change Role' }))
+    await waitFor(() => expect(api.setPersonRole).toHaveBeenCalledWith(OPERATOR, 'Auditor'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success', { to: personUrl('operator@site.test') })
+    await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps the dialog open with the database\'s sentence when it is refused', async () => {
+    api.setPersonRole.mockRejectedValue(new Error('this would leave no Administrator who can sign in.'))
+    const toast = renderPeople()
+    const dialog = await openChangeRole('second@site.test')
+    fireEvent.change(dialog.getByLabelText('Role'), { target: { value: 'Operator' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Change Role' }))
+    expect(await dialog.findByText('this would leave no Administrator who can sign in.')).toBeInTheDocument()
+    expect(dialog.getByLabelText('Role')).toHaveValue('Operator')
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('starts on No role for a person who holds none', async () => {
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === INVITED ? { ...p, role: null } : p)))
+    renderPeople()
+    expect((await row('invited@site.test')).cells[1]).toHaveTextContent(/^No role$/)
+    const dialog = await openChangeRole('invited@site.test')
+    const select = dialog.getByLabelText('Role')
+    expect(select).toHaveValue('')
+    expect(select).toHaveAccessibleDescription('They hold no role now.')
+    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    fireEvent.change(select, { target: { value: 'Administrator' } })
+    expect(screen.getByRole('dialog')).toHaveTextContent('invited@site.test becomes an Administrator. They can do everything')
+    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeEnabled()
+  })
+
+  it('is refused for yourself, a removed person and the last Administrator who can sign in, in the select\'s words', async () => {
+    // Your own Administrator row is removed here, so the second is the last who can sign in.
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === ME
+      ? { ...p, role: null, status: 'removed', sign_in_blocked: true, role_on_restore: 'Administrator' }
+      : p)))
+    renderPeople()
+    const last = (await openDrawer('second@site.test')).getByRole('button', { name: 'Change Role' })
+    expect(last).toBeDisabled()
+    expect(last).toHaveAccessibleDescription('The only Administrator who can sign in. Make someone else an Administrator first.')
+    fireEvent.click(last)
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    await showRemoved()
+    const removed = (await openDrawer('removed@site.test')).getByRole('button', { name: 'Change Role' })
+    expect(removed).toBeDisabled()
+    expect(removed).toHaveAccessibleDescription('Their access is removed. Restore it first, then change their role.')
+
+    const mine = (await openDrawer('me@site.test')).getByRole('button', { name: 'Change Role' })
+    expect(mine).toBeDisabled()
+    expect(mine).toHaveAccessibleDescription('You cannot change your own role. Ask another Administrator.')
+    expect(api.setPersonRole).not.toHaveBeenCalled()
+  })
+})
+
 describe('the people rules', () => {
   it('offers the four roles the database accepts, in the dashboard\'s order', () => {
     expect(PERSON_ROLES.map(r => r.name)).toEqual(Object.keys(DEFAULT_ROLE_PERMISSIONS_MAP))
+  })
+
+  it('says what each role lets a person do, and from when, for Change Role', () => {
+    for (const r of PERSON_ROLES) expect(r.consequence).toMatch(/^They can .+, from their next request\.$/)
+    expect(PERSON_ROLES.map(r => personRoleWithArticle(r.name)))
+      .toEqual(['an Administrator', 'a Shopfloor Manager', 'an Operator', 'an Auditor'])
   })
 
   it('refuses the last Administrator who can sign in, and no other', () => {

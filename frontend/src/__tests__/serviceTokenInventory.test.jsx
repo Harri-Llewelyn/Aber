@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ServiceTokenInventoryModal } from '../components/modals/ServiceTokenInventoryModal'
 import { tokenStatus, tokenStatusLabel, tokenStatusDetail, TOKEN_STATES } from '../utils/serviceIdentities'
+import { NO_VALUE, formatDateTime } from '../utils/format'
 import { api } from '../api'
 
 vi.mock('../api', () => ({ api: { revokeServiceToken: vi.fn() } }))
@@ -210,5 +211,75 @@ describe('ServiceTokenInventoryModal: sorting by a column (#801)', () => {
     sortBy('Expires')
     expect(jtis()).toEqual(['undated', 'pulled', 'live', 'lapsed'])
     expect(window.location.pathname + window.location.search).toBe('/access-control/identities?sort=-tokens')
+  })
+})
+
+describe('ServiceTokenInventoryModal: Last Used (#1028)', () => {
+  const HOUR = 3600000
+  const CLIENT = 'b0000000-0000-4000-8000-000000000001'
+  const INGESTOR = 'b0000000-0000-4000-8000-000000000002'
+  /** A live token for `principal`, last used `hoursAgo` hours before NOW (null: never; undefined: unread). */
+  const used = (jti, hoursAgo, principal = CLIENT) => ({
+    ...mint(jti, 10),
+    principal_id: principal,
+    lastUsedAt: hoursAgo === undefined ? undefined
+      : hoursAgo === null ? null : new Date(NOW - hoursAgo * HOUR).toISOString(),
+  })
+  const TOKENS = [used('recent', 1), used('idle', null), used('daemon', null, INGESTOR),
+    used('unread', undefined), used('old', 300)]
+
+  const open = (tokens = TOKENS) => render(
+    <ServiceTokenInventoryModal
+      principalName="Read-only API client"
+      status={tokenStatus(tokens, NOW)}
+      now={NOW}
+      onClose={vi.fn()}
+      onChanged={vi.fn()}
+      showToast={vi.fn()}
+    />
+  )
+  const lastUsedOf = (jti) => {
+    const row = screen.getByText(jti).closest('tr')
+    const column = screen.getAllByRole('columnheader').findIndex(h => /Last Used/.test(h.textContent))
+    return row.cells[column].textContent
+  }
+  const jtis = () => screen.getAllByRole('row').slice(1).map(r => r.cells[0].textContent)
+
+  it('shows the hour a token was last used, or Never', () => {
+    open()
+    expect(lastUsedOf('recent')).toBe(formatDateTime(NOW - HOUR))
+    expect(lastUsedOf('old')).toBe(formatDateTime(NOW - 300 * HOUR))
+    expect(lastUsedOf('idle')).toBe('Never')
+  })
+
+  /** Their daemons call the REST API directly, so Never would invite revoking a live key. */
+  it('says Not recorded for an identity whose key the deployment holds', () => {
+    open()
+    expect(lastUsedOf('daemon')).toBe('Not recorded')
+  })
+
+  it('does not say Never when the last use could not be read', () => {
+    open()
+    expect(lastUsedOf('unread')).toBe(NO_VALUE)
+  })
+
+  /** Ascending brings the tokens nobody presents to the top; the cells with no answer go last. */
+  it('sorts Never and the oldest use first, and the cells with no answer last either way', () => {
+    open()
+    fireEvent.click(screen.getByRole('button', { name: 'Last Used' }))
+    expect(jtis().slice(0, 3)).toEqual(['idle', 'old', 'recent'])
+    expect(jtis().slice(3).sort()).toEqual(['daemon', 'unread'])
+    fireEvent.click(screen.getByRole('button', { name: 'Last Used' }))
+    expect(jtis().slice(0, 3)).toEqual(['recent', 'old', 'idle'])
+    expect(jtis().slice(3).sort()).toEqual(['daemon', 'unread'])
+  })
+
+  it('says in its heading what is and is not recorded, in a few words', async () => {
+    open()
+    fireEvent.focus(screen.getByRole('button', { name: 'What Last Used means' }))
+    const tip = (await screen.findByRole('tooltip')).textContent
+    expect(tip).toMatch(/last presented this token to the i3X server, to the hour/i)
+    expect(tip).toMatch(/Calls straight to the REST API are not recorded/i)
+    expect(tip.split(/\s+/).length).toBeLessThanOrEqual(35)
   })
 })
