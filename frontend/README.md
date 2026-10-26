@@ -522,11 +522,19 @@ the address (see [Routing](#routing)), which is why the page has no Refresh: eve
 list again, and a reload returns to the same view.
 
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
-`userRole` Administrator, and the page opens on it. Roles go through `set_person_role()`; adding,
-removing, restoring and Set New Password go through `manage-people`, because GoTrue's admin API
-needs the secret key. The controls the database would refuse (your own row, the last Administrator
-who can sign in, a removed person's role or password) are disabled with the reason as their
-tooltip, computed in `utils/people.js`, so the page and the database state the same rule. A password
+`userRole` Administrator, and the page opens on it. A row keeps the person, the role select (the
+commonest change), status and last sign-in; a click or Enter opens the person's drawer, in the
+address as `?person=<email>` (`personUrl()` writes it beside the search), which holds every other
+action. The drawer is drawn into an element `AccessControlTab` renders beside its card, where the
+broker-role drawer sits, so it pushes the table as every page's drawer does. Roles go through
+`set_person_role()` and ending sessions through `end_person_sessions()`; adding, removing,
+restoring, Set New Password and Change Email go through `manage-people`, because GoTrue's admin API
+needs the secret key. The drawer's session count is `person_session_summary()`, a number and a time
+with no list. The controls the database would refuse (your own row, the last Administrator who can
+sign in, a removed person's role, password or address) are disabled with the reason as their
+tooltip, computed in `utils/people.js`, so the page and the database state the same rule. A new
+address is the drawer's key, so after Change Email the list takes it before the address bar does,
+and the drawer moves with it rather than being tidied away. A password
 `manage-people` mints, for Add Person on a site with no mail relay or for Set New Password, is shown
 by `PasswordShownOnce` and lives in its dialog's state until it closes, as a minted token does in
 `ServiceTokenModal`.
