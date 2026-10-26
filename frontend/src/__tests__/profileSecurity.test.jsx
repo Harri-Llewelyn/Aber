@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProfileTab } from '../components/tabs/ProfileTab'
-import { endSessionQuestion } from '../components/tabs/SessionsSection'
+import { endSessionQuestion } from '../utils/sessions'
 import { tabLink } from '../test/tabBar'
 
 vi.mock('../lib/supabaseClient', () => ({

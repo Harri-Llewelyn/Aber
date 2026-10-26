@@ -1,60 +1,25 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
-import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { IconLogOut, IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
-import { ColumnHeader } from '../common/SortHeader'
+import { SessionsTable } from '../common/SessionsTable'
 import { Tooltip } from '../common/Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { tabUrl } from '../../routes'
-import { formatDate, formatDateTime, formatRelative, plural } from '../../utils/format'
-import { sessionLabel, sortSessions } from '../../utils/sessions'
+import { plural } from '../../utils/format'
+import { endSessionQuestion, sessionLabel, sortSessions } from '../../utils/sessions'
 
 /** Where every message about a session links: this list. */
 const SESSIONS_URL = tabUrl('profile', 'security')
 
-/** How long ago, in words for a sentence: "5 minutes ago", "2 days ago", "on 25 Sept 2026". */
-function agoInWords(ts, now) {
-  const t = new Date(ts ?? NaN).getTime()
-  if (Number.isNaN(t)) return null
-  const seconds = Math.max(0, Math.round((now - t) / 1000))
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${plural(Math.floor(seconds / 60), 'minute')} ago`
-  if (seconds < 86400) return `${plural(Math.floor(seconds / 3600), 'hour')} ago`
-  const days = Math.floor(seconds / 86400)
-  return days < 30 ? `${plural(days, 'day')} ago` : `on ${formatDate(t)}`
-}
-
-/**
- * The End dialog's question: the session as the Where column names it, when it was last active,
- * and what has to sign in again, a browser, a program or a service. Reads sessionLabel()'s words:
- * "A program (…)", "A browser on …" and "Not recorded" are describeUserAgent()'s.
- */
-export function endSessionQuestion(session, now = Date.now()) {
-  const label = sessionLabel(session)
-  const when = agoInWords(session?.last_active_at, now)
-  const lastActive = when ? `, last active ${when}` : ''
-  if (session?.service_name) {
-    return `End the session in ${label}${lastActive}? ${label} has to sign you in again.`
-  }
-  if (label === 'Not recorded') {
-    return `End the session with no browser recorded${lastActive}? Whatever used it has to sign in again.`
-  }
-  const lowered = label.replace(/^A /, 'a ')
-  if (label.startsWith('A program')) {
-    return `End the session of ${lowered}${lastActive}? That program has to sign in again.`
-  }
-  return `End the session in ${lowered}${lastActive}? That browser has to sign in again.`
-}
-
 /**
  * The Security tab's Sessions section: every session the signed-in person holds, in every browser
- * and service (`list_my_sessions()`, 0206), the one in use first. End ends one other session
- * (`end_my_session()`), and Sign Out of All Other Sessions ends all of them at once
- * (`end_my_other_sessions()`, 0211), each after a dialog that says what it ends. Both are
- * recorded in the Audit Trail. Each act reads the list again.
+ * and service (`list_my_sessions()`, 0206), the one in use first, in the table a person's drawer
+ * on People shares. End ends one other session (`end_my_session()`), and Sign Out of All Other
+ * Sessions ends all of them at once (`end_my_other_sessions()`, 0211), each after a dialog that
+ * says what it ends. Both are recorded in the Audit Trail. Each act reads the list again.
  *
  * `isPerson` is false for a machine identity, which signs in with a token and has nothing to list.
  */
@@ -153,53 +118,7 @@ export function SessionsSection({ isPerson = true, showToast }) {
       ) : sessions.length === 0 ? (
         <EmptyState message="No sessions are open." />
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <ColumnHeader title="The browser and system you signed in from, or the service that signed you in.">Where</ColumnHeader>
-                <ColumnHeader title="When you signed in.">Started</ColumnHeader>
-                <ColumnHeader title="When the session last renewed its access. An open dashboard renews about once an hour.">Last active</ColumnHeader>
-                <th className="row-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map(s => {
-                const label = sessionLabel(s)
-                return (
-                  <tr key={s.id} data-session={s.id}>
-                    <td>
-                      {/* The browser's own words behind the short ones; a service's are GoTrue's. */}
-                      <Tooltip text={s.service_name ? null : s.user_agent || null}>
-                        <span className="session-where">{label}</span>
-                      </Tooltip>
-                      {s.service_name && <Badge size="sm" className="session-badge">Service</Badge>}
-                      {s.is_current && <Badge size="sm" tone="info" className="session-badge">This browser</Badge>}
-                    </td>
-                    <td className="cell-meta">{formatDateTime(s.created_at)}</td>
-                    <td className="cell-meta">
-                      <Tooltip text={formatDateTime(s.last_active_at)}>
-                        <span>{formatRelative(s.last_active_at)}</span>
-                      </Tooltip>
-                    </td>
-                    <td className="row-actions">
-                      {!s.is_current && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setConfirmingEnd(s)}
-                          aria-label={`End the session: ${label}`}
-                        >
-                          End
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <SessionsTable sessions={sessions} onEnd={setConfirmingEnd} />
       )}
 
       {confirmingEnd && (
