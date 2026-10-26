@@ -950,6 +950,14 @@ export const SUITES = {
       'session in use is refused, that another person\'s session is answered as a missing one, ' +
       'that an ended session\'s token is then refused, and that no machine identity may call either.',
   },
+  'supabase/migrations/test_signing_out_ends_the_person_s_door_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0208 -- that end_my_door_sessions() ends the caller's Studio and forge door sessions and " +
+      "no other: the caller's dashboard, Grafana and Node-RED sessions and other people's door " +
+      'sessions survive, the dashboard token is still served, and a machine identity, a token ' +
+      'naming nobody, anon and service_role are refused.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1094,7 +1102,9 @@ export const SUITES = {
       'the whole flow and meets the 403; a forged identity header from outside is not a login; and ' +
       'a role removed from user_roles mid-session is refused and unseated on the next request; ' +
       "a session ended elsewhere is sent back through the door; and Gitea's own sign-out link ends " +
-      'every session the person holds, the dashboard included. ' +
+      "the door's session alone and sends the browser to the dashboard's /sign-out, while the same " +
+      "person's session in another browser is still served; and end_my_door_sessions() (0208), the " +
+      "dashboard's Sign Out, ends the door's session and leaves the dashboard's own served. " +
       'Needs the stack, the forge, the seeded personas AND the gateways organisation (one enrolment ' +
       'creates it), and skips without any of them.',
   },

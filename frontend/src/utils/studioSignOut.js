@@ -1,19 +1,19 @@
 import { GITEA_URL, STUDIO_URL } from '../constants';
 
 /**
- * End the sessions the gateway holds in front of Studio and the forge, which are not this
- * application's session.
+ * Ask the gateway's Studio and forge doors to clear the cookies they keep in this browser.
  *
- * Each listener keeps its own cookie, minted by Envoy's oauth2 filter and verified locally against
- * the shared secret, so `supabase.auth.signOut()` leaves both consoles open on the signed-out
- * identity until the token expires. A no-cors GET of `/oauth2/signout` takes the expired Set-Cookie
- * headers and discards the 302. It works cross-origin because SameSite ignores the port, and on
- * Kubernetes the subdomains are one site.
+ * Each door keeps its own cookie, minted by Envoy's oauth2 filter. A no-cors GET of the door's
+ * `/oauth2/signout` carries it, and the answer's expired Set-Cookie headers clear it, but only
+ * where the browser counts the door and the dashboard as one site: hosts that share a registrable
+ * domain, such as app.site.example and git.site.example. `*.localhost` hosts share none, so there
+ * the cookies stay. What signs the doors out everywhere is ending their GoTrue sessions
+ * (end_my_door_sessions(), in utils/signOut.js): a door then sends its next request through its own
+ * sign-out.
  *
  * Best-effort, deliberately: Studio may be off, the gateway down or the address unset, and the
- * local sign-out must still happen, so this resolves rather than rejects and the caller does not
- * wait. The timeout exists because `fetch` has none, and an unreachable Studio would otherwise hang
- * the sign-out button.
+ * local sign-out must still happen, so this resolves rather than rejects. The timeout exists
+ * because `fetch` has none, and an unreachable Studio would otherwise hang the sign-out button.
  */
 const SIGNOUT_TIMEOUT_MS = 2000;
 
@@ -30,9 +30,9 @@ export async function signOutOfDoor(doorUrl, fetchImpl = globalThis.fetch) {
       mode: 'no-cors',
       credentials: 'include',
       signal: abort.signal,
-      // The 302 is the answer: its Set-Cookie headers are applied by the time this resolves, and
-      // following it would enter the door's login flow.
-      redirect: 'manual',
+      // No `redirect`: the Fetch standard refuses no-cors with anything but follow, before the
+      // request is sent. Following the 302 enters the door's login flow, whose opaque answer is
+      // discarded; the Set-Cookie headers on the 302 apply all the same.
       cache: 'no-store',
     });
     return true;

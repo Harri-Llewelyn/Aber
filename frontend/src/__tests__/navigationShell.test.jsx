@@ -301,8 +301,9 @@ describe('Merged navigation shell', () => {
       expect(trigger()).toHaveAttribute('aria-expanded', 'true')
 
       fireEvent.click(within(menu).getByRole('menuitem', { name: /sign out/i }))
-      // This browser's session only: the person's other browsers and services keep theirs.
-      expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+      // This browser's session only: the person's other browsers and services keep theirs. Not on
+      // the click itself: the door sessions end first, while the dashboard's token is still served.
+      await waitFor(() => expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' }))
     })
 
     it('checks the CURRENT theme in a Light/Dark switch, and stays open when the other is chosen', async () => {

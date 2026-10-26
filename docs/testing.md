@@ -216,9 +216,11 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=.
 # and the room behind it: which team the forge put them in, that an Operator completes the flow and
 # meets the 403, that a forged identity header from outside is not a login, and that a role removed
 # mid-session is refused and unseated on the next request, that a session ended elsewhere is
-# sent back through the door, and that Gitea's own sign-out link signs the person out of the
-# platform. Needs the forge and one enrolled gateway (which creates the organisation), and skips
-# without them.
+# sent back through the door, and that Gitea's own sign-out link ends the door's session alone and
+# sends the browser to the dashboard's /sign-out, while the same person's session in another
+# browser is still served; and that the dashboard's Sign Out (end_my_door_sessions(), 0208) ends
+# the door's session and leaves the dashboard's own served. Needs the forge and one enrolled gateway
+# (which creates the organisation), and skips without them.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
@@ -655,6 +657,12 @@ python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.
 # the session in use, and answers another person's as a missing one. Every person role may call
 # both; a machine identity, an account with no role, anon and service_role may not. No audit row.
 python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
+
+# Door sessions at Sign Out (0208): end_my_door_sessions() ends the caller's Studio and forge door
+# sessions, in every browser, and says how many. The caller's dashboard, Grafana and Node-RED
+# sessions and other people's door sessions survive, and the dashboard's token is still served. A
+# machine identity, a token naming nobody, anon and service_role are refused. Every test rolls back.
+python supabase/migrations/test_signing_out_ends_the_person_s_door_sessions.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
