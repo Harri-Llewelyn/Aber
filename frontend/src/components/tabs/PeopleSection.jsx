@@ -324,7 +324,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           },
         ] : []}
         beforeActions={list && (
-          <section id={sessionListId} className="person-sessions" aria-label={`${nameOf(p)}'s sessions`}>
+          <section id={sessionListId} aria-label={`${nameOf(p)}'s sessions`}>
             {list.error ? (
               <div className="callout callout-danger" role="status">
                 <IconShieldAlert size={14} className="callout-icon" />

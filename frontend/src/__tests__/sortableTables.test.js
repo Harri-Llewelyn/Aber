@@ -15,6 +15,10 @@ const TABLES = {
     sortable: 0,
     fixed: ['A table in a help page: its rows in the order the page writes them, as GitHub shows them.']
   },
+  'components/common/SessionsTable.jsx': {
+    sortable: 0,
+    fixed: ['A person\'s sessions, a handful: the one in use first, then the most recently active. The Security tab and a person\'s drawer on People both draw it.']
+  },
   'components/modals/AssetConfigModal.jsx': { sortable: 2 },
   'components/modals/ServiceTokenInventoryModal.jsx': { sortable: 1 },
   'components/modals/StartPlaybackModal.jsx': {
@@ -50,10 +54,6 @@ const TABLES = {
     fixed: ['A form: each setting in its tab\'s order, with its own Save and Discard.']
   },
   'components/tabs/SchemasTab.jsx': { sortable: 1 },
-  'components/tabs/SessionsSection.jsx': {
-    sortable: 0,
-    fixed: ['A person\'s own sessions, a handful: the one in use first, then the most recently active.']
-  },
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']
