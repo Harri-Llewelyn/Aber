@@ -1687,6 +1687,48 @@ the hook's owner may read it and that a session that does not exist is refused w
 db lane. `test_sign_out_ends_one_session.py` holds it through the gateway in the stack lane, with the
 person's other session still served.
 
+### A person can see and end their other sessions (0206)
+
+Every sign-in through GoTrue, to the dashboard or to a service, is one `auth.sessions` row. The
+Profile page's Security tab lists the person's own and ends one of them, so a forgotten browser or
+a service sign-in can be ended without changing the password.
+
+- **`list_my_sessions()`** returns the caller's rows (`user_id = auth.uid()`): `id`;
+  `service_name`, the `auth.oauth_clients` name of the service that started the session, NULL for
+  a dashboard or password sign-in; `user_agent`; `created_at`; `last_active_at`; `not_after`; and
+  `is_current`, true for the session the token's `session_id` claim names. The session in use
+  comes first, then the newest activity.
+- **`last_active_at` is the latest of `refreshed_at`, `updated_at` and `created_at`.** GoTrue writes
+  `refreshed_at` as a `timestamp` without a time zone, in UTC, so it is read `AT TIME ZONE 'UTC'`.
+  A session never refreshed has none.
+- **What it leaves out.** `ip` (empty today), `tag`, `scopes`, `refresh_token_hmac_key` and
+  `refresh_token_counter`. A service session records GoTrue's own client, `Node-oauth`, as its
+  user agent: the service's server exchanged the code, so no device is known for it.
+- **`end_my_session(p_session_id)`** deletes one of the caller's rows, as GoTrue's own sign-out
+  does: its refresh tokens and MFA claims cascade, so nothing refreshes it again, and
+  `auth_pre_request()` (`0205`) refuses its access token on the next request. Grafana and Node-RED
+  hold their own sessions and notice on their own schedule (`docs/security-model.md`).
+- **It refuses the session in use** (`22023`): Sign Out ends that one. **Another person's session
+  is answered as a missing one**, the same `raise_not_found()` 404 (`0165`), so no answer says
+  another person's session id exists.
+- **Who may call them.** Every person role, Auditor included. A caller with no role is `42501`, and
+  no machine identity holds one. `anon` and `service_role` hold no `EXECUTE`. Both are `SECURITY
+  DEFINER` with `search_path` pinned: `postgres` reads `auth.sessions` and `auth.oauth_clients`, and
+  deletes from `auth.sessions`, by GoTrue's grants.
+- **No Audit Trail row.** A person ending their own sign-in changes nothing about the platform, and
+  a Sign Out writes none either. GoTrue's own log (`auth.audit_log_entries`) records a Sign Out,
+  but not a row deleted here. Revisit if a site needs to show who ended which session.
+
+**Sign Out of All Other Sessions**, on the same tab, is GoTrue's `/logout?scope=others`
+(`signOut({ scope: 'others' })`). It deletes every one of the person's rows but the current one, and
+leaves this browser signed in. It needs no function here.
+
+The file's self-check asserts both functions' `SECURITY DEFINER` and pin, who may execute them,
+that a request with no identity is refused, and, where GoTrue's tables exist, that their owner may
+read and delete what it needs. The test database's GoTrue fixture
+(`test-harness/auth-bootstrap.sql`) declares those columns of `auth.sessions` and a minimal
+`auth.oauth_clients`. `test_a_person_can_see_and_end_their_other_sessions.py` holds the rules.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

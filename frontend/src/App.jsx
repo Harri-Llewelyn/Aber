@@ -778,6 +778,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 singleKeyShortcuts={singleKeyShortcuts}
                 onChangeSingleKeyShortcuts={setSingleKeyShortcuts}
                 settingsSource={settingsSource}
+                showToast={showToast}
               />
             )}
           </Suspense>

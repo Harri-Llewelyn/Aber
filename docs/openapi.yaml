@@ -1015,6 +1015,64 @@ paths:
                     user_id:      { type: string, format: uuid }
                     display_name: { type: string }
 
+  /rest/v1/rpc/list_my_sessions:
+    post:
+      tags: [Auth]
+      summary: List your own sessions, in every browser and service
+      description: |
+        For the Security tab on the Profile page (`0206`). One row per GoTrue session you hold: a
+        sign-in to the dashboard, a script's password sign-in, or a service's (Grafana, Node-RED,
+        Studio, the forge). The session your token names comes first, then the most recently
+        active. Any person role; an account with no role, such as a machine identity, is refused.
+
+        A service session carries `service_name` and GoTrue's own client as its `user_agent`: the
+        service's server signed you in, so no device is known for it. No address is recorded.
+      responses:
+        '200':
+          description: Your sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:             { type: string, format: uuid }
+                    service_name:   { type: string, nullable: true, description: "The OAuth client's name for a service's session; null for a dashboard or password sign-in." }
+                    user_agent:     { type: string, nullable: true }
+                    created_at:     { type: string, format: date-time }
+                    last_active_at: { type: string, format: date-time, description: 'The latest of its last refresh, last update and start.' }
+                    not_after:      { type: string, format: date-time, nullable: true, description: 'When GoTrue ends it regardless, if ever.' }
+                    is_current:     { type: boolean, description: "True for the session this request's token belongs to." }
+        '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
+
+  /rest/v1/rpc/end_my_session:
+    post:
+      tags: [Auth]
+      summary: End one of your own sessions
+      description: |
+        Deletes the session (`0206`), as a sign-out does: nothing refreshes it again, and the API
+        refuses its access token from the next request (401 `session_not_found`, `0205`). Grafana
+        and Node-RED notice on their own schedule. No Audit Trail row is written.
+
+        The session your token belongs to is refused (400, `22023`): sign out to end it. To end
+        all the others at once, call GoTrue's `POST /auth/v1/logout?scope=others`. A session that
+        is not yours is answered exactly as one that does not exist (404).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_session_id]
+              properties:
+                p_session_id: { type: string, format: uuid }
+      responses:
+        '204': { description: The session has ended. }
+        '400': { description: 'The session this token belongs to (`22023`).' }
+        '403': { description: 'An account with no role, such as a machine identity (`42501`).' }
+        '404': { description: 'No session of yours with that id (`P0002`).' }
+
   /rest/v1/rpc/set_person_role:
     post:
       tags: [Auth]

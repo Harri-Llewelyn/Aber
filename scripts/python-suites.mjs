@@ -935,6 +935,13 @@ export const SUITES = {
       'in again on, and that every token naming a live session, or none, is still served: a ' +
       'false refusal here is the whole API down.',
   },
+  'supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py': {
+    lanes: ['db'],
+    why:
+      "0206 -- that a person lists and ends their own sessions and nobody else's, that the " +
+      'session in use is refused, that another person\'s session is answered as a missing one, ' +
+      'that an ended session\'s token is then refused, and that no machine identity may call either.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
