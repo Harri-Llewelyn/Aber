@@ -667,17 +667,16 @@ class TestTheNameplateLane(ProposalCase):
             " WHERE device_id = %s;", (DEVICE,))
         self.assertEqual(self.cur.fetchone(), ("SN-0001", "Haas"))
 
-    def test_updated_by_names_the_approver_who_wrote_it(self):
-        # device_nameplate_stamp() (0210) records whoever wrote the row, and approving is the
-        # write. The proposer stays on the proposal.
+    def test_updated_by_names_the_proposer_not_the_approver(self):
+        # The column's own comment settles it: a nameplate is an assertion ABOUT an asset, so who
+        # made it is part of the record -- that is the proposer. Who AUTHORISED it is the
+        # audit_trail row.
         proposal = self.propose({"serial_number": "SN-0002"}, entity_type="device_nameplate")
         as_user(self.cur, MANAGER)
         self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
         as_owner(self.cur)
         self.cur.execute("SELECT updated_by FROM public.device_nameplate WHERE device_id = %s;",
                          (DEVICE,))
-        self.assertEqual(str(self.cur.fetchone()[0]), MANAGER)
-        self.cur.execute("SELECT proposed_by FROM public.change_proposals WHERE id = %s;", (proposal,))
         self.assertEqual(str(self.cur.fetchone()[0]), OPERATOR)
 
     def test_a_constraint_on_the_nameplate_is_enforced_at_approval(self):

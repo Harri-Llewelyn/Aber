@@ -6,11 +6,13 @@ A nameplate names the person the server signed in, at the time the server wrote 
 Requires a migrated Supabase database (54322 by default; `npm run test:db` starts a throwaway one).
 
 What is held here: device_nameplate_stamp() sets updated_by to the caller and updated_at to the
-database's time on every insert, update and upsert, whatever the request names. A Shopfloor
-Manager's and an Administrator's writes that name another person and a past time are stored as the
-caller's, now. A write with no person behind it (the owner's session, service_role) stores NULL.
-The audit row carries the stamped values. The trigger is BEFORE INSERT OR UPDATE FOR EACH ROW, its
-function runs as its caller with a pinned search_path, and no API role may execute it.
+database's time on every insert, update and upsert made through the API, whatever the request
+names. A Shopfloor Manager's and an Administrator's writes that name another person and a past time
+are stored as the caller's, now; service_role's store NULL. The database's own writes keep their
+values: an approved proposal stores its proposer, because approve_proposal() writes as its owner,
+and the owner's session stores what it wrote. The audit rows carry the stamped values. The trigger
+is BEFORE INSERT OR UPDATE FOR EACH ROW, its function runs as its caller with a pinned search_path,
+and no API role may execute it.
 
 EVERY TEST ROLLS BACK.
 """
@@ -29,6 +31,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 MANAGER = "a0d17070-0000-4000-8000-0000000210a1"
 ADMIN = "a0d17070-0000-4000-8000-0000000210a2"
 OTHER = "a0d17070-0000-4000-8000-0000000210a3"
+OPERATOR = "a0d17070-0000-4000-8000-0000000210a4"
 CELL = "a0d17070-0000-4000-8000-0000000210c1"
 # Differs from every other fixture in its first 21 hex characters, which become its sparkplug_id.
 DEVICE = "d2100153-0000-4000-8000-0000000210d1"
@@ -72,13 +75,14 @@ class TheDatabaseStampsTheNameplate(unittest.TestCase):
         self.cur.execute("SELECT to_regprocedure('public.device_nameplate_stamp()');")
         if self.cur.fetchone()[0] is None:
             self.skipTest("0210 is not applied to this database")
-        for user_id in (MANAGER, ADMIN, OTHER):
+        for user_id in (MANAGER, ADMIN, OTHER, OPERATOR):
             self.cur.execute(
                 "INSERT INTO auth.users (id, email, encrypted_password, created_at)"
                 " VALUES (%s, %s, 'not-a-real-hash', now()) ON CONFLICT (id) DO NOTHING;",
                 (user_id, f"{user_id}@nameplate-stamp.test"),
             )
-        for user_id, role in ((MANAGER, "Shopfloor_Manager"), (ADMIN, "Administrator")):
+        for user_id, role in ((MANAGER, "Shopfloor_Manager"), (ADMIN, "Administrator"),
+                              (OPERATOR, "Operator")):
             self.cur.execute(
                 "INSERT INTO public.user_roles (user_id, role_id)"
                 " SELECT %s, id FROM public.roles WHERE name = %s;",
@@ -116,9 +120,28 @@ class TheDatabaseStampsTheNameplate(unittest.TestCase):
         )
         return self.cur.fetchone()
 
+    def kept(self, updated_by, updated_at):
+        """Whether the fixture's nameplate holds exactly these two values."""
+        self.cur.execute(
+            "SELECT updated_by IS NOT DISTINCT FROM %s::uuid AND updated_at = %s::timestamptz"
+            "  FROM public.device_nameplate WHERE device_id = %s;",
+            (updated_by, updated_at, DEVICE),
+        )
+        return self.cur.fetchone()[0]
+
     def high_water(self):
         self.cur.execute("SELECT coalesce(max(id), 0) FROM public.audit_trail;")
         return self.cur.fetchone()[0]
+
+    def approve_a_proposal(self, patch):
+        """The Operator proposes `patch` to the nameplate and the Manager approves it."""
+        self.write("INSERT INTO public.change_proposals (entity_type, entity_id, patch, rationale)"
+                   " VALUES ('device_nameplate', %s, %s::jsonb, 'the plate on the machine says so')",
+                   (DEVICE, json.dumps(patch)), OPERATOR)
+        self.cur.execute("SELECT id FROM public.change_proposals WHERE entity_id = %s AND status = 'open';",
+                         (DEVICE,))
+        proposal = self.cur.fetchone()[0]
+        self.write("SELECT public.approve_proposal(%s);", (proposal,), MANAGER)
 
     # -- a Shopfloor Manager ----------------------------------------------------------------------
 
@@ -151,19 +174,52 @@ class TheDatabaseStampsTheNameplate(unittest.TestCase):
         self.write(UPDATE_NAMING, ("SN-2", MANAGER, PAST, DEVICE), ADMIN)
         self.assertEqual(self.stamp(), (ADMIN, True))
 
-    # -- no person behind the write ---------------------------------------------------------------
-
-    def test_the_owners_session_records_nobody(self):
-        self.write(INSERT_NAMING, (DEVICE, "SN-1", OTHER, PAST), role=None)
-        self.assertEqual(self.stamp(), (None, True))
-        self.write(UPDATE_NAMING, ("SN-2", MANAGER, PAST, DEVICE), role=None)
-        self.assertEqual(self.stamp(), (None, True))
+    # -- service_role -----------------------------------------------------------------------------
 
     def test_service_role_records_nobody(self):
         self.write(INSERT_NAMING, (DEVICE, "SN-1", OTHER, PAST), role="service_role")
         self.assertEqual(self.stamp(), (None, True))
         self.write(UPDATE_NAMING, ("SN-2", MANAGER, PAST, DEVICE), role="service_role")
         self.assertEqual(self.stamp(), (None, True))
+
+    # -- the database's own writes ----------------------------------------------------------------
+
+    def test_an_approval_records_the_proposer_at_the_time_it_was_applied(self):
+        self.write(INSERT_NAMING, (DEVICE, "SN-1", None, None), ADMIN)
+        self.approve_a_proposal({"serial_number": "SN-2"})
+        self.cur.execute("SELECT serial_number FROM public.device_nameplate WHERE device_id = %s;", (DEVICE,))
+        self.assertEqual(self.cur.fetchone()[0], "SN-2")
+        self.assertEqual(self.stamp(), (OPERATOR, True))
+
+    def test_a_first_approval_records_the_proposer_too(self):
+        # No row yet: approve_proposal() inserts one, then updates it.
+        self.approve_a_proposal({"serial_number": "SN-1"})
+        self.assertEqual(self.stamp(), (OPERATOR, True))
+
+    def test_the_approval_writes_as_the_functions_owner(self):
+        # The rule rests on this: an INVOKER trigger fired inside a SECURITY DEFINER function sees
+        # the function's owner as current_user, while auth.uid() is still the approver's.
+        self.cur.execute("CREATE TEMP TABLE stamp_probe (who name, uid uuid) ON COMMIT DROP;")
+        self.cur.execute("GRANT ALL ON pg_temp.stamp_probe TO PUBLIC;")
+        self.cur.execute(
+            "CREATE FUNCTION public.stamp_probe_0210() RETURNS trigger LANGUAGE plpgsql AS $$"
+            " BEGIN INSERT INTO pg_temp.stamp_probe VALUES (current_user, auth.uid()); RETURN NEW; END $$;"
+        )
+        self.cur.execute(
+            "CREATE TRIGGER stamp_probe_0210 BEFORE UPDATE ON public.device_nameplate"
+            " FOR EACH ROW EXECUTE FUNCTION public.stamp_probe_0210();"
+        )
+        self.write(INSERT_NAMING, (DEVICE, "SN-1", None, None), ADMIN)
+        self.approve_a_proposal({"serial_number": "SN-2"})
+        self.write(UPDATE_NAMING, ("SN-3", None, None, DEVICE), MANAGER)
+        self.cur.execute("SELECT who::text, uid::text FROM pg_temp.stamp_probe;")
+        self.assertEqual(self.cur.fetchall(), [("postgres", MANAGER), ("authenticated", MANAGER)])
+
+    def test_the_owners_session_keeps_what_it_writes(self):
+        self.write(INSERT_NAMING, (DEVICE, "SN-1", OTHER, PAST), role=None)
+        self.assertTrue(self.kept(OTHER, PAST))
+        self.write(UPDATE_NAMING, ("SN-2", MANAGER, PAST, DEVICE), role=None)
+        self.assertTrue(self.kept(MANAGER, PAST))
 
     # -- the Audit Trail --------------------------------------------------------------------------
 

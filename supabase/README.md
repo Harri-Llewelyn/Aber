@@ -1819,18 +1819,27 @@ the caller's role. So an Administrator or Shopfloor Manager calling the API coul
 any uuid, or by nobody, at any time. The Audit Trail was right throughout: `log_audit_trail_event()`
 takes `changed_by` from the token.
 
-- **`device_nameplate_stamp()`**, a `BEFORE INSERT OR UPDATE ... FOR EACH ROW` trigger, sets
-  `updated_by := auth.uid()` and `updated_at := now()`, whatever the request carried. It is shaped
-  like `system_settings_stamp()`: PL/pgSQL, `SECURITY INVOKER` so `auth.uid()` reads the caller's
-  own token, `search_path` pinned, and no API role may execute it. A write with no person behind it
-  (a migration, `service_role`) records `NULL`, as `system_settings` does.
+- **`device_nameplate_stamp()`**, a `BEFORE INSERT OR UPDATE ... FOR EACH ROW` trigger, stamps
+  every write made through the API: when `current_user` is `anon`, `authenticated` or
+  `service_role`, it sets `updated_by := auth.uid()` and `updated_at := now()`, whatever the
+  request carried. It is shaped like `system_settings_stamp()`: PL/pgSQL, `search_path` pinned, and
+  no API role may execute it. `service_role` has no person behind it and records `NULL`, as
+  `system_settings` does.
+- **The database's own writes keep their values.** Any other `current_user` is the database
+  writing for itself. A `SECURITY DEFINER` function runs as its owner, and a migration or the
+  owner's session writes what it means to. The function is `SECURITY INVOKER` so that
+  `current_user` is the writer's; as a definer it would always see `postgres` and stamp nothing. A
+  role later granted `INSERT` or `UPDATE` on the table must join the list.
+- **An approved proposal records the proposer.** `approve_proposal()` is `SECURITY DEFINER`, owned
+  by `postgres`, and sets `updated_by` to the proposer and `updated_at` to the time it applies the
+  change, as archived migration 0086 decided
+  ([Who the record names](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)).
+  The trigger fired from inside it sees `current_user = postgres` while `auth.uid()` is still the
+  approver, so it keeps those values. The proposer can be trusted: `change_proposals_insert_proposer`
+  pins `proposed_by` to `auth.uid()`, a trigger refuses a later change to it, and a patch cannot
+  name `updated_by` or `updated_at` (`proposable_columns()`).
 - **The dashboard sends neither column.** `api.js`'s nameplate save upserts the fields alone, so
   the request says only what the person changed.
-- **An approved proposal records the approver.** `approve_proposal()` set `updated_by` to the
-  proposer, as archived migration 0086 decided. It runs with the approver's token and writes the
-  row as it is now, so the trigger stamps the approver, and the function no longer sets either
-  column (`0165`'s body). The proposer is still `change_proposals.proposed_by`, and the approval's
-  `PROPOSAL_APPLIED` audit row carries both.
 - **A restore keeps what was recorded.** A backup is a whole-database dump, and `pg_restore` and a
   plain replay create a table's triggers after loading its rows. `test-db.mjs --with-history` loads
   under `session_replication_role = replica`, where the trigger does not fire. Nothing else writes
@@ -1839,7 +1848,8 @@ takes `changed_by` from the token.
 - **The Audit Trail shows what it did before.** The audit trigger is `AFTER`, so its snapshots hold
   the stamped values. Its `WHEN` clause already ignores a save that moved only `updated_by` and
   `updated_at`, and the Audit Trail's diff hides `updated_at` but shows `updated_by` changing from
-  one person to the next, as it did when the browser sent the value.
+  one person to the next, as it did when the browser sent the value. An approval still shows the
+  proposer there.
 
 The file's self-check fails the boot if the trigger is missing or disabled, is not `BEFORE INSERT
 OR UPDATE FOR EACH ROW`, its function lost its `search_path` pin or became `SECURITY DEFINER`, or
@@ -4784,9 +4794,7 @@ open it and add to it.
 **Who the record names.** `device_nameplate.updated_by` becomes the **proposer** — the column's own
 comment says a nameplate is an assertion about an asset, so who made it is part of the record —
 while the `audit_trail` row names the **approver** in `changed_by` and carries `proposed_by` in
-its payload. Both are in the record; neither column has to hold both. Since
-[`0210`](#a-nameplate-names-the-person-the-server-signed-in-0210) the database stamps `updated_by`
-on every nameplate write, so an approval records the approver there too.
+its payload. Both are in the record; neither column has to hold both.
 
 **The timer is not a person.** An open proposal nobody acts on closes after
 `proposals.open_expiry_days`, whose floor is 1: zero would auto-close every proposal at the moment

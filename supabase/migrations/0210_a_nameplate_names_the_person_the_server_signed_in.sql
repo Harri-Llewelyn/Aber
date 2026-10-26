@@ -6,10 +6,11 @@
 -- at any time they chose.
 --
 --   * device_nameplate_stamp(), a BEFORE INSERT OR UPDATE trigger, sets updated_by := auth.uid()
---     and updated_at := now() on every row written, as system_settings_stamp() does. A write with
---     no person behind it (a migration, service_role) records NULL.
---   * An approved nameplate proposal is written by the approver, so the approver is recorded. The
---     proposer stays in change_proposals.proposed_by and in the approval's audit row.
+--     and updated_at := now() on every row written through the API (current_user anon,
+--     authenticated or service_role), as system_settings_stamp() does. service_role records NULL.
+--   * The database's own writes keep their values. approve_proposal() runs as its owner and
+--     records the proposer, as archived migration 0086 decided; a migration or the owner's session
+--     writes what it means to.
 --   * A restore keeps the recorded values: pg_restore and a plain dump load the rows before they
 --     create the table's triggers.
 --
@@ -19,17 +20,21 @@
 -- -------------------------------------------------------------------------------------------------
 -- 1. The stamp
 -- -------------------------------------------------------------------------------------------------
--- SECURITY INVOKER, as system_settings_stamp() is: auth.uid() reads the caller's own token, and the
--- function touches nothing but the row it is given. No API role executes it; a trigger needs none.
+-- Stamps a write through the API, where current_user is the role PostgREST switched to. Any other
+-- current_user is the database's own write and keeps its values: approve_proposal(), a SECURITY
+-- DEFINER, records the proposer, whom change_proposals_insert_proposer pins to auth.uid(). INVOKER
+-- so current_user is the writer's; a role later granted writes on this table must join the list.
 CREATE OR REPLACE FUNCTION public.device_nameplate_stamp() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_catalog'
     AS $$
 BEGIN
-    -- Whatever the request carried. `auth.uid()` reads `request.jwt.claims`, which PostgREST sets
-    -- from the verified token. NULL under service_role and during migrations, which is correct.
-    NEW.updated_by := auth.uid();
-    NEW.updated_at := now();
+    IF current_user IN ('anon', 'authenticated', 'service_role') THEN
+        -- Whatever the request carried. `auth.uid()` reads `request.jwt.claims`, which PostgREST
+        -- sets from the verified token. NULL under service_role, which is correct.
+        NEW.updated_by := auth.uid();
+        NEW.updated_at := now();
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -38,9 +43,11 @@ ALTER FUNCTION public.device_nameplate_stamp() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.device_nameplate_stamp() FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON FUNCTION public.device_nameplate_stamp() IS
-  'BEFORE INSERT OR UPDATE trigger on device_nameplate: sets updated_by to auth.uid() and '
-  'updated_at to now(), whatever the request carried, as system_settings_stamp() does. '
-  'updated_by is NULL for a write with no person behind it: a migration or service_role (0210).';
+  'BEFORE INSERT OR UPDATE trigger on device_nameplate. A write through the API (current_user '
+  'anon, authenticated or service_role) gets updated_by auth.uid() and updated_at now(), '
+  'whatever the request carried, as system_settings_stamp() does; service_role records NULL. '
+  'Any other current_user is the database''s own write and keeps its values: approve_proposal(), '
+  'running as its owner, records the proposer (0210).';
 
 SELECT public.replay_trigger('public.device_nameplate', 'device_nameplate_stamp', $ddl$
 CREATE TRIGGER device_nameplate_stamp BEFORE INSERT OR UPDATE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.device_nameplate_stamp();
@@ -50,15 +57,15 @@ $ddl$);
 -- 2. What the columns say
 -- -------------------------------------------------------------------------------------------------
 COMMENT ON COLUMN public.device_nameplate.updated_by IS
-  'Who last wrote this nameplate: the caller''s auth.uid(), stamped by device_nameplate_stamp() '
-  'whatever the request carried. NULL for a write with no person behind it (a migration, '
-  'service_role). An approved proposal records the approver; the proposer is the proposal''s '
-  'proposed_by. A nameplate is an assertion about an asset, so who made it is part of the record '
-  '(0210).';
+  'Who last edited this nameplate. A write through the API records the caller''s auth.uid(), '
+  'stamped by device_nameplate_stamp() whatever the request carried; service_role records NULL. '
+  'An approved proposal records its proposer. A nameplate is an assertion about an asset, so who '
+  'made it is part of the record (0210).';
 
 COMMENT ON COLUMN public.device_nameplate.updated_at IS
-  'When this nameplate was last written, by the database''s clock: stamped by '
-  'device_nameplate_stamp() whatever the request carried (0210).';
+  'When this nameplate was last written, by the database''s clock. A write through the API is '
+  'stamped by device_nameplate_stamp() whatever the request carried; approve_proposal() writes '
+  'the time it applied the proposal (0210).';
 
 -- -------------------------------------------------------------------------------------------------
 -- What this file did, and nothing wider.
@@ -86,7 +93,8 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = v_fn
                   AND NOT prosecdef AND 'search_path=public, pg_catalog' = ANY (proconfig)) THEN
-    RAISE EXCEPTION '0210: device_nameplate_stamp() lost its search_path pin or became SECURITY DEFINER';
+    RAISE EXCEPTION '0210: device_nameplate_stamp() lost its search_path pin or became SECURITY DEFINER, '
+      'where current_user would always be its owner and nothing would be stamped';
   END IF;
   FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
     IF has_function_privilege(r, v_fn, 'EXECUTE') THEN

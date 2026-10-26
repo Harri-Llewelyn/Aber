@@ -2588,7 +2588,8 @@ paths:
       description: |
         Administrator or Shopfloor_Manager only. Use `Prefer: resolution=merge-duplicates` to upsert.
         The database stamps `updated_by` and `updated_at` with the caller and the time of the write,
-        whatever the request carries, so leave both out.
+        whatever the request carries, so leave both out. An approved nameplate proposal records its
+        proposer instead.
       parameters: [{ $ref: '#/components/parameters/Prefer' }]
       requestBody:
         required: true
@@ -2676,9 +2677,9 @@ paths:
 
         Writes one `audit_trail` row naming both parties: `changed_by` is the approver,
         `new_data.proposed_by` is who asked. It carries the same `causation_id` as the audit row
-        the change itself wrote, so the two read as one act. On the nameplate lane the database
-        stamps `updated_by` with the **approver**, as on every nameplate write; the proposer is the
-        proposal's `proposed_by`.
+        the change itself wrote, so the two read as one act. On the nameplate lane `updated_by` is
+        set to the **proposer**, because a nameplate is an assertion about an asset and who made it
+        is part of the record.
       requestBody:
         required: true
         content:
@@ -6050,8 +6051,8 @@ components:
         software_version: { type: string, nullable: true }
         country_of_origin: { type: string, nullable: true }
         uri_of_the_product: { type: string, nullable: true, description: 'Must be an absolute IRI; a bare string is rejected by a CHECK.' }
-        updated_at: { type: string, format: date-time, readOnly: true, description: 'When the row was last written, by the database''s clock. Stamped on every write; a value sent is ignored.' }
-        updated_by: { type: string, format: uuid, nullable: true, readOnly: true, description: 'Who last wrote the row: the caller''s user id, stamped on every write; a value sent is ignored. Null for a write with no person behind it, such as a migration or `service_role`.' }
+        updated_at: { type: string, format: date-time, readOnly: true, description: 'When the row was last written, by the database''s clock. Stamped on every write through the API; a value sent is ignored.' }
+        updated_by: { type: string, format: uuid, nullable: true, readOnly: true, description: 'Who last wrote the row. A write through the API records the caller''s user id, and a value sent is ignored; `service_role` records null. An approved proposal records its proposer.' }
 
     SparkplugAddress:
       type: object

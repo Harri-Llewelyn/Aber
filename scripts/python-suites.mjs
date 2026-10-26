@@ -961,11 +961,12 @@ export const SUITES = {
   'supabase/migrations/test_a_nameplate_names_the_person_the_server_signed_in.py': {
     lanes: ['db'],
     why:
-      "0210 -- that a nameplate's updated_by and updated_at are the caller and the database's " +
+      "0210 -- that a nameplate written through the API records the caller and the database's " +
       "time, whatever the request names: a Shopfloor Manager's and an Administrator's insert, " +
-      'update and upsert naming another person and a past time are stored as theirs, now, and ' +
-      'a write with no person behind it stores NULL. A wrong value here is silent: the record ' +
-      'names somebody who never touched the asset.',
+      "update and upsert naming another person and a past time are stored as theirs, now, and " +
+      "service_role's store NULL. An approval still records the proposer, and the owner's " +
+      'session keeps what it writes. A wrong value here is silent: the record names somebody ' +
+      'who never touched the asset.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
