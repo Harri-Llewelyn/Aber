@@ -973,6 +973,35 @@ const apiMethods = {
   },
 
   /**
+   * The signed-in person's own sessions, in every browser and service: `{ id, service_name,
+   * user_agent, created_at, last_active_at, not_after, is_current }` from `list_my_sessions()`
+   * (0206). An account with no role is refused, with the database's sentence.
+   */
+  listMySessions: async () => {
+    const { data, error } = await supabase.rpc('list_my_sessions');
+    if (error) throw new Error(error.message || 'Could not list your sessions');
+    return data || [];
+  },
+
+  /**
+   * End one of your own sessions (`end_my_session()`, 0206). The database refuses the one in use
+   * and answers another person's as not found; its sentence is the error.
+   */
+  endMySession: async (sessionId) => {
+    const { error } = await supabase.rpc('end_my_session', { p_session_id: sessionId });
+    if (error) throw new Error(error.message || 'Could not end the session');
+  },
+
+  /**
+   * End every session you hold but this browser's: GoTrue's `scope=others`. auth-js keeps this
+   * browser's session whatever GoTrue answers, and reports no error for a 401, 403 or 404.
+   */
+  signOutOtherSessions: async () => {
+    const { error } = await supabase.auth.signOut({ scope: 'others' });
+    if (error) throw new Error(error.message || 'Could not sign out of your other sessions');
+  },
+
+  /**
    * Give a person one of the four roles. The database refuses your own role, a person whose access
    * is removed, and the last Administrator who can sign in, and its sentence is the error.
    */
