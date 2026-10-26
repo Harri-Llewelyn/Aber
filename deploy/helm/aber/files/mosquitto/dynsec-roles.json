@@ -55,6 +55,16 @@
       ]
     },
     {
+      "rolename": "subscriber",
+      "textDescription": "A consumer outside the platform that only reads: a SCADA system, a dashboard, an analytics client. Reads the whole Sparkplug namespace and the Unified Namespace, and publishes nothing. ONE of its grants is not in this file: its read of the Unified Namespace subtree <root>/#, from UNS_MQTT_TOPIC_ROOT (ingestion.unsMqttTopicRoot), is injected at reconcile time as the ingestion role's write there is. It reads no Directory subtree: publishing the Directory is a deployment's own exposure decision. Site-wide: it reads every area. No account holds it until an operator creates one.",
+      "acls": [
+        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
+          "why": "A consumer's subscription to spBv1.0/# or any filter beneath it, as an account an operator creates; scripts/check-broker-config.mjs subscribes as one." },
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true,
+          "why": "Delivery for that consumer's Sparkplug subscription." }
+      ]
+    },
+    {
       "rolename": "monitor",
       "textDescription": "The health probes and the metrics exporter: $SYS only.",
       "acls": [

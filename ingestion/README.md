@@ -1601,7 +1601,7 @@ default.
 **The broker's roles are the whole of that access control**, and they are deliberately narrow:
 
 ```
-ingestion   publish, subscribe, receive   <DIRECTORY_MQTT_TOPIC_PREFIX>/#
+ingestion   publish   <DIRECTORY_MQTT_TOPIC_PREFIX>/#
 ```
 
 **That grant is not in `dynsec-roles.json`.** The subtree is named after the site's Sparkplug
@@ -1612,7 +1612,9 @@ publish silently, because refusal is silent at QoS 0.
 
 **Nothing else holds a Directory grant**, including the i3X server: it reads the Directory from
 the database over PostgREST, where the rows are authoritative, so a broker grant would be one it
-never exercises (issue #297).
+never exercises (issue #297). Nor does the `subscriber` role a consumer outside the platform holds:
+it reads Sparkplug and the Unified Namespace, and a deployment that wants a consumer to read the
+Directory adds that grant itself.
 
 **No gateway may read it.** A gateway is otherwise confined to `spBv1.0/+/+/<its id>/#` — its own
 edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
@@ -1716,12 +1718,14 @@ Retained, QoS 0: a subscriber sees the last value on connect, and the next readi
 
 **It is off by default**, for the Directory publisher's reason. A topic has no caller, so the broker
 ACL is the whole of the access control, and the tree (`uns/#` by default) is every machine's
-readings in the clear. The ingestion role grants the daemon publish and read on `<root>/#`, derived
+readings in the clear. The ingestion role grants the daemon publish on `<root>/#`, derived
 at reconcile time from the same `ingestion.unsMqttTopicRoot` this daemon reads, and **no gateway a
 read of it**:
 one gateway credential reading the tree would read the whole plant, which the per-node confinement
-exists to prevent. A BI or SCADA consumer gets its own account and a role reading `uns/#`, added
-deliberately in `mosquitto/dynsec-roles.json`. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
+exists to prevent. A BI or SCADA consumer gets an account of its own holding the `subscriber` role,
+which reads `<root>/#`, derived from the same value, and `spBv1.0/#`, and publishes nothing
+([`mosquitto/README.md`, *Giving a consumer a read-only account*](../mosquitto/README.md#giving-a-consumer-a-read-only-account)).
+`scripts/check-broker-config.mjs` asserts each of these by delivery.
 
 **The cost is on the single-writer path**, one publish per metric per message on the same thread
 as the historian write, and it is measured the same way: `aber_ingestion_uns_publish_seconds` sits

@@ -33,8 +33,8 @@ import { tmpdir } from 'node:os';
 
 import { hashArgvForUsername } from './lib/mosquitto-credentials.mjs';
 import {
-  PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, controlArgv, controlInput, controlPayload, isRefusal,
-  issueCommand, issueWithControl, summariseInventory,
+  CONTROL_TOPIC, PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, controlArgv, controlInput, controlPayload,
+  isRefusal, issueCommand, issueWithControl, summariseInventory,
 } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
@@ -211,6 +211,11 @@ const ADMIN = 'dynsec-admin';
  * any client and undeclared role, so the delivery assertions can see what the daemon writes.
  */
 const OBSERVER = 'check-observer';
+/**
+ * A consumer outside the platform, holding the `subscriber` role and nothing else. Seeded in the
+ * stored document, so the reconcile keeps it as it would keep an account an operator created.
+ */
+const SUBSCRIBER = 'check-subscriber';
 
 /**
  * The username each PLATFORM_PRINCIPALS entry boots with, so the reconcile below runs on the list
@@ -230,6 +235,7 @@ const ACCOUNTS = {
   [GATEWAY_B]: 'gateway-b-secret-0001',
   probe: 'probe-secret-00000001',
   [OBSERVER]: 'observer-secret-0001',
+  [SUBSCRIBER]: 'subscriber-secret-0001',
 };
 
 /**
@@ -429,13 +435,14 @@ try {
     // holds the shared role and the role generated for it, which the reconcile must retire. `probe`
     // holds none and must be kept as it is. The `ingestion` role holds the reads of the UNS and the
     // Directory that every release before 1.7 reconciled beside each write, which the reconcile must
-    // drop. OBSERVER and its role are this check's own.
+    // drop. OBSERVER and its role are this check's own; SUBSCRIBER holds the declared subscriber role.
     const retired = `gateway-${GATEWAY_B}`;
     const subtreeAcls = (acltypes) => [UNS_FILTER, DIRECTORY_FILTER]
       .flatMap((topic) => acltypes.map((acltype) => ({ acltype, topic, allow: true })));
     const stored = {
       clients: [
         storedClient(GATEWAY_B, ['gateway', retired]), storedClient('probe', []), storedClient(OBSERVER, [OBSERVER]),
+        storedClient(SUBSCRIBER, ['subscriber']),
       ],
       roles: [{
         rolename: retired,
@@ -515,6 +522,17 @@ try {
       ok.push('a stored role the policy does not declare is kept, with the client holding it (this check\'s observer)');
     } else {
       problems.push(`the reconcile did not keep the check's observer and its role (roles ${rolesOf(OBSERVER).join(', ') || '(none)'}); the UNS and Directory assertions below read through it`);
+    }
+    // The file's spBv1.0/# pair, and the UNS pair the reconcile derives from the root it is given.
+    const subscriberAcls = (doc.roles.find((role) => role.rolename === 'subscriber')?.acls || [])
+      .map((a) => `${a.acltype} ${a.topic}`).sort();
+    const subscriberWanted = ['publishClientReceive', 'subscribePattern']
+      .flatMap((acltype) => ['spBv1.0/#', UNS_FILTER].map((topic) => `${acltype} ${topic}`)).sort();
+    if (JSON.stringify(subscriberAcls) === JSON.stringify(subscriberWanted)
+      && JSON.stringify(rolesOf(SUBSCRIBER)) === JSON.stringify(['subscriber'])) {
+      ok.push(`the subscriber role reads spBv1.0/# and ${UNS_FILTER}, from the root it is given, and publishes nowhere; a stored account keeps it`);
+    } else {
+      problems.push(`the subscriber role holds [${subscriberAcls.join('; ')}] and ${SUBSCRIBER} holds [${rolesOf(SUBSCRIBER).join(', ')}]; expected [${subscriberWanted.join('; ')}] and [subscriber]`);
     }
     if (doc.defaultACLAccess?.publishClientReceive === false && doc.defaultACLAccess?.subscribe === false) {
       ok.push('the document denies by default (defaultACLAccess receive and subscribe are false)');
@@ -823,6 +841,51 @@ try {
         false
       );
 
+      // The subscriber role, for a consumer outside the platform: it reads every Sparkplug topic
+      // and the UNS under the root it is given, never the Directory, and every publish it makes is
+      // dropped. Each drop is read by an observer the positive controls above show receiving that
+      // topic from its writer.
+      expect(
+        'a subscriber receives a gateway\'s Sparkplug data',
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`, SUBSCRIBER, 'spBv1.0/#')),
+        true
+      );
+      expect(
+        `a subscriber receives the Unified Namespace under the root it is given (${UNS_ROOT})`,
+        (delivers('aber_ingestion', UNS_DOC, SUBSCRIBER, UNS_FILTER)),
+        true
+      );
+      expect(
+        'a subscriber may NOT read the Directory (publishing it is the deployment\'s own decision)',
+        (delivers('aber_ingestion', DIRECTORY_DOC, SUBSCRIBER, DIRECTORY_FILTER)),
+        false
+      );
+      expect(
+        'a subscriber may NOT publish a command (NCMD)',
+        (delivers(SUBSCRIBER, `spBv1.0/Aber/NCMD/${GATEWAY_A}`)),
+        false
+      );
+      expect(
+        'a subscriber may NOT publish Sparkplug data (NDATA)',
+        (delivers(SUBSCRIBER, `spBv1.0/Aber/NDATA/${GATEWAY_A}`)),
+        false
+      );
+      expect(
+        'a subscriber may NOT publish a primary-host STATE',
+        (delivers(SUBSCRIBER, `spBv1.0/STATE/${PRIMARY_HOST_ID}`, 'aber_ingestion', 'spBv1.0/STATE/#')),
+        false
+      );
+      expect(
+        'a subscriber may NOT publish into the Unified Namespace',
+        (delivers(SUBSCRIBER, UNS_DOC, OBSERVER, UNS_FILTER)),
+        false
+      );
+      expect(
+        'a subscriber may NOT publish the Directory',
+        (delivers(SUBSCRIBER, DIRECTORY_DOC, OBSERVER, DIRECTORY_FILTER)),
+        false
+      );
+
       // The Sparkplug primary-host STATE (ingestion/primary_host.py). The roles have granted every
       // gateway READ of this subtree from the beginning; until issue #149 nothing was allowed to
       // write it, so every gateway watched a permanently empty topic and a compliant third-party
@@ -876,6 +939,11 @@ try {
         problems.push('the plugin\'s admin can read $SYS; its role must grant $CONTROL/dynamic-security/# and nothing else');
       } else {
         ok.push('the plugin\'s admin cannot read $SYS');
+      }
+      if ((sysRead(SUBSCRIBER).stdout || '').includes('mosquitto version')) {
+        problems.push('a subscriber credential can read $SYS; the subscriber role reads spBv1.0/# and the UNS and nothing else');
+      } else {
+        ok.push('a subscriber credential cannot read $SYS');
       }
 
       // The packet ceiling, at its edge: an NBIRTH whose MQTT 3.1.1 packet is exactly the ceiling
@@ -969,6 +1037,36 @@ try {
           ok.push('listRoles holds the gateway role\'s %u rules and no role per gateway');
         } else {
           problems.push(`listRoles: the gateway role's %u rules are [${own.join(', ')}], and ${perGateway.length} per-gateway role(s) remain`);
+        }
+      }
+
+      // A subscriber may NOT command the plugin. A $CONTROL/ publish that passes the ACL goes to the
+      // plugin and is never delivered to a subscriber (2.1.2's handle_publish.c), so no observer
+      // could see it: the proof is whether the command took effect. The admin's identical command,
+      // sent the same way and after it, is the positive control.
+      {
+        const groupOf = (user) => `check-control-${user}`;
+        const exists = (groupname) => {
+          const reply = send({ command: 'getGroup', groupname });
+          return !isRefusal(reply, 'not found') && Boolean(assertOk(reply).data?.group);
+        };
+        for (const user of [SUBSCRIBER, ADMIN]) {
+          docker(['exec', r.name, 'mosquitto_pub', '-u', user, '-P', ACCOUNTS[user], '-t', CONTROL_TOPIC,
+            '-m', controlPayload([{ command: 'createGroup', groupname: groupOf(user) }])]);
+        }
+        const deadline = Date.now() + DELIVERY_DEADLINE_S * 1000;
+        let control = false;
+        try {
+          while (!control && Date.now() < deadline) control = exists(groupOf(ADMIN));
+          if (!control) {
+            problems.push(`the admin's createGroup on ${CONTROL_TOPIC} had not taken effect after ${DELIVERY_DEADLINE_S} s, so nothing here proves a subscriber's is refused`);
+          } else if (exists(groupOf(SUBSCRIBER))) {
+            problems.push(`A SUBSCRIBER COMMANDED THE PLUGIN: its createGroup on ${CONTROL_TOPIC} took effect`);
+          } else {
+            ok.push(`a subscriber may NOT command the plugin (its createGroup on ${CONTROL_TOPIC} took no effect; the admin's did)`);
+          }
+        } catch (err) {
+          problems.push(`the plugin could not be asked whether a subscriber's command took effect: ${err.message}`);
         }
       }
 

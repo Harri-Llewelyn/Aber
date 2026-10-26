@@ -928,6 +928,9 @@ re-render).
 > - the plugin's admin: `$CONTROL` only
 > - every gateway: its own edge node, through the shared `gateway` role, whose rules name the
 >   connecting username (`%u`)
+> - an account you make for a reader such as a SCADA system: the `subscriber` role. It reads
+>   Sparkplug and the Unified Namespace, and writes nothing. No such account exists until you make
+>   one ([`mosquitto/README.md`](../../mosquitto/README.md#giving-a-consumer-a-read-only-account))
 >
 > One credential holding `readwrite spBv1.0/#` could forge `DBIRTH`/`DDATA` for any machine on the
 > site. `verify_gateway_binding()` cannot detect that for a correctly bound device.

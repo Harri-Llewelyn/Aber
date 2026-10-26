@@ -10,7 +10,7 @@
 //   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
 //   PRIMARY_HOST_ID              required; the ingestion role is granted write on spBv1.0/STATE/<id>
 //   DIRECTORY_MQTT_TOPIC_PREFIX  required; the ingestion role is granted <prefix>/#
-//   UNS_MQTT_TOPIC_ROOT          required; the ingestion role is granted <root>/#
+//   UNS_MQTT_TOPIC_ROOT          required; the ingestion role may write <root>/#, the subscriber read it
 //   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR always
 //   MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD   the credential service's account, required
 //   MQTT_<NAME>_USER / MQTT_<NAME>_PASSWORD               one pair per PLATFORM_PRINCIPALS entry
@@ -34,6 +34,7 @@ import {
   rolesFor,
   withDirectoryGrant,
   withUnsGrant,
+  withUnsReadGrant,
   withPrimaryHostGrant,
 } from './lib/mosquitto-dynsec.mjs';
 
@@ -135,12 +136,13 @@ function main() {
       + 'only writer of the UNS unable to publish -- silently, at QoS 0. The chart passes '
       + 'ingestion.unsMqttTopicRoot, which is uns by default.');
   }
+  // The subscriber role reads the same subtree, whether or not the daemon publishes into it.
   try {
-    policy = withUnsGrant(policy, unsRoot);
+    policy = withUnsReadGrant(withUnsGrant(policy, unsRoot), unsRoot);
   } catch (err) {
     fail(`UNS_MQTT_TOPIC_ROOT: ${err.message}`);
   }
-  log(`unified namespace: granting the ingestion role ${unsTopicFilter(unsRoot)}`);
+  log(`unified namespace: granting the ingestion role write and the subscriber role read on ${unsTopicFilter(unsRoot)}`);
 
   const adminUser = process.env.MQTT_DYNSEC_ADMIN_USER || 'dynsec-admin';
   const adminPassword = process.env.MQTT_DYNSEC_ADMIN_PASSWORD || '';
