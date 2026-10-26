@@ -643,9 +643,11 @@ Value, Actions), header row and all, so the two read alike.
   (`list_my_sessions()`, `supabase/README.md` `0206`), the one in use first and marked This browser,
   then by last activity. Where is the browser and system from the user agent, or the service
   without the "Aber " prefix (`utils/sessions.js`, no parsing library). End calls
-  `end_my_session()` on any other row; Sign Out of All Other Sessions is
-  `signOut({ scope: 'others' })`, which auth-js answers without touching this browser's session.
-  Each act toasts with a link back to the tab and reads the list again.
+  `end_my_session()` on any other row, after a dialog that names the session and when it was last
+  active; Sign Out of All Other Sessions calls `end_my_other_sessions()` (`supabase/README.md`
+  `0211`), which keeps the session the token names. Each writes one `SESSIONS_ENDED` row, and the
+  Audit Trail's drawer names that row's session with the same `sessionLabel()`. Each act toasts
+  with a link back to the tab and reads the list again.
 
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
