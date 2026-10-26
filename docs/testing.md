@@ -451,6 +451,15 @@ python supabase/migrations/test_user_settings.py
 # retirers they may already read; list_people() and list_user_accounts() carry the name; and
 # 0001 and 0166 bring a database holding the older list shapes forward. Every test rolls back.
 python supabase/migrations/test_a_person_can_have_a_display_name.py
+# An Administrator ends a person's sessions and changes their email address (0207). Only an
+# Administrator ends or counts a person's sessions, never their own; every session the person
+# holds ends, nobody else's, and the API refuses the ended sessions' tokens at once; one
+# SESSIONS_ENDED row names who, whose and how many; a removed person's may be ended; the count's
+# time reads GoTrue's zone-less refreshed_at as UTC. An email change is refused for your own
+# address, a removed person, a taken address, the same address and a non-address before GoTrue
+# acts, recorded only once the account holds the new address, with both addresses, and ends the
+# person's sessions in the same transaction. Every test rolls back.
+python supabase/migrations/test_an_administrator_ends_a_person_s_sessions.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.

@@ -131,8 +131,9 @@ GRANT SELECT, INSERT, DELETE ON auth.oauth_clients TO postgres;
 
 -- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
 -- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as
--- GoTrue does. The columns are the ones the chain reads, with GoTrue's types: `refreshed_at` has
--- no time zone (GoTrue writes UTC).
+-- GoTrue does. The columns are the ones the chain reads (0206, 0207), with GoTrue's types:
+-- `refreshed_at` has no time zone (GoTrue writes UTC). The ALTER gives a kept container (`--reuse`)
+-- the columns added after it was first made.
 CREATE TABLE IF NOT EXISTS auth.sessions (
   id              uuid PRIMARY KEY,
   user_id         uuid NOT NULL,
@@ -143,4 +144,9 @@ CREATE TABLE IF NOT EXISTS auth.sessions (
   user_agent      text,
   oauth_client_id uuid REFERENCES auth.oauth_clients (id) ON DELETE CASCADE
 );
+ALTER TABLE auth.sessions
+  ADD COLUMN IF NOT EXISTS not_after       timestamptz,
+  ADD COLUMN IF NOT EXISTS refreshed_at    timestamp,
+  ADD COLUMN IF NOT EXISTS user_agent      text,
+  ADD COLUMN IF NOT EXISTS oauth_client_id uuid REFERENCES auth.oauth_clients (id) ON DELETE CASCADE;
 GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;

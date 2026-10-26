@@ -70,8 +70,11 @@ in one database and the server opens another, with nothing reporting a fault.
   value: "true"
 - name: GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION
   value: "true"
+# Off: with it on, a sign-in whose auto-registration fails because a forge user already holds the
+# address (one that kept an address an Administrator has since changed) is signed in as that user,
+# found by X-WEBAUTH-EMAIL. A new forge user gets Gitea's `<uuid>@localhost` placeholder instead.
 - name: GITEA__service__ENABLE_REVERSE_PROXY_EMAIL
-  value: "true"
+  value: "false"
 - name: GITEA__service__ENABLE_REVERSE_PROXY_FULL_NAME
   value: "true"
 - name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION_API

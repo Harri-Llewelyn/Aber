@@ -77,8 +77,12 @@ export default async function handler(req: Request): Promise<Response> {
 
     // Fail closed: returning no `role` key at all, rather than guessing Viewer, is what lets
     // role_attribute_strict = true reject the login. An unmapped role is a provisioning error.
+    // Grafana finds the user by `sub` and copies `login`, `email` and `name` onto it at each
+    // sign-in. Without `login` it keeps the address the account first signed in with as its login,
+    // and an Administrator can change the address on People.
     const body: Record<string, unknown> = {
       sub: user.id,
+      login: user.email,
       email: user.email,
       email_verified: Boolean(user.email_confirmed_at),
       name: user.email,

@@ -1,14 +1,14 @@
 /**
- * Add a person, remove their access, restore it, or set them a new password: the GoTrue half of the
- * People tab. A function and not an RPC because GoTrue's admin API needs the secret key, which is
- * not in the database.
+ * Add a person, remove their access, restore it, set them a new password or change their email
+ * address: the GoTrue half of the People tab. A function and not an RPC because GoTrue's admin API
+ * needs the secret key, which is not in the database.
  *
  * Administrator only, checked twice: here, from the caller's session, before any admin call; and by
  * the SECURITY DEFINER function each act calls in the caller's session, which also writes its audit
- * row. Removing, restoring and setting a password call the database FIRST, so its rules (not your
- * own account, not the last Administrator who can sign in) are decided before GoTrue changes
- * anything. Removing bans the account and never deletes it: the Audit Trail names the person
- * through it.
+ * row. Removing, restoring, setting a password and changing an address call the database FIRST, so
+ * its rules (not your own account, not the last Administrator who can sign in) are decided before
+ * GoTrue changes anything. Removing bans the account and never deletes it: the Audit Trail names
+ * the person through it.
  *
  * A new account without a mail relay, and every new password, is minted here and returned once.
  * Nothing stores or logs it; GoTrue keeps only its hash.
@@ -200,7 +200,7 @@ async function addPerson(req: Request, body: Record<string, unknown>, caller: Cl
     const { error: nameRefusal } = await caller.rpc("set_display_name", { p_user_id: userId, p_name: displayName });
     if (nameRefusal) {
       console.error("manage-people: setting a new account's display name failed:", userId, nameRefusal.message);
-      nameError = "Their display name was not set. Select Change Name on their row to set it.";
+      nameError = "Their display name was not set. Open their row and select Change Name to set it.";
     }
   }
 
@@ -285,6 +285,47 @@ async function setPassword(req: Request, body: Record<string, unknown>, callerId
   return json(200, { user_id: userId, password });
 }
 
+/**
+ * A new address for someone else, in use at once: GoTrue's admin API sends no mail, and
+ * `email_confirm` keeps the address confirmed, as `add` without a relay does. The database decides
+ * first, so a refusal changes nothing, and answers with the address held. After GoTrue, the record
+ * writes EMAIL_CHANGED and ends the person's sessions, whose tokens still carry the old address.
+ * If that record fails, the address WAS changed, and the answer says so.
+ */
+async function changeEmail(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+  const userId = targetOf(body, callerId, "You cannot change your own email address. Ask another Administrator.");
+  if (userId instanceof Response) return userId;
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!EMAIL.test(email) || email.length > 254) {
+    return json(400, { error: "Malformed request", details: "`email` must be an email address." });
+  }
+
+  const { data: previous, error } = await caller.rpc("check_person_email_change", { p_user_id: userId, p_email: email });
+  if (error) return dbRefusal(req, error, "The email address was not changed");
+
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, { email, email_confirm: true });
+  if (authError) return authRefusal(req, authError, "The email address was not changed");
+
+  const { data: ended, error: recordError } = await caller.rpc("record_person_email_change", {
+    p_user_id: userId,
+    p_old_email: previous,
+    p_email: email,
+  });
+  if (recordError) {
+    return serverError(req, FN, recordError, {
+      error: "The email address was changed, but the change was not recorded and their sessions were " +
+        "not ended. Select End Sessions for them on the People tab.",
+      context: `recording a new email address for ${userId}`,
+    });
+  }
+  return json(200, {
+    user_id: userId,
+    email,
+    previous_email: typeof previous === "string" ? previous : null,
+    sessions_ended: typeof ended === "number" ? ended : 0,
+  });
+}
+
 export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -321,7 +362,7 @@ export async function handler(req: Request): Promise<Response> {
     if (await resolveUserRole(caller, user.id) !== "Administrator") {
       return json(403, {
         error: "Forbidden: Insufficient privileges",
-        details: "Only an Administrator may add people, or change their access or password.",
+        details: "Only an Administrator may add people, or change their access, password or email address.",
       });
     }
 
@@ -345,10 +386,12 @@ export async function handler(req: Request): Promise<Response> {
         return await restoreAccess(req, body, user.id, caller, admin);
       case "set-password":
         return await setPassword(req, body, user.id, caller, admin);
+      case "change-email":
+        return await changeEmail(req, body, user.id, caller, admin);
       default:
         return json(400, {
           error: "Malformed request",
-          details: "`action` must be add, remove, restore or set-password.",
+          details: "`action` must be add, remove, restore, set-password or change-email.",
         });
     }
   } catch (err) {

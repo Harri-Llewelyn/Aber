@@ -43,6 +43,8 @@ function stack(replies: Record<string, Reply | Reply[]> = {}, role = "Administra
     "POST /rest/v1/rpc/remove_person_access": { status: 200, body: true },
     "POST /rest/v1/rpc/restore_person_access": { status: 200, body: "Operator" },
     "POST /rest/v1/rpc/record_person_password_set": { status: 204, body: null },
+    "POST /rest/v1/rpc/check_person_email_change": { status: 200, body: "old@site.test" },
+    "POST /rest/v1/rpc/record_person_email_change": { status: 200, body: 3 },
     [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 200, body: { id: TARGET_ID } },
     [`DELETE /auth/v1/admin/users/${NEW_ID}`]: { status: 200, body: {} },
   };
@@ -298,7 +300,7 @@ Deno.test("a name the database does not set leaves the person added, and says so
   );
   assert.equal(response.status, 200);
   assert.equal(body.display_name, null);
-  assert.ok(/Change Name/.test(body.name_error), body.name_error);
+  assert.ok(/Open their row and select Change Name/.test(body.name_error), body.name_error);
   assert.ok(typeof body.password === "string", "the password is still shown once");
   assert.equal(s.paths().some((p) => p.startsWith("DELETE")), false, "the account is kept");
   assert.ok(logged.some((l) => l.includes("terminating connection")), "the cause is logged");
@@ -591,4 +593,115 @@ Deno.test("a change the database did not record says so, and withholds the passw
   const password = String(s.calls.find((c) => c.method === "PUT")?.body?.password);
   assert.ok(!answer.logged.join("\n").includes(password), "the password is not logged");
   assert.ok(!JSON.stringify(answer.body).includes(password));
+});
+
+const CHECK_PATH = "/rest/v1/rpc/check_person_email_change";
+const RECORD_EMAIL_PATH = "/rest/v1/rpc/record_person_email_change";
+
+Deno.test("changing an address asks the database, changes it in GoTrue, then records it and ends the sessions", async () => {
+  // With a relay as well: the admin API sends no mail, and the new address is in use at once.
+  for (const smtp of [false, true]) {
+    env(smtp);
+    const s = stack();
+    const { response, body } = await run(
+      post({ action: "change-email", user_id: TARGET_ID, email: "  New.Address@Site.TEST " }),
+      s,
+    );
+    assert.equal(response.status, 200, `relay ${smtp}`);
+    assert.equal(s.paths().slice(2), [
+      `POST ${CHECK_PATH}`,
+      `PUT /auth/v1/admin/users/${TARGET_ID}`,
+      `POST ${RECORD_EMAIL_PATH}`,
+    ]);
+
+    const check = s.calls.find((c) => c.path === CHECK_PATH)!;
+    assert.equal(check.body, { p_user_id: TARGET_ID, p_email: "new.address@site.test" }, "trimmed and lower-cased");
+    assert.equal(check.auth, `Bearer ${CALLER_TOKEN}`, "decided as the caller");
+
+    const change = s.calls.find((c) => c.method === "PUT")!;
+    assert.equal(change.auth, `Bearer ${SERVICE_KEY}`, "the admin call carries the secret key");
+    assert.equal(change.body, { email: "new.address@site.test", email_confirm: true }, "only the address, confirmed");
+
+    // The audit row is the database's: the old address the check answered, the new one, as the caller.
+    const record = s.calls.find((c) => c.path === RECORD_EMAIL_PATH)!;
+    assert.equal(record.body, { p_user_id: TARGET_ID, p_old_email: "old@site.test", p_email: "new.address@site.test" });
+    assert.equal(record.auth, `Bearer ${CALLER_TOKEN}`, "recorded as the caller, so the trail names them");
+
+    assert.equal(body, {
+      user_id: TARGET_ID,
+      email: "new.address@site.test",
+      previous_email: "old@site.test",
+      sessions_ended: 3,
+    });
+  }
+});
+
+Deno.test("nobody changes their own address here, and nothing is called", async () => {
+  env(false);
+  const s = stack();
+  const { response, body } = await run(post({ action: "change-email", user_id: ADMIN_ID, email: "me2@site.test" }), s);
+  assert.equal(response.status, 403);
+  assert.ok(/your own email address/.test(body.details), body.details);
+  assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"]);
+});
+
+Deno.test("an address that is not one is refused before the database and GoTrue", async () => {
+  for (const email of ["not-an-address", "two words@site.test", "", 42, `${"a".repeat(250)}@site.test`]) {
+    env(false);
+    const s = stack();
+    const { response } = await run(post({ action: "change-email", user_id: TARGET_ID, email }), s);
+    assert.equal(response.status, 400, String(email));
+    assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"], String(email));
+  }
+});
+
+Deno.test("a caller who is not an Administrator changes no address", async () => {
+  for (const role of ["Shopfloor_Manager", "Operator", "Auditor"]) {
+    env(false);
+    const s = stack({}, role);
+    const { response } = await run(post({ action: "change-email", user_id: TARGET_ID, email: "new@site.test" }), s);
+    assert.equal(response.status, 403, role);
+    assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"], role);
+  }
+});
+
+Deno.test("an address the database refuses never reaches GoTrue", async () => {
+  const refusals: [number, string, string, number][] = [
+    [400, "P0001", "this person's access is removed. Restore it first, then change their email address.", 409],
+    [400, "P0001", "taken@site.test already belongs to another account", 409],
+    [400, "22023", "that is already their email address", 400],
+    [403, "42501", "insufficient privileges to change a person's email address", 403],
+    [404, "P0002", `person ${TARGET_ID} not found`, 404],
+  ];
+  for (const [status, code, message, expected] of refusals) {
+    env(false);
+    const s = stack({ [`POST ${CHECK_PATH}`]: { status, body: { code, message, details: null, hint: null } } });
+    const { response, body } = await run(post({ action: "change-email", user_id: TARGET_ID, email: "taken@site.test" }), s);
+    assert.equal(response.status, expected, message);
+    assert.equal(body.details, message, message);
+    assert.equal(gotrueAdmin(s.paths()), [], message);
+    assert.equal(s.paths().includes(`POST ${RECORD_EMAIL_PATH}`), false, `${message}: nothing recorded`);
+  }
+});
+
+Deno.test("an address GoTrue did not change is not recorded, and no session ends", async () => {
+  env(false);
+  const s = stack({ [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 500, body: { code: 500, msg: "Error updating user" } } });
+  const answer = await run(post({ action: "change-email", user_id: TARGET_ID, email: "new@site.test" }), s);
+  assertServerFailure(answer, 502, "Error updating user");
+  assert.equal(answer.body.error, "The email address was not changed: the sign-in service failed. Nothing was changed.");
+  assert.equal(s.paths().includes(`POST ${RECORD_EMAIL_PATH}`), false);
+});
+
+Deno.test("a change the database did not record says the address changed and the sessions did not end", async () => {
+  env(false);
+  const s = stack({
+    [`POST ${RECORD_EMAIL_PATH}`]: {
+      status: 503,
+      body: { code: "57P01", message: "terminating connection", details: null, hint: null },
+    },
+  });
+  const answer = await run(post({ action: "change-email", user_id: TARGET_ID, email: "new@site.test" }), s);
+  assertServerFailure(answer, 500, "terminating connection");
+  assert.ok(/was changed/.test(answer.body.error) && /End Sessions/.test(answer.body.error), answer.body.error);
 });

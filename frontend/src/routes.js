@@ -68,8 +68,12 @@ export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id 
 /** One backup run on the Backups page, or the page itself. */
 export const backupUrl = (runId = '') => pageUrl('backups', { run: runId })
 
-/** One person on Access Control › People, found by email; a removed person is shown with the removed. */
-export const personUrl = (email, removed = false) => pageUrl('access-control', { search: email, removed }, 'people')
+/**
+ * One person on Access Control › People, found by email with their drawer open; a removed person
+ * is shown with the removed.
+ */
+export const personUrl = (email, removed = false) =>
+  pageUrl('access-control', { search: email, removed, person: email }, 'people')
 
 /**
  * One machine identity on Access Control › Machine identities, found by name or principal id;
