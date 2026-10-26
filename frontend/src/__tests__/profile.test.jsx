@@ -93,6 +93,14 @@ describe('Account', () => {
     expect(within(row('Role')).getByText('Only an Administrator can change this')).toBeInTheDocument()
   })
 
+  it('tells an Administrator that another Administrator changes their address and role, on People', () => {
+    renderProfile({ userRole: 'Administrator' })
+    for (const label of ['Email address', 'Role']) {
+      expect(within(row(label)).getByText('Another Administrator can change this, on Access Control › People')).toBeInTheDocument()
+      expect(within(row(label)).queryByText('Only an Administrator can change this')).toBeNull()
+    }
+  })
+
   it('says nothing about the role while it is still being read', () => {
     renderProfile({ userRole: undefined })
     expect(within(row('Role')).getByText('Loading…')).toBeInTheDocument()
