@@ -40,6 +40,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // plugin; the read returns names, roles and state and no hash material.
   "broker-inventory": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
+  // Creates and deletes a read-only broker account (the subscriber role alone), Administrator only.
+  // The same bearer token: the credential service's two verbs for it refuse any username outside
+  // the subscriber scheme, so it can delete no gateway or platform account. No service-role key:
+  // the audit rows (0218) are written as the caller.
+  "broker-subscriber": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
+
   // Signs a long-lived JWT for a service principal and reveals it once. JWT_SECRET is the widest
   // secret in this map: it signs anything, including a `service_role` token that storage, realtime,
   // the edge runtime and Studio accept without consulting the denylist. It is signed here rather

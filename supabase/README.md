@@ -4709,6 +4709,7 @@ refuses a missing or wrong token or secret.
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 | [`aas-api`](functions/aas-api) | any authenticated user | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
+| [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |

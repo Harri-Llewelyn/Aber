@@ -3828,6 +3828,18 @@ paths:
                             counting the credential service's own request on the plugin's admin
                             account. NULL when the broker's reply carries no session list (before
                             Mosquitto 2.1).
+                        textname:
+                          type: string
+                          nullable: true
+                          description: >-
+                            The plugin's name for the account: the name a read-only account was
+                            created with on the Access Control page. NULL where it holds none.
+                        textdescription:
+                          type: string
+                          nullable: true
+                          description: >-
+                            What the account is for, as a read-only account was created with. NULL
+                            where the plugin holds none.
                   roles:
                     type: array
                     items:
@@ -3864,6 +3876,76 @@ paths:
                     description: The configuration error. `details`, when present, names the unset variable.
                     properties: { error: { type: string }, details: { type: string } }
         '503': { description: The credential service is unreachable, or could not read the broker. }
+
+  /functions/v1/broker-subscriber:
+    post:
+      tags: [Edge Functions]
+      summary: Create or delete a read-only broker account
+      description: |
+        New Read-Only Account and Delete on Access Control › Broker accounts. The account is for a
+        consumer outside Aber that only reads: it holds the broker's `subscriber` role and nothing
+        else, so it subscribes to and receives `spBv1.0/#` and the Unified Namespace's `<root>/#`,
+        and every publish it makes is dropped. It is a plain MQTT reader, not a Sparkplug Host
+        Application: it publishes no STATE. The role is site-wide.
+
+        - **`create`**: `name` (1-80 characters) and `description` (1-500), each trimmed and on
+          one line, are what the account is for; the broker keeps them as the client's textname
+          and textdescription. The credential service generates the username, `sub` and 21
+          lowercase hex characters, and the password, which is returned here once and kept
+          nowhere. Then `record_broker_account_created()` writes the Audit Trail row as the
+          caller. If that fails the password is still returned, with `audit_recorded: false`.
+        - **`delete`**: `username` must be in the subscriber scheme; a gateway's account, one of
+          Aber's own and any account made by hand are refused (400) before the credential service
+          is asked. The broker deletes the client (`deleteClient`), which drops its live sessions
+          and refuses its next CONNECT. Then `record_broker_account_deleted()` writes the row.
+
+        Administrator only, checked before the credential service is asked anything. No
+        service-role key: the audit functions run as the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:      { type: string, enum: [create, delete] }
+                name:        { type: string, maxLength: 80, description: '`create`: what the Access Control page lists the account as.' }
+                description: { type: string, maxLength: 500, description: '`create`: what the account is for.' }
+                username:    { type: string, pattern: '^sub[0-9a-f]{21}$', description: '`delete`: the account to delete.' }
+      responses:
+        '200':
+          description: 'Done. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mqtt_username:  { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                  password:       { type: string, description: '`create` only. Shown once; the broker stores a hash.' }
+                  name:           { type: string, description: '`create` only.' }
+                  description:    { type: string, description: '`create` only.' }
+                  role:           { type: string, enum: [subscriber], description: '`create` only.' }
+                  deleted:        { type: boolean, description: '`delete` only.' }
+                  audit_recorded: { type: boolean, description: 'False when the Audit Trail row could not be written; the act was done.' }
+        '400': { description: 'Malformed request, an unknown action, a missing or malformed name or description, or a username outside the subscriber scheme.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '404': { description: '`delete`: the broker holds no account by that name. Nothing was recorded.' }
+        '405': { description: Method not allowed. }
+        '500':
+          description: >-
+            The credential service is not configured on this deployment (`details` names the unset
+            variable). Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    properties: { error: { type: string }, details: { type: string } }
+        '503': { description: 'The credential service is unreachable or refused. For `create` nothing the page can use was made; retry.' }
 
   /functions/v1/enroll-gateway:
     post:
