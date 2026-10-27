@@ -1749,7 +1749,13 @@ jobs:
       # --network-policy: every step below runs under the NetworkPolicy layer, as a site's values
       # turn it on, so a flow the edge list does not name fails here. The layer-off default is held
       # by the helm-chart job's render checks and by every developer's `dev:up` (docs/testing.md).
+      #
+      # ABER_KUBELET_SYNC_FREQUENCY: this cluster's kubelet syncs its pods every 10 s, not a site's
+      # minute, so a credential delivered into the playback worker's projected Secret reaches it in
+      # seconds; the suites wait on that delivery several times. The rehearsals keep the default.
       - name: Bring The Stack Up (dev-cluster up --e2e --network-policy)
+        env:
+          ABER_KUBELET_SYNC_FREQUENCY: 10s
         run: node scripts/dev-cluster.mjs up --e2e --network-policy
 
       # The host copies are never read again once imported; dropping them is the largest single

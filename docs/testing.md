@@ -1053,6 +1053,14 @@ machine that meets the same error, `sudo sysctl -w net.ipv4.ip_local_reserved_po
 reserves them until the next reboot; add them to the list if `sysctl net.ipv4.ip_local_reserved_ports`
 already names other ports.
 
+**k8s-validation's kubelet syncs its pods every 10 seconds, faster than a site's.** The job sets
+`ABER_KUBELET_SYNC_FREQUENCY=10s`, and `dev-cluster up` passes it to the kubelet of the cluster it
+creates. A site's kubelet keeps its default of a minute, and so do the dev loop and both rehearsals.
+The kubelet refreshes a running pod's projected Secrets on that period. So a credential delivered
+to the playback worker reaches it in about 15 seconds rather than about a minute, and the playback
+replay and the two capture suites wait that much less for each one. Their timeouts stay sized for a
+site's minute. Check 154 holds the job, the script and this paragraph to one period.
+
 ## The install and upgrade rehearsals
 
 k8s-validation installs the checkout with `values-dev.yaml`, which sets every password and every
