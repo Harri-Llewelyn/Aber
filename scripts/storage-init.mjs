@@ -61,6 +61,14 @@ const ASSET_EXPORT_MIME_TYPES = [
   'application/asset-administration-shell-package+xml',
 ];
 
+// What the dashboard uploads (WebP, or JPEG where the browser cannot encode WebP) and PNG. No SVG,
+// which is active content, and no GIF, which animates. storage-api compares the declared type, not
+// the bytes.
+const AVATAR_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
+// 512 KiB. The dashboard uploads 256x256, tens of KB; this is the control, the picker's limit is not.
+const AVATAR_SIZE_LIMIT = 524288;
+
 // A list in code, not parameters: whether a bucket is public must be readable here, beside its reason.
 const BUCKETS = [
   {
@@ -99,6 +107,15 @@ const BUCKETS = [
     file_size_limit: AREA_PLAN_SIZE_LIMIT,
     allowed_mime_types: AREA_PLAN_MIME_TYPES,
     why: 'area plans drawn by the Site Map, under <area_id>/, referenced by areas.plan_path',
+  },
+  {
+    // Private, and read by its owner alone: a person's picture is shown to nobody else. A fixed
+    // name, for the area-plans reason.
+    id: 'avatars',
+    public: false,
+    file_size_limit: AVATAR_SIZE_LIMIT,
+    allowed_mime_types: AVATAR_MIME_TYPES,
+    why: "people's own pictures, one each at <user id>/avatar, recorded by person_profiles.avatar_path",
   },
 ];
 

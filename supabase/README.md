@@ -1541,7 +1541,7 @@ per person who has a name. **No name is no row. The email stays the identifier.*
   beside the work a person did. Not GoTrue's `user_metadata`: a person writes any JSON there through
   `updateUser()`, with no CHECK the database can apply, and it rides in every access token. The
   table is named for the person rather than the name, so a later column about the person has a
-  place.
+  place. `0213` puts the person's picture there, and a row may then hold a picture and no name.
 - **What a name may be.** Three CHECKs: trimmed (`btrim`), 1 to 80 characters, and none of
   Unicode's control characters or bidirectional controls. A bidirectional control can make the
   email printed beside a name read in another order. The character class is also in
@@ -1549,7 +1549,8 @@ per person who has a name. **No name is no row. The email stays the identifier.*
   name before it is sent; `scripts/check-mirror-drift.mjs` (check 15) holds the three together.
 - **One writer.** `set_display_name(p_user_id, p_name)` is SECURITY DEFINER. A person sets their
   own; an Administrator sets anyone's; anything else is `42501`. It trims, and an empty or NULL
-  name deletes the row. A machine identity has no display name (`22023`): it is named under Machine
+  name deletes the row, or since `0213` clears the name of a row that holds a picture. A machine
+  identity has no display name (`22023`): it is named under Machine
   identities. A name the CHECKs refuse is re-raised as `22023` with a sentence, so the rule is
   stated once, in the table. `authenticated` holds SELECT on the table and nothing else, so no
   write can skip the audit row; the one policy returns the caller's own row.
@@ -1999,6 +2000,85 @@ check 25 (`scripts/check-mirror-drift.mjs`) holds the same columns, and holds
 `end_person_session()`'s recorded fields to them and to what `sessionLabel()` reads.
 `test_an_administrator_ends_one_of_a_person_s_sessions.py` holds the list, the end, the row, the
 refusals and the cascade.
+
+### A person can put a picture on their account (0213)
+
+The account control at the foot of the sidebar showed the same icon for every person, and the
+address beside it is a rail label, hidden whenever the rail is collapsed. On a shopfloor PC several
+people share, the only way to see whose session was open was the tooltip or the menu. A person can
+now upload a picture for their own account. It shows on that control and on their Profile page,
+and **nobody else sees it**: not People, Approvals, the Audit Trail or any page another person
+reads. So nobody can use a picture to pass as someone else, `0203`'s rule that the email stays
+beside a name is untouched, and an Administrator has nothing to moderate. Showing pictures to
+other people would be a later decision, and would need both that rule and an Administrator action
+to remove one.
+
+- **One object per person, in a private bucket.** `avatars`, at `<user id>/avatar`, written with
+  `upsert`, so nobody ever holds more than one file. PNG, JPEG or WebP, 512 KiB at most; see
+  "Storage buckets and why they differ" for what the bucket does not check.
+- **Its four policies admit the owner alone.** SELECT, INSERT, UPDATE and DELETE are each
+  `bucket_id = 'avatars' AND is_own_avatar_object(name)`. That function is true when the name is
+  exactly the caller's own `<id>/avatar` and the caller holds a role: every person role, Auditor
+  included, as with `user_settings` (`0188`). A machine identity holds none, and neither does a
+  person whose access is removed. There is no Administrator arm. `storage-policies.sql`'s
+  self-check fails the boot if one of the four is missing, if any arm of one is anything else, or
+  if any other permissive policy on `storage.objects` is not confined to another bucket by its
+  first test: permissive policies are ORed, so an unconfined one would admit somebody to a picture.
+- **`person_profiles.avatar_path` records that one exists**, as `areas.plan_path` records a plan.
+  The account control downloads only when it is set, so a person with no picture makes no failed
+  request on every page load. A CHECK holds it to `<user id>/avatar` or NULL. A row now holds a
+  name, a picture or both, so `display_name` drops NOT NULL, and a second CHECK holds that a row has
+  one of them. No name and no picture is still no row. The column sits on `0203`'s table, which was
+  named for the person for this reason.
+- **Only the owner sets or clears it.** `set_own_picture(p_present)` takes no id and acts on
+  `auth.uid()` alone, for a caller who holds a role. The dashboard uploads the object, then calls it
+  with true; Remove deletes the object, then calls it with false. A value naming a missing object is
+  shown as no picture, so a failure between the two steps leaves the fallback, not an error. It
+  writes no audit row: nobody else sees a picture, so there is nothing for the trail to show them.
+- **An Administrator's write cannot touch it.** `set_display_name()` is the one write an
+  Administrator makes to another person's row. It is redeclared so that clearing a name keeps a row
+  that holds a picture, setting `display_name` to NULL, where `0203` deleted the row. It never
+  names `avatar_path` otherwise, and the file's self-check holds that.
+- **A picture says nothing to anybody else.** `log_display_name_change()` is redeclared to write
+  nothing when the name did not change, so a row made or deleted for a picture alone is not a
+  rename. `display_names_for()` is redeclared to leave out a row with no name: before this file
+  there was no such row, and now one would tell an Approvals reader that the person has a picture.
+  `list_people()` and `list_user_accounts()` read `display_name` alone, and the table's one policy
+  still returns the caller's own row.
+- **Remove Access deletes the picture.** It bans the account and never deletes it (`0166`), so the
+  `ON DELETE CASCADE` never fires. The name stays, because the trail reads it beside the person's
+  work. Nobody needs the picture, and it is a photo of a person. So `manage-people`'s `remove`
+  deletes the object as `service_role` after the ban, then calls `forget_person_picture(p_user_id)`
+  as `service_role`. That function clears the column, and refuses a person whose access is not
+  removed. A failed delete answers 502 and says to select Remove Access again, as a failed ban does.
+  `remove_person_access()` answers false for a removal already made and changes nothing, so the
+  second time bans again and finishes the delete. Restore Access brings the account back with no
+  picture.
+- **The dashboard shrinks it before upload.** The picker accepts PNG, JPEG and WebP up to 10 MB.
+  The page crops a centred square, scales it to 256x256 on a canvas, and encodes it as WebP, or as
+  JPEG where the browser's `toBlob()` cannot give WebP. A phone photo of several MB uploads as tens
+  of KB. Only the pixels pass through the canvas, so the photo's metadata, including the GPS
+  position where it was taken, is never uploaded. The picker's limit protects the person's own
+  browser; the bucket's is the control.
+- **It is shown as a plan is.** Downloaded with the person's session, turned into a blob URL and
+  set on an `<img>` with empty alt text, since the button's label names the account, as
+  `loadAreaPlanUrl()` does. Never a public URL, and nothing outside the site is asked: no Gravatar.
+  The download asks the browser not to cache it, because the name never changes when the picture
+  does. The CSP's `img-src` already admits `blob:`.
+- **Backups keep old pictures.** `backup-databases.sh` archives every bucket, so a picture that was
+  replaced or removed stays in older backups until they rotate out. `help/pages/profile.md` says so.
+
+The file's self-check asserts the column and both CHECKs, that `set_display_name()` writes no
+`avatar_path`, the two redeclared readers' new conditions, that `set_own_picture()` takes one
+boolean and no id, who may execute each function, `SECURITY DEFINER` and the pin on all but
+`is_own_avatar_object()`, which runs as the caller, and that a request with no identity is refused.
+`test_a_person_can_put_a_picture_on_their_account.py` holds the column's writers and refusals, the
+audit rows, what others read, and the avatars policies run verbatim on a stand-in table with their
+self-check. `supabase/functions/manage-people/test_account_pictures_stack.py` holds what only
+storage-api decides, in the stack lane: the owner's upload, download and delete through the Storage
+API, everyone else refused, a wrong type and an oversize file refused, and Remove Access deleting
+the object. Mirror check 26 (`scripts/check-mirror-drift.mjs`) holds the bucket's name, types,
+limit and object name in the dashboard, `manage-people` and `storage-init.mjs` together.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -7160,20 +7240,21 @@ rotated in place.
 
 ## Storage buckets and why they differ
 
-Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
+Five buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file. `area-plans` is the odd one out below.
+than split across comment blocks in the policy file. `area-plans` is the odd one out below, and
+`avatars` is the only one whose objects each have one reader.
 
 There is no bucket for cold telemetry: it leaves the cluster entirely, for a configured S3
 endpoint. See "Cold telemetry archival" above.
 
-| | `asset-3d-models` | `broker-captures` | `area-plans` | `asset-exports` |
-| :--- | :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
-| Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
-| Operator | read | nothing | read | nothing |
-| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
+| | `asset-3d-models` | `broker-captures` | `area-plans` | `asset-exports` | `avatars` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` | **the owner alone**, their own `<user id>/avatar`, while they hold a role; Remove Access deletes it as `service_role` |
+| Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor | the owner alone: no Administrator arm |
+| Operator | read | nothing | read | nothing | their own picture |
+| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
 
 `asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
 an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
@@ -7186,6 +7267,15 @@ bucket admits `image/svg+xml` only, and the dashboard never inlines it. A plan n
 deleted by the hourly `area-plan-sweep` CronJob once it has gone an hour unnamed. The sweep runs as
 the ingestion principal, which the bucket admits to such a plan and nothing else (see "A plan no
 area names is swept from storage (0199)").
+
+`avatars` holds one picture per person, at `<user id>/avatar`, and each is read by its owner alone
+(see "A person can put a picture on their account (0213)"). It admits `image/png`, `image/jpeg` and
+`image/webp`: no SVG, which is active content, and no GIF, which animates. Its limit is 512 KiB;
+the dashboard uploads a 256x256 picture of tens of KB. **What the bucket does not check:**
+storage-api compares the content type an upload declares with `allowed_mime_types`, and does not
+read the bytes. So a person who bypasses the dashboard can store any file under 512 KiB at their
+own path, declared as an image. This is accepted: only they can read it, and an `<img>` runs
+nothing it is given. No edge function inspects uploads.
 
 ### How `storage-init.mjs` creates them
 
