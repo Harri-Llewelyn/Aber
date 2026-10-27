@@ -17,6 +17,10 @@
  *           --only=a,b          build and import only these images (`up`)
  *           ABER_BUILD_JOBS=<n> an environment variable: how many images build at once, default 4;
  *                               1 builds them one after another, each one's output as it comes (`up`)
+ *           ABER_KUBELET_SYNC_FREQUENCY=<n>s  an environment variable: the kubelet's pod sync
+ *                               period on a cluster `up` creates, default the kubelet's 1m; CI
+ *                               sets 10s, so a projected Secret change reaches a running pod
+ *                               sooner (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
  *           --network-policy    install with the NetworkPolicy layer on (networkPolicy.enabled), as
  *                               values-prod.yaml.example has it; k3s's kube-system holds DNS and
@@ -211,16 +215,34 @@ function clusterExists () {
 // `k3d cluster create` for the dev loop: the shared ports (80 for Traefik, 1883 and 8883 for the
 // broker's LoadBalancer) and FORGE_SSH_PORT for gitea-external, which appliances on the LAN clone
 // from. The trial hands appliances no address, so the port is not in the shared list.
-export function clusterCreateArgs (name = CLUSTER) {
-  return createClusterArgs(name, ['--port', `${FORGE_SSH_PORT}:${FORGE_SSH_PORT}@loadbalancer`])
+// `syncFrequency` (ABER_KUBELET_SYNC_FREQUENCY, whole seconds such as 10s) sets the kubelet's pod
+// sync period, which bounds how soon a running pod sees a projected Secret change. Unset keeps the
+// kubelet's default minute, as a site has; CI's k8s-validation job sets it. Anything else throws.
+export function clusterCreateArgs (name = CLUSTER, syncFrequency = process.env.ABER_KUBELET_SYNC_FREQUENCY) {
+  const extra = ['--port', `${FORGE_SSH_PORT}:${FORGE_SSH_PORT}@loadbalancer`]
+  const sync = (syncFrequency ?? '').trim()
+  if (sync !== '') {
+    if (!/^[1-9]\d*s$/.test(sync)) {
+      throw new Error(`ABER_KUBELET_SYNC_FREQUENCY must be whole seconds such as 10s, the kubelet's pod sync period, not ${JSON.stringify(syncFrequency)}`)
+    }
+    extra.push('--k3s-arg', `--kubelet-arg=sync-frequency=${sync}@server:*`)
+  }
+  return createClusterArgs(name, extra)
 }
 
 function ensureCluster () {
   step(`cluster ${CLUSTER}`)
+  let args
+  try {
+    args = clusterCreateArgs()
+  } catch (e) {
+    die(e.message)
+  }
   if (clusterExists()) {
     console.log(`  exists`)
+    if (process.env.ABER_KUBELET_SYNC_FREQUENCY) console.log('  ABER_KUBELET_SYNC_FREQUENCY applies only to a cluster this creates')
   } else {
-    must('k3d', clusterCreateArgs(), 'k3d could not create the cluster')
+    must('k3d', args, 'k3d could not create the cluster')
   }
   // k3d writes the API endpoint as host.docker.internal on Windows and macOS, which some adapters
   // resolve to an address nothing answers on. Loopback always works: the port is published there.
