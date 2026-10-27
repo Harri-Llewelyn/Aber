@@ -994,6 +994,15 @@ export const SUITES = {
       "Administrator and the session; and that another person's session, a missing one and your " +
       'own are refused with no row.',
   },
+  'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0218 -- that creating and deleting a read-only broker account each write one row in the " +
+      'broker_accounts lane of the security domain, naming the Administrator and what the account ' +
+      'is for, under one entity id; that only an Administrator may write either; and that a ' +
+      'username outside the subscriber scheme, or a name or description outside the credential ' +
+      "service's rule, is refused with no row.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

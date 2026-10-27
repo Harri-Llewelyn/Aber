@@ -773,8 +773,8 @@ paths:
 
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
         `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
-        the asset lane, and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and
-        `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
+        the asset lane, and `user_roles`, `service_principals`, `broker_accounts` (a read-only broker
+        account, 0218), `system_settings`, `backup_jobs` and `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -1531,6 +1531,65 @@ paths:
         '400': { description: 'The account does not hold the new address, or no old address was given.' }
         '403': { description: 'Not an Administrator, or your own address.' }
         '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_broker_account_created:
+    post:
+      tags: [Auth]
+      summary: Record a read-only broker account made
+      description: |
+        Called by `/functions/v1/broker-subscriber` in the caller's session (`0218`), AFTER the
+        broker made the account. Writes one `INSERT` row in the `broker_accounts` lane of the
+        security domain: the name, description, MQTT username and role (`subscriber`), with you
+        in `changed_by`. Never a password. The entity id is the username's 21 hex characters
+        padded with zeros, so the deletion's row shares it. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_username, p_name, p_description]
+              properties:
+                p_username:    { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                p_name:        { type: string, description: '1-80 characters after trimming, on one line.' }
+                p_description: { type: string, description: '1-500 characters after trimming, on one line.' }
+      responses:
+        '200':
+          description: The audit row's id.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A username outside the subscriber scheme, or a name or description outside the rule (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/record_broker_account_deleted:
+    post:
+      tags: [Auth]
+      summary: Record a read-only broker account deleted
+      description: |
+        Called by `/functions/v1/broker-subscriber` in the caller's session (`0218`), AFTER the
+        broker deleted the account. Writes one `DELETE` row in the `broker_accounts` lane: the
+        name and description the broker held (NULL where it held none) and the MQTT username, with
+        you in `changed_by`, under the entity id the creation's row carries. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_username]
+              properties:
+                p_username:    { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                p_name:        { type: string, nullable: true }
+                p_description: { type: string, nullable: true }
+      responses:
+        '200':
+          description: The audit row's id.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A username outside the subscriber scheme (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
 
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
@@ -5477,8 +5536,8 @@ components:
         entity_type:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
-                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups,
-                 capture_jobs, captures, playback_jobs]
+                 change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
+                 backups, capture_jobs, captures, playback_jobs]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -5506,7 +5565,9 @@ components:
             writes `SESSIONS_ENDED` too, through `end_my_session()` and `end_my_other_sessions()`
             (0211), with themselves in `changed_by`. An Administrator ending one of a person's
             sessions writes it through `end_person_session()` (0212), in the shape
-            `end_my_session()` writes.
+            `end_my_session()` writes. A read-only broker account's creation and deletion are an
+            `INSERT` and a `DELETE` in the `broker_accounts` lane, written by
+            `record_broker_account_created()` and `record_broker_account_deleted()` (0218).
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

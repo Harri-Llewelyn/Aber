@@ -702,6 +702,14 @@ python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
 # Other Sessions. Every test rolls back.
 python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
+# An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
+# writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
+# lane of the security domain, naming the Administrator, with the account's name, description and
+# MQTT username, under one entity id. Only an Administrator may write either. A username outside
+# the subscriber scheme, and a name or description outside the credential service's rule, are
+# refused with no row. An Auditor reads the rows and a Shopfloor Manager does not. Every test
+# rolls back.
+python supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
