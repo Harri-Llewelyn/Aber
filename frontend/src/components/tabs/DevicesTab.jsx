@@ -51,6 +51,8 @@ import {
   locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import { AreaIcon } from '../../utils/areaIcon'
+import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
+import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
   unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
@@ -157,6 +159,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [view, setView, viewHref] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
+  // Each device's place in the Unified Namespace (utils/unsPath.js): undefined while the bridge is
+  // off or before the first read, null when the read failed.
+  const [unsPaths, setUnsPaths] = useState(undefined)
 
   /**
    * Latest value per (device, metric), plus the catalog that says which values are legal. Outside
@@ -237,15 +242,18 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [a, c, g, s, ar] = await Promise.all([
+      const [a, c, g, s, ar, uns] = await Promise.all([
         api.get('/api/v1/devices', { signal }),
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/schemas', { signal }),
         // Tolerated: without it the picker simply offers no Area-Wide entries.
         api.get('/api/v1/areas', { signal }).catch(() => []),
+        // Read only while the bridge publishes; tolerated, and the drawer says it could not be read.
+        unsBridgeOn() ? api.get('/api/v1/uns-paths', { signal }).catch(() => null) : undefined,
       ])
       setAssets(a); setCells(c); setGateways(g); setSchemas(s); setAreas(ar)
+      setUnsPaths(uns === undefined ? undefined : unsPathIndex(uns))
 
       try {
         const q = await api.get('/api/v1/quarantine', { signal })
@@ -664,6 +672,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // rather than reading `cell_id` directly -- an inherited device has none of its own. The cells
   // resolve the area above a cell.
   const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway, cellById) : null
+  const selectedUns = selectedDevice && unsTopicField({
+    index: unsPaths,
+    device: selectedDevice,
+    cell: cellById.get(selectedLocation?.effective_cell_id),
+    area: areaById.get(selectedLocation?.effective_area_id),
+    source: selectedLocation?.location_source,
+    onCopy: showToast
+  })
 
   return (
     <div className="page-layout page-fill">
@@ -1090,6 +1106,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               <div className="form-hint">
                 A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>
+              <UnsRenameNote
+                index={unsPaths}
+                renamed={!!editing && form.asset_name.trim() !== (editing.asset_name || '')}
+                deviceId={editing?.asset_id}
+              />
             </div>
 
             <div className="form-group">
@@ -1521,6 +1542,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
                       : noCellReason(selectedGateway) || undefined
           },
+          // Where the location puts its readings in the Unified Namespace, or why nowhere.
+          ...(selectedUns ? [selectedUns] : []),
           {
             // Resolved through schemasForDevice: every `device_submodels` row
             // (`submodel_schema_ids`), since a device may carry several.

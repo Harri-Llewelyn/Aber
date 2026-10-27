@@ -18,6 +18,8 @@ import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
 import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
+import { unsBridgeOn, unsPathIndex, unsTopicRoot } from '../../utils/unsPath'
+import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -66,6 +68,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [editing, setEditing]   = useState(null)
   // The area whose links are open.
   const [linksForArea, setLinksForArea] = useState(null)
+  // Each device's place in the Unified Namespace (utils/unsPath.js): undefined while the bridge is
+  // off or before the first read, null when the read failed.
+  const [unsPaths, setUnsPaths] = useState(undefined)
 
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
@@ -81,13 +86,16 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const loadAll = useCallback(async (signal) => {
     try {
       // Cells come from their own endpoint, as the Cells page reads them.
-      const [ar, c, a, g] = await Promise.all([
+      const [ar, c, a, g, uns] = await Promise.all([
         api.get('/api/v1/areas', { signal }),
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
-        api.get('/api/v1/gateways', { signal })
+        api.get('/api/v1/gateways', { signal }),
+        // Read only while the bridge publishes; tolerated, and the drawer says it could not be read.
+        unsBridgeOn() ? api.get('/api/v1/uns-paths', { signal }).catch(() => null) : undefined
       ])
       setAreas(ar); setCells(c); setAssets(a); setGateways(g)
+      setUnsPaths(uns === undefined ? undefined : unsPathIndex(uns))
 
       /* The reader's own open proposals, so Propose a Change can add to one rather than replace
          it. Tolerated rather than required: the page works without them, and somebody who holds no
@@ -455,8 +463,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             <label className="form-label" htmlFor="area-name">Area Name</label>
             <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" />
             <div className="form-hint">
-              Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">uns/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
+              Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">{unsTopicRoot()}/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
             </div>
+            <UnsRenameNote
+              index={unsPaths}
+              renamed={!!editing && formVal.area_name.trim() !== editing.area_name}
+              areaId={editing?.area_id}
+            />
           </div>
           <div className="form-group">
             {/* A grid of buttons, as the cell form has: the choice is visual. */}
@@ -562,8 +575,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               : null,
             full: true,
             help: 'Assets marked Area-Wide here: they belong to the area rather than to any one cell in it. Set on the Devices and Gateways pages.'
-          }
-        ] : []}
+          },
+          unsFilterField({ index: unsPaths, areaId: selectedArea.area_id, onCopy: showToast })
+        ].filter(Boolean) : []}
         actions={selectedArea ? [
           {
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,

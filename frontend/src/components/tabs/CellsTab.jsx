@@ -16,6 +16,8 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
+import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
+import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
 import { CellPlacementPicker } from '../common/CellPlacementPicker'
@@ -72,6 +74,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const minSpacing = Number.isFinite(Number(minSpacingSetting)) ? Number(minSpacingSetting) : DEFAULT_MIN_PIN_SPACING
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [linksForCell, setLinksForCell] = useState(null)
+  // Each device's place in the Unified Namespace (utils/unsPath.js): undefined while the bridge is
+  // off or before the first read, null when the read failed.
+  const [unsPaths, setUnsPaths] = useState(undefined)
   // The filters are query parameters. A cell handed over from another page arrives as
   // `?search=<cell_id>`; the search predicate matches cell_id or cell_name.
   const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
@@ -84,12 +89,15 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     try {
       // /api/v1/cells embeds each cell's gateways only. Device membership is the resolved effective
       // cell, grouped from `assets` by groupDevicesByCell.
-      const [c, a, ar] = await Promise.all([
+      const [c, a, ar, uns] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
-        api.get('/api/v1/areas', { signal }).catch(() => [])
+        api.get('/api/v1/areas', { signal }).catch(() => []),
+        // Read only while the bridge publishes; tolerated, and the drawer says it could not be read.
+        unsBridgeOn() ? api.get('/api/v1/uns-paths', { signal }).catch(() => null) : undefined
       ])
       setCells(c); setAssets(a); setAreas(ar)
+      setUnsPaths(uns === undefined ? undefined : unsPathIndex(uns))
 
       /* This person's open proposals, so the edit dialog can seed itself with an open patch rather
          than replace it. Tolerated rather than required. */
@@ -496,6 +504,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           <div className="form-group">
             <label className="form-label" htmlFor="cell-name">Cell Name</label>
             <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" />
+            <UnsRenameNote
+              index={unsPaths}
+              renamed={!!editing && (formVal.cell_name || '').trim() !== editing.cell_name}
+              cellId={editing?.cell_id}
+            />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="cell-description">Description (Optional)</label>
@@ -686,6 +699,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             full: true,
             help: "This cell's gateways' devices, plus any device filed here explicitly."
           },
+          unsFilterField({ index: unsPaths, cellId: selectedCell.cell_id, onCopy: showToast }),
           // The purge timer.
           selectedCell.is_archived && {
             label: 'Retention',
