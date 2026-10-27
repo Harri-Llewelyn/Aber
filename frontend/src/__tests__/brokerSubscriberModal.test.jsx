@@ -95,7 +95,9 @@ describe('New Read-Only Account', () => {
     const handlers = await create(open())
     expect(api.createBrokerSubscriber).toHaveBeenCalledWith({ name: ACCOUNT.name, description: ACCOUNT.description })
     expect(handlers.onCreated).toHaveBeenCalledWith(ACCOUNT)
-    expect(handlers.showToast).toHaveBeenCalledWith('Read-only account “Line 4 OEE board” created', 'success')
+    expect(handlers.showToast).toHaveBeenCalledWith(
+      'Read-only account “Line 4 OEE board” created', 'success', { to: '/access-control/accounts' }
+    )
 
     const value = (label) => screen.getByLabelText(label).value
     expect(value('Broker address')).toBe('mqtt.plant.example')

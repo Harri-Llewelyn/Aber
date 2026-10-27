@@ -6,6 +6,7 @@ import { Modal } from '../common/Modal'
 import { IconShieldAlert } from '../common/Icons'
 import { Setting, useDirectoryBroker } from './EdgeNodeSettings'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
+import { tabUrl } from '../../routes'
 import { SUBSCRIBER_DESCRIPTION_MAX, SUBSCRIBER_NAME_MAX } from '../../utils/serviceIdentities'
 
 const COPY_FEEDBACK_MS = 1600
@@ -55,7 +56,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
       if (made?.audit_recorded === false) {
         showToast?.('Account created, but the Audit Trail entry could not be written. Note this.', 'error')
       } else {
-        showToast?.(`Read-only account “${made.name}” created`, 'success')
+        showToast?.(`Read-only account “${made.name}” created`, 'success', { to: tabUrl('access-control', 'accounts') })
       }
     } catch (err) {
       // The form stays as typed: nothing was created, so the Administrator retries or corrects it.

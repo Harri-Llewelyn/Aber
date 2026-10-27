@@ -354,12 +354,11 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     const account = deletingSubscriber
     try {
       const result = await api.deleteBrokerSubscriber(account.username)
-      showToast?.(
-        result?.audit_recorded === false
-          ? 'Account deleted, but the Audit Trail entry could not be written. Note this.'
-          : `Read-only account “${account.textname || account.username}” deleted`,
-        result?.audit_recorded === false ? 'error' : 'success'
-      )
+      if (result?.audit_recorded === false) {
+        showToast?.('Account deleted, but the Audit Trail entry could not be written. Note this.', 'error')
+      } else {
+        showToast?.(`Read-only account “${account.textname || account.username}” deleted`, 'success')
+      }
     } catch (err) {
       showToast?.(err.message, 'error')
     }
