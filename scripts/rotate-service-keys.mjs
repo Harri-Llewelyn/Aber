@@ -168,11 +168,18 @@ const yamlValue = (value) => (value.includes('"') ? `'${value}'` : `"${value}"`)
  * the `after` key at its indent. Null when neither line exists.
  */
 function assign(text, key, value, after) {
-  const line = new RegExp(`^(\\s*)${key}:.*$`, 'm');
-  if (line.test(text)) return text.replace(line, (m, indent) => `${indent}${key}: ${yamlValue(value)}`);
-  const anchor = after && new RegExp(`^(\\s*)${after}:.*$`, 'm');
-  if (anchor && anchor.test(text)) return text.replace(anchor, (m, indent) => `${m}\n${indent}${key}: ${yamlValue(value)}`);
-  return null;
+  const lines = text.split('\n');
+  const at = (name) => lines.findIndex((l) => l.trimStart().startsWith(`${name}:`));
+  const indentOf = (l) => l.slice(0, l.length - l.trimStart().length);
+  const line = at(key);
+  if (line >= 0) {
+    lines[line] = `${indentOf(lines[line])}${key}: ${yamlValue(value)}`;
+    return lines.join('\n');
+  }
+  const anchor = after ? at(after) : -1;
+  if (anchor < 0) return null;
+  lines.splice(anchor + 1, 0, `${indentOf(lines[anchor])}${key}: ${yamlValue(value)}`);
+  return lines.join('\n');
 }
 
 /** Patches the release Secret with `values` (env name -> value); exits on a refusal. */

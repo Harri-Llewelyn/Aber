@@ -123,7 +123,7 @@ if these are missing the PVC must be destroyed, not the pod restarted):
   ⚠  Tokens are signed HS256 with secrets.jwtSecret, which every service that verifies one holds
      and could sign with. HS256 signing is DEPRECATED: 1.8 requires the ES256 key set and stops
      accepting HS256 tokens. Add the key set now, in three steps:
-       npm run keys:rotate -- --signing-keys                       # the key pair, into the Secret
+       npm run keys:rotate -- --signing-keys                       # the key pair, into your values
        supabaseAuth.es256Signing: true, then helm upgrade
        npm run keys:rotate -- --apply --anon-and-service-role      # re-signs the API's JWTs
      help/site/upgrading.md, "From 1.7.0, sign tokens with ES256", has the details.
@@ -131,8 +131,9 @@ if these are missing the PVC must be destroyed, not the pod restarted):
 
   ⚠  Tokens are signed ES256. HS256 tokens signed before still verify, until 1.8. Before
      upgrading to 1.8, re-mint any service-principal token (Access Control, Issue Token) and the
-     Read-only API client's (scripts/mint-api-token.mjs), and run npm run keys:rotate --
-     --apply --anon-and-service-role if the API's JWTs are still HS256.
+     Read-only API client's (scripts/mint-api-token.mjs). If npm run keys:check lists a key as
+     HS256, re-sign it:
+       npm run keys:rotate -- --apply --anon-and-service-role
 {{- end }}
 {{- if not .Values.secrets.existingSecret }}
 

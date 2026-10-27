@@ -61,7 +61,11 @@ function valuesFile() {
   return file;
 }
 
-const value = (text, key) => new RegExp(`^\\s*${key}: ['"](.*)['"]$`, 'm').exec(text)?.[1];
+/** A values file's `key: "value"` or `key: 'value'`, unquoted. */
+const value = (text, key) => {
+  const line = text.split('\n').find((l) => l.trimStart().startsWith(`${key}: `));
+  return line?.trim().slice(key.length + 2).replace(/^['"]|['"]$/g, '');
+};
 const algOf = (token) => JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString()).alg;
 const env = (url, extra = {}) => ({
   SUPABASE_URL: url, SUPABASE_JWT_SECRET: SECRET, SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_PUBLISHABLE_KEY: 'p',
