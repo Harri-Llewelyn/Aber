@@ -305,13 +305,13 @@ class NobodyElseLearnsOfIt(Base):
 
     def test_the_people_lists_carry_no_picture(self):
         self.set_picture("Operator")
-        for fn in ("list_people", "list_user_accounts"):
+        for fn, read in (("public.list_people()", "SELECT display_name FROM public.list_people() WHERE user_id = %s;"),
+                         ("public.list_user_accounts()",
+                          "SELECT display_name FROM public.list_user_accounts() WHERE user_id = %s;")):
             with self.subTest(fn=fn):
-                self.cur.execute(f"SELECT pg_get_function_result('public.{fn}()'::regprocedure);")
+                self.cur.execute("SELECT pg_get_function_result(%s::regprocedure);", (fn,))
                 self.assertNotIn("avatar", self.cur.fetchone()[0])
-                rows = self._run("Administrator", f"SELECT display_name FROM public.{fn}() WHERE user_id = %s;",
-                                 (OWNER,))
-                self.assertEqual(rows, [(None,)])
+                self.assertEqual(self._run("Administrator", read, (OWNER,)), [(None,)])
 
 
 class TheBucketPolicies(Base):
@@ -337,24 +337,24 @@ class TheBucketPolicies(Base):
 
     def setUp(self):
         super().setUp()
-        self.cur.execute(f"CREATE SCHEMA {PROBE};")
-        self.cur.execute(f"CREATE TABLE {PROBE}.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
-        self.cur.execute(f"ALTER TABLE {PROBE}.objects ENABLE ROW LEVEL SECURITY;")
+        self.cur.execute("CREATE SCHEMA avatars_probe;")
+        self.cur.execute("CREATE TABLE avatars_probe.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
+        self.cur.execute("ALTER TABLE avatars_probe.objects ENABLE ROW LEVEL SECURITY;")
         # The grants storage-policies.sql gives storage.objects.
-        self.cur.execute(f"GRANT USAGE ON SCHEMA {PROBE} TO anon, authenticated;")
-        self.cur.execute(f"GRANT SELECT ON {PROBE}.objects TO anon;")
-        self.cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {PROBE}.objects TO authenticated;")
+        self.cur.execute("GRANT USAGE ON SCHEMA avatars_probe TO anon, authenticated;")
+        self.cur.execute("GRANT SELECT ON avatars_probe.objects TO anon;")
+        self.cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON avatars_probe.objects TO authenticated;")
         self.cur.execute(self._section())
-        self.cur.execute(f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('avatars', %s);", (PICTURE,))
+        self.cur.execute("INSERT INTO avatars_probe.objects (bucket_id, name) VALUES ('avatars', %s);", (PICTURE,))
 
     def _sees(self, caller, name=PICTURE):
-        return self._run(caller, f"SELECT count(*) FROM {PROBE}.objects WHERE bucket_id = 'avatars' "
+        return self._run(caller, "SELECT count(*) FROM avatars_probe.objects WHERE bucket_id = 'avatars' "
                                  "AND name = %s;", (name,))[0][0] == 1
 
     def _writes(self, caller, name, bucket="avatars"):
         self.cur.execute("SAVEPOINT w;")
         try:
-            self._run(caller, f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES (%s, %s);", (bucket, name))
+            self._run(caller, "INSERT INTO avatars_probe.objects (bucket_id, name) VALUES (%s, %s);", (bucket, name))
             return True
         except pg_errors.InsufficientPrivilege:
             return False
@@ -364,7 +364,7 @@ class TheBucketPolicies(Base):
     def _updates(self, caller, name=PICTURE):
         self.cur.execute("SAVEPOINT u;")
         try:
-            return self._run(caller, f"UPDATE {PROBE}.objects SET metadata = '{{}}' WHERE bucket_id = 'avatars' "
+            return self._run(caller, "UPDATE avatars_probe.objects SET metadata = '{}' WHERE bucket_id = 'avatars' "
                                      "AND name = %s;", (name,)) == 1
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT u;")
@@ -372,7 +372,7 @@ class TheBucketPolicies(Base):
     def _deletes(self, caller, name=PICTURE):
         self.cur.execute("SAVEPOINT d;")
         try:
-            return self._run(caller, f"DELETE FROM {PROBE}.objects WHERE bucket_id = 'avatars' AND name = %s;",
+            return self._run(caller, "DELETE FROM avatars_probe.objects WHERE bucket_id = 'avatars' AND name = %s;",
                              (name,)) == 1
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT d;")
@@ -381,7 +381,7 @@ class TheBucketPolicies(Base):
         self.assertTrue(self._sees("Operator"))
         self.assertTrue(self._updates("Operator"), "an upsert of the picture would be refused")
         self.assertTrue(self._deletes("Operator"))
-        self._run("Operator", f"DELETE FROM {PROBE}.objects WHERE name = %s;", (PICTURE,))
+        self._run("Operator", "DELETE FROM avatars_probe.objects WHERE name = %s;", (PICTURE,))
         self.assertTrue(self._writes("Operator", PICTURE))
 
     def test_every_person_role_reaches_their_own(self):
@@ -428,38 +428,43 @@ class TheBucketPolicies(Base):
     def test_the_self_check_refuses_a_missing_policy(self):
         def drop(text):
             self.assertIn(self.DELETE_POLICY, text, "the DELETE policy moved; update DELETE_POLICY")
-            return text.replace(self.DELETE_POLICY, f'DROP POLICY IF EXISTS "avatars_delete_own" ON storage.objects;\n')
+            return text.replace(self.DELETE_POLICY, 'DROP POLICY IF EXISTS "avatars_delete_own" ON storage.objects;\n')
         with self.assertRaisesRegex(pg_errors.RaiseException, "avatars_delete_own is missing"):
             self.cur.execute(self._section(drop))
 
     def test_the_self_check_refuses_an_avatars_policy_it_does_not_make(self):
-        self.cur.execute(f"CREATE POLICY avatars_select_shared ON {PROBE}.objects FOR SELECT TO authenticated "
+        self.cur.execute("CREATE POLICY avatars_select_shared ON avatars_probe.objects FOR SELECT TO authenticated "
                          "USING (bucket_id = 'avatars');")
         with self.assertRaisesRegex(pg_errors.RaiseException, "avatars_select_shared"):
             self.cur.execute(self._section())
 
     def test_the_self_check_reads_another_bucket_s_policy_confined_by_its_first_test(self):
-        for using in ("bucket_id = 'area-plans'",
-                      "bucket_id = 'area-plans' AND public.has_role(ARRAY['Administrator'])",
-                      "bucket_id = 'area-plans' AND (public.has_role(ARRAY['Administrator']) OR true)"):
+        head = "CREATE POLICY confined ON avatars_probe.objects FOR SELECT TO authenticated USING "
+        for using in (head + "(bucket_id = 'area-plans');",
+                      head + "(bucket_id = 'area-plans' AND public.has_role(ARRAY['Administrator']));",
+                      head + "(bucket_id = 'area-plans' AND (public.has_role(ARRAY['Administrator']) OR true));"):
             with self.subTest(using=using):
                 self.cur.execute("SAVEPOINT c;")
-                self.cur.execute(f"CREATE POLICY confined ON {PROBE}.objects FOR SELECT TO authenticated USING ({using});")
+                self.cur.execute(using)
                 self.cur.execute(self._section())
                 self.cur.execute("ROLLBACK TO SAVEPOINT c;")
 
     def test_the_self_check_refuses_another_policy_that_could_admit_somebody_to_a_picture(self):
+        on = " ON avatars_probe.objects "
         for name, ddl in (
-            ("everything", "FOR SELECT TO authenticated USING (true)"),
-            ("either", "FOR SELECT TO authenticated USING (bucket_id = 'area-plans' OR public.has_role(ARRAY['Administrator']))"),
-            ("arm_or", "FOR SELECT TO authenticated USING ((bucket_id = 'area-plans' AND true) OR bucket_id = 'avatars')"),
-            ("named", "FOR DELETE TO authenticated USING (bucket_id = 'avatars')"),
-            ("no_using", "FOR UPDATE TO authenticated WITH CHECK (bucket_id = 'area-plans')"),
-            ("second", "FOR SELECT TO anon USING (public.has_role(ARRAY['Auditor']) AND bucket_id = 'area-plans')"),
+            ("everything", "CREATE POLICY everything" + on + "FOR SELECT TO authenticated USING (true);"),
+            ("either", "CREATE POLICY either" + on + "FOR SELECT TO authenticated "
+                       "USING (bucket_id = 'area-plans' OR public.has_role(ARRAY['Administrator']));"),
+            ("arm_or", "CREATE POLICY arm_or" + on + "FOR SELECT TO authenticated "
+                       "USING ((bucket_id = 'area-plans' AND true) OR bucket_id = 'avatars');"),
+            ("named", "CREATE POLICY named" + on + "FOR DELETE TO authenticated USING (bucket_id = 'avatars');"),
+            ("no_using", "CREATE POLICY no_using" + on + "FOR UPDATE TO authenticated WITH CHECK (bucket_id = 'area-plans');"),
+            ("second", "CREATE POLICY second" + on + "FOR SELECT TO anon "
+                       "USING (public.has_role(ARRAY['Auditor']) AND bucket_id = 'area-plans');"),
         ):
             with self.subTest(policy=name):
                 self.cur.execute("SAVEPOINT c;")
-                self.cur.execute(f"CREATE POLICY {name} ON {PROBE}.objects {ddl};")
+                self.cur.execute(ddl)
                 with self.assertRaisesRegex(pg_errors.RaiseException, f"{name}.*is not confined"):
                     self.cur.execute(self._section())
                 self.cur.execute("ROLLBACK TO SAVEPOINT c;")
