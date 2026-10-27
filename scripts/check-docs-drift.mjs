@@ -3047,6 +3047,56 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 156. A read-only broker account is one rule in the four places that hold it: "sub" and 21
+// lowercase hex characters, a name of at most 80 characters and a description of at most 500.
+// The credential library decides; broker-subscriber refuses first, 0218 records, and the page
+// offers Delete. A page wider than the function offers a Delete that is refused; a record
+// narrower than the service fails on an account the broker already made.
+// -------------------------------------------------------------------------------------------------
+{
+  const SCHEME = '^sub[0-9a-f]{21}$';
+  const lib = read('scripts/lib/mosquitto-credentials.mjs');
+  const fn = read('supabase/functions/broker-subscriber/subscriber.ts');
+  const ui = read('frontend/src/utils/serviceIdentities.js');
+  const migration = readdirSync(join(REPO, 'supabase/migrations')).find((f) => /^0218_.*\.sql$/.test(f));
+  const sql = migration ? read(`supabase/migrations/${migration}`) : '';
+  const literal = (src, name) => src.match(new RegExp(`\\b${name}\\s*=\\s*/([^/\\n]+)/`))?.[1] ?? null;
+  const number = (src, name) => Number(src.match(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`))?.[1] ?? NaN);
+  const holders = [
+    ['scripts/lib/mosquitto-credentials.mjs', literal(lib, 'SUBSCRIBER_ID_PATTERN'),
+      number(lib, 'SUBSCRIBER_NAME_MAX'), number(lib, 'SUBSCRIBER_DESCRIPTION_MAX')],
+    ['broker-subscriber/subscriber.ts', literal(fn, 'SUBSCRIBER_USERNAME'), number(fn, 'NAME_MAX'), number(fn, 'DESCRIPTION_MAX')],
+    ['frontend/src/utils/serviceIdentities.js', literal(ui, 'SUBSCRIBER_USERNAME'),
+      number(ui, 'SUBSCRIBER_NAME_MAX'), number(ui, 'SUBSCRIBER_DESCRIPTION_MAX')],
+  ];
+  const problems156 = [];
+  for (const [where, pattern, nameMax, descriptionMax] of holders) {
+    if (pattern !== SCHEME) problems156.push(`${where} spells the scheme ${pattern === null ? '(not found)' : `/${pattern}/`}`);
+    if (nameMax !== 80 || descriptionMax !== 500) {
+      problems156.push(`${where} bounds the name at ${nameMax} and the description at ${descriptionMax}`);
+    }
+  }
+  const sqlSchemes = [...sql.matchAll(/!~ '([^']+)'/g)].map((m) => m[1]);
+  if (!migration) {
+    problems156.push('supabase/migrations holds no 0218, which records these accounts');
+  } else {
+    if (sqlSchemes.length !== 2 || sqlSchemes.some((p) => p !== SCHEME)) {
+      problems156.push(`${migration} refuses usernames by ${sqlSchemes.join(', ') || '(no pattern found)'}`);
+    }
+    if (!/char_length\(v_name\) NOT BETWEEN 1 AND 80\b/.test(sql) || !/char_length\(v_description\) NOT BETWEEN 1 AND 500\b/.test(sql)) {
+      problems156.push(`${migration} does not bound the name at 80 and the description at 500`);
+    }
+  }
+  if (problems156.length) {
+    fail(`a read-only broker account is not one rule: ${problems156.join('; ')}.\n` +
+      '      The credential library, broker-subscriber, 0218 and the Access Control page must agree on\n' +
+      `      /${SCHEME}/, 80 and 500.`);
+  } else {
+    pass(`a read-only broker account is /${SCHEME}/ with a name of 80 and a description of 500 in the library, the function, 0218 and the page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers

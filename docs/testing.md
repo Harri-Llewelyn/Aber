@@ -295,6 +295,14 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # material) are asserted here too, against the running plugin.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
+# A read-only broker account, through broker-subscriber as the Access Control page calls it. An
+# Administrator creates one and a Shopfloor Manager cannot. Connected with the password shown, it
+# receives a Sparkplug message and a UNS message, which the ingestion account publishes, and its own
+# publishes reach nobody. Deleting it drops the live session and refuses the next CONNECT. Each act
+# is one Audit Trail row naming the Administrator. Needs kubectl to the broker's pod.
+SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
+  python supabase/functions/broker-subscriber/test_broker_subscriber.py
+
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
@@ -311,6 +319,10 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
 # prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
+# And the credential service as it ships, over HTTP, against a stand-in `mosquitto_rr`: a read-only
+# account is made holding the subscriber role alone under a username it generates, the caller
+# names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
+# command.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
