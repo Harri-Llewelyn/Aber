@@ -87,7 +87,13 @@ spec:
               value: public,storage,graphql_public
             - name: PGRST_DB_ANON_ROLE
               value: anon
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # A JWKS in place of the secret: ES256 by kid, and HS256 by the legacy key, which has
+            # no kid. A value that does not parse as JSON is taken as a plain secret.
+            {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
+            {{- else }}
             {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- end }}
             - name: PGRST_DB_USE_LEGACY_GUCS
               value: "false"
             # The revocation choke point (0074). Run in the caller's role

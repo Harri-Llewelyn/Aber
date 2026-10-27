@@ -118,6 +118,22 @@ if these are missing the PVC must be destroyed, not the pod restarted):
      unset. `npm run setup` sets it with a password of its own; or set it and
      secrets.firstAdministratorPassword, then upgrade. An existing administrator is unaffected.
 {{- end }}
+{{- if not .Values.supabaseAuth.es256Signing }}
+
+  ⚠  Tokens are signed HS256 with secrets.jwtSecret, which every service that verifies one holds
+     and could sign with. HS256 signing is DEPRECATED: 1.8 requires the ES256 key set and stops
+     accepting HS256 tokens. Add the key set now, in three steps:
+       npm run keys:rotate -- --signing-keys                       # the key pair, into the Secret
+       supabaseAuth.es256Signing: true, then helm upgrade
+       npm run keys:rotate -- --apply --anon-and-service-role      # re-signs the API's JWTs
+     help/site/upgrading.md, "Sign tokens with ES256", has the details.
+{{- else }}
+
+  ⚠  Tokens are signed ES256. HS256 tokens signed before still verify, until 1.8. Before
+     upgrading to 1.8, re-mint any service-principal token (Access Control, Issue Token) and the
+     Read-only API client's (scripts/mint-api-token.mjs), and run npm run keys:rotate --
+     --apply --anon-and-service-role if the API's JWTs are still HS256.
+{{- end }}
 {{- if not .Values.secrets.existingSecret }}
 
   ⚠  This release rendered its own Secret from values. Right for local k3s, wrong for anything

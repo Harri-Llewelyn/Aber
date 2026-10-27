@@ -89,7 +89,16 @@ spec:
             # under the names the image reads.
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY") | nindent 12 }}
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # Studio verifies nothing with this. It only reports it (its settings endpoint, the JWT
+            # pages) and signs HS256 tokens with it for GraphiQL's and the Realtime inspector's role
+            # impersonation. So it is not given the secret; unset, it would report the published
+            # demo value instead.
+            - name: AUTH_JWT_SECRET
+              value: "not-held-by-studio"
+            {{- else }}
             {{- include "aber.secretEnv" (dict "name" "AUTH_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- end }}
             - name: DEFAULT_ORGANIZATION_NAME
               value: {{ .Values.supabaseStudio.organizationName | quote }}
             - name: DEFAULT_PROJECT_NAME

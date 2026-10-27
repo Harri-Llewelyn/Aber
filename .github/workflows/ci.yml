@@ -526,6 +526,12 @@ jobs:
             -f "$DEV" --set secrets.anonKey=
           expect_failure "publishableKey empty" "secrets.publishableKey" \
             -f "$DEV" --set secrets.publishableKey=
+          # With supabaseAuth.es256Signing the key pair joins the set, and both halves keep jwtSecret
+          # as the legacy key (aber.validateSigningKeys).
+          expect_failure "es256Signing with no signing set" "secrets.jwtKeys (SUPABASE_JWT_KEYS) is not set" \
+            -f "$DEV" --set secrets.jwtKeys=
+          expect_failure "es256Signing with a jwtSecret the key set does not carry" "legacy" \
+            -f "$DEV" --set secrets.jwtSecret=a-different-secret-of-at-least-32-characters
 
           # The first administrator is created by the db-init hook, so a bad address or a missing
           # password would fail the install only after everything else had been created.
@@ -1526,7 +1532,8 @@ jobs:
           python3 - <<'PY'
           import base64, json, re, sys
           docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
-          jwt = re.compile(r'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+')
+          # Any JWT whose header opens {"alg": -- HS256 or ES256 with its kid.
+          jwt = re.compile(r'eyJhbGciOi[A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+')
           bad, seen = [], []
           for d in docs:
               kind = re.search(r'^kind: (\S+)', d, re.M)
@@ -1543,6 +1550,12 @@ jobs:
                   seen.append(f"{where} role={role}")
                   if role != 'anon' and kind.group(1) != 'Secret':
                       bad.append(f"{where} (role={role})")
+              # The ES256 private key: a JWK's "d" member, quoted or escaped as stringData quotes it.
+              if re.search(r'\\?"d\\?"\s*:\s*\\?"[A-Za-z0-9_-]{20,}', d):
+                  where = f"{kind.group(1)}/{name.group(1) if name else '?'}"
+                  seen.append(f"{where} signing key")
+                  if kind.group(1) != 'Secret':
+                      bad.append(f"{where} (the JWT signing key)")
           for s in sorted(set(seen)):
               print(f"  {s}")
           if bad:
