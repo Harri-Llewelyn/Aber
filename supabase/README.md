@@ -2000,6 +2000,44 @@ check 25 (`scripts/check-mirror-drift.mjs`) holds the same columns, and holds
 `test_an_administrator_ends_one_of_a_person_s_sessions.py` holds the list, the end, the row, the
 refusals and the cascade.
 
+### An Administrator resets a person's second factor (0216)
+
+From 1.7.0 a person may enrol a TOTP second factor on Profile › Security, through GoTrue's factor
+API, and signing in asks for its code. That needs a way back for someone who has lost their
+authenticator: **Reset MFA** in their drawer on People. The factors are GoTrue's, in
+`auth.mfa_factors`, and the browser holds no admin key, so the act is `manage-people`'s
+`reset-mfa`, which deletes them through GoTrue's admin API. This file is its database half.
+
+- **`record_person_mfa_reset(p_user_id, p_check_only, p_factors_removed)`** is called twice in the
+  caller's session, as `record_person_password_set()` (`0167`) is around a new password. With
+  `p_check_only` true (or NULL), before GoTrue deletes anything, it decides and writes nothing; with
+  false, after, it writes one `MFA_RESET` row on `entity_type = 'user_roles'` in the person's lane,
+  with the Administrator in `changed_by`. `new_data` is the person's email and `factors_removed`,
+  the number GoTrue deleted. A reset of none is recorded too, as End Sessions records ending none.
+- **Why the function does not read `auth.mfa_factors` itself.** It could count or delete the rows
+  directly, as `end_person_sessions()` deletes `auth.sessions`. GoTrue's admin delete does more:
+  it lowers the sessions that used the factor to `aal1` and drops their `totp` claim, which is what
+  a later `aal2` check must see. So GoTrue deletes, and the record takes GoTrue's count. An
+  Administrator calling the function directly can write a row that claims a reset nobody made, in
+  their own name; that is `record_person_password_set()`'s property too.
+- **What is refused, with no row.** `check_person_act()`'s rules (`0166`): Administrator only, under
+  the People lock; an unknown person is a 404 and a machine identity `22023`. Your own account is
+  `42501`: Profile › Security removes your own factor, from an `aal2` session, as GoTrue requires. A
+  record with no count, or a negative one, is `22023`. A removed person's factors may be reset, so
+  Restore Access lets them back with none.
+- **Sessions are not ended.** Losing a phone is not losing a laptop, and End Sessions already ends
+  sessions. The dialog says so, and the two acts write their own rows.
+- **No enforcement.** Nothing in the schema reads `aal`: a session that has not given its code
+  keeps every right its role has, as a password-only session does.
+
+`manage-people` deletes each factor in turn. If GoTrue fails before any went, nothing is recorded
+and the answer is a 502. If it fails part-way, the ones that went are recorded and the answer says
+how many, so a second reset removes the rest. The file's self-check asserts `SECURITY DEFINER` and
+the pin, who may execute it, one signature only (PostgREST calls by argument names), and that a
+request with no identity is refused.
+`test_an_administrator_resets_a_person_s_second_factor.py` holds the check, the row and the
+refusals; `supabase/test_a_person_can_enrol_a_second_factor.py` drives the whole path on a stack.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -4669,7 +4707,7 @@ refuses a missing or wrong token or secret.
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
-| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access, restores it, or sets a new password, for the People tab (`0166`, `0167`) |
+| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access, restores it, sets a new password, or resets their second factor, for the People tab (`0166`, `0167`, `0216`) |
 | [`enroll-gateway`](functions/enroll-gateway) | **no Supabase role at all** | An appliance redeeming its single-use enrolment token |
 | [`gateway-install`](functions/gateway-install) | **no Supabase role at all** | What the one-liner fetches, authorised by the enrolment token in `X-Enrolment-Token` |
 | [`revoke-gateway-credential`](functions/revoke-gateway-credential) | **no Supabase role at all** | Called by the database through pg_net; authorised by `GATEWAY_REVOKE_SECRET` in `x-revoke-secret` |

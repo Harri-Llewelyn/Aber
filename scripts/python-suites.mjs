@@ -994,6 +994,15 @@ export const SUITES = {
       "Administrator and the session; and that another person's session, a missing one and your " +
       'own are refused with no row.',
   },
+  'supabase/migrations/test_an_administrator_resets_a_person_s_second_factor.py': {
+    lanes: ['db'],
+    why:
+      "0216 -- that Reset MFA's database half decides before GoTrue and writes nothing then, and " +
+      "afterwards writes one MFA_RESET row in the person's lane naming the Administrator and how " +
+      'many factors went; that only an Administrator may call it; and that your own account, an ' +
+      'unknown person, a machine identity and a missing count are refused with no row, while a ' +
+      "removed person's factors may be reset and no session ends.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1347,6 +1356,15 @@ export const SUITES = {
       'running stack has the whole path: the server accepting the token, its recorder thread ' +
       'calling PostgREST as the caller, and the hook and the function behind it. Issues a token, ' +
       'uses it, reads the hour back as an Administrator, then revokes it.',
+  },
+  'supabase/test_a_person_can_enrol_a_second_factor.py': {
+    lanes: ['stack'],
+    why:
+      "A second factor works end to end against the chart's GoTrue: the GOTRUE_MFA_* settings, " +
+      "GoTrue's factor API through the gateway, and manage-people's reset-mfa with the secret key. " +
+      'A throwaway Auditor enrols a TOTP factor, signs in again at aal1 and reaches aal2 with a code ' +
+      'computed here (RFC 6238), and an Administrator resets it, which leaves one MFA_RESET row and ' +
+      'the session signed in. Phone and WebAuthn enrolment are refused.',
   },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],

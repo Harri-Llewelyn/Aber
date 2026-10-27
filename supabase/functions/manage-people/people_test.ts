@@ -705,3 +705,154 @@ Deno.test("a change the database did not record says the address changed and the
   assertServerFailure(answer, 500, "terminating connection");
   assert.ok(/was changed/.test(answer.body.error) && /End Sessions/.test(answer.body.error), answer.body.error);
 });
+
+const MFA_RECORD_PATH = "/rest/v1/rpc/record_person_mfa_reset";
+const FACTORS_PATH = `/auth/v1/admin/users/${TARGET_ID}/factors`;
+const PHONE_FACTOR = "dddddddd-0000-4000-8000-000000000004";
+const TABLET_FACTOR = "eeeeeeee-0000-4000-8000-000000000005";
+const TWO_FACTORS = {
+  [`GET ${FACTORS_PATH}`]: {
+    status: 200,
+    body: [
+      { id: PHONE_FACTOR, friendly_name: "Phone", factor_type: "totp", status: "verified" },
+      { id: TABLET_FACTOR, friendly_name: "Tablet", factor_type: "totp", status: "unverified" },
+    ],
+  },
+  [`DELETE ${FACTORS_PATH}/${PHONE_FACTOR}`]: { status: 200, body: { id: PHONE_FACTOR } },
+  [`DELETE ${FACTORS_PATH}/${TABLET_FACTOR}`]: { status: 200, body: { id: TABLET_FACTOR } },
+  [`POST ${MFA_RECORD_PATH}`]: { status: 204, body: null },
+};
+
+Deno.test("resetting MFA asks the database, deletes every factor in GoTrue, then records how many", async () => {
+  env(false);
+  const s = stack({ ...TWO_FACTORS });
+  const { response, body } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 200);
+  assert.equal(body, { user_id: TARGET_ID, factors_removed: 2 });
+  assert.equal(s.paths().slice(2), [
+    `POST ${MFA_RECORD_PATH}`,
+    `GET ${FACTORS_PATH}`,
+    `DELETE ${FACTORS_PATH}/${PHONE_FACTOR}`,
+    `DELETE ${FACTORS_PATH}/${TABLET_FACTOR}`,
+    `POST ${MFA_RECORD_PATH}`,
+  ]);
+
+  const [check, record] = s.calls.filter((c) => c.path === MFA_RECORD_PATH);
+  assert.equal(check.body, { p_user_id: TARGET_ID, p_check_only: true });
+  assert.equal(record.body, { p_user_id: TARGET_ID, p_check_only: false, p_factors_removed: 2 });
+  assert.equal(check.auth, `Bearer ${CALLER_TOKEN}`, "decided as the caller");
+  assert.equal(record.auth, `Bearer ${CALLER_TOKEN}`, "recorded as the caller, so the trail names them");
+  for (const call of s.calls.filter((c) => c.path.startsWith(FACTORS_PATH))) {
+    assert.equal(call.auth, `Bearer ${SERVICE_KEY}`, `${call.method} ${call.path} carries the secret key`);
+  }
+  // Their sessions are End Sessions' to end, not this.
+  assert.equal(s.paths().some((p) => p.includes("sessions") || p.startsWith("PUT ")), false);
+});
+
+Deno.test("resetting MFA for someone who holds none records a reset of none", async () => {
+  env(false);
+  const s = stack({ ...TWO_FACTORS, [`GET ${FACTORS_PATH}`]: { status: 200, body: [] } });
+  const { response, body } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 200);
+  assert.equal(body, { user_id: TARGET_ID, factors_removed: 0 });
+  assert.equal(s.calls.filter((c) => c.path === MFA_RECORD_PATH).map((c) => c.body), [
+    { p_user_id: TARGET_ID, p_check_only: true },
+    { p_user_id: TARGET_ID, p_check_only: false, p_factors_removed: 0 },
+  ]);
+});
+
+Deno.test("nobody resets their own MFA here, and nothing is called", async () => {
+  env(false);
+  const s = stack();
+  const { response, body } = await run(post({ action: "reset-mfa", user_id: ADMIN_ID }), s);
+  assert.equal(response.status, 403);
+  assert.ok(/Profile page's Security tab/.test(body.details), body.details);
+  assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"]);
+});
+
+Deno.test("a caller who is not an Administrator resets no MFA", async () => {
+  for (const role of ["Shopfloor_Manager", "Operator", "Auditor"]) {
+    env(false);
+    const s = stack({ ...TWO_FACTORS }, role);
+    const { response } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+    assert.equal(response.status, 403, role);
+    assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"], role);
+  }
+});
+
+Deno.test("a reset the database refuses never reaches GoTrue", async () => {
+  const refusals: [number, string, string, number][] = [
+    [403, "42501", "insufficient privileges to reset a person's second factor", 403],
+    [404, "P0002", `person ${TARGET_ID} not found`, 404],
+    [400, "22023", `${TARGET_ID} is a machine identity, not a person.`, 400],
+  ];
+  for (const [status, code, message, expected] of refusals) {
+    env(false);
+    const s = stack({ ...TWO_FACTORS, [`POST ${MFA_RECORD_PATH}`]: { status, body: { code, message, details: null, hint: null } } });
+    const { response, body } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+    assert.equal(response.status, expected, code);
+    assert.equal(body.details, message, code);
+    assert.equal(gotrueAdmin(s.paths()), [], code);
+    assert.equal(s.paths().filter((p) => p.endsWith(MFA_RECORD_PATH)).length, 1, `${code}: nothing recorded`);
+  }
+});
+
+Deno.test("a reset for a malformed person id is refused before anything is called", async () => {
+  env(false);
+  const s = stack();
+  const { response } = await run(post({ action: "reset-mfa", user_id: "not-a-uuid" }), s);
+  assert.equal(response.status, 400);
+  assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"]);
+});
+
+Deno.test("factors GoTrue did not list or delete are not recorded", async () => {
+  for (const failing of [`GET ${FACTORS_PATH}`, `DELETE ${FACTORS_PATH}/${PHONE_FACTOR}`]) {
+    env(false);
+    const s = stack({ ...TWO_FACTORS, [failing]: { status: 500, body: { code: 500, msg: "database at 10.0.0.7 refused" } } });
+    const answer = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+    assertServerFailure(answer, 502, "database at 10.0.0.7 refused");
+    assert.equal(answer.body.error, "MFA was not reset: the sign-in service failed. Nothing was changed.", failing);
+    assert.equal(s.paths().filter((p) => p.endsWith(MFA_RECORD_PATH)).length, 1, `${failing}: only the check ran`);
+  }
+});
+
+Deno.test("a reset GoTrue stops part-way records what went and says to reset again", async () => {
+  env(false);
+  const s = stack({
+    ...TWO_FACTORS,
+    [`DELETE ${FACTORS_PATH}/${TABLET_FACTOR}`]: { status: 500, body: { code: 500, msg: "Database error deleting factor" } },
+  });
+  const answer = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 502, "Database error deleting factor");
+  assert.ok(/1 of their 2 second factors were removed/.test(answer.body.error) && /Reset MFA again/.test(answer.body.error),
+    answer.body.error);
+  const record = s.calls.filter((c) => c.path === MFA_RECORD_PATH)[1];
+  assert.equal(record?.body, { p_user_id: TARGET_ID, p_check_only: false, p_factors_removed: 1 });
+});
+
+Deno.test("a factor already gone is not counted, and the rest are still removed", async () => {
+  env(false);
+  const s = stack({
+    ...TWO_FACTORS,
+    [`DELETE ${FACTORS_PATH}/${PHONE_FACTOR}`]: { status: 404, body: { code: 404, error_code: "mfa_factor_not_found", msg: "Factor not found" } },
+  });
+  const { response, body } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 200);
+  assert.equal(body, { user_id: TARGET_ID, factors_removed: 1 });
+  assert.equal(s.paths().includes(`DELETE ${FACTORS_PATH}/${TABLET_FACTOR}`), true);
+});
+
+Deno.test("a reset the database did not record says the factors went and the trail has no row", async () => {
+  env(false);
+  const s = stack({
+    ...TWO_FACTORS,
+    [`POST ${MFA_RECORD_PATH}`]: [
+      { status: 204, body: null },
+      { status: 503, body: { code: "57P01", message: "terminating connection", details: null, hint: null } },
+    ],
+  });
+  const answer = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 500, "terminating connection");
+  assert.ok(/2 second factors were removed/.test(answer.body.error) && /Audit Trail did not record it/.test(answer.body.error),
+    answer.body.error);
+});
