@@ -20,7 +20,20 @@ vi.mock('../api', () => ({
     revokeServicePrincipal: vi.fn(),
     reinstateServicePrincipal: vi.fn(),
     createServicePrincipal: vi.fn(),
+    deleteBrokerSubscriber: vi.fn(),
   }
+}))
+
+// A stub that shows the topics it was given and can report a creation, as the tab's part is to
+// pass the subscriber role's rules and read the list again.
+vi.mock('../components/modals/BrokerSubscriberModal', () => ({
+  BrokerSubscriberModal: ({ topics, onCreated, onClose }) => (
+    <div data-testid="subscriber-modal">
+      <span data-testid="subscriber-topics">{topics === null ? 'not read' : topics.join(' ')}</span>
+      <button onClick={() => onCreated({ mqtt_username: 'sub0a1b2c3d4e5f60718293a' })}>stub-created</button>
+      <button onClick={onClose}>stub-close</button>
+    </div>
+  )
 }))
 
 // The two modals reach for browser APIs this suite has no need to stub; the tab's job is to decide
@@ -525,6 +538,136 @@ describe('AccessControlTab', () => {
     const row = (await screen.findByRole('button', { name: /scada-reader/ })).closest('tr')
     expect(within(row).getByText(/A consumer outside Aber that only reads/)).toBeTruthy()
     expect(within(row).queryByText('No gateway')).toBeNull()
+    // Made by hand, outside the scheme: the page offers no Delete for it.
+    expect(within(row).queryByRole('button', { name: /Delete/ })).toBeNull()
+  })
+
+  describe('read-only accounts', () => {
+    const SUB = 'sub0a1b2c3d4e5f60718293a'
+    const readOnly = {
+      username: SUB, roles: ['subscriber'], disabled: false, connections: 1,
+      textname: 'Line 4 OEE board', textdescription: 'The contractor dashboard on line 4.',
+    }
+    const inventory = (clients) => ({
+      clients,
+      roles: [{
+        rolename: 'subscriber',
+        acls: [
+          { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'subscribePattern', topic: 'plant/uns/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'plant/uns/#', allow: true },
+        ],
+      }],
+    })
+
+    it('offers New Read-Only Account once the broker is read, with the role’s subscribe rules', async () => {
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue(inventory([{ username: 'dynsec-admin', roles: ['admin'], disabled: false }]))
+      await renderTab('Broker accounts')
+
+      const create = await screen.findByRole('button', { name: /New Read-Only Account/ })
+      expect(create.closest('.filter-bar-actions')).toBeTruthy()
+      expect(create.className).toContain('btn-primary')
+      fireEvent.click(create)
+      expect(screen.getByTestId('subscriber-topics').textContent).toBe('spBv1.0/# plant/uns/#')
+
+      // The new row is read behind the dialog, which stays open to show the password.
+      const reads = api.listBrokerInventory.mock.calls.length
+      fireEvent.click(screen.getByRole('button', { name: 'stub-created' }))
+      await waitFor(() => expect(api.listBrokerInventory.mock.calls.length).toBe(reads + 1))
+      expect(screen.getByTestId('subscriber-modal')).toBeTruthy()
+    })
+
+    it('offers no New Read-Only Account when the broker was not read', async () => {
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockRejectedValue(new Error('Reading the broker\'s accounts requires Administrator.'))
+      await renderTab('Broker accounts')
+
+      await screen.findByText('The broker was not read, so its accounts cannot be listed.')
+      expect(screen.queryByRole('button', { name: /New Read-Only Account/ })).toBeNull()
+    })
+
+    it('says the dialog could not list the topics when the broker reported no subscriber role', async () => {
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue({ clients: [{ username: 'dynsec-admin', roles: ['admin'] }], roles: [] })
+      await renderTab('Broker accounts')
+
+      fireEvent.click(await screen.findByRole('button', { name: /New Read-Only Account/ }))
+      expect(screen.getByTestId('subscriber-topics').textContent).toBe('not read')
+    })
+
+    it('lists one with the name and description it was made with, and offers Delete for it alone', async () => {
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue(inventory([
+        readOnly,
+        { username: 'aber_ingestion', roles: ['ingestion'], disabled: false },
+        { username: 'dynsec-admin', roles: ['admin'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+        { username: 'scada-reader', roles: ['subscriber'], disabled: false },
+      ]))
+      await renderTab('Broker accounts')
+
+      const row = (await screen.findByRole('button', { name: new RegExp(SUB) })).closest('tr')
+      expect(within(row).getByText(/Line 4 OEE board/)).toBeTruthy()
+      expect(within(row).getByText(/The contractor dashboard on line 4\./)).toBeTruthy()
+      expect(within(row).getByText('subscriber')).toBeTruthy()
+      expect(within(row).getByText('Connected')).toBeTruthy()
+      expect(within(row).getByRole('button', { name: 'Delete Line 4 OEE board' })).toBeTruthy()
+      // Never a gateway's, a platform principal's or one made by hand.
+      expect(screen.getAllByRole('button', { name: /^Delete / })).toHaveLength(1)
+    })
+
+    it('deletes one after a dialog that names it, whose button repeats the act', async () => {
+      const showToast = vi.fn()
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue(inventory([readOnly]))
+      api.deleteBrokerSubscriber.mockResolvedValue({ mqtt_username: SUB, deleted: true, audit_recorded: true })
+      render(<AccessControlTab showToast={showToast} />)
+      fireEvent.click(await findTabLink('Broker accounts'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete Line 4 OEE board' }))
+      const dialog = screen.getByRole('dialog')
+      expect(within(dialog).getByText(/Delete the read-only account “Line 4 OEE board”/)).toBeTruthy()
+      expect(within(dialog).getByText(SUB)).toBeTruthy()
+      expect(within(dialog).getByText(/It is connected now/)).toBeTruthy()
+      expect(api.deleteBrokerSubscriber).not.toHaveBeenCalled()
+
+      const reads = api.listBrokerInventory.mock.calls.length
+      await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Account' })) })
+      expect(api.deleteBrokerSubscriber).toHaveBeenCalledWith(SUB)
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(showToast).toHaveBeenCalledWith('Read-only account “Line 4 OEE board” deleted', 'success')
+      expect(api.listBrokerInventory.mock.calls.length).toBe(reads + 1)
+    })
+
+    it('reports a delete that failed, and reads the list again', async () => {
+      const showToast = vi.fn()
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue(inventory([readOnly]))
+      api.deleteBrokerSubscriber.mockRejectedValue(new Error('The broker credential service could not delete it. Retry.'))
+      render(<AccessControlTab showToast={showToast} />)
+      fireEvent.click(await findTabLink('Broker accounts'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete Line 4 OEE board' }))
+      const reads = api.listBrokerInventory.mock.calls.length
+      await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete Account' })) })
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('The broker credential service could not delete it. Retry.', 'error'))
+      expect(api.listBrokerInventory.mock.calls.length).toBe(reads + 1)
+    })
+
+    it('says so when the deletion was not recorded', async () => {
+      const showToast = vi.fn()
+      api.listGatewayCredentials.mockResolvedValue([])
+      api.listBrokerInventory.mockResolvedValue(inventory([readOnly]))
+      api.deleteBrokerSubscriber.mockResolvedValue({ mqtt_username: SUB, deleted: true, audit_recorded: false })
+      render(<AccessControlTab showToast={showToast} />)
+      fireEvent.click(await findTabLink('Broker accounts'))
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete Line 4 OEE board' }))
+      await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete Account' })) })
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Audit Trail entry could not be written/), 'error'))
+    })
   })
 
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
@@ -1212,7 +1355,8 @@ describe('AccessControlTab card composition', () => {
     for (const [label, hasRow] of [
       ['Broker credentials', true],
       ['Machine identities', true],
-      ['Broker accounts', false],
+      // New Read-Only Account, once the broker was read.
+      ['Broker accounts', true],
       ['Broker roles', false],
     ]) {
       fireEvent.click(tabLink(label))

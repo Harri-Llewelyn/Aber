@@ -4538,6 +4538,14 @@ now `disableClient`: the live session is dropped at once, the account stays list
 a re-issue re-enables it. When the broker cannot be read the column says *Not read* and the page
 says why once, rather than drawing an empty column that reads as no accounts.
 
+**It makes and deletes read-only broker accounts (`0218`).** *New Read-Only Account* on *Broker
+accounts* asks for a name and what the account is for, and `broker-subscriber` has the credential
+service create a client holding the `subscriber` role alone, under a generated `sub…` username,
+with both in the plugin's textname and textdescription. The password is shown once. *Delete* is
+offered on those accounts alone, and the service refuses any other username. No table holds
+these accounts; the broker does, and each act writes one Audit Trail row
+([*An Administrator's read-only broker account is recorded (0218)*](#an-administrators-read-only-broker-account-is-recorded-0218)).
+
 `tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
 adds a live credential rather than replacing one — reporting the newer of two would state half the
 exposure on the one page whose job is to state all of it.

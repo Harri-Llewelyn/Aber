@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
+import { BrokerSubscriberModal } from '../modals/BrokerSubscriberModal'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ServiceTokenModal } from '../modals/ServiceTokenModal'
@@ -11,7 +13,7 @@ import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescrib
 import { PeopleSection } from './PeopleSection'
 import {
   IconArchive, IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconShieldAlert,
-  IconShieldCheck,
+  IconShieldCheck, IconTrash,
 } from '../common/Icons'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { CardHeading } from '../common/CardHeading'
@@ -51,6 +53,7 @@ import {
   describeBrokerAccount,
   describePrincipal,
   isMintableFromPage,
+  isSubscriberAccount,
   permissionReach,
   tokenStatus,
   tokenStatusDetail,
@@ -181,6 +184,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   // Administrator-only, and one error state would blame the whole page for a refusal that applies
   // to one section.
   const [principalError, setPrincipalError] = useState(null)
+  // True while New Read-Only Account is open; the read-only account being deleted, or null.
+  const [creatingSubscriber, setCreatingSubscriber] = useState(false)
+  const [deletingSubscriber, setDeletingSubscriber] = useState(null)
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) {
@@ -307,7 +313,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   }, [inventory, rows])
 
   // The broker's own accounts: everything that is not a gateway, plus any declared fixture. Each
-  // with the purpose of the platform role it holds, or its own declaration. In policy order, so
+  // with the purpose of the platform role it holds, or its own declaration; a read-only account
+  // with the name and description it was created with, which the broker holds. In policy order, so
   // the list reads the same way as Broker roles.
   const platformAccounts = useMemo(() => {
     if (!inventory) return []
@@ -315,6 +322,9 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     const purposeOf = c => {
       const declared = describeBrokerAccount(c.username)
       if (declared) return { name: declared.name, purpose: declared.purpose }
+      if (isSubscriberAccount(c.username) && (c.textname || c.textdescription)) {
+        return { name: c.textname || null, purpose: c.textdescription || null }
+      }
       const role = (c.roles || []).find(r => order.has(r) && r !== GATEWAY_ROLE.role)
       return role ? { name: null, purpose: ROLE_ENTRIES[order.get(role)].purpose } : { name: null, purpose: null }
     }
@@ -330,6 +340,32 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     () => [...platformAccounts, ...orphanAccounts.map(c => ({ ...c, noGateway: true }))],
     [platformAccounts, orphanAccounts]
   )
+
+  // What a new read-only account may read: the subscriber role's subscribe rules as the broker
+  // reported them, the UNS root included. Null when the broker did not report the role.
+  const subscriberTopics = useMemo(() => {
+    const role = rolesByName.get('subscriber')
+    return role ? role.acls.filter(a => a.allow && a.acltype === 'subscribePattern').map(a => a.topic) : null
+  }, [rolesByName])
+
+  // Delete, after the dialog names the account. Reports and closes either way: the list is read
+  // again, so a row that is gone, or still there, shows which happened.
+  const deleteSubscriber = useCallback(async () => {
+    const account = deletingSubscriber
+    try {
+      const result = await api.deleteBrokerSubscriber(account.username)
+      showToast?.(
+        result?.audit_recorded === false
+          ? 'Account deleted, but the Audit Trail entry could not be written. Note this.'
+          : `Read-only account “${account.textname || account.username}” deleted`,
+        result?.audit_recorded === false ? 'error' : 'success'
+      )
+    } catch (err) {
+      showToast?.(err.message, 'error')
+    }
+    setDeletingSubscriber(null)
+    load()
+  }, [deletingSubscriber, showToast, load])
 
   const afterAction = useCallback(() => {
     setCredentialForGw(null)
@@ -852,9 +888,23 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
           {/* The broker's own accounts, live. Every account that is not a gateway's, and any gateway
               -shaped account the repository declares as a fixture: those are created by the boot
-              reconcile from the MQTT_*_USER pairs, not issued against a row. Then any gateway-shaped
-              account no gateway claims, marked No gateway. */}
+              reconcile from the MQTT_*_USER pairs, not issued against a row. Read-only accounts an
+              Administrator made here are among them. Then any gateway-shaped account no gateway
+              claims, marked No gateway. */}
           {section === 'accounts' && (<>
+          {/* Offered only once the broker was read: only an Administrator can read it, and a button
+              that opens a dialog to fail is worse than none. */}
+          {inventory && (
+            <div className="filter-bar">
+              <div className="filter-bar-actions">
+                <Tooltip text="For a consumer outside Aber that only reads, such as a SCADA system or a dashboard. It holds the subscriber role and publishes nothing.">
+                  <button className="btn btn-primary btn-sm" onClick={() => setCreatingSubscriber(true)}>
+                    <IconPlus size={13} /> New Read-Only Account
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          )}
           {inventoryLoading ? <LoadingState label="broker accounts" /> : !inventory ? (
             <EmptyState
               icon={<IconRadio size={36} />}
@@ -874,6 +924,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                     <SortHeader sort={accountSort} column="roles">Roles</SortHeader>
                     <SortHeader sort={accountSort} column="purpose">Purpose</SortHeader>
                     <SortHeader sort={accountSort} column="broker">Broker</SortHeader>
+                    <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -897,6 +948,21 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                         {accountPurpose(c)}
                       </td>
                       <td>{brokerBadge(brokerState(c, true), brokerConnections(c, true))}</td>
+                      {/* Delete only for a read-only account: a gateway's is revoked, and Aber's own
+                          are the chart's. The credential service refuses any other name too. */}
+                      <td className="row-actions">
+                        {isSubscriberAccount(c.username) && (
+                          <Tooltip text="Delete this read-only account. Anything connected as it is disconnected at once.">
+                            <button
+                              className="btn btn-sm btn-danger btn-danger-reveal"
+                              onClick={() => setDeletingSubscriber(c)}
+                              aria-label={`Delete ${c.name || c.username}`}
+                            >
+                              <IconTrash size={13} /> Delete
+                            </button>
+                          </Tooltip>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1101,6 +1167,38 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           onClose={() => setDescribing(null)}
           onChanged={load}
           showToast={showToast}
+        />
+      )}
+
+      {/* `load()` on creation, so the new row is listed behind the dialog showing its password. */}
+      {creatingSubscriber && (
+        <BrokerSubscriberModal
+          topics={subscriberTopics}
+          onClose={() => setCreatingSubscriber(false)}
+          onCreated={() => load()}
+          showToast={showToast}
+        />
+      )}
+
+      {deletingSubscriber && (
+        <ConfirmModal
+          title={`Delete the read-only account “${deletingSubscriber.textname || deletingSubscriber.username}”`}
+          size="md"
+          message={(
+            <>
+              The broker deletes <span className="mono">{deletingSubscriber.username}</span> at once.
+              Anything connected as it is disconnected, and its password is refused from then on.
+              {(deletingSubscriber.connections ?? 0) > 0 && (
+                <> It is connected now, so whatever reads through it stops receiving.</>
+              )}{' '}
+              To give the consumer access again, create a new account. The Audit Trail records the
+              deletion.
+            </>
+          )}
+          confirmLabel="Delete Account"
+          pendingLabel="Deleting…"
+          onConfirm={deleteSubscriber}
+          onCancel={() => setDeletingSubscriber(null)}
         />
       )}
 
