@@ -467,7 +467,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             </div>
             <UnsRenameNote
               index={unsPaths}
-              renamed={!!editing && formVal.area_name.trim() !== editing.area_name}
+              renamed={!!editing && (formVal.area_name || '').trim() !== editing.area_name}
               areaId={editing?.area_id}
             />
           </div>

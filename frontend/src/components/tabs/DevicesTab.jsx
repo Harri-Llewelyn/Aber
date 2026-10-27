@@ -1108,7 +1108,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
               <UnsRenameNote
                 index={unsPaths}
-                renamed={!!editing && form.asset_name.trim() !== (editing.asset_name || '')}
+                renamed={!!editing && (form.asset_name || '').trim() !== (editing.asset_name || '')}
                 deviceId={editing?.asset_id}
               />
             </div>
