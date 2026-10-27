@@ -104,6 +104,9 @@ CREDENTIAL_TIMEOUT = 240
 PROJECTION_MARGIN = 90
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
+# A read for a row that must NOT arrive. 15 s is ample: the daemon's writer has no flush interval
+# (it writes as messages arrive), and the job has already ended when this window opens.
+ABSENCE_WINDOW = 15
 # The worker's NDEATH is acknowledged before the job finishes; the daemon writes it a moment later.
 GATEWAY_OFFLINE_TIMEOUT = 30
 
@@ -528,6 +531,26 @@ class _ReplayFixture(unittest.TestCase):
         )
 
     @classmethod
+    def _ensure_worker_credential(cls):
+        """
+        Mint and wait only when the worker has not recently reported holding the current
+        credential, as the two capture suites do. PlaybackReachesTheHistorian always mints: it is
+        the class that tests the delivery.
+        """
+        wanted = cls.playback_gateway["sparkplug_id"]
+        status, rows = cls.session.rest(
+            "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
+        holds = (
+            status == 200 and bool(rows)
+            and wanted in (rows[0].get("held_edge_nodes") or [])
+            and time.time() - _epoch_seconds(rows[0]["reported_at"]) < WORKER_STALE_SECONDS
+            and not cls._credential_is_stale(wanted)
+        )
+        if not holds:
+            cls._mint_credential()
+            cls._await_worker_credential()
+
+    @classmethod
     def _store_capture(cls):
         """Begin, upload and register the fixture, the three steps the browser performs in that order."""
         epoch_ms = int(time.time() * 1000)
@@ -628,14 +651,14 @@ class _ReplayFixture(unittest.TestCase):
         return row
 
     @classmethod
-    def _await_historian(cls, at_least=EXPECTED_READINGS):
+    def _await_historian(cls, at_least=EXPECTED_READINGS, timeout=HISTORIAN_TIMEOUT):
         """
         Which assets carry the sentinel metric, and what they were given.
 
         Polled rather than read once: the daemon batches telemetry through the writer thread, so
         the rows appear a moment after the last publish rather than with it.
         """
-        deadline = time.monotonic() + HISTORIAN_TIMEOUT
+        deadline = time.monotonic() + timeout
         rows = []
         while time.monotonic() < deadline:
             try:
@@ -901,8 +924,7 @@ class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
         cls._begin()
         cls.playback_gateway = cls._playback_gateway()
         cls.source = cls._source_device()
-        cls._mint_credential()
-        cls._await_worker_credential()
+        cls._ensure_worker_credential()
         cls._store_capture()
         cls.lane_map = cls._prepare_lanes()
 
@@ -913,8 +935,9 @@ class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
         cls._mint_credential()
         cls.job = cls._await_job(job_id)
         cls.gateway_after = cls._await_gateway_offline()
-        # One more than could have been written, so this reads for the whole window.
-        cls.rows = cls._await_historian(at_least=(cls.job["messages_sent"] or 0) + 1)
+        # One more than could have been written, so this reads for the whole absence window.
+        cls.rows = cls._await_historian(
+            at_least=(cls.job["messages_sent"] or 0) + 1, timeout=ABSENCE_WINDOW)
 
     def test_the_job_failed_naming_the_lost_connection(self):
         self.assertEqual(self.running["status"], "RUNNING",
