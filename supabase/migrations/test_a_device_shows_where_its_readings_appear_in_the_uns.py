@@ -121,10 +121,6 @@ class Base(unittest.TestCase):
         )
         return device_id
 
-    def name_of(self, table, row_id):
-        self.cur.execute(f"SELECT name FROM public.{table} WHERE id = %s;", (row_id,))
-        return self.cur.fetchone()[0]
-
     # -- reads ---------------------------------------------------------------------------------
 
     def read(self, device_id, caller=None):
