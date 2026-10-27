@@ -967,6 +967,16 @@ export const SUITES = {
       'sessions survive, the dashboard token is still served, and a machine identity, a token ' +
       'naming nobody, anon and service_role are refused.',
   },
+  'supabase/migrations/test_a_nameplate_names_the_person_the_server_signed_in.py': {
+    lanes: ['db'],
+    why:
+      "0210 -- that a nameplate written through the API records the caller and the database's " +
+      "time, whatever the request names: a Shopfloor Manager's and an Administrator's insert, " +
+      "update and upsert naming another person and a past time are stored as theirs, now, and " +
+      "service_role's store NULL. An approval still records the proposer, and the owner's " +
+      'session keeps what it writes. A wrong value here is silent: the record names somebody ' +
+      'who never touched the asset.',
+  },
   'supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py': {
     lanes: ['db'],
     why:

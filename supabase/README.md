@@ -1855,6 +1855,53 @@ call with no claims, or naming no recorded token, records nothing.
 `test_a_service_token_shows_when_it_was_last_used.py` holds it in the db lane, and
 `test_a_token_s_use_is_recorded.py` holds it through the i3X server in the stack lane.
 
+### A nameplate names the person the server signed in (0210)
+
+`device_nameplate.updated_by` records who last edited a device's nameplate, because a nameplate is
+an assertion about an asset and who made it is part of the record. It held whatever the request
+carried. The dashboard sent its own user id and the browser's clock as `updated_at`, and the write
+policies (`device_nameplate_insert_privileged`, `device_nameplate_update_privileged`) check only
+the caller's role. So an Administrator or Shopfloor Manager calling the API could save an edit "by"
+any uuid, or by nobody, at any time. The Audit Trail was right throughout: `log_audit_trail_event()`
+takes `changed_by` from the token.
+
+- **`device_nameplate_stamp()`**, a `BEFORE INSERT OR UPDATE ... FOR EACH ROW` trigger, stamps
+  every write made through the API: when `current_user` is `anon`, `authenticated` or
+  `service_role`, it sets `updated_by := auth.uid()` and `updated_at := now()`, whatever the
+  request carried. It is shaped like `system_settings_stamp()`: PL/pgSQL, `search_path` pinned, and
+  no API role may execute it. `service_role` has no person behind it and records `NULL`, as
+  `system_settings` does.
+- **The database's own writes keep their values.** Any other `current_user` is the database
+  writing for itself. A `SECURITY DEFINER` function runs as its owner, and a migration or the
+  owner's session writes what it means to. The function is `SECURITY INVOKER` so that
+  `current_user` is the writer's; as a definer it would always see `postgres` and stamp nothing. A
+  role later granted `INSERT` or `UPDATE` on the table must join the list.
+- **An approved proposal records the proposer.** `approve_proposal()` is `SECURITY DEFINER`, owned
+  by `postgres`, and sets `updated_by` to the proposer and `updated_at` to the time it applies the
+  change, as archived migration 0086 decided
+  ([Who the record names](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)).
+  The trigger fired from inside it sees `current_user = postgres` while `auth.uid()` is still the
+  approver, so it keeps those values. The proposer can be trusted: `change_proposals_insert_proposer`
+  pins `proposed_by` to `auth.uid()`, a trigger refuses a later change to it, and a patch cannot
+  name `updated_by` or `updated_at` (`proposable_columns()`).
+- **The dashboard sends neither column.** `api.js`'s nameplate save upserts the fields alone, so
+  the request says only what the person changed.
+- **A restore keeps what was recorded.** A backup is a whole-database dump, and `pg_restore` and a
+  plain replay create a table's triggers after loading its rows. `test-db.mjs --with-history` loads
+  under `session_replication_role = replica`, where the trigger does not fire. Nothing else writes
+  the table: the AAS exporter reads it, i3X and ingestion never touch it, and no archive or restore
+  path copies a nameplate back.
+- **The Audit Trail shows what it did before.** The audit trigger is `AFTER`, so its snapshots hold
+  the stamped values. Its `WHEN` clause already ignores a save that moved only `updated_by` and
+  `updated_at`, and the Audit Trail's diff hides `updated_at` but shows `updated_by` changing from
+  one person to the next, as it did when the browser sent the value. An approval still shows the
+  proposer there.
+
+The file's self-check fails the boot if the trigger is missing or disabled, is not `BEFORE INSERT
+OR UPDATE FOR EACH ROW`, its function lost its `search_path` pin or became `SECURITY DEFINER`, or
+an API role may execute the function. `test_a_nameplate_names_the_person_the_server_signed_in.py`
+holds the rest in the db lane.
+
 ### Ending another of your sessions is recorded (0211)
 
 `0206` let a person end their own sessions on the Profile page's Security tab, and recorded

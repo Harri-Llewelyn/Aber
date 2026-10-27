@@ -678,6 +678,13 @@ python supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py
 # sessions and other people's door sessions survive, and the dashboard's token is still served. A
 # machine identity, a token naming nobody, anon and service_role are refused. Every test rolls back.
 python supabase/migrations/test_signing_out_ends_the_person_s_door_sessions.py
+# A nameplate names the person the server signed in (0210): device_nameplate_stamp() sets
+# updated_by to the caller and updated_at to the database's time on every insert, update and
+# upsert through the API. A Shopfloor Manager's and an Administrator's writes that name another
+# person and a past time are stored as theirs, now; service_role's store NULL. An approval stores
+# the proposer, since approve_proposal() writes as its owner, and the owner's session keeps what it
+# writes. The audit rows carry the stamp. Every test rolls back.
+python supabase/migrations/test_a_nameplate_names_the_person_the_server_signed_in.py
 # Ending your own sessions is recorded (0211). End writes one SESSIONS_ENDED row in the person's
 # lane, naming them, with a count of 1 and the session's service, user agent and times, never an
 # address or a token. end_my_other_sessions() ends every session but the one the token names,

@@ -2678,7 +2678,11 @@ paths:
     post:
       tags: [Registry]
       summary: Record nameplate data for a device
-      description: 'Administrator or Shopfloor_Manager only. Use `Prefer: resolution=merge-duplicates` to upsert.'
+      description: |
+        Administrator or Shopfloor_Manager only. Use `Prefer: resolution=merge-duplicates` to upsert.
+        The database stamps `updated_by` and `updated_at` with the caller and the time of the write,
+        whatever the request carries, so leave both out. An approved nameplate proposal records its
+        proposer instead.
       parameters: [{ $ref: '#/components/parameters/Prefer' }]
       requestBody:
         required: true
@@ -6142,8 +6146,8 @@ components:
         software_version: { type: string, nullable: true }
         country_of_origin: { type: string, nullable: true }
         uri_of_the_product: { type: string, nullable: true, description: 'Must be an absolute IRI; a bare string is rejected by a CHECK.' }
-        updated_at: { type: string, format: date-time, readOnly: true }
-        updated_by: { type: string, format: uuid, nullable: true }
+        updated_at: { type: string, format: date-time, readOnly: true, description: 'When the row was last written, by the database''s clock. Stamped on every write through the API; a value sent is ignored.' }
+        updated_by: { type: string, format: uuid, nullable: true, readOnly: true, description: 'Who last wrote the row. A write through the API records the caller''s user id, and a value sent is ignored; `service_role` records null. An approved proposal records its proposer.' }
 
     SparkplugAddress:
       type: object

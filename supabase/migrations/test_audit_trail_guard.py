@@ -652,10 +652,11 @@ class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
 
     def test_a_save_that_moved_only_the_bookkeeping_columns_is_not(self):
         """
-        THE NEGATIVE CASE, AND IT IS NOT HYPOTHETICAL. The editor upserts the whole row and stamps
-        `updated_at` on every save, so an operator who opens the form and saves it unchanged writes
-        a different row. Without the WHEN clause that files an event whose two snapshots are
-        identical but for a timestamp -- into an append-only table, so it could never be tidied up.
+        THE NEGATIVE CASE, AND IT IS NOT HYPOTHETICAL. The editor upserts the whole row and the
+        database stamps `updated_by` and `updated_at` on every save through the API (0210), so a
+        person who opens the form and saves it unchanged writes a different row. Without the WHEN
+        clause that files an event whose two snapshots are identical but for the stamp -- into an
+        append-only table, so it could never be tidied up.
 
         audit_telemetry_columns() cannot cover this: it names the columns a gateway HEARTBEAT
         rewrites, and widening it to `updated_at` would silence that column on every table.
@@ -665,13 +666,17 @@ class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
         # `now()` is TRANSACTION-scoped, so writing it here would reproduce the value the
         # INSERT above already stored and the function's own no-op guard would swallow the write
         # -- leaving this test passing with the WHEN clause removed. An explicitly different
-        # timestamp is what makes it measure the clause it is about.
+        # timestamp is what makes it measure the clause it is about. It lands because the owner's
+        # session is not stamped (0210).
         self.cur.execute(
             "UPDATE public.device_nameplate "
             "   SET updated_at = now() + interval '1 hour', updated_by = NULL "
             " WHERE device_id = %s",
             (self.device_id,),
         )
+        self.cur.execute("SELECT updated_at > now() FROM public.device_nameplate WHERE device_id = %s",
+                         (self.device_id,))
+        self.assertTrue(self.cur.fetchone()[0], "the timestamp did not land, so the save measured nothing")
         self.assertEqual(self.audit_count("device_nameplate"), 0,
                          "a save that changed no nameplate field was recorded as an event")
 
@@ -738,6 +743,7 @@ class TestNameplateEditsReachTheTrail(AuditGuardTestCase):
         self.cur.execute(
             "SELECT tgname FROM pg_trigger "
             " WHERE tgrelid = 'public.device_nameplate'::regclass AND NOT tgisinternal "
+            "   AND tgfoid = 'public.log_audit_trail_event()'::regprocedure "
             " ORDER BY tgname"
         )
         self.assertEqual(
