@@ -46,6 +46,18 @@
 //   node scripts/rotate-service-keys.mjs             # re-sign all three and print them, with the commands to apply
 //   node scripts/rotate-service-keys.mjs --apply     # ... and patch the release Secret, restart the workloads
 //   node scripts/rotate-service-keys.mjs --days 30   # shorter than the 90-day default
+//   node scripts/rotate-service-keys.mjs --anon-and-service-role   # ... and the API's two JWTs, ES256
+//   node scripts/rotate-service-keys.mjs --signing-keys            # add the ES256 key pair, sign nothing
+//
+// IT SIGNS WITH WHAT THE STACK VERIFIES: ES256 with the private key in SUPABASE_JWT_KEYS once
+// GoTrue publishes its kid (supabaseAuth.es256Signing is on), HS256 with SUPABASE_JWT_SECRET until
+// then. An HS256 key verifies on both through 1.7; an ES256 one only once the switch is on.
+//
+// --signing-keys is the first of the three steps that move an existing site to ES256
+// (help/site/upgrading.md, "Sign tokens with ES256"): it mints the pair around the stack's own
+// secret and writes it to the values file, or with --apply to the release Secret. Nothing reads the
+// two values until the switch is on, so writing them changes nothing yet. It refuses a Secret that
+// already holds a pair: replacing the signing key is the key-rotation runbook's, not this.
 //
 // --apply rewrites the Secret the pods read. A release installed from a values file must carry the
 // new keys there too (--values=<file> rewrites secrets.ingestionKey, .playbackKey and
@@ -55,13 +67,15 @@
 // =================================================================================================
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { NAMESPACE, RELEASE, missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
+import {
+  NAMESPACE, RELEASE, liveSigningKey, missingCredentialAdvice, stackCredentials,
+} from './lib/stack-credentials.mjs';
 import { hostname, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
-  mintJwt, decodeJwt, daysUntilExpiry,
-  SERVICE_KEY_DEFAULT_DAYS, SERVICE_KEY_MAX_DAYS, EXPIRY_WARN_DAYS,
+  mintJwt, decodeJwt, daysUntilExpiry, generateSigningKeys,
+  SERVICE_KEY_DEFAULT_DAYS, SERVICE_KEY_MAX_DAYS, EXPIRY_WARN_DAYS, INFRASTRUCTURE_KEY_DAYS,
 } from './lib/service-jwt.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -101,9 +115,22 @@ const KEYS = [
   },
 ];
 
+/**
+ * The API's two JWTs, re-signed only with --anon-and-service-role: no principal, so no jti and no
+ * record, and ten years like setup.mjs's. The gateway substitutes them into its config at start and
+ * storage-api reads them at start, so both restart.
+ */
+const API_KEYS = [
+  { env: 'SUPABASE_ANON_KEY', valuesKey: 'anonKey', role: 'anon' },
+  { env: 'SUPABASE_SERVICE_ROLE_KEY', valuesKey: 'serviceRoleKey', role: 'service_role' },
+];
+const API_KEY_RESTARTS = ['supabase-envoy', 'supabase-storage'];
+
 const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
 const apply = args.includes('--apply');
+const addSigningKeys = args.includes('--signing-keys');
+const apiKeys = args.includes('--anon-and-service-role');
 const valuesArg = args.find((a) => a.startsWith('--values='));
 const valuesPath = valuesArg ? valuesArg.slice('--values='.length) : join(REPO, 'deploy', 'helm', 'aber', 'values-local.yaml');
 const daysArg = args.indexOf('--days');
@@ -117,8 +144,87 @@ if (!Number.isFinite(days) || days <= 0 || days > SERVICE_KEY_MAX_DAYS) {
 }
 
 // The keys as the running stack holds them, from the release Secret (or the environment).
-const creds = stackCredentials(['SUPABASE_JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL', ...KEYS.map((k) => k.env)]);
+const creds = stackCredentials([
+  'SUPABASE_JWT_SECRET', 'SUPABASE_JWT_KEYS', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
+  'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_URL', ...KEYS.map((k) => k.env),
+]);
 const envValue = (key) => creds[key] || '';
+
+/** A token's alg, from its header: what a verifier picks its key by. */
+function algorithmOf(token) {
+  try {
+    return JSON.parse(Buffer.from(String(token).split('.')[0], 'base64url').toString('utf8')).alg ?? '?';
+  } catch {
+    return '?';
+  }
+}
+
+/** YAML for a values file: compact JSON single-quoted (it holds no single quote), the rest double. */
+const yamlValue = (value) => (value.includes('"') ? `'${value}'` : `"${value}"`);
+
+/**
+ * `key: value` set in a values file's text: the line rewritten where it exists, else added under
+ * the `after` key at its indent. Null when neither line exists.
+ */
+function assign(text, key, value, after) {
+  const line = new RegExp(`^(\\s*)${key}:.*$`, 'm');
+  if (line.test(text)) return text.replace(line, (m, indent) => `${indent}${key}: ${yamlValue(value)}`);
+  const anchor = after && new RegExp(`^(\\s*)${after}:.*$`, 'm');
+  if (anchor && anchor.test(text)) return text.replace(anchor, (m, indent) => `${m}\n${indent}${key}: ${yamlValue(value)}`);
+  return null;
+}
+
+/** Patches the release Secret with `values` (env name -> value); exits on a refusal. */
+function patchSecret(values) {
+  const patch = { data: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Buffer.from(v).toString('base64')])) };
+  const patched = spawnSync('kubectl', ['-n', NAMESPACE, 'patch', 'secret', `${RELEASE}-secrets`, '--type=merge', '-p', JSON.stringify(patch)], { encoding: 'utf8' });
+  if (patched.status !== 0) {
+    console.error(`❌ could not patch the Secret: ${(patched.stderr || '').trim()}`);
+    process.exit(1);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// --signing-keys: the ES256 key pair, around the secret the stack already signs with
+// -------------------------------------------------------------------------------------------------
+if (addSigningKeys) {
+  const secret = envValue('SUPABASE_JWT_SECRET');
+  if (!secret) {
+    console.error('❌ ' + missingCredentialAdvice('SUPABASE_JWT_SECRET'));
+    console.error('   The pair carries it as the legacy key, so HS256 tokens signed before keep verifying.');
+    process.exit(1);
+  }
+  if (envValue('SUPABASE_JWT_KEYS')) {
+    console.error('❌ The release Secret already holds SUPABASE_JWT_KEYS. Replacing the signing key would');
+    console.error('   invalidate every ES256 token at once; help/site/upgrading.md, "Rotate the ES256 signing key",');
+    console.error('   adds a second key first.');
+    process.exit(1);
+  }
+  const set = generateSigningKeys(secret);
+  const values = { SUPABASE_JWT_KEYS: set.jwtKeys, SUPABASE_JWT_JWKS: set.jwtJwks };
+  if (existsSync(valuesPath)) {
+    const keysSet = assign(readFileSync(valuesPath, 'utf8'), 'jwtKeys', set.jwtKeys, 'jwtSecret');
+    const both = keysSet && assign(keysSet, 'jwtJwks', set.jwtJwks, 'jwtKeys');
+    if (both) {
+      writeFileSync(valuesPath, both, { mode: 0o600 });
+      console.log(`✅ Wrote secrets.jwtKeys and secrets.jwtJwks (kid ${set.kid}) into ${valuesPath}.`);
+    } else {
+      console.error(`⚠️  ${valuesPath} has no secrets.jwtSecret to write the pair beside; not rewritten.`);
+    }
+  }
+  if (apply) {
+    patchSecret(values);
+    console.log(`✅ Added SUPABASE_JWT_KEYS and SUPABASE_JWT_JWKS (kid ${set.kid}) to ${RELEASE}-secrets.`);
+  } else if (!existsSync(valuesPath)) {
+    for (const [k, v] of Object.entries(values)) console.log(`${k}=${v}`);
+    console.error(`Printed only. Add these two keys to the release Secret where it lives, or re-run with --apply.`);
+  }
+  console.log('');
+  console.log('Nothing reads the pair until the switch is on. Next:');
+  console.log('  1. Set supabaseAuth.es256Signing: true (site.yaml) and helm upgrade with the same values.');
+  console.log('  2. npm run keys:rotate -- --apply --anon-and-service-role   (re-signs the JWTs ES256)');
+  process.exit(0);
+}
 
 // -------------------------------------------------------------------------------------------------
 // --check: the answer to "a date nobody wrote down"
@@ -157,9 +263,16 @@ if (checkOnly) {
     const state = remaining < 0 ? 'EXPIRED' : remaining < EXPIRY_WARN_DAYS ? 'DUE' : 'ok';
     console.log(
       `  ${key.env.padEnd(26)} ${String(whole).padStart(5)} days  ${new Date(Date.now() + remaining * 86400000).toISOString().slice(0, 10)}  ${state}`
-      + `  jti ${claims.jti ?? 'NONE'}`
+      + `  ${algorithmOf(token)}  jti ${claims.jti ?? 'NONE'}`
     );
     worst = Math.min(worst, remaining);
+  }
+  // Not a failure in 1.7: HS256 still verifies everywhere, until 1.8.
+  const hs256 = [...KEYS, ...API_KEYS].filter((k) => envValue(k.env) && algorithmOf(envValue(k.env)) === 'HS256');
+  if (hs256.length) {
+    console.log('');
+    console.log(`  HS256, which stops verifying in 1.8: ${hs256.map((k) => k.env).join(', ')}.`);
+    console.log('  Re-sign ES256 once supabaseAuth.es256Signing is on (help/site/upgrading.md, "Sign tokens with ES256").');
   }
 
   if (worst < EXPIRY_WARN_DAYS) {
@@ -178,24 +291,36 @@ if (checkOnly) {
 // -------------------------------------------------------------------------------------------------
 // Mint
 // -------------------------------------------------------------------------------------------------
+const supabaseUrl = envValue('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const secret = envValue('SUPABASE_JWT_SECRET');
-if (!secret) {
+const signing = await liveSigningKey({
+  jwtKeys: envValue('SUPABASE_JWT_KEYS'), supabaseUrl, apikey: envValue('SUPABASE_PUBLISHABLE_KEY'),
+});
+if (apiKeys && !signing.key) {
+  console.error(`❌ --anon-and-service-role re-signs them ES256, and ES256 is not live: ${signing.why}.`);
+  console.error('   Turn supabaseAuth.es256Signing on first (help/site/upgrading.md, "Sign tokens with ES256").');
+  process.exit(1);
+}
+if (!signing.key && !secret) {
   console.error('❌ ' + missingCredentialAdvice('SUPABASE_JWT_SECRET'));
   console.error('   The new keys have to be signed with the');
   console.error('   SAME secret the stack already trusts — signing with a new one would invalidate');
   console.error('   the anon and service-role keys along with everything else.');
   process.exit(1);
 }
+const signedWith = signing.key ? `ES256 (kid ${signing.key.kid})` : `HS256 (${signing.why})`;
 
 const minted = KEYS.map((key) => ({
   ...key,
-  ...mintJwt({ role: 'authenticated', secret, subject: key.principal, days }),
+  ...mintJwt({ role: 'authenticated', secret, signingKey: signing.key, subject: key.principal, days }),
 }));
+const mintedApi = apiKeys
+  ? API_KEYS.map((key) => ({ ...key, ...mintJwt({ role: key.role, signingKey: signing.key, days: INFRASTRUCTURE_KEY_DAYS }) }))
+  : [];
 
 // -------------------------------------------------------------------------------------------------
 // Record, best-effort — see the header for why this one is not fatal
 // -------------------------------------------------------------------------------------------------
-const supabaseUrl = envValue('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const serviceRoleKey = envValue('SUPABASE_SERVICE_ROLE_KEY');
 const unrecorded = [];
 
@@ -229,12 +354,16 @@ for (const key of minted) {
 
 // -------------------------------------------------------------------------------------------------
 // Apply, or print. The release Secret is what the pods read, so --apply patches it and restarts
-// the two workloads. Without --apply the values are printed with the commands, for a Secret
-// managed outside the cluster (External Secrets, SOPS), where the operator applies them where they
-// live. Either way a values file the release was installed from is rewritten when it exists, or
-// the next `helm upgrade` would put the old keys back.
+// the workloads that read the keys at start. Without --apply the values are printed with the
+// commands, for a Secret managed outside the cluster (External Secrets, SOPS), where the operator
+// applies them where they live. Either way a values file the release was installed from is
+// rewritten when it exists, or the next `helm upgrade` would put the old keys back.
 // -------------------------------------------------------------------------------------------------
-const restart = [...new Set(minted.filter((k) => k.restart).map((k) => `deploy/${k.restart}`))];
+const all = [...minted, ...mintedApi];
+const restart = [...new Set([
+  ...minted.filter((k) => k.restart).map((k) => `deploy/${k.restart}`),
+  ...(mintedApi.length ? API_KEY_RESTARTS.map((name) => `deploy/${name}`) : []),
+])];
 if (existsSync(valuesPath)) {
   let values = readFileSync(valuesPath, 'utf8');
   const notFound = [];
@@ -253,33 +382,36 @@ if (existsSync(valuesPath)) {
     }
     notFound.push(key.valuesKey);
   }
+  for (const key of mintedApi) {
+    const next = assign(values, key.valuesKey, key.token, null);
+    if (next) values = next;
+    else notFound.push(key.valuesKey);
+  }
   if (notFound.length) {
     console.error(`⚠️  ${valuesPath} has no assignment for secrets.${notFound.join(', ')}; not rewritten.`);
   } else {
     writeFileSync(valuesPath, values, { mode: 0o600 });
-    console.log(`✅ Rewrote ${minted.map((k) => `secrets.${k.valuesKey}`).join(', ')} in ${valuesPath}.`);
+    console.log(`✅ Rewrote ${all.map((k) => `secrets.${k.valuesKey}`).join(', ')} in ${valuesPath}.`);
   }
 }
 if (!apply) {
-  for (const key of minted) console.log(`${key.env}=${key.token}`);
+  for (const key of all) console.log(`${key.env}=${key.token}`);
   console.error('');
-  console.error(`Printed only. Put these in the release Secret (${RELEASE}-secrets in ${NAMESPACE}), or re-run`);
-  console.error(`with --apply to patch it here; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
+  console.error(`Signed ${signedWith}. Printed only. Put these in the release Secret (${RELEASE}-secrets in`);
+  console.error(`${NAMESPACE}), or re-run with --apply to patch it here; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
   console.error('The release check reads its key at each run; nothing restarts for it.');
   process.exit(0);
 }
-const patch = { data: Object.fromEntries(minted.map((k) => [k.env, Buffer.from(k.token).toString('base64')])) };
-const patched = spawnSync('kubectl', ['-n', NAMESPACE, 'patch', 'secret', `${RELEASE}-secrets`, '--type=merge', '-p', JSON.stringify(patch)], { encoding: 'utf8' });
-if (patched.status !== 0) {
-  console.error(`❌ could not patch the Secret: ${(patched.stderr || '').trim()}`);
-  process.exit(1);
-}
+patchSecret(Object.fromEntries(all.map((k) => [k.env, k.token])));
 const restarted = spawnSync('kubectl', ['-n', NAMESPACE, 'rollout', 'restart', ...restart], { encoding: 'utf8' });
-console.log(`✅ Re-signed ${minted.length} service keys for ${days} days, in the release Secret.`);
+console.log(`✅ Re-signed ${minted.length} service keys for ${days} days, ${signedWith}, in the release Secret.`);
 for (const key of minted) {
   console.log(`   ${key.env.padEnd(26)} ${key.name}  jti ${key.jti}`);
 }
 console.log(`   All expire ${minted[0].expiresAt.toISOString().slice(0, 10)}.`);
+if (mintedApi.length) {
+  console.log(`   And ${mintedApi.map((k) => k.env).join(' and ')}, for ${INFRASTRUCTURE_KEY_DAYS} days.`);
+}
 console.log(restarted.status === 0 ? `   Restarted ${restart.join(' ')}.` : `   Restart by hand: kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
 console.log('');
 
