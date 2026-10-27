@@ -3060,14 +3060,14 @@ const OPERATOR_PAIRS = [
   const ui = read('frontend/src/utils/serviceIdentities.js');
   const migration = readdirSync(join(REPO, 'supabase/migrations')).find((f) => /^0218_.*\.sql$/.test(f));
   const sql = migration ? read(`supabase/migrations/${migration}`) : '';
-  const literal = (src, name) => src.match(new RegExp(`\\b${name}\\s*=\\s*/([^/\\n]+)/`))?.[1] ?? null;
-  const number = (src, name) => Number(src.match(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`))?.[1] ?? NaN);
+  const grab = (src, re) => src.match(re)?.[1] ?? null;
   const holders = [
-    ['scripts/lib/mosquitto-credentials.mjs', literal(lib, 'SUBSCRIBER_ID_PATTERN'),
-      number(lib, 'SUBSCRIBER_NAME_MAX'), number(lib, 'SUBSCRIBER_DESCRIPTION_MAX')],
-    ['broker-subscriber/subscriber.ts', literal(fn, 'SUBSCRIBER_USERNAME'), number(fn, 'NAME_MAX'), number(fn, 'DESCRIPTION_MAX')],
-    ['frontend/src/utils/serviceIdentities.js', literal(ui, 'SUBSCRIBER_USERNAME'),
-      number(ui, 'SUBSCRIBER_NAME_MAX'), number(ui, 'SUBSCRIBER_DESCRIPTION_MAX')],
+    ['scripts/lib/mosquitto-credentials.mjs', grab(lib, /\bSUBSCRIBER_ID_PATTERN = \/(\S+)\/;?$/m),
+      Number(grab(lib, /\bSUBSCRIBER_NAME_MAX = (\d+)/)), Number(grab(lib, /\bSUBSCRIBER_DESCRIPTION_MAX = (\d+)/))],
+    ['broker-subscriber/subscriber.ts', grab(fn, /\bSUBSCRIBER_USERNAME = \/(\S+)\/;?$/m),
+      Number(grab(fn, /\bNAME_MAX = (\d+)/)), Number(grab(fn, /\bDESCRIPTION_MAX = (\d+)/))],
+    ['frontend/src/utils/serviceIdentities.js', grab(ui, /\bSUBSCRIBER_USERNAME = \/(\S+)\/;?$/m),
+      Number(grab(ui, /\bSUBSCRIBER_NAME_MAX = (\d+)/)), Number(grab(ui, /\bSUBSCRIBER_DESCRIPTION_MAX = (\d+)/))],
   ];
   const problems156 = [];
   for (const [where, pattern, nameMax, descriptionMax] of holders) {
@@ -3076,14 +3076,16 @@ const OPERATOR_PAIRS = [
       problems156.push(`${where} bounds the name at ${nameMax} and the description at ${descriptionMax}`);
     }
   }
-  const sqlSchemes = [...sql.matchAll(/!~ '([^']+)'/g)].map((m) => m[1]);
+  // Each `!~ '<pattern>'` in the file: the two functions' refusals of a username.
+  const sqlSchemes = sql.split("!~ '").slice(1).map((rest) => rest.slice(0, rest.indexOf("'")));
   if (!migration) {
     problems156.push('supabase/migrations holds no 0218, which records these accounts');
   } else {
     if (sqlSchemes.length !== 2 || sqlSchemes.some((p) => p !== SCHEME)) {
       problems156.push(`${migration} refuses usernames by ${sqlSchemes.join(', ') || '(no pattern found)'}`);
     }
-    if (!/char_length\(v_name\) NOT BETWEEN 1 AND 80\b/.test(sql) || !/char_length\(v_description\) NOT BETWEEN 1 AND 500\b/.test(sql)) {
+    if (!sql.includes('char_length(v_name) NOT BETWEEN 1 AND 80 ')
+      || !sql.includes('char_length(v_description) NOT BETWEEN 1 AND 500 ')) {
       problems156.push(`${migration} does not bound the name at 80 and the description at 500`);
     }
   }
