@@ -13,6 +13,7 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
+import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -1003,6 +1004,75 @@ const apiMethods = {
     if (error) throw new Error(error.message || 'Could not sign out of your other sessions');
     return typeof data === 'number' ? data : 0;
   },
+
+  /*
+   * Second factors: the signed-in person's own, through GoTrue's factor API (auth-js
+   * `supabase.auth.mfa`), and an Administrator's Reset MFA of someone else's, through manage-people.
+   * GoTrue's refusals are thrown as a sentence a person can act on, with GoTrue's `code` kept.
+   */
+
+  /** Every factor the person holds, verified or not: `{ id, friendly_name, factor_type, status, created_at }`. */
+  listMyFactors: async () => {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (error) throw factorError(error, 'Could not list your second factors');
+    return data?.all || [];
+  },
+
+  /**
+   * Start adding an authenticator app named `friendlyName`. An enrolment left unconfirmed earlier
+   * is removed first: GoTrue keeps it, and refuses its name again. Resolves to `{ id,
+   * friendly_name, qr_code, secret, uri }`; the factor is unverified until verifyFactorCode().
+   */
+  startFactorEnrolment: async (friendlyName) => {
+    const { data: listed, error: listError } = await supabase.auth.mfa.listFactors();
+    if (listError) throw factorError(listError, 'Could not start adding a second factor');
+    for (const stale of (listed?.all || []).filter(f => f.status !== 'verified')) {
+      await supabase.auth.mfa.unenroll({ factorId: stale.id });
+    }
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName });
+    if (error) throw factorError(error, 'Could not start adding a second factor');
+    return { id: data.id, friendly_name: data.friendly_name, ...data.totp };
+  },
+
+  /**
+   * A code from the factor's app, checked by GoTrue: it confirms a new factor, and raises this
+   * session to aal2. GoTrue then ends the person's other sessions that are still aal1.
+   */
+  verifyFactorCode: async (factorId, code) => {
+    const { data, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: normaliseCode(code) });
+    if (error) throw factorError(error, 'Could not check the code');
+    return data;
+  },
+
+  /** An enrolment abandoned before its code: removed, so it neither lingers nor holds its name. */
+  cancelFactorEnrolment: async (factorId) => {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) console.warn('[mfa] could not remove an unconfirmed factor:', error.message);
+  },
+
+  /**
+   * Remove one of your factors. GoTrue needs an aal2 session for a verified one, and lowers the
+   * sessions that used it to aal1; the token is renewed at once so the dashboard sees that too.
+   */
+  removeFactor: async (factorId) => {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) throw factorError(error, 'Could not remove the second factor');
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) console.warn('[mfa] could not renew the session after removing a factor:', refreshError.message);
+  },
+
+  /** getAuthenticatorAssuranceLevel()'s answer: `{ currentLevel, nextLevel, currentAuthenticationMethods }`. */
+  assuranceLevel: async () => {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error) throw factorError(error, 'Could not read how this session signed in');
+    return data;
+  },
+
+  /**
+   * Reset MFA: delete every second factor someone else holds, through manage-people, recorded in
+   * the Audit Trail. Their sessions stay. Resolves to `{ user_id, factors_removed }`.
+   */
+  resetPersonMfa: (userId) => api.managePeople({ action: 'reset-mfa', user_id: userId }),
 
   /**
    * Give a person one of the four roles. The database refuses your own role, a person whose access

@@ -125,6 +125,9 @@
   --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.35);
   --shadow-pin:     0 2px 8px rgba(0, 0, 0, 0.25);
   --scrim:          rgba(0, 0, 0, 0.6);
+  /* Behind a second factor's QR code in both themes: GoTrue's SVG leaves its quiet zone clear, and
+     a camera reads dark modules on a light ground. */
+  --qr-paper:       #ffffff;
   --transition:   all 0.2s ease;
   /* The z-index ladder. A layer sits above the ones listed before it; a new layer takes a rung,
      not a number picked to win.
@@ -5824,6 +5827,31 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* A session's place, then its badges on the same line. */
 .session-where { color: var(--text-primary); }
 .session-badge { margin-left: 8px; }
+
+/* The Security tab's Second factor section, under Sessions: a rule above its heading, and its
+   table keeps its height, so the sessions list is what scrolls. */
+.second-factor-head { border-top: 1px solid var(--border); }
+.card-fill > .table-wrap.second-factor-table { flex-shrink: 0; overflow-y: visible; }
+
+/* Adding one: the QR code on its light ground, then the secret for typing in, in groups. */
+.second-factor-qr {
+  display: block;
+  width: 184px;
+  height: 184px;
+  margin: 4px auto 12px;
+  padding: 8px;
+  background: var(--qr-paper);
+  border-radius: var(--radius-xs);
+}
+.second-factor-secret {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  user-select: all;
+  color: var(--text-primary);
+}
+.second-factor-code { letter-spacing: 0.2em; }
 
 /* A person's sessions in their People drawer: the Security tab's table, narrowed to the drawer.
    Headers and cells wrap rather than scroll, and the outer columns line up with the fields. */
