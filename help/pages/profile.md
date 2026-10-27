@@ -20,6 +20,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
 - **End**, on a row of the **Security** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
 - **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
+- **Second factor**, on the **Security** tab, lists the authenticator apps you have added. **Add Second Factor** adds one, and **Remove** on a row removes it. **Your second factor**, below, says how, and what it changes when you sign in.
 - **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
@@ -91,6 +92,35 @@ What ending a session does:
 - **The Audit Trail records it**, in your lane, with you as the person who did it. Administrators and Auditors can read it. **End** records the session it ended, named as this list names it. **Sign Out of All Other Sessions** records how many sessions it ended. **Sign Out** records nothing.
 
 **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
+
+## Your second factor
+
+A second factor is a code from an authenticator app on your phone. With one added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
+
+Every role can add one. Nothing on this site requires one yet.
+
+To add one:
+
+1. On the **Security** tab, select **Add Second Factor**.
+2. Give it a name, such as "Work phone". Select **Continue**.
+3. Scan the QR code with your authenticator app. If the app cannot scan, type in the key shown under the code. If the app asks, choose a time-based key.
+4. Enter the 6-digit code the app shows. Select **Add Second Factor**.
+
+Adding one signs you out of your other browsers and services, such as Grafana and Node-RED. This browser stays signed in.
+
+To remove one, select **Remove** on its row. A dialog asks first. Select **Remove Second Factor** to remove it. With none left, your password alone signs you in. If the dialog asks for a code, enter one from that app first.
+
+What happens when you sign in:
+
+- **After your password, the sign-in page asks for your code.** Open your app and enter the 6 digits it shows for this site. They change every 30 seconds.
+- **With two apps added**, choose which one the code is from.
+- **Sign Out** is on the same page, if you want to stop there.
+- **Grafana, Node-RED, Studio and the forge** sign you in through the dashboard. If this browser has not given a code yet, they ask for it there.
+- **Each time you enter a code, your sessions that have not given one end.** That includes Grafana, Node-RED, Studio and the forge, in every browser. Each signs you in again through the dashboard when you next open it.
+- **A password reset link** asks for your code before you choose the new password.
+- **If you remove the app you signed in with** and have another, the dashboard asks for a code from the other one.
+
+**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new second factor here.
 
 ## What is not here
 

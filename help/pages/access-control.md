@@ -31,7 +31,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Operator** reads the shopfloor and its live readings, and can propose changes.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
-- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, and **Remove Access** or **Restore Access**.
+- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, and **Remove Access** or **Restore Access**.
 - The drawer shows their email address, display name, role, status and last sign-in.
 - **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used.
 - Select **Show sessions**, under the count, to list them. Each row says where the session is: a browser and system, a program, or a service. It says when the session started and when it was last active. No address is shown.
@@ -45,6 +45,10 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
 - **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a shared screen left signed in, or when you cannot tell which session to end. They keep their role, and can sign in again.
+- **Reset MFA** asks you to confirm. Then it removes every second factor the person has, so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
+- Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new second factor on their **Profile** page's **Security** tab.
+- Each reset is recorded in the Audit Trail, with how many second factors it removed. You cannot reset your own here: remove it on your **Profile** page's **Security** tab.
+- **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as [Resetting the only Administrator's second factor](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
