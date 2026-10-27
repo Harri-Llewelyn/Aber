@@ -36,9 +36,11 @@ const TABLET = { id: 'f-tablet', friendly_name: 'Tablet', factor_type: 'totp', s
 const HALF_MADE = { id: 'f-half', friendly_name: 'Authenticator app', factor_type: 'totp', status: 'unverified', created_at: '2026-10-22T09:15:00Z' }
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect style="fill:#000"/></svg>'
+// A made-up key, 32 base32 characters as GoTrue's are.
+const KEY = 'AAAABBBB'.repeat(4)
 const ENROLMENT = {
   id: 'f-new', friendly_name: 'Authenticator app', qr_code: `data:image/svg+xml;utf-8,${SVG}`,
-  secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', uri: 'otpauth://totp/site:me',
+  secret: KEY, uri: 'otpauth://totp/site:me',
 }
 
 const AAL2 = { currentLevel: 'aal2', nextLevel: 'aal2', currentAuthenticationMethods: [{ method: 'totp' }] }
@@ -119,7 +121,7 @@ describe('adding one', () => {
     const qr = await within(dialog).findByRole('img', { name: 'QR code for your authenticator app' })
     // Percent-encoded: the raw SVG's `#` would end a data URL.
     expect(qr.getAttribute('src')).toBe(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(SVG)}`)
-    expect(dialog).toHaveTextContent('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')
+    expect(dialog).toHaveTextContent('AAAA BBBB AAAA BBBB AAAA BBBB AAAA BBBB')
     expect(within(dialog).getByLabelText('Code')).toHaveAttribute('autocomplete', 'one-time-code')
   })
 

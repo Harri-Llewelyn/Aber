@@ -107,7 +107,7 @@ export const SETTINGS_TABS = [
 export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'The address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
-  { id: 'security', label: 'Security', description: 'Where you are signed in, in every browser and service, with a way to end each session, and your second factor.' },
+  { id: 'security', label: 'Security', description: 'Where you are signed in, in every browser and service, how to end each session, and your second factor.' },
 ]
 
 /*
