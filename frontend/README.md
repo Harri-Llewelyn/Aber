@@ -694,6 +694,14 @@ Value, Actions), header row and all, so the two read alike.
   (`hooks/useDisplayNames.js`, and `personLabel()` in `utils/displayName.js` for "Name (email)").
   The email address stays the account's identifier: where a page says who someone is, the name
   never stands without it.
+- **A person may have a picture, which only they see** (`supabase/README.md`, `0213`). Profile's
+  Account tab has a Picture row (`PictureRow` in `ProfileTab.jsx`), and the account control at the
+  foot of the rail shows it (`components/common/AccountAvatar.jsx`); nothing else does. With no
+  picture the control shows the display name's initials, then the icon. `shrinkPicture()` in
+  `utils/picture.js` crops a centred square and redraws it at 256x256 on a canvas as WebP, or JPEG,
+  so a photo's metadata never leaves the browser. `hooks/useOwnPicture.js` downloads it with the
+  session as a blob URL, only when `person_profiles.avatar_path` says there is one, and revokes each
+  URL it replaces.
 
 ---
 
