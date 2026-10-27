@@ -3472,15 +3472,18 @@ paths:
       tags: [Edge Functions]
       summary: Sign a long-lived token for a service principal and reveal it once
       description: |
-        Signs an HS256 JWT naming a **service principal** as its subject, records the issue, and
-        returns the token. It is shown once and is not recoverable: nothing in the stack keeps a
-        copy, and the signature is reproducible only from `JWT_SECRET`.
+        Signs a JWT naming a **service principal** as its subject, records the issue, and returns
+        the token. It is shown once and is not recoverable: nothing in the stack keeps a copy, and
+        the signature is reproducible only from the signing key. With `supabaseAuth.es256Signing`
+        it is ES256, with the `kid` of the private key in `JWT_KEYS`, GoTrue's signing set;
+        without, HS256 with `JWT_SECRET`. HS256 tokens stop verifying in 1.8, so one minted before
+        the switch is minted again then.
 
         **Why this is a function and not an RPC.** `pgjwt` is installed, so a `SECURITY DEFINER`
-        RPC could sign in-database — but `SUPABASE_JWT_SECRET` is *not* in that database, and
-        putting it there is the thing to avoid. That key signs anything, `service_role` included,
-        and such a token is accepted by storage, realtime, the edge runtime and Studio, none of
-        which consult the revocation denylist. The edge runtime already holds the key for signing,
+        RPC could sign in-database — but the signing key is *not* in that database, and putting
+        it there is the thing to avoid. That key signs anything, `service_role` included, and such
+        a token is accepted by storage, realtime and the edge runtime, none of which consult the
+        revocation denylist. The edge runtime already holds the key for signing,
         so the key stays put and the mint comes to it.
 
         **Minting ADDS a credential; it does not replace one.** This is the opposite of
@@ -3499,8 +3502,8 @@ paths:
 
         > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
         > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > the edge runtime and Studio verify the signature independently. For those four the expiry
-        > is still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > and the edge runtime verify the signature independently. For those three the expiry is
+        > still the only bound, which is why the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:

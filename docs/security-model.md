@@ -98,8 +98,8 @@ Three things follow, and none of them is obvious:
   which asks GoTrue whether the session still exists and reads `user_roles`, so a removed or demoted
   Administrator is refused on the next request, not when the token expires. A 5xx from that step
   admits on the claim already checked, as the forge's door does, so a broken edge runtime does not
-  also take away the console. `openid` is deliberately absent from the requested scope: GoTrue
-  refuses to sign an ID token with HS256, which is what this whole stack signs with.
+  also take away the console. `openid` is absent from the requested scope: the door needs the
+  access token alone, and under HS256 GoTrue refuses to sign an ID token.
 - **It closes the unauthenticated MCP server.** Studio's port also served `/api/mcp` — a Supabase
   MCP server exposing `execute_sql` and `apply_migration` as the owner, completing `initialize` with
   no credential at all. It is covered because it is not exempted, and an MCP client cannot complete
@@ -327,9 +327,15 @@ polling instead, or waiting for upstream to authenticate before delivering the e
 ### Revocation reaches PostgREST and nothing else
 
 `0074` made a token revocable at the one choke point PostgREST offers (`PGRST_DB_PRE_REQUEST`).
-Storage, Realtime, the edge runtime and Studio verify the HS256 signature for themselves and consult
-no table, so a revoked token still opens those doors until its own `exp` — at most 90 days for a
-token naming a principal.
+Storage, Realtime and the edge runtime verify the signature for themselves and consult no table, so
+a revoked token still opens those doors until its own `exp` — at most 90 days for a token naming a
+principal.
+
+Who can sign one is narrower with `supabaseAuth.es256Signing`: GoTrue and `mint-service-token`
+hold the private key, and every verifier the public key. Through 1.7 each verifier also holds the
+legacy HS256 key, so a holder could still sign an HS256 token until 1.8 removes it
+([supabase/README.md](../supabase/README.md#signing-with-es256)). Without the switch every verifier
+holds the HS256 secret, and could sign any token, a `service_role` one included.
 
 **Accepted because** every write that matters goes through PostgREST and RLS, including the two a
 machine identity may hold, the other surfaces are read-side or gated by a separate login, and the

@@ -621,7 +621,8 @@ supabaseAuth:
   # Sign with an EC P-256 key pair (secrets.jwtKeys, secrets.jwtJwks) instead of secrets.jwtSecret.
   # Every verifier takes the public key and still accepts HS256 tokens signed before, and the
   # Grafana and Node-RED sign-ins take an OpenID Connect ID token. Off is HS256, deprecated in 1.7:
-  # 1.8 requires the key set. Turning it on: help/site/upgrading.md, "Sign tokens with ES256".
+  # 1.8 requires the key set. Turning it on, in three steps:
+  # help/site/upgrading.md, "From 1.7.0, sign tokens with ES256".
   es256Signing: false
   jwtExpiry: 3600
   # GoTrue ends a session nothing has refreshed for this long, so the person signs in again. An

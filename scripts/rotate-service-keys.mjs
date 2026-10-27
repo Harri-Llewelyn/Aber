@@ -54,10 +54,11 @@
 // then. An HS256 key verifies on both through 1.7; an ES256 one only once the switch is on.
 //
 // --signing-keys is the first of the three steps that move an existing site to ES256
-// (help/site/upgrading.md, "Sign tokens with ES256"): it mints the pair around the stack's own
-// secret and writes it to the values file, or with --apply to the release Secret. Nothing reads the
-// two values until the switch is on, so writing them changes nothing yet. It refuses a Secret that
-// already holds a pair: replacing the signing key is the key-rotation runbook's, not this.
+// (help/site/upgrading.md, "From 1.7.0, sign tokens with ES256"): it mints the pair around the
+// stack's own secret and writes it to the values file, or with --apply to the release Secret.
+// Nothing reads the two values until the switch is on, so writing them changes nothing yet. It
+// refuses a Secret that already holds a pair: replacing the signing key is the key-rotation
+// runbook's, not this.
 //
 // --apply rewrites the Secret the pods read. A release installed from a values file must carry the
 // new keys there too (--values=<file> rewrites secrets.ingestionKey, .playbackKey and
@@ -196,7 +197,7 @@ if (addSigningKeys) {
   }
   if (envValue('SUPABASE_JWT_KEYS')) {
     console.error('❌ The release Secret already holds SUPABASE_JWT_KEYS. Replacing the signing key would');
-    console.error('   invalidate every ES256 token at once; help/site/upgrading.md, "Rotate the ES256 signing key",');
+    console.error('   invalidate every ES256 token at once; supabase/README.md, "Rotating the ES256 signing key",');
     console.error('   adds a second key first.');
     process.exit(1);
   }
@@ -272,7 +273,7 @@ if (checkOnly) {
   if (hs256.length) {
     console.log('');
     console.log(`  HS256, which stops verifying in 1.8: ${hs256.map((k) => k.env).join(', ')}.`);
-    console.log('  Re-sign ES256 once supabaseAuth.es256Signing is on (help/site/upgrading.md, "Sign tokens with ES256").');
+    console.log('  Re-sign ES256 once supabaseAuth.es256Signing is on (help/site/upgrading.md, "From 1.7.0, sign tokens with ES256").');
   }
 
   if (worst < EXPIRY_WARN_DAYS) {
@@ -298,7 +299,7 @@ const signing = await liveSigningKey({
 });
 if (apiKeys && !signing.key) {
   console.error(`❌ --anon-and-service-role re-signs them ES256, and ES256 is not live: ${signing.why}.`);
-  console.error('   Turn supabaseAuth.es256Signing on first (help/site/upgrading.md, "Sign tokens with ES256").');
+  console.error('   Turn supabaseAuth.es256Signing on first (help/site/upgrading.md, "From 1.7.0, sign tokens with ES256").');
   process.exit(1);
 }
 if (!signing.key && !secret) {

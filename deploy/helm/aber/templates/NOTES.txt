@@ -126,7 +126,7 @@ if these are missing the PVC must be destroyed, not the pod restarted):
        npm run keys:rotate -- --signing-keys                       # the key pair, into the Secret
        supabaseAuth.es256Signing: true, then helm upgrade
        npm run keys:rotate -- --apply --anon-and-service-role      # re-signs the API's JWTs
-     help/site/upgrading.md, "Sign tokens with ES256", has the details.
+     help/site/upgrading.md, "From 1.7.0, sign tokens with ES256", has the details.
 {{- else }}
 
   ⚠  Tokens are signed ES256. HS256 tokens signed before still verify, until 1.8. Before
