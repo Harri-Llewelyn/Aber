@@ -66,11 +66,11 @@ def request(path, method="GET", token=None, body=None):
         return status, text
 
 
-def totp(secret, step=0):
-    """RFC 6238 with GoTrue's parameters: HMAC-SHA1, 30-second steps, six digits. `step` moves the
-    counter, so two verifications in one window can use different codes."""
+def totp(secret, step=0, at=None):
+    """RFC 6238 with GoTrue's parameters: HMAC-SHA1, 30-second steps, six digits, at `at` (now by
+    default). `step` moves the counter, so two verifications in one window can use different codes."""
     key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
-    counter = int(time.time() // 30) + step
+    counter = int((time.time() if at is None else at) // 30) + step
     digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     offset = digest[-1] & 0x0F
     value = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
@@ -104,6 +104,16 @@ def must(what, answer):
     if not 200 <= status < 300:
         raise AssertionError(f"{what}: HTTP {status} {str(body)[:300]}")
     return body
+
+
+class TheCodesAreRfc6238s(unittest.TestCase):
+    """RFC 6238 appendix B's SHA-1 vectors, cut to six digits, so a refusal below is GoTrue's."""
+
+    def test_the_appendix_vectors(self):
+        secret = base64.b32encode(b"12345678901234567890").decode()
+        for at, code in ((59, "287082"), (1111111109, "081804"), (1234567890, "005924"), (2000000000, "279037")):
+            with self.subTest(at=at):
+                self.assertEqual(totp(secret, at=at), code)
 
 
 class ASecondFactorEnrolsAndResets(unittest.TestCase):
