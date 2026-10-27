@@ -4,7 +4,8 @@
 // sweep. Nothing here touches a filesystem, a broker or a shell. mosquitto/README.md is the
 // reasoning; this file is the shape.
 import {
-  CredentialError, GATEWAY_ID_PATTERN, assertEntry, assertGatewayId, isGatewayId,
+  CredentialError, GATEWAY_ID_PATTERN, assertEntry, assertGatewayId, assertSafePassword, assertSubscriberId,
+  assertSubscriberPurpose, generateSubscriberId, isGatewayId, isSubscriberId,
 } from './mosquitto-credentials.mjs';
 
 // The topic the plugin listens on, and where it answers.
@@ -143,8 +144,10 @@ export function withUnsGrant(policy, root) {
 }
 
 // The role a consumer outside the platform holds, and its read of the same subtree: subscribe and
-// receive, never publish, from the root the writer's grant is derived from.
+// receive, never publish, from the root the writer's grant is derived from. Every account in the
+// subscriber scheme holds it and nothing else.
 export const UNS_READER_ROLE = 'subscriber';
+export const SUBSCRIBER_ROLE = UNS_READER_ROLE;
 
 export function withUnsReadGrant(policy, root) {
   return withSubtreeGrant(
@@ -212,8 +215,9 @@ function roleNamesOf(client) {
 // The document the broker should boot on, from the one it has and what the repository declares.
 // Roles: every policy role replaces the stored one of its name, a retired gateway-<id> role is
 // dropped, any other stored role is kept. Clients: every managed client replaces the stored one of
-// its name, every other stored client is kept, and a gateway client holds the gateway role and no
-// retired one. The broker is down while this runs, so no connected client holds what is dropped.
+// its name, every other stored client is kept, a gateway client holds the gateway role and no
+// retired one, and a subscriber-scheme client holds the subscriber role, no other and no group.
+// The broker is down while this runs, so no connected client holds what is dropped.
 // THROWS rather than return a document missing any other client: the stored document is the fleet's
 // credentials, and a boot that lost one would fail silently at the appliance's next reconnect.
 export function reconcile(existing, policy, managedClients) {
@@ -241,7 +245,10 @@ export function reconcile(existing, policy, managedClients) {
 
   const before = new Set((stored.clients || []).map((c) => c.username));
   const clients = [];
-  const report = { managed: [], kept: [], gateways: [], unmanaged: [], retiredMemberships: 0, retiredRoles: [] };
+  const report = {
+    managed: [], kept: [], gateways: [], subscribers: [], reassertedSubscribers: [], unmanaged: [],
+    retiredMemberships: 0, retiredRoles: [],
+  };
 
   for (const c of managedByName.values()) {
     clients.push(c);
@@ -256,6 +263,13 @@ export function reconcile(existing, policy, managedClients) {
       report.retiredMemberships += held - client.roles.length;
       if (!roleNamesOf(client).includes(GATEWAY_SHARED_ROLE)) client.roles.push({ rolename: GATEWAY_SHARED_ROLE });
       report.gateways.push(client.username);
+    } else if (isSubscriberId(client.username)) {
+      // Exactly the one role, keeping its stored entry; a group's roles would be a second grant.
+      const held = roleNamesOf(client);
+      client.roles = [client.roles.find((r) => r.rolename === SUBSCRIBER_ROLE) || { rolename: SUBSCRIBER_ROLE }];
+      const grouped = (stored.groups || []).some((g) => (g.clients || []).some((m) => m.username === client.username));
+      if (grouped || held.length !== 1 || held[0] !== SUBSCRIBER_ROLE) report.reassertedSubscribers.push(client.username);
+      report.subscribers.push(client.username);
     } else {
       report.unmanaged.push(client.username);
     }
@@ -286,11 +300,18 @@ export function reconcile(existing, policy, managedClients) {
     declared.add(r.rolename);
   }
 
+  // A group is kept, less any subscriber-scheme member: the plugin records membership on the group.
+  const groups = (Array.isArray(stored.groups) ? stored.groups : []).map((g) => (
+    (g.clients || []).some((m) => isSubscriberId(m.username))
+      ? { ...g, clients: g.clients.filter((m) => !isSubscriberId(m.username)) }
+      : g
+  ));
+
   const config = {
     defaultACLAccess: { ...policy.defaultACLAccess },
     clients,
     roles,
-    groups: Array.isArray(stored.groups) ? stored.groups : [],
+    groups,
   };
   return { config, report };
 }
@@ -403,15 +424,67 @@ export function issueWithControl(send, sparkplugId, password) {
   return { replaced: true };
 }
 
+// The command that creates a read-only account: a client in the subscriber scheme holding the
+// subscriber role alone, with what it is for in the plugin's textname and textdescription.
+export function createSubscriberCommand(username, password, { name, description } = {}) {
+  assertSubscriberId(username);
+  assertSafePassword(password);
+  const purpose = assertSubscriberPurpose(name, description);
+  return {
+    command: 'createClient',
+    username,
+    password,
+    textname: purpose.name,
+    textdescription: purpose.description,
+    roles: [{ rolename: SUBSCRIBER_ROLE }],
+  };
+}
+
+// The command that deletes one, and nothing outside the scheme. deleteClient on an account with
+// live sessions drops them and leaves the broker up (measured on 2.1.2, mosquitto/README.md).
+export function deleteSubscriberCommand(username) {
+  return { command: 'deleteClient', username: assertSubscriberId(username) };
+}
+
+// Create through `send` under a fresh username. Never falls back to an existing client: "already
+// exists" is an account this call did not make, so the refusal stands.
+export function createSubscriberWithControl(send, purpose, password, username = generateSubscriberId()) {
+  const command = createSubscriberCommand(username, password, purpose);
+  assertOk(send(command));
+  return { username, name: command.textname, description: command.textdescription, roles: [SUBSCRIBER_ROLE] };
+}
+
+// Delete through `send`: read the account first, so the caller can record what it was for, then
+// delete it. One the broker does not hold is `existed: false`, with nothing deleted.
+export function deleteSubscriberWithControl(send, username) {
+  const gone = { existed: false, deleted: false, name: null, description: null, roles: [] };
+  const read = send({ command: 'getClient', username: assertSubscriberId(username) });
+  if (isRefusal(read, 'not found')) return gone;
+  const client = assertOk(read).data?.client || {};
+  const deleted = send(deleteSubscriberCommand(username));
+  if (isRefusal(deleted, 'not found')) return gone;
+  assertOk(deleted);
+  return {
+    existed: true,
+    deleted: true,
+    name: typeof client.textname === 'string' ? client.textname : null,
+    description: typeof client.textdescription === 'string' ? client.textdescription : null,
+    roles: roleNamesOf(client),
+  };
+}
+
 // A summary the dashboard can render: no hashes, no salts, and the role's ACLs in full. Each
 // account's live sessions are a count, never their addresses: behind the chart's Service every
 // outside client shows the node's address. null when the reply has no `connections` (before 2.1).
+// textname and textdescription are what an account is for, null where the plugin holds none.
 export function summariseInventory(clientsResponse, rolesResponse) {
   const clients = (clientsResponse?.data?.clients || []).map((c) => ({
     username: c.username,
     roles: roleNamesOf(c),
     disabled: c.disabled === true,
     connections: Array.isArray(c.connections) ? c.connections.length : null,
+    textname: typeof c.textname === 'string' ? c.textname : null,
+    textdescription: typeof c.textdescription === 'string' ? c.textdescription : null,
   }));
   const roles = (rolesResponse?.data?.roles || []).map((r) => ({
     rolename: r.rolename,
