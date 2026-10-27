@@ -19,6 +19,8 @@ import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
 import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
+import { SecondFactorScreen } from './components/auth/SecondFactorChallenge'
+import { useSecondFactorDue } from './hooks/useSecondFactorDue'
 import { HoldToReveal } from './components/common/HoldToReveal'
 import { ResetPasswordScreen } from './pages/ResetPassword'
 import { describeResetError } from './utils/authErrors'
@@ -952,6 +954,13 @@ export default function App() {
   // A session that ended while the tab was out of sight ends here too when it is shown again.
   useSessionRecheck(!!session, endRejectedSession)
 
+  // A person with a second factor gives a code after their password, before anything opens:
+  // undefined while that is read. The database decides access; this only asks.
+  const secondFactor = useSecondFactorDue(session)
+  const secondFactorScreen = secondFactor === undefined
+    ? <div className="loading-wrap"><div className="spinner" /> Checking your sign-in…</div>
+    : secondFactor ? <SecondFactorScreen onSignOut={signOutOfThisBrowser} /> : null
+
   // OAuth consent, checked before the loading and auth branches. GoTrue redirects here from
   // /oauth/authorize because it ships no consent UI. The page reads the session itself and must not
   // fall through to AuthScreen, which would lose the authorization_id.
@@ -972,7 +981,8 @@ export default function App() {
       setRecovering(false)
       window.history.replaceState({}, '', '/site-map')
     }
-    if (session) return <ResetPasswordScreen email={session.user?.email} onDone={finish} />
+    // GoTrue changes the password of an account with a second factor only from an aal2 session.
+    if (session) return secondFactorScreen || <ResetPasswordScreen email={session.user?.email} onDone={finish} />
     // The link's token was rejected or already spent: no session arrived with it.
     return (
       <AuthScreen
@@ -991,6 +1001,8 @@ export default function App() {
       />
     )
   }
+
+  if (secondFactorScreen) return secondFactorScreen
 
   // The account menu's Sign Out is the /sign-out route's: this browser's sessions only.
   return <Dashboard
