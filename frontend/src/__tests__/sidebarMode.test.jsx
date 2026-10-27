@@ -122,4 +122,15 @@ describe('the stylesheet', () => {
     expect(account).toMatch(/background:\s*none/)
     expect(collapseAll).toMatch(/background:\s*none/)
   })
+
+  it('keeps the account control 28px round whichever mark it holds', () => {
+    const avatar = APP_CSS.match(/\n\.user-avatar \{([\s\S]*?)\n\}/)[1]
+    expect(avatar).toMatch(/width:\s*28px/)
+    expect(avatar).toMatch(/height:\s*28px/)
+    expect(avatar).toMatch(/border-radius:\s*50%/)
+    // A picture fills the circle and is clipped to it; the letters and the icon need no rule of size.
+    expect(APP_CSS).toMatch(/\n\.user-avatar-picture img \{[^}]*object-fit:\s*cover/)
+    expect(APP_CSS).not.toMatch(/\n\.user-avatar-picture \{[^}]*background/)
+    expect(APP_CSS).not.toMatch(/\n\.user-avatar-(picture|letters|initials|icon)[^{]*\{[^}]*[{;\s](width|height):(?!\s*100%)/)
+  })
 })

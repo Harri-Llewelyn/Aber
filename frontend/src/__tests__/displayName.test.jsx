@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import App from '../App'
+import { api } from '../api'
 import { PersonName } from '../components/common/PersonName'
 import {
   DISPLAY_NAME_FORBIDDEN, DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName, personLabel,
@@ -135,5 +136,28 @@ describe('the account menu', () => {
     const menu = screen.getByRole('menu')
     await waitFor(() => expect(within(menu).getByText('Ada Admin')).toBeInTheDocument())
     expect(within(menu).getByText('admin@aber.local')).toHaveClass('user-popover-address')
+  })
+
+  // 0213: the person's own picture on the control, else the initials of this name.
+  it('marks the control with the initials of the name when there is no picture', async () => {
+    render(<App />)
+    const trigger = await screen.findByRole('button', { name: /Signed in as Ada Admin/ })
+    const mark = trigger.querySelector('.user-avatar')
+    await waitFor(() => expect(mark).toHaveAttribute('data-avatar', 'initials'))
+    expect(mark).toHaveTextContent('AA')
+    expect(supabase.storage).toBeUndefined()
+  })
+
+  it('marks the control with the person\'s own picture when they have one', async () => {
+    const picture = vi.spyOn(api, 'ownPictureUrl').mockResolvedValue('blob:mine')
+    try {
+      render(<App />)
+      const trigger = await screen.findByRole('button', { name: /Signed in as Ada Admin/ })
+      await waitFor(() => expect(trigger.querySelector('.user-avatar img')).toHaveAttribute('src', 'blob:mine'))
+      expect(trigger.querySelector('.user-avatar img')).toHaveAttribute('alt', '')
+      expect(picture).toHaveBeenCalledWith('user-admin-123')
+    } finally {
+      picture.mockRestore()
+    }
   })
 })

@@ -497,6 +497,24 @@ html, body, #root {
 .user-menu-button.active { color: var(--accent-text); font-weight: 600; }
 .user-menu-button.active .user-avatar { border-color: var(--accent); color: var(--accent); }
 
+/* The person's own picture fills the circle (AccountAvatar.jsx), which hides the icon's colour and
+   the open menu's fill. So the ring carries the state: 2px in the accent, the border and a 1px
+   shadow outside it, so nothing moves. Profile keeps the bar and the label's accent text. */
+.user-avatar-picture { overflow: hidden; }
+.user-avatar-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.user-menu-button:hover .user-avatar-picture,
+.user-menu-button-open .user-avatar-picture,
+.user-menu-button.active .user-avatar-picture { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Initials from the display name take the icon's colours in every state. */
+.user-avatar-letters { font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.02em; }
+
+/* Profile > Account's Picture row: the mark at a size the person can check before Save. */
+.profile-picture { display: flex; align-items: center; gap: 12px; }
+.profile-picture .user-avatar { width: 64px; height: 64px; }
+.profile-picture .user-avatar-letters { font-size: 22px; }
+.profile-picture .user-avatar-icon svg { width: 26px; height: 26px; }
+
 /* Opens upward beside the rail, as the behaviour menu does: `fixed`, so the panel's overflow
    never clips it, and readable while the rail is collapsed. */
 .user-popover {
