@@ -47,8 +47,9 @@ python ingestion/test_mqtt_tls.py
 # fails if NBIRTH, DBIRTH or an on_message handler ever appears in it. That is the design
 # issue #64 proposed and this refused -- a registry accumulated from what devices claim.
 python ingestion/test_directory_publish.py
-# The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
-# an incomplete path is skipped and counted rather than filled with a placeholder.
+# The Unified Namespace bridge: the topic is the root, the message's group and the path
+# device_uns_paths answers (0214), read once per device per TTL, and a device the view skips is
+# skipped and counted under its reason rather than filled with a placeholder.
 python ingestion/test_uns_publish.py
 # The Sparkplug primary-host STATE certificates. The assertion worth having is that the birth and
 # the death carry the SAME timestamp: 3.0.0 pairs them that way, and each half reading its own
@@ -702,6 +703,13 @@ python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
 # Other Sessions. Every test rolls back.
 python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
+# Each device shows its place in the Unified Namespace (0214). device_uns_paths answers every
+# device with a path below the root at the levels it occupies (a cell's device under area and
+# cell, an Area-Wide one under its area, a Site-Wide one under the site), under the group its
+# gateway last published under, or with the one reason the bridge skips it for, in the bridge's
+# order: no site name, a lane, unassigned, a cell in no area, a name a topic cannot carry. It runs
+# as its caller; a person and the ingestion principal read it, anon does not. Every test rolls back.
+python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
