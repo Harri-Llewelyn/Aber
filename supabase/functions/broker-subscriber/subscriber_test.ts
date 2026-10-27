@@ -17,7 +17,8 @@ const CREDENTIAL_TOKEN = "credential-service-bearer-token-0001";
 const CALLER_TOKEN = "caller-session-token";
 const ADMIN_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const USERNAME = "sub0a1b2c3d4e5f60718293a";
-const PASSWORD = "Zm9yLXRoZS10ZXN0LW9ubHktMDAwMDAw";
+// Made up, and low in entropy so a secret scan does not read it as a credential.
+const PASSWORD = "not-a-secret-not-a-secret";
 const PURPOSE = { name: "Line 4 OEE board", description: "The contractor dashboard on line 4. Reads only." };
 
 type Reply = { status: number; body: unknown };

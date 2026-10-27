@@ -19,7 +19,8 @@ vi.mock('../api', () => ({
 
 const ACCOUNT = {
   mqtt_username: 'sub0a1b2c3d4e5f60718293a',
-  password: 'cmVhZC1vbmx5LXBhc3N3b3JkLTAwMDAx',
+  // Made up, and low in entropy so a secret scan does not read it as a credential.
+  password: 'readonly-readonly-readonly',
   name: 'Line 4 OEE board',
   description: 'The contractor dashboard on line 4.',
   role: 'subscriber',
