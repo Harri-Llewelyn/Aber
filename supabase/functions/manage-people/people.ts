@@ -226,19 +226,10 @@ async function removeAccess(req: Request, body: Record<string, unknown>, callerI
   const { error } = await caller.rpc("remove_person_access", { p_user_id: userId });
   if (error) return dbRefusal(req, error, "Access was not removed");
 
-  const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: BAN_DURATION });
-  if (banError) {
-    return serverError(req, FN, banError, {
-      status: 502,
-      error: "Sign-in is not blocked yet. Their role is removed, so they can do nothing that needs " +
-        "one, but the sign-in service did not block the account. Select Remove Access again.",
-      context: `banning ${userId}`,
-    });
-  }
-
   // The picture goes with the access: nobody needs it, and it is a photo of a person. The object,
-  // as service_role, then the column; a removal already made answers false above, so selecting
-  // Remove Access again finishes either step.
+  // as service_role, then the column, before the ban: until the ban is made the person reads as
+  // Sign-in still open, which offers Remove Access again, and a removal already made answers false
+  // above, so selecting it again finishes every step.
   const { error: pictureError } = await admin.storage.from(PICTURE_BUCKET).remove([picturePath(userId)]);
   const { error: forgetError } = pictureError
     ? { error: null }
@@ -246,9 +237,20 @@ async function removeAccess(req: Request, body: Record<string, unknown>, callerI
   if (pictureError || forgetError) {
     return serverError(req, FN, pictureError ?? forgetError, {
       status: pictureError ? 502 : 500,
-      error: "Their picture is not deleted yet. Their access is removed and sign-in is blocked, but " +
-        "the picture on their account was not deleted. Select Remove Access again.",
+      error: "Sign-in is not blocked yet, and their picture is not deleted. Their role is removed, so " +
+        "they can do nothing that needs one, but the picture on their account could not be deleted. " +
+        "Select Remove Access again.",
       context: `deleting the picture of ${userId}`,
+    });
+  }
+
+  const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: BAN_DURATION });
+  if (banError) {
+    return serverError(req, FN, banError, {
+      status: 502,
+      error: "Sign-in is not blocked yet. Their role is removed, so they can do nothing that needs " +
+        "one, but the sign-in service did not block the account. Select Remove Access again.",
+      context: `banning ${userId}`,
     });
   }
   return json(200, { user_id: userId, access: "removed" });

@@ -2048,12 +2048,15 @@ to remove one.
 - **Remove Access deletes the picture.** It bans the account and never deletes it (`0166`), so the
   `ON DELETE CASCADE` never fires. The name stays, because the trail reads it beside the person's
   work. Nobody needs the picture, and it is a photo of a person. So `manage-people`'s `remove`
-  deletes the object as `service_role` after the ban, then calls `forget_person_picture(p_user_id)`
-  as `service_role`. That function clears the column, and refuses a person whose access is not
-  removed. A failed delete answers 502 and says to select Remove Access again, as a failed ban does.
-  `remove_person_access()` answers false for a removal already made and changes nothing, so the
-  second time bans again and finishes the delete. Restore Access brings the account back with no
-  picture.
+  deletes the object as `service_role`, then calls `forget_person_picture(p_user_id)` as
+  `service_role`, after `remove_person_access()` and before the ban. That function clears the
+  column, and refuses a person whose access is not removed. A failed delete answers as a failed ban
+  does, 502 and "Select Remove Access again", and leaves the same state: the role gone and sign-in
+  not yet blocked, which People shows as Sign-in still open and offers Remove Access for. After the
+  ban, the person would read as Access removed, offered only Restore Access, so the delete could
+  not be retried. `remove_person_access()` answers false for a removal already made and changes
+  nothing, so the second time deletes, clears and bans. Restore Access brings the account back with
+  no picture.
 - **The dashboard shrinks it before upload.** The picker accepts PNG, JPEG and WebP up to 10 MB.
   The page crops a centred square, scales it to 256x256 on a canvas, and encodes it as WebP, or as
   JPEG where the browser's `toBlob()` cannot give WebP. A phone photo of several MB uploads as tens

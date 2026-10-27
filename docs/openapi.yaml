@@ -3626,9 +3626,10 @@ paths:
           and `name_error` says why the name was not set.
         - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
           changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
-          The person's picture is: its object in `avatars` as `service_role`, then
-          `forget_person_picture()` clears `person_profiles.avatar_path` (`0213`). If either fails,
-          the answer says to remove access again, which finishes it.
+          The person's picture is deleted before the ban: its object in `avatars` as
+          `service_role`, then `forget_person_picture()` clears `person_profiles.avatar_path`
+          (`0213`). If either fails, nothing more is done, and the answer says to remove access
+          again, which finishes it.
         - **`restore`**: `restore_person_access()`, then the ban is lifted.
         - **`set-password`**: a new password minted as `add` mints one, with or without a relay,
           returned once in `password`. `record_person_password_set()` decides first (a person whose
@@ -3690,8 +3691,8 @@ paths:
           description: >-
             GoTrue failed or did not answer. For `add`, `set-password` and `change-email` nothing was changed. For
             `remove` and `restore` the database act was done but the ban was not made or lifted;
-            repeat it. For `remove`, also Storage not deleting the picture; repeat it. A fixed
-            sentence and a request id, as for a 500.
+            repeat it. For `remove`, also Storage not deleting the picture, before the ban; repeat
+            it. A fixed sentence and a request id, as for a 500.
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
 
