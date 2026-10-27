@@ -1381,7 +1381,7 @@ main .filter-bar .search-input-field:focus ~ .search-input-kbd { display: none; 
   padding: 0;
   cursor: pointer;
   font: inherit;
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 

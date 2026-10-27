@@ -183,6 +183,9 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // text, and a link whose text is code sits on the code's glass ground.
     ['help link',                      '--accent-text',  card,                             AA_TEXT],
     ['help link set as code',          '--accent-text',  glass(card),                      AA_TEXT],
+    // A count that opens something is a link too: in a table on a card, and in a drawer.
+    ['count link on card',             '--accent-text',  card,                             AA_TEXT],
+    ['count link in a drawer',         '--accent-text',  surface,                          AA_TEXT],
     // Brand badges. The label is --text-primary ON the brand tint precisely because the brand
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', on(mix('--brand-sharepoint', 15), surface), AA_TEXT],
@@ -403,11 +406,11 @@ describe('accent badges', () => {
 })
 
 /**
- * A link in the top bar's popovers, the toasts and the help text is accent text, as every link in
- * the dashboard is, with no underline until it is pointed at or focused.
+ * A link in the top bar's popovers, the toasts, the help text and a count that opens something is
+ * accent text, as every link in the dashboard is, with no underline until it is pointed at or focused.
  */
-describe('links in the popovers, toasts and help text', () => {
-  it.each(['.toast-link', '.notif-item-link', '.alert-pill-item-link .alert-pill-item-name', '.help-prose a', '.gateway-settings-help a'])(
+describe('links in the popovers, toasts, help text and counts', () => {
+  it.each(['.toast-link', '.notif-item-link', '.alert-pill-item-link .alert-pill-item-name', '.help-prose a', '.gateway-settings-help a', '.count-link'])(
     '%s is --accent-text', (selector) => {
       expect(declaration(APP_CSS, selector, 'color')).toBe('var(--accent-text)')
     }
@@ -417,7 +420,7 @@ describe('links in the popovers, toasts and help text', () => {
     expect(declaration(APP_CSS, '.help-prose a code', 'color')).toBe('inherit')
   })
 
-  it.each(['.toast-link', '.notif-item-link', '.help-prose a', '.gateway-settings-help a'])('%s is underlined only on hover and focus', (selector) => {
+  it.each(['.toast-link', '.notif-item-link', '.help-prose a', '.gateway-settings-help a', '.count-link'])('%s is underlined only on hover and focus', (selector) => {
     expect(declaration(APP_CSS, selector, 'text-decoration')).toBe('none')
     expect(declaration(APP_CSS, `${selector}:hover`, 'text-decoration')).toBe('underline')
     expect(declaration(APP_CSS, `${selector}:focus-visible`, 'text-decoration')).toBe('underline')
