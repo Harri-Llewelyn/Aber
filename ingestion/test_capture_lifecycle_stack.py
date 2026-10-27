@@ -28,10 +28,11 @@ TheBucketAdmitsEachWorkerToItsOwnObject runs the broker-captures policies on the
 storage.objects, as the storage-policies Job applied them: the daemon's arm, the worker's arm, and
 a device's folder. The db lane runs the same policy text on a stand-in table.
 
-Stages 5 and 6 restart a Deployment with `kubectl --context $ABER_KUBE_CONTEXT -n $KUBE_NAMESPACE
-rollout restart` (k3d-aber and aber by default), and wait for the rollout. They skip, saying why,
-when kubectl or that context is absent. Restarting ingestion stops ingestion for the whole stack for
-the length of the rollout.
+Stages 5 and 6 use `kubectl --context $ABER_KUBE_CONTEXT -n $KUBE_NAMESPACE` (k3d-aber and aber by
+default). Stage 5 deletes the playback pod with a one-second grace, an abrupt end, as a crash would
+be; stage 6 runs `rollout restart` on ingestion, which shuts down cleanly on SIGTERM. Each waits for
+its pod to come back. They skip, saying why, when kubectl or that context is absent. Restarting
+ingestion stops ingestion for the whole stack for the length of the rollout.
 
 Needs the stack up and `playback.enabled` (values-dev.yaml sets it), and the environment
 test_playback_replay.py reads, whose helpers this reuses with test_recorded_capture_replay.py's.
@@ -95,9 +96,9 @@ STOP_ANSWER_SECONDS = 10
 # A restart: the old pod's termination, the new pod's initContainer, then the startup sweep.
 RESTART_TIMEOUT = 300
 
-# The long replay: a birth, then one reading a second, so it can be stopped or cut partway. Long
-# enough to outlast the playback pod's 30-second termination grace: the worker installs no SIGTERM
-# handler, so as PID 1 it publishes on until the kubelet kills it.
+# The long replay: a birth, then one reading a second, so it can be stopped or cut partway. The
+# worker installs no SIGTERM handler, so as PID 1 it publishes on until the kubelet kills it; 90 s
+# leaves the replay running however slowly the cut arrives.
 LONG_READINGS = 90
 # The replay is stopped or cut once it has reported this many messages published.
 CUT_AFTER = 4
@@ -180,6 +181,24 @@ def restart(deployment):
     if result.returncode != 0:
         raise AssertionError(f"kubectl rollout restart deployment/{deployment} failed: "
                              f"{result.stderr.strip()}")
+
+
+def end_pod_at_once(deployment):
+    """
+    Delete the Deployment's pod with a one-second grace: SIGTERM, then SIGKILL a second later. The
+    same abrupt end a rollout restart gives a worker that ignores SIGTERM, without waiting out the
+    pod's 30-second grace. The ReplicaSet starts the replacement; await_rollout() waits for it.
+    """
+    found = kubectl("get", "deployment", deployment, "-o", "json", timeout=30)
+    if found.returncode != 0:
+        raise AssertionError(f"cannot read deployment/{deployment}: {found.stderr.strip()}")
+    labels = json.loads(found.stdout)["spec"]["selector"]["matchLabels"]
+    selector = ",".join(f"{key}={value}" for key, value in sorted(labels.items()))
+    result = kubectl("delete", "pod", "-l", selector, "--grace-period=1", "--timeout=60s",
+                     "-o", "name", timeout=90)
+    if result.returncode != 0 or "pod/" not in result.stdout:
+        raise AssertionError(f"kubectl delete pod -l {selector} --grace-period=1 deleted nothing: "
+                             f"{result.stderr.strip() or result.stdout.strip()}")
 
 
 def await_rollout(deployment):
@@ -635,7 +654,8 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
             raise unittest.SkipTest(reason)
         job_id = cls._start_playback(cls.long_capture_id, cls.long_map)
         cls.restart_seen_online = cls._run_long_until(job_id, CUT_AFTER)
-        restart("playback")
+        end_pod_at_once("playback")
+        # FAILED is written by the replacement worker's startup sweep, so it is running by then.
         cls.restarted_replay = cls._playback_job(job_id, lambda j: j.get("status") in TERMINAL,
                                                  RESTART_TIMEOUT, 2)
         cls.after_restart = cls._await_playback_gateway("OFFLINE")
