@@ -45,7 +45,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
 - **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a shared screen left signed in, or when you cannot tell which session to end. They keep their role, and can sign in again.
-- **Reset MFA** asks you to confirm. Then it removes every second factor the person has, so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
+- **Reset MFA** asks you to confirm. Then it removes every [second factor](../guides/glossary.md#second-factor-mfa) the person has, so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
 - Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new second factor on their **Profile** page's **Security** tab.
 - Each reset is recorded in the Audit Trail, with how many second factors it removed. You cannot reset your own here: remove it on your **Profile** page's **Security** tab.
 - **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as [Resetting the only Administrator's second factor](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.

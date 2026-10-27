@@ -955,7 +955,7 @@ export default function App() {
   useSessionRecheck(!!session, endRejectedSession)
 
   // A person with a second factor gives a code after their password, before anything opens:
-  // undefined while that is read. The database decides access; this only asks.
+  // undefined while that is read. A prompt, not a gate: nothing on the server reads aal.
   const secondFactor = useSecondFactorDue(session)
   const secondFactorScreen = secondFactor === undefined
     ? <div className="loading-wrap"><div className="spinner" /> Checking your sign-in…</div>
