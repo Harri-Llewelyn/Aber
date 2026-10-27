@@ -533,8 +533,12 @@ away from the person's next request, so it asks first, as the drawer's other cha
 on the row saved a stray click or arrow key at once. Roles go through
 `set_person_role()` and ending sessions through `end_person_sessions()`; adding, removing,
 restoring, Set New Password and Change Email go through `manage-people`, because GoTrue's admin API
-needs the secret key. The drawer's session count is `person_session_summary()`, a number and a time
-with no list. The controls the database would refuse (your own row, the last Administrator who can
+needs the secret key. The drawer's Sessions row is `person_session_summary()`, a number and a time.
+Its Show sessions opens the list below the fields, read then (`person_sessions()`, `supabase/README.md`
+`0212`) and not with every drawer, in the Security tab's table (`components/common/SessionsTable.jsx`)
+with End on every row. End asks first with `endSessionQuestion()` naming the person, then calls
+`end_person_session()` and reads the list and the count again. Your own drawer links to Profile's
+Security tab instead, where the session in use is marked. The controls the database would refuse (your own row, the last Administrator who can
 sign in, a removed person's role, password or address) are disabled with the reason as their
 tooltip, computed in `utils/people.js`, so the page and the database state the same rule. A new
 address is the drawer's key, so after Change Email the list takes it before the address bar does,
@@ -645,7 +649,8 @@ Value, Actions), header row and all, so the two read alike.
 - **Security is a tab of sections, each with its own heading, About tip and line under it.** The
   first is Sessions (`components/tabs/SessionsSection.jsx`): every session the person holds
   (`list_my_sessions()`, `supabase/README.md` `0206`), the one in use first and marked This browser,
-  then by last activity. Where is the browser and system from the user agent, or the service by
+  then by last activity, in `components/common/SessionsTable.jsx`, which a person's drawer on People
+  shares. Where is the browser and system from the user agent, or the service by
   the name the help uses (`utils/sessions.js`, no parsing library): the OAuth client's name without
   "Aber ", and "Studio" for "Aber Supabase Studio", whose name the consent page still shows. End calls
   `end_my_session()` on any other row, after a dialog that names the session and when it was last

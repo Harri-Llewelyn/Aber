@@ -1,12 +1,13 @@
 /**
  * The words the Sessions list uses (utils/sessions.js): a browser and system from a user agent,
- * a service by the name the help uses, a short fallback for anything else, and the order.
+ * a service by the name the help uses, a short fallback for anything else, the order, and End's
+ * question when the session is another person's.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { describeUserAgent, serviceLabel, sessionLabel, sortSessions } from '../utils/sessions'
+import { describeUserAgent, endSessionQuestion, serviceLabel, sessionLabel, sortSessions } from '../utils/sessions'
 
 const AGENTS = {
   'Chrome on Windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
@@ -87,5 +88,42 @@ describe('sortSessions', () => {
     expect(sortSessions(rows).map(r => r.id)).toEqual(['c', 'b', 'e', 'a', 'd'])
     expect(rows.map(r => r.id)).toEqual(['a', 'b', 'c', 'd', 'e'])
     expect(sortSessions(null)).toEqual([])
+  })
+
+  it('orders a list with no session in use, as person_sessions() returns, by activity alone', () => {
+    const rows = [
+      { id: 'a', last_active_at: '2026-10-24T10:00:00Z' },
+      { id: 'b', last_active_at: '2026-10-25T09:00:00Z' },
+      { id: 'c', last_active_at: null },
+    ]
+    expect(sortSessions(rows).map(r => r.id)).toEqual(['b', 'a', 'c'])
+  })
+})
+
+describe("endSessionQuestion, for another person's session", () => {
+  const NOW = Date.parse('2026-10-26T12:00:00Z')
+  const ago = (ms) => new Date(NOW - ms).toISOString()
+  const browser = { service_name: null, user_agent: AGENTS['Chrome on Windows'], last_active_at: ago(5 * 60 * 1000) }
+
+  it('names the person and the session, and says the browser has to sign in again', () => {
+    expect(endSessionQuestion(browser, NOW, 'Owain Operator'))
+      .toBe("End Owain Operator's session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.")
+  })
+
+  it('says a service has to sign them in again, not you', () => {
+    expect(endSessionQuestion({ service_name: 'Aber Grafana', user_agent: 'Node-oauth', last_active_at: ago(3600 * 1000) }, NOW, 'owain@site.test'))
+      .toBe("End owain@site.test's session in Grafana, last active 1 hour ago? Grafana has to sign them in again.")
+  })
+
+  it('names a program, and a session with no user agent', () => {
+    expect(endSessionQuestion({ ...browser, user_agent: 'Python-urllib/3.14', last_active_at: null }, NOW, 'Owain Operator'))
+      .toBe("End Owain Operator's session of a program (Python-urllib)? That program has to sign in again.")
+    expect(endSessionQuestion({ ...browser, user_agent: null }, NOW, 'Owain Operator'))
+      .toBe("End Owain Operator's session with no browser recorded, last active 5 minutes ago? Whatever used it has to sign in again.")
+  })
+
+  it('without a person, asks about your own session as the Security tab does', () => {
+    expect(endSessionQuestion(browser, NOW))
+      .toBe('End the session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.')
   })
 })

@@ -1745,14 +1745,17 @@ account and left their history behind.
   `SESSIONS_ENDED` row on `entity_type = 'user_roles'`, as `0203`'s rename does: the caller in
   `changed_by`, the person's email and how many ended in `new_data`. It returns that number. It goes
   through `check_person_act()` (`0166`), so it is Administrator only, under the People lock, and
-  refuses a machine identity and an unknown person. Your own sessions are refused (`42501`): Sign
-  Out ends this browser's. A removed person's may be ended, which is harmless and closes what a
-  removal leaves open until tokens expire.
+  refuses a machine identity and an unknown person. Your own sessions are refused (`42501`); since
+  `0212` the refusal names Sign Out of All Other Sessions, which ends the others. A removed
+  person's may be ended, which is harmless and closes what a removal leaves open until tokens
+  expire.
 - **`person_session_summary(p_user_id)`** is the drawer's count: how many rows, and the latest of
   each row's `refreshed_at`, `updated_at` and `created_at`. GoTrue writes `refreshed_at` as a
-  `timestamp` without a zone, in UTC, so it is read `AT TIME ZONE 'UTC'`. There is no list for an
-  Administrator: which browsers and services a person uses is theirs to see. A session past the
-  inactivity timeout keeps its row until GoTrue's cleanup, so it is counted until then.
+  `timestamp` without a zone, in UTC, so it is read `AT TIME ZONE 'UTC'`. There was no list for an
+  Administrator at first: which browsers and services a person uses was theirs to see. `0212` adds
+  one: see [An Administrator ends one of a person's sessions
+  (0212)](#an-administrator-ends-one-of-a-persons-sessions-0212). A session past the inactivity
+  timeout keeps its row until GoTrue's cleanup, so it is counted until then.
 - **A change of address is two calls around GoTrue**, as Set New Password is (`0167`).
   `manage-people` calls `check_person_email_change()` first, which writes nothing and answers with
   the address held. It refuses your own address, a removed person, an address another account
@@ -1948,6 +1951,54 @@ column cascades from `auth.sessions`. The test database's fixture
 (`test-harness/auth-bootstrap.sql`) gives `auth.refresh_tokens` that column and GoTrue's key.
 `test_ending_another_of_your_sessions_is_recorded.py` holds the rows, the refusals, and that Sign
 Out of All Other Sessions ends what `scope=others` ended and no other person's.
+
+### An Administrator ends one of a person's sessions (0212)
+
+`0207` gave a person's drawer on People a count of their sessions and End Sessions, which ends them
+all. That was right for a shared screen left signed in, and too much for one lost laptop: the
+person's other browsers, a wall display signed in as them, and their Grafana and Node-RED sign-ins
+ended too. The drawer now lists the sessions, as the person's own Security tab does (`0206`), and
+ends one.
+
+- **`person_sessions(p_user_id)`** is `list_my_sessions()`'s query for another person:
+  `service_name`, `user_agent`, `created_at`, `last_active_at` (the latest of `refreshed_at` read as
+  UTC, `updated_at` and `created_at`) and `not_after`, newest activity first. Never `ip`, the tag or
+  a refresh-token column. That is enough to tell a laptop from a wall display, and no more than the
+  person sees of their own sessions. `0207` kept which browsers and services a person uses theirs
+  to see; a lost laptop showed an Administrator needs it when the person cannot act.
+- **No `is_current`.** The caller's token names the caller's session, never the person's, so the
+  flag would always be false, and a false one reads as "not in use". The dashboard's shared table
+  treats a missing flag as "not the session in use" and offers End on every row.
+- **`end_person_session(p_user_id, p_session_id)`** deletes that one `auth.sessions` row if it is
+  the person's. Its refresh tokens cascade with it (GoTrue's key), and `0205`'s arm refuses its
+  access token at the API at once. It writes one `SESSIONS_ENDED` row on `entity_type =
+  'user_roles'` in the person's lane, in the same transaction, with the Administrator in
+  `changed_by`. `new_data` is the shape `end_my_session()` writes (`0211`): the person's email,
+  `sessions_ended: 1` and `session`, read through `person_sessions()` before the delete. So the
+  Audit Trail's drawer names it with `sessionLabel()`, as it names a person's own End.
+- **What is refused, with no row.** A session that is not the person's and one that does not exist
+  are the same 404 (`raise_not_found()`), so no answer says another person's session id exists.
+  Then `end_person_sessions()`'s rules, through `check_person_act()` (`0166`): Administrator only,
+  under the People lock; an unknown person is a 404 and a machine identity `22023`. Your own
+  session is `42501`: Profile's Security tab ends it, and marks the one in use. A removed person's
+  session may be ended.
+- **Who may read the list.** An Administrator, as `person_session_summary()` allows; it answers for
+  your own id too, though the drawer points you to Profile instead. Every other role is `42501`;
+  `anon` and `service_role` hold no `EXECUTE`. Both functions are `SECURITY DEFINER` with
+  `search_path` pinned: `postgres` reads `auth.sessions` and `auth.oauth_clients`, and deletes from
+  `auth.sessions`, by GoTrue's grants.
+- **`end_person_sessions()` is redeclared** for one sentence. Its refusal of your own sessions said
+  "Use Sign Out in the account menu", but Sign Out ends only the browser in use (`0208`). The match
+  is Sign Out of All Other Sessions on the Profile page's Security tab, which it now names.
+
+The file's self-check asserts the three functions' `SECURITY DEFINER` and pin, who may execute
+them, that a request with no identity is refused by both new ones, and that `person_sessions()`
+returns `list_my_sessions()`'s result type without `is_current`. Where GoTrue's tables exist, it
+asserts that the owner may read and delete `auth.sessions` and read `auth.oauth_clients`. Mirror
+check 25 (`scripts/check-mirror-drift.mjs`) holds the same columns, and holds
+`end_person_session()`'s recorded fields to them and to what `sessionLabel()` reads.
+`test_an_administrator_ends_one_of_a_person_s_sessions.py` holds the list, the end, the row, the
+refusals and the cascade.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

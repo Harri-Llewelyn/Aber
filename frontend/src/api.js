@@ -1051,14 +1051,35 @@ const apiMethods = {
 
   /**
    * How many sessions a person holds, and when one was last active: `{ open_sessions,
-   * last_active_at }` from `person_session_summary()` (0207). Administrator only. No list: which
-   * browsers and services they are is the person's own to see.
+   * last_active_at }` from `person_session_summary()` (0207). Administrator only. The list is
+   * personSessions().
    */
   personSessionSummary: async (userId) => {
     const { data, error } = await supabase.rpc('person_session_summary', { p_user_id: userId })
     if (error) throw new Error(error.message || 'Could not read their sessions')
     const row = Array.isArray(data) ? data[0] : data
     return { open_sessions: row?.open_sessions ?? 0, last_active_at: row?.last_active_at ?? null }
+  },
+
+  /**
+   * A person's sessions, in every browser and service: `{ id, service_name, user_agent,
+   * created_at, last_active_at, not_after }` from `person_sessions()` (0212), what
+   * `list_my_sessions()` returns the person but which one is in use. Administrator only.
+   */
+  personSessions: async (userId) => {
+    const { data, error } = await supabase.rpc('person_sessions', { p_user_id: userId })
+    if (error) throw new Error(error.message || 'Could not list their sessions')
+    return data || []
+  },
+
+  /**
+   * End one of a person's sessions (`end_person_session()`, 0212), recorded in the Audit Trail.
+   * The database refuses your own, and answers a session that is not theirs as not found; its
+   * sentence is the error.
+   */
+  endPersonSession: async (userId, sessionId) => {
+    const { error } = await supabase.rpc('end_person_session', { p_user_id: userId, p_session_id: sessionId })
+    if (error) throw new Error(error.message || 'Could not end the session')
   },
 
   /**
