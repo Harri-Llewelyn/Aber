@@ -72,7 +72,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - **Type** is **Confidential** for an app that holds a secret, on a server. A **Public** app holds none.
 - **People** is how many people allow the app now.
 - The **search** box matches an app's name and the addresses it sends people back to. **Clear filters** empties it.
-- No app can add itself. Aber keeps that turned off, so an app is added only by someone holding the secret key.
+- No app can register itself, because Aber keeps that turned off. Only someone holding the secret key can add one.
 
 **Click an app's row**, or press Enter on it, to open its drawer. It lists the people who allowed the app, when, and what it may read.
 
