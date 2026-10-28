@@ -20,7 +20,11 @@ vi.mock('../lib/supabaseClient', () => ({
 }))
 
 vi.mock('../api', () => ({
-  api: { listMySessions: vi.fn(), endMySession: vi.fn(), signOutOtherSessions: vi.fn() },
+  api: {
+    listMySessions: vi.fn(), endMySession: vi.fn(), signOutOtherSessions: vi.fn(),
+    // The Second factor section below Sessions, with none: profileSecondFactor.test.jsx is its suite.
+    listMyFactors: vi.fn(() => Promise.resolve([])), assuranceLevel: vi.fn(() => Promise.resolve(null)),
+  },
 }))
 
 import { api } from '../api'
@@ -127,7 +131,7 @@ describe('the list', () => {
 
   it('asks nothing for a machine identity, which has no sessions', () => {
     renderSecurity({ email: null })
-    expect(screen.getByText(/A machine identity signs in with a token/)).toBeInTheDocument()
+    expect(screen.getByText(/A machine identity signs in with a token, so it has no sessions/)).toBeInTheDocument()
     expect(api.listMySessions).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /Sign Out of All Other Sessions/ })).toBeNull()
   })

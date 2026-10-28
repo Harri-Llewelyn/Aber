@@ -17,10 +17,11 @@ vi.mock('../api', async () => {
   return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
-// The three audit_domain_for() names, and the two backup kinds it files there by its
-// fail-closed default: an act on the whole database is an Administrator's to perform, so it is an
+// The three audit_domain_for() names, and the three kinds it files there by its fail-closed
+// default: the two backup kinds, since an act on the whole database is an Administrator's to
+// perform, and a read-only broker account (0218), which only an Administrator makes. So each is an
 // Administrator's and an Auditor's to read.
-const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Apps', 'Settings', 'Backup jobs', 'Backups']
+const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Broker accounts', 'Apps', 'Settings', 'Backup jobs', 'Backups']
 
 beforeEach(() => {
   vi.clearAllMocks()

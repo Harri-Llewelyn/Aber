@@ -7,7 +7,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import {
   IconArchive, IconChevronDown, IconChevronUp, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw,
-  IconShieldAlert, IconShieldCheck, IconUser,
+  IconScan, IconShieldAlert, IconShieldCheck, IconUser,
 } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
@@ -65,15 +65,15 @@ const CLOSED_LIST = { userId: null, rows: undefined, error: null }
 
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
- * Administrator to add, re-role, rename, re-address, sign out, remove or restore, or to give a new
- * password. A row is the person, their role, status and last sign-in; a click or Enter opens their
+ * Administrator to add, re-role, rename, re-address, sign out, remove or restore, to give a new
+ * password, or to reset a lost second factor (Reset MFA). A row is the person, their role, status and last sign-in; a click or Enter opens their
  * drawer (`?person=<email>`), which holds every action. A person is drawn by their display name
  * with their email beside it, or by the email alone.
  *
  * Roles go through set_person_role(), names through set_display_name(), and ending sessions
  * through end_person_sessions() or, one at a time from the drawer's list of them,
- * end_person_session(); adding, removing, restoring, a new password and a new address go through
- * manage-people, which holds GoTrue's secret key. The database refuses your own role, access,
+ * end_person_session(); adding, removing, restoring, a new password, a new address and Reset MFA go
+ * through manage-people, which holds GoTrue's secret key. The database refuses your own role, access,
  * password, address and sessions, and the last Administrator who can sign in; the controls are
  * disabled for those with the reason as their tooltip, and your own drawer points to Profile for
  * your sessions.
@@ -91,8 +91,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [adding, setAdding] = useState(false)
-  // { act: 'remove' | 'restore' | 'password' | 'sessions', person } while the confirmation is
-  // open, or { act: 'session', person, session } for one session from the drawer's list.
+  // { act: 'remove' | 'restore' | 'password' | 'sessions' | 'mfa', person } while the confirmation
+  // is open, or { act: 'session', person, session } for one session from the drawer's list.
   const [confirming, setConfirming] = useState(null)
   // { email, password } while a new password is on screen; gone when its dialog closes.
   const [newPassword, setNewPassword] = useState(null)
@@ -220,6 +220,15 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
         await api.endPersonSession(person.user_id, session.id)
         showToast?.(
           `Session ended for ${personLabel(person)}: ${sessionLabel(session)}`,
+          'success',
+          { to: personUrl(person.email, accessRemoved(person)) }
+        )
+      } else if (act === 'mfa') {
+        const { factors_removed: removed } = await api.resetPersonMfa(person.user_id)
+        showToast?.(
+          removed === 0
+            ? `${personLabel(person)} had no second factor to remove`
+            : `${personLabel(person)}'s second factor is reset: their password alone signs them in`,
           'success',
           { to: personUrl(person.email, accessRemoved(person)) }
         )
@@ -380,6 +389,15 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             onClick: () => setConfirming({ act: 'sessions', person: p }),
             disabled: !!sessionsBlocked,
             title: sessionsBlocked || 'Sign them out of every browser and service. They keep their role, and can sign in again.',
+          },
+          // Your own second factor is removed on Profile, as your own sessions are ended there.
+          {
+            label: 'Reset MFA', icon: <IconScan size={13} />,
+            onClick: () => setConfirming({ act: 'mfa', person: p }),
+            disabled: isSelf,
+            title: isSelf
+              ? "You cannot reset your own second factor here. Remove it on your Profile page's Security tab."
+              : 'Remove their second factor, for someone who has lost their authenticator. Their password alone signs them in until they add a new one.',
           },
           removed && {
             label: 'Restore Access', icon: <IconRefreshCw size={13} />,
@@ -623,6 +641,26 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           )}
           confirmLabel="End Sessions"
           pendingLabel="Ending…"
+          confirmClassName="btn btn-primary"
+          onConfirm={confirmAct}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.act === 'mfa' && (
+        <ConfirmModal
+          title={`Reset MFA for ${personLabel(confirming.person)}`}
+          icon={<IconScan size={18} />}
+          message={(
+            <>
+              Every second factor they have is removed, so signing in asks only for their password.
+              Use it when they have lost their authenticator app. They can add a new one on their
+              Profile page&apos;s Security tab. Their sessions stay signed in: to sign them out, use
+              End Sessions as well.
+            </>
+          )}
+          confirmLabel="Reset MFA"
+          pendingLabel="Resetting…"
           confirmClassName="btn btn-primary"
           onConfirm={confirmAct}
           onCancel={() => setConfirming(null)}

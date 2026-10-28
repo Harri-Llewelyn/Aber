@@ -38,6 +38,11 @@ import {
   withUnsGrant,
   withUnsReadGrant,
   UNS_READER_ROLE,
+  SUBSCRIBER_ROLE,
+  createSubscriberCommand,
+  createSubscriberWithControl,
+  deleteSubscriberCommand,
+  deleteSubscriberWithControl,
 } from './mosquitto-dynsec.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -322,8 +327,8 @@ describe('the control API', () => {
     const roles = { data: { roles: [{ rolename: 'gateway', acls: [{ acltype: 'subscribePattern', topic: 'spBv1.0/#', priority: 0, allow: true }] }] } };
     const summary = summariseInventory(clients, roles);
     assert.deepEqual(summary.clients, [
-      { username: GW_A, roles: ['gateway'], disabled: false, connections: null },
-      { username: GW_B, roles: [], disabled: true, connections: null },
+      { username: GW_A, roles: ['gateway'], disabled: false, connections: null, textname: null, textdescription: null },
+      { username: GW_B, roles: [], disabled: true, connections: null, textname: null, textdescription: null },
     ]);
     assert.deepEqual(summary.roles, [{ rolename: 'gateway', acls: [{ acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true }] }]);
     assert.ok(!JSON.stringify(summary).includes('salt'));
@@ -670,5 +675,165 @@ describe('an upgraded broker loses the ingestion role\'s reads of the UNS and th
     const { config: second } = reconcile(first, policy(), managed);
     assert.deepEqual(subtreeAcls(second), subtreeAcls(first));
     assert.deepEqual(second.clients.map((c) => c.username).sort(), first.clients.map((c) => c.username).sort());
+  });
+});
+
+describe('a read-only account in the subscriber scheme holds the subscriber role and nothing else', () => {
+  const SUB_A = 'sub0a1b2c3d4e5f60718293a';
+  const SUB_B = 'sub00000000000000000000b';
+  const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion'))];
+  const booted = () => withUnsReadGrant(withUnsGrant(withPrimaryHostGrant(POLICY, 'Site-One'), 'uns'), 'uns');
+  const rolesOf = (config, username) => config.clients.find((c) => c.username === username).roles;
+
+  test('a drifted account is put right on the next boot, and its hash is kept', () => {
+    // SUB_A was given ingestion and admin by hand, SUB_B lost its role: both hold subscriber alone.
+    const stored = {
+      clients: [
+        clientFromPasswordEntry(entry(SUB_A, 'b2xkc2FsdHNhbHQ='), [SUBSCRIBER_ROLE, 'ingestion', 'admin']),
+        clientFromPasswordEntry(entry(SUB_B), []),
+      ],
+      roles: [],
+      groups: [],
+    };
+    const { config, report } = reconcile(stored, booted(), managed);
+    assert.deepEqual(rolesOf(config, SUB_A), [{ rolename: SUBSCRIBER_ROLE }]);
+    assert.deepEqual(rolesOf(config, SUB_B), [{ rolename: SUBSCRIBER_ROLE }]);
+    assert.equal(config.clients.find((c) => c.username === SUB_A).salt, 'b2xkc2FsdHNhbHQ=');
+    assert.deepEqual(report.subscribers.sort(), [SUB_A, SUB_B].sort());
+    assert.deepEqual(report.reassertedSubscribers.sort(), [SUB_A, SUB_B].sort());
+    assert.ok(!report.unmanaged.includes(SUB_A), 'a subscriber-scheme account was treated as unmanaged');
+  });
+
+  test('a group cannot hand one a second role: its membership is dropped and the group kept', () => {
+    const stored = {
+      clients: [clientFromPasswordEntry(entry(SUB_A), [SUBSCRIBER_ROLE]), clientFromPasswordEntry(entry('bi_reader'), [])],
+      roles: [],
+      groups: [{ groupname: 'writers', roles: [{ rolename: 'ingestion' }], clients: [{ username: SUB_A }, { username: 'bi_reader' }] }],
+    };
+    const { config, report } = reconcile(stored, booted(), managed);
+    assert.deepEqual(config.groups, [{ groupname: 'writers', roles: [{ rolename: 'ingestion' }], clients: [{ username: 'bi_reader' }] }]);
+    assert.deepEqual(report.reassertedSubscribers, [SUB_A]);
+    assert.equal(stored.groups[0].clients.length, 2, 'the stored document was mutated');
+  });
+
+  test('an account already right is left exactly as it is, its stored entry included', () => {
+    const client = { ...clientFromPasswordEntry(entry(SUB_A), []), roles: [{ rolename: SUBSCRIBER_ROLE, priority: 3 }], textname: 'BI feed' };
+    const stored = { clients: [client], roles: [], groups: [] };
+    const { config: first, report } = reconcile(stored, booted(), managed);
+    assert.deepEqual(first.clients.find((c) => c.username === SUB_A), client);
+    assert.deepEqual(report.reassertedSubscribers, []);
+    const { config: second } = reconcile(first, booted(), managed);
+    assert.deepEqual(second, first);
+  });
+
+  test('only the exact scheme is held to it: a name near it is an account made by hand, kept as it is', () => {
+    const near = ['subscriber-1', 'sub0a1b2c3d4e5f60718293', 'SUB0A1B2C3D4E5F60718293A', 'sub0a1b2c3d4e5f60718293ag', 'xsub0a1b2c3d4e5f6071829'];
+    const stored = { clients: near.map((u) => clientFromPasswordEntry(entry(u), ['ingestion'])), roles: [], groups: [] };
+    const { config, report } = reconcile(stored, booted(), managed);
+    for (const u of near) assert.deepEqual(rolesOf(config, u), [{ rolename: 'ingestion' }], u);
+    assert.deepEqual(report.subscribers, []);
+    assert.deepEqual(report.unmanaged.sort(), [...near].sort());
+  });
+
+  test('a platform principal of that shape is the environment\'s, not the scheme\'s', () => {
+    const principal = clientFromPasswordEntry(entry(SUB_A), ['monitor']);
+    const stored = { clients: [clientFromPasswordEntry(entry(SUB_A), [SUBSCRIBER_ROLE])], roles: [] };
+    const { config } = reconcile(stored, booted(), [principal]);
+    assert.deepEqual(rolesOf(config, SUB_A), [{ rolename: 'monitor' }]);
+  });
+});
+
+describe('creating and deleting a read-only account over the control API', () => {
+  const SUB = 'sub0a1b2c3d4e5f60718293a';
+  const PASSWORD = 'password-0000000000000000';
+  const PURPOSE = { name: '  Line 4 OEE board ', description: ' Reads line 4 for the contractor dashboard. ' };
+
+  test('create is one client holding the subscriber role, with its name and description', () => {
+    assert.deepEqual(createSubscriberCommand(SUB, PASSWORD, PURPOSE), {
+      command: 'createClient',
+      username: SUB,
+      password: PASSWORD,
+      textname: 'Line 4 OEE board',
+      textdescription: 'Reads line 4 for the contractor dashboard.',
+      roles: [{ rolename: 'subscriber' }],
+    });
+  });
+
+  test('create refuses a username outside the scheme, a password outside the alphabet and a missing purpose', () => {
+    for (const bad of ['gwy120000000000400080000', 'aber_ingestion', 'dynsec-admin', 'sub123', `${SUB}0`, SUB.toUpperCase(), '', null]) {
+      assert.throws(() => createSubscriberCommand(bad, PASSWORD, PURPOSE), (e) => e.code === 'invalid_subscriber_id', String(bad));
+    }
+    assert.throws(() => createSubscriberCommand(SUB, 'not base64url!', PURPOSE), (e) => e.code === 'invalid_password');
+    for (const name of ['', '   ', null, 'two\nlines', 'x'.repeat(81)]) {
+      assert.throws(() => createSubscriberCommand(SUB, PASSWORD, { ...PURPOSE, name }), (e) => e.code === 'invalid_subscriber_name', JSON.stringify(name));
+    }
+    for (const description of [undefined, '', 'tab\there', 'x'.repeat(501)]) {
+      assert.throws(() => createSubscriberCommand(SUB, PASSWORD, { ...PURPOSE, description }), (e) => e.code === 'invalid_subscriber_description', JSON.stringify(description));
+    }
+    // Counted in characters, as Postgres counts them.
+    assert.doesNotThrow(() => createSubscriberCommand(SUB, PASSWORD, { name: 'é'.repeat(80), description: '\u{1F4C8}'.repeat(500) }));
+  });
+
+  test('create sends one createClient, and an account that exists is refused, never taken over', () => {
+    const sent = [];
+    const send = (command) => { sent.push(command); return { command: command.command }; };
+    const made = createSubscriberWithControl(send, PURPOSE, PASSWORD);
+    assert.match(made.username, /^sub[0-9a-f]{21}$/);
+    assert.deepEqual(made, { username: made.username, name: 'Line 4 OEE board', description: 'Reads line 4 for the contractor dashboard.', roles: ['subscriber'] });
+    assert.deepEqual(sent.map((c) => c.command), ['createClient']);
+    assert.equal(sent[0].username, made.username);
+
+    const taken = [];
+    const exists = (command) => { taken.push(command.command); return { command: command.command, error: 'Client already exists' }; };
+    assert.throws(() => createSubscriberWithControl(exists, PURPOSE, PASSWORD, SUB), (e) => e.code === 'broker_refused');
+    assert.deepEqual(taken, ['createClient'], 'an existing account was re-issued');
+  });
+
+  test('two creates make two usernames', () => {
+    const send = (command) => ({ command: command.command });
+    const names = new Set(Array.from({ length: 20 }, () => createSubscriberWithControl(send, PURPOSE, PASSWORD).username));
+    assert.equal(names.size, 20);
+  });
+
+  test('delete reads the account for its purpose, then deletes it, and grants or removes no role', () => {
+    const sent = [];
+    const send = (command) => {
+      sent.push(command.command);
+      if (command.command === 'getClient') {
+        return { data: { client: { username: SUB, textname: 'Line 4 OEE board', textdescription: 'Reads line 4.', roles: [{ rolename: 'subscriber' }], connections: [{}] } } };
+      }
+      return { command: command.command };
+    };
+    assert.deepEqual(deleteSubscriberWithControl(send, SUB), {
+      existed: true, deleted: true, name: 'Line 4 OEE board', description: 'Reads line 4.', roles: ['subscriber'],
+    });
+    assert.deepEqual(sent, ['getClient', 'deleteClient']);
+  });
+
+  test('deleting an account the broker does not hold deletes nothing', () => {
+    const sent = [];
+    const send = (command) => { sent.push(command.command); return { command: command.command, error: 'Client not found' }; };
+    assert.deepEqual(deleteSubscriberWithControl(send, SUB), { existed: false, deleted: false, name: null, description: null, roles: [] });
+    assert.deepEqual(sent, ['getClient']);
+  });
+
+  test('delete refuses every username outside the scheme before anything is sent', () => {
+    for (const bad of ['gwy120000000000400080000', 'gwy110000000000400080000', 'aber_ingestion', 'aber_i3x', 'aber_monitor', 'dynsec-admin', 'scada-reader', '']) {
+      let sent = 0;
+      assert.throws(() => deleteSubscriberWithControl(() => { sent += 1; return {}; }, bad), (e) => e.code === 'invalid_subscriber_id', bad);
+      assert.throws(() => deleteSubscriberCommand(bad), (e) => e.code === 'invalid_subscriber_id', bad);
+      assert.equal(sent, 0, bad);
+    }
+  });
+
+  test('the inventory carries what an account is for, and null where the plugin holds nothing', () => {
+    const clients = { data: { clients: [
+      { username: SUB, textname: 'Line 4 OEE board', textdescription: 'Reads line 4.', roles: [{ rolename: 'subscriber' }], connections: [] },
+      { username: GW_A, roles: [{ rolename: 'gateway' }], connections: [] },
+    ] } };
+    const summary = summariseInventory(clients, null);
+    assert.deepEqual(summary.clients.map((c) => [c.username, c.textname, c.textdescription]), [
+      [SUB, 'Line 4 OEE board', 'Reads line 4.'], [GW_A, null, null],
+    ]);
   });
 });

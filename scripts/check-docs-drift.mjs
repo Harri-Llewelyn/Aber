@@ -107,6 +107,24 @@ const gitignored = (path) => IGNORED.some((p) => p.test(path));
 }
 
 // -------------------------------------------------------------------------------------------------
+// 152. A reference to the upgrade guide outside markdown (its path, a comma, then a heading in double
+// quotes) names one of its headings exactly. NOTES.txt prints such a reference on every upgrade,
+// and the chart's values and the key scripts carry it, where check 1 cannot see a renamed heading.
+// -------------------------------------------------------------------------------------------------
+{
+  const GUIDE = 'help/site/upgrading.md';
+  const headings = new Set(read(GUIDE).split('\n').map((l) => l.match(/^#{1,6}\s+(.*?)\s*$/)?.[1]).filter(Boolean));
+  const refs = [];
+  for (const file of allFiles.filter((f) => !f.endsWith('.md') && !gitignored(f) && /\.(mjs|js|ts|ya?ml|txt|tpl|example)$/.test(f))) {
+    for (const m of read(file).matchAll(/help\/site\/upgrading\.md,\s*"([^"\n]+)"/g)) refs.push({ file, heading: m[1] });
+  }
+  const missing = refs.filter((r) => !headings.has(r.heading));
+  for (const r of missing) fail(`${r.file} names "${r.heading}" in ${GUIDE}, which has no such heading`);
+  if (!refs.length) fail(`check 152 found no reference to a heading of ${GUIDE}, so it compares nothing`);
+  else if (!missing.length) pass(`the ${refs.length} references to a heading of ${GUIDE} outside markdown name one`);
+}
+
+// -------------------------------------------------------------------------------------------------
 // 2. The component table (docs/architecture.md) pins the same image tags the chart does. The chart's values are
 // parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
@@ -1072,6 +1090,9 @@ function edgeFunctionNames() {
     'public.audit_trail_user_ids_matching': '0203 matches a person\'s display name as well as their email, since the Audit Trail labels a person\'s lane with the name; the baseline matches the email alone. It restates 0176\'s search_path pin',
     'public.end_my_session': '0211 writes a SESSIONS_ENDED row in the caller\'s lane, with the session as list_my_sessions() returned it, in the delete\'s transaction; 0206 wrote none',
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Security tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
+    'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
+    'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture; 0203 had no such row',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -3047,6 +3068,58 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 156. A read-only broker account is one rule in the four places that hold it: "sub" and 21
+// lowercase hex characters, a name of at most 80 characters and a description of at most 500.
+// The credential library decides; broker-subscriber refuses first, 0218 records, and the page
+// offers Delete. A page wider than the function offers a Delete that is refused; a record
+// narrower than the service fails on an account the broker already made.
+// -------------------------------------------------------------------------------------------------
+{
+  const SCHEME = '^sub[0-9a-f]{21}$';
+  const lib = read('scripts/lib/mosquitto-credentials.mjs');
+  const fn = read('supabase/functions/broker-subscriber/subscriber.ts');
+  const ui = read('frontend/src/utils/serviceIdentities.js');
+  const migration = readdirSync(join(REPO, 'supabase/migrations')).find((f) => /^0218_.*\.sql$/.test(f));
+  const sql = migration ? read(`supabase/migrations/${migration}`) : '';
+  const grab = (src, re) => src.match(re)?.[1] ?? null;
+  const holders = [
+    ['scripts/lib/mosquitto-credentials.mjs', grab(lib, /\bSUBSCRIBER_ID_PATTERN = \/(\S+)\/;?$/m),
+      Number(grab(lib, /\bSUBSCRIBER_NAME_MAX = (\d+)/)), Number(grab(lib, /\bSUBSCRIBER_DESCRIPTION_MAX = (\d+)/))],
+    ['broker-subscriber/subscriber.ts', grab(fn, /\bSUBSCRIBER_USERNAME = \/(\S+)\/;?$/m),
+      Number(grab(fn, /\bNAME_MAX = (\d+)/)), Number(grab(fn, /\bDESCRIPTION_MAX = (\d+)/))],
+    ['frontend/src/utils/serviceIdentities.js', grab(ui, /\bSUBSCRIBER_USERNAME = \/(\S+)\/;?$/m),
+      Number(grab(ui, /\bSUBSCRIBER_NAME_MAX = (\d+)/)), Number(grab(ui, /\bSUBSCRIBER_DESCRIPTION_MAX = (\d+)/))],
+  ];
+  const problems156 = [];
+  for (const [where, pattern, nameMax, descriptionMax] of holders) {
+    if (pattern !== SCHEME) problems156.push(`${where} spells the scheme ${pattern === null ? '(not found)' : `/${pattern}/`}`);
+    if (nameMax !== 80 || descriptionMax !== 500) {
+      problems156.push(`${where} bounds the name at ${nameMax} and the description at ${descriptionMax}`);
+    }
+  }
+  // Each `!~ '<pattern>'` in the file: the two functions' refusals of a username.
+  const sqlSchemes = sql.split("!~ '").slice(1).map((rest) => rest.slice(0, rest.indexOf("'")));
+  if (!migration) {
+    problems156.push('supabase/migrations holds no 0218, which records these accounts');
+  } else {
+    if (sqlSchemes.length !== 2 || sqlSchemes.some((p) => p !== SCHEME)) {
+      problems156.push(`${migration} refuses usernames by ${sqlSchemes.join(', ') || '(no pattern found)'}`);
+    }
+    if (!sql.includes('char_length(v_name) NOT BETWEEN 1 AND 80 ')
+      || !sql.includes('char_length(v_description) NOT BETWEEN 1 AND 500 ')) {
+      problems156.push(`${migration} does not bound the name at 80 and the description at 500`);
+    }
+  }
+  if (problems156.length) {
+    fail(`a read-only broker account is not one rule: ${problems156.join('; ')}.\n` +
+      '      The credential library, broker-subscriber, 0218 and the Access Control page must agree on\n' +
+      `      /${SCHEME}/, 80 and 500.`);
+  } else {
+    pass(`a read-only broker account is /${SCHEME}/ with a name of 80 and a description of 500 in the library, the function, 0218 and the page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers
@@ -4283,6 +4356,39 @@ const OPERATOR_PAIRS = [
     fail(`${notManual.length ? `${notManual.map((i) => i.file).join(', ')} write(s) an OAuth client that is not registration_type 'manual'` : 'no migration seeds an OAuth client, so this check reads nothing'}: the stack's clients are the ones its migrations seed (0197)`);
   } else {
     pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, and the ${inserts.length} client(s) the migrations seed are all 'manual'`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 153. GoTrue offers TOTP second factors and no other kind, and the dashboard enrols only those.
+// auth.yaml sets every GOTRUE_MFA_* below: phone needs an SMS provider, WebAuthn a hostname
+// relying-party id and a secure context, and the dashboard's auth-js has no client for recovery
+// codes, so a factor of any of those would be one nobody can use from Profile › Security.
+// -------------------------------------------------------------------------------------------------
+{
+  const authYaml = 'deploy/helm/aber/templates/supabase/auth.yaml';
+  const WANT = {
+    GOTRUE_MFA_TOTP_ENROLL_ENABLED: '"true"', GOTRUE_MFA_TOTP_VERIFY_ENABLED: '"true"',
+    GOTRUE_MFA_PHONE_ENROLL_ENABLED: '"false"', GOTRUE_MFA_PHONE_VERIFY_ENABLED: '"false"',
+    GOTRUE_MFA_WEB_AUTHN_ENROLL_ENABLED: '"false"', GOTRUE_MFA_WEB_AUTHN_VERIFY_ENABLED: '"false"',
+    GOTRUE_MFA_RECOVERY_CODES_ENROLL_ENABLED: '"false"', GOTRUE_MFA_RECOVERY_CODES_VERIFY_ENABLED: '"false"',
+  };
+  const text = read(authYaml);
+  const set = Object.fromEntries([...text.matchAll(/- name: (GOTRUE_MFA_\w+)\s*\n\s*value:\s*(\S+)/g)].map((m) => [m[1], m[2]]));
+  const wrong = [
+    ...Object.entries(WANT).filter(([name, value]) => set[name] !== value)
+      .map(([name, value]) => `${authYaml}: ${name} is ${set[name] ?? 'not set'}, not ${value}`),
+    ...Object.keys(set).filter((name) => !(name in WANT))
+      .map((name) => `${authYaml}: ${name} is set, and this check does not know it`),
+  ];
+  const enrolled = [...read('frontend/src/api.js').matchAll(/mfa\.enroll\(\{ factorType: '(\w+)'/g)].map((m) => m[1]);
+  if (!enrolled.length || enrolled.some((t) => t !== 'totp')) {
+    wrong.push(`frontend/src/api.js enrols ${enrolled.join(', ') || 'nothing this check can read'}, not TOTP alone`);
+  }
+  if (wrong.length) {
+    fail(`second factors disagree:\n${wrong.map((w) => `        ${w}`).join('\n')}`);
+  } else {
+    pass(`GoTrue offers TOTP second factors alone (${Object.keys(WANT).length} GOTRUE_MFA_* in auth.yaml), and the dashboard enrols only TOTP`);
   }
 }
 

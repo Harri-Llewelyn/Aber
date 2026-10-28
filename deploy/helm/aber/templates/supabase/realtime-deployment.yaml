@@ -137,6 +137,12 @@ spec:
             # Must be the same secret the gateway, PostgREST and GoTrue verify with, or every subscriber
             # is rejected at the socket handshake.
             {{- include "aber.secretEnv" (dict "name" "API_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # The tenant's jwt_jwks (the seed reads it on every start): an ES256 token is verified
+            # by its kid, an HS256 one by API_JWT_SECRET. The /api routes, the probes' among them,
+            # take API_JWT_SECRET alone.
+            {{- include "aber.secretEnv" (dict "name" "API_JWT_JWKS" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
+            {{- end }}
             {{- include "aber.secretEnv" (dict "name" "SECRET_KEY_BASE" "secretName" $secretName "key" "REALTIME_SECRET_KEY_BASE") | nindent 12 }}
             {{/*
               MANDATORY SINCE realtime v2.102.3 -- `System.fetch_env!`, so the container refuses to
@@ -151,7 +157,9 @@ spec:
               metrics tokens: a wider grant for no gain.
             */}}
             {{- include "aber.secretEnv" (dict "name" "METRICS_JWT_SECRET" "secretName" $secretName "key" "REALTIME_METRICS_JWT_SECRET") | nindent 12 }}
+            {{- if not .Values.supabaseAuth.es256Signing }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- end }}
             - name: ERL_AFLAGS
               value: "-proto_dist inet_tcp"
             - name: DNS_NODES
@@ -193,12 +201,19 @@ spec:
           #
           # Single quotes rather than double: the command already contains double quotes around the
           # header value, and those have to reach curl.
+          {{- /* With supabaseAuth.es256Signing the anon key is ES256, which the /api routes refuse
+                 (they verify with API_JWT_SECRET and no JWKS), so the probe signs a one-minute
+                 HS256 token with that secret instead (aber.realtimeHealthCommand). */}}
           startupProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
+                {{- if .Values.supabaseAuth.es256Signing }}
+                {{- include "aber.realtimeHealthCommand" . | nindent 16 }}
+                {{- else }}
                 - 'curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health'
+                {{- end }}
             periodSeconds: 10
             timeoutSeconds: 5
             # Realtime applies its own _realtime migrations and seeds the tenant before answering.
@@ -208,7 +223,11 @@ spec:
               command:
                 - /bin/sh
                 - -c
+                {{- if .Values.supabaseAuth.es256Signing }}
+                {{- include "aber.realtimeHealthCommand" . | nindent 16 }}
+                {{- else }}
                 - 'curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health'
+                {{- end }}
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3

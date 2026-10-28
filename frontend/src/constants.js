@@ -81,6 +81,8 @@ export const AUDIT_TRAIL_ACTIONS = {
   // every session the person held ended, with how many. A new address ends the sessions too.
   EMAIL_CHANGED:     'Email address changed',
   SESSIONS_ENDED:    'Sessions ended',
+  // An Administrator's Reset MFA (0216): every second factor the person held, deleted, with how many.
+  MFA_RESET:         'MFA reset',
   // An app that signs people in (0217): written by triggers on the sign-in service's own tables,
   // so an act inside it is recorded too. Registration and removal are in the app's lane, and a
   // person's approval, given or revoked, in theirs.
@@ -137,6 +139,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // shape both.
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
   { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
+  // A read-only broker account made or deleted on Access Control (0218): an INSERT and a DELETE,
+  // filed under security by audit_domain_for()'s fail-closed default. No table holds the account.
+  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
   // The apps that sign people in (0217): the sign-in service's OAuth clients.
   { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },

@@ -10,6 +10,7 @@ The settings for the whole site are on the **Settings** page, not here.
 
 - **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on **Access Control › People**. That is true for an Administrator too: another Administrator changes yours.
 - **Display name**, on the **Account** tab, is the name other people see you by. Type it, then select **Save**. To remove it, empty the box and select **Save**. **Your display name**, below, says where it shows.
+- **Picture**, on the **Account** tab, puts a picture on your account control at the foot of the sidebar. Select **Choose Picture**, then pick a PNG, JPEG or WebP file of up to 10 MB. The row shows how it will look. Select **Save** to keep it, or **Discard** to drop it. **Remove** takes it off. **Your picture**, below, says who sees it.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.
 - **Copy Key**, on the **Publishable key** row, copies the site's publishable key. Some tools ask for it beside your token. It is public: every browser that opens the dashboard is given it.
@@ -20,6 +21,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
 - **End**, on a row of the **Security** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
 - **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
+- **Second factor**, on the **Security** tab, lists the authenticator apps you have added. **Add Second Factor** adds one, and **Remove** on a row removes it. **Your second factor**, below, says how, and what it changes when you sign in.
 - **Apps you have allowed**, on the **Security** tab, lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
 - **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
@@ -72,6 +74,18 @@ Your display name is shown first wherever you appear. Your email address stays t
 
 **The email address beside it is the one they had at the time.** Approvals keeps the address a proposal was made from. Archived Entities keeps the address of the person who deleted the entity. The Audit Trail and People show the address the account has now.
 
+## Your picture
+
+Your picture shows at a glance whose session is open. That helps on a shared PC, even with the sidebar collapsed.
+
+- **Only you see it.** It shows on your account control at the foot of the sidebar, and on this page. It does not show on People, Approvals, the Audit Trail or any other page. An Administrator cannot see it either.
+- **Without a picture,** the control shows the initials of your display name. Without a display name, it shows the person icon.
+- **It is shrunk before it is uploaded.** The page keeps the middle square of the picture and makes it 256 by 256 pixels. A phone photo of several megabytes uploads as a few tens of kilobytes.
+- **Only the picture is uploaded.** A camera or phone stores other details in a photo, such as where it was taken. Those are left behind.
+- **Nothing outside the site is asked for a picture.** Aber does not use Gravatar or any similar service.
+- **Older backups keep a picture you replaced or removed** until they are deleted in turn. The site's backups copy every stored file.
+- **If an Administrator removes your access,** your picture is deleted. If your access is restored, you come back with no picture.
+
 ## Your sessions
 
 A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED, Studio and the forge, and any program that signs in as you.
@@ -92,6 +106,35 @@ What ending a session does:
 - **The Audit Trail records it**, in your lane, with you as the person who did it. Administrators and Auditors can read it. **End** records the session it ended, named as this list names it. **Sign Out of All Other Sessions** records how many sessions it ended. **Sign Out** records nothing.
 
 **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
+
+## Your second factor
+
+A second factor is a code from an authenticator app on your phone. With one added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
+
+Every role can add one. Nothing on this site requires one yet.
+
+To add one:
+
+1. On the **Security** tab, select **Add Second Factor**.
+2. Give it a name, such as "Work phone". Select **Continue**.
+3. Scan the QR code with your authenticator app. If the app cannot scan, type in the key shown under the code. If the app asks, choose a time-based key.
+4. Enter the 6-digit code the app shows. Select **Add Second Factor**.
+
+Adding one signs you out of your other browsers and services, such as Grafana and Node-RED. This browser stays signed in.
+
+To remove one, select **Remove** on its row. A dialog asks first. Select **Remove Second Factor** to remove it. With none left, your password alone signs you in. If the dialog asks for a code, enter one from that app first.
+
+What happens when you sign in:
+
+- **After your password, the sign-in page asks for your code.** Open your app and enter the 6 digits it shows for this site. They change every 30 seconds.
+- **With two apps added**, choose which one the code is from.
+- **Sign Out** is on the same page, if you want to stop there.
+- **Grafana, Node-RED, Studio and the forge** sign you in through the dashboard. If this browser has not given a code yet, they ask for it there.
+- **Each time you enter a code, your sessions that have not given one end.** That includes Grafana, Node-RED, Studio and the forge, in every browser. Each signs you in again through the dashboard when you next open it.
+- **A password reset link** asks for your code before you choose the new password.
+- **If you remove the app you signed in with** and have another, the dashboard asks for a code from the other one.
+
+**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new second factor here.
 
 ## Apps you have allowed
 

@@ -90,6 +90,7 @@ const NO_LINK = [
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture is gone' },
+  { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },
   { file: 'components/tabs/DevicesTab.jsx', piece: "Quarantined device '${item.asset_name}' rejected", why: 'a rejected device is deleted' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'discarded', why: 'a discarded draft is deleted' },
 ]

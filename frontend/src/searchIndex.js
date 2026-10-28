@@ -99,7 +99,7 @@ export const CARDS = [
 
   { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['email', 'role', 'password', 'change password', 'my role'] },
   { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] },
-  { id: 'profile-security',     ...tabCard('profile', 'security'), keywords: ['sessions', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }
+  { id: 'profile-security',     ...tabCard('profile', 'security'), keywords: ['sessions', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop', 'second factor', 'mfa', 'two-factor', '2fa', 'authenticator', 'totp', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }
 ]
 
 /**

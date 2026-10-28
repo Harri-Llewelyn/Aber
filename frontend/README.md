@@ -513,6 +513,14 @@ unknown is not *Not connected*. The broker also reports each session's address, 
 `summariseInventory()` drops it: every client outside the cluster reaches the broker under the
 node's address.
 
+*Broker accounts* makes and deletes read-only accounts through `broker-subscriber`. *New Read-Only
+Account* (`modals/BrokerSubscriberModal.jsx`) is offered once the broker was read, which only an
+Administrator can do. It shows the password once, as `GatewayCredentialModal` shows a gateway's,
+with the broker address `EdgeNodeSettings`' `useDirectoryBroker()` reads and the topics the page's
+read of the `subscriber` role reports. An account in the scheme (`isSubscriberAccount()` in
+`utils/serviceIdentities.js`) shows the name and description the broker holds, and is the only row
+with *Delete*, which a `ConfirmModal` names first.
+
 People, Broker credentials and Machine identities are searched and filtered in the browser: each
 list is tens of rows, read whole. What is gone is hidden the same way on every tab, behind a **Show
 … (N)** toggle that appears only while N is above 0: removed people (`accessRemoved()` in
@@ -532,8 +540,8 @@ them do (`consequence` in `PERSON_ROLES`) before anything is sent. A role change
 away from the person's next request, so it asks first, as the drawer's other changes do; a select
 on the row saved a stray click or arrow key at once. Roles go through
 `set_person_role()` and ending sessions through `end_person_sessions()`; adding, removing,
-restoring, Set New Password and Change Email go through `manage-people`, because GoTrue's admin API
-needs the secret key. The drawer's Sessions row is `person_session_summary()`, a number and a time.
+restoring, Set New Password, Reset MFA and Change Email go through `manage-people`, because GoTrue's
+admin API needs the secret key. The drawer's Sessions row is `person_session_summary()`, a number and a time.
 Its Show sessions opens the list below the fields, read then (`person_sessions()`, `supabase/README.md`
 `0212`) and not with every drawer, in the Security tab's table (`components/common/SessionsTable.jsx`)
 with End on every row. End asks first with `endSessionQuestion()` naming the person, then calls
@@ -648,6 +656,22 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
   signs nobody out, even when an expired token could not be refreshed through it and supabase-js
   holds no session for the moment.
 
+### The sign-in asks for a second factor's code
+
+A password sign-in by someone with a verified factor is `aal1`. `hooks/useSecondFactorDue.js` asks
+`getAuthenticatorAssuranceLevel()` whenever the access token changes, and `secondFactorDue()` is
+true when the current level is `aal1` and the next `aal2`, unless `amr` names a federated method
+(`oauth`, `sso/saml`), which is never asked twice. While it is true, `App.jsx` shows
+`SecondFactorScreen` (`components/auth/SecondFactorChallenge.jsx`) in the sign-in page's frame
+instead of the dashboard, and
+before a password reset too: GoTrue refuses a new password from `aal1` for an account with a
+factor. The screen lists the person's factors from GoTrue, takes six digits, and has GoTrue check
+them with `challengeAndVerify()`. The `aal2` session reaches `App.jsx` through
+`onAuthStateChange`. Sign Out is on the screen. `pages/OAuthConsent.jsx` asks the same before it
+reads an authorization request, because Grafana, Node-RED, Studio and the forge sign in through
+the dashboard's session. The question is a prompt, not a gate: nothing on the server reads `aal`
+yet, and an answer that cannot be read opens the dashboard.
+
 ### Profile, and the preferences that follow the person
 
 Two pages, two scopes, and each says which in its heading's note. **Profile**
@@ -668,7 +692,15 @@ Value, Actions), header row and all, so the two read alike.
   `0211`), which keeps the session the token names. Each writes one `SESSIONS_ENDED` row, and the
   Audit Trail's drawer names that row's session with the same `sessionLabel()`. Each act toasts
   with a link back to the tab and reads the list again.
-- **Apps you have allowed** (`components/tabs/AllowedAppsSection.jsx`) is the next section: each app
+- **The second is Second factor** (`components/tabs/SecondFactorSection.jsx`): the person's verified
+  TOTP factors, read with auth-js `supabase.auth.mfa` through `api.js`, no new dependency. Add
+  Second Factor (`modals/AddSecondFactorModal.jsx`) takes a name, enrols, and shows GoTrue's QR code
+  and the secret as text; `qrImageSource()` (`utils/secondFactor.js`) percent-encodes the SVG auth-js
+  leaves raw, and the CSP's `img-src` admits `data:`. The factor counts once GoTrue accepts a code;
+  Cancel removes the half-made one. Remove (`modals/RemoveSecondFactorModal.jsx`) asks first, and
+  takes a code first when the session is `aal1`, since GoTrue removes a verified factor only from
+  `aal2`. A removal renews the token, so the dashboard sees a session GoTrue lowered to `aal1`.
+- **The third is Apps you have allowed** (`components/tabs/AllowedAppsSection.jsx`): each app
   the person allowed (`list_my_app_approvals()`, `supabase/README.md` `0217`), in
   `components/common/AppApprovalsTable.jsx`. Revoke calls GoTrue's own `DELETE /user/oauth/grants`
   through `supabase.auth.oauth.revokeGrant()`, which also ends that app's sessions for the person,
@@ -709,6 +741,14 @@ Value, Actions), header row and all, so the two read alike.
   (`hooks/useDisplayNames.js`, and `personLabel()` in `utils/displayName.js` for "Name (email)").
   The email address stays the account's identifier: where a page says who someone is, the name
   never stands without it.
+- **A person may have a picture, which only they see** (`supabase/README.md`, `0213`). Profile's
+  Account tab has a Picture row (`PictureRow` in `ProfileTab.jsx`), and the account control at the
+  foot of the rail shows it (`components/common/AccountAvatar.jsx`); nothing else does. With no
+  picture the control shows the display name's initials, then the icon. `shrinkPicture()` in
+  `utils/picture.js` crops a centred square and redraws it at 256x256 on a canvas as WebP, or JPEG,
+  so a photo's metadata never leaves the browser. `hooks/useOwnPicture.js` downloads it with the
+  session as a blob URL, only when `person_profiles.avatar_path` says there is one, and revokes each
+  URL it replaces.
 
 ---
 
@@ -1003,10 +1043,10 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities |
-| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin |
+| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
+| `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
-| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too |
+| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `DirectoryTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |

@@ -47,8 +47,9 @@ python ingestion/test_mqtt_tls.py
 # fails if NBIRTH, DBIRTH or an on_message handler ever appears in it. That is the design
 # issue #64 proposed and this refused -- a registry accumulated from what devices claim.
 python ingestion/test_directory_publish.py
-# The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
-# an incomplete path is skipped and counted rather than filled with a placeholder.
+# The Unified Namespace bridge: the topic is the root, the message's group and the path
+# device_uns_paths answers (0214), read once per device per TTL, and a device the view skips is
+# skipped and counted under its reason rather than filled with a placeholder.
 python ingestion/test_uns_publish.py
 # The Sparkplug primary-host STATE certificates. The assertion worth having is that the birth and
 # the death carry the SAME timestamp: 3.0.0 pairs them that way, and each half reading its own
@@ -87,6 +88,15 @@ python supabase/test_auth_rate_limit.py
 # signs one session out as the dashboard does (scope=local), and reads through the gateway with
 # both tokens: the signed-out one gets 401 session_not_found, and the other is still served.
 python supabase/test_sign_out_ends_one_session.py
+# A person's picture through the real Storage API (0213). Needs the stack up. It adds a throwaway
+# Operator through manage-people, who uploads, replaces, downloads and deletes their own
+# <id>/avatar. The seeded people read, list, sign, overwrite and delete none of it, the public URL
+# serves nothing, and a machine identity sees no row of the bucket. The bucket refuses SVG, GIF and
+# HTML, and holds its 512 KiB limit; it is read from the bucket, because an oversize upload resets
+# the connection and ends the shared gateway port-forward. Remove Access deletes the object and
+# clears avatar_path, and Restore Access brings the person back with no picture. The account is
+# deleted afterwards.
+python supabase/functions/manage-people/test_account_pictures_stack.py
 # Revoking an app ends its refresh token (0217). Needs the stack up, with GRAFANA_OAUTH_CLIENT_SECRET.
 # The seeded Operator signs in to Grafana's client as Grafana does (the code flow with PKCE, the
 # consent page's approval, the code exchanged with the secret) and the app's refresh token works.
@@ -100,6 +110,13 @@ python supabase/test_revoking_an_app_ends_its_refresh_token.py
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
 # leaves the row as it was. Then it revokes the token and waits for the i3X server to refuse it.
 python supabase/test_a_token_s_use_is_recorded.py
+# A second factor end to end (0216). Needs the stack up. The seeded Administrator prepares a
+# throwaway Auditor, which enrols a TOTP factor through the gateway; codes are computed from its
+# secret (RFC 6238). A wrong code is refused, a right one raises the session to aal2, and a new
+# sign-in is aal1 until its code. Phone and WebAuthn enrolment are refused. The Administrator's
+# Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
+# reset and a non-Administrator's are refused. The account's access is removed at the end.
+python supabase/test_a_person_can_enrol_a_second_factor.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
@@ -304,6 +321,14 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # material) are asserted here too, against the running plugin.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
+# A read-only broker account, through broker-subscriber as the Access Control page calls it. An
+# Administrator creates one and a Shopfloor Manager cannot. Connected with the password shown, it
+# receives a Sparkplug message and a UNS message, which the ingestion account publishes, and its own
+# publishes reach nobody. Deleting it drops the live session and refuses the next CONNECT. Each act
+# is one Audit Trail row naming the Administrator. Needs kubectl to the broker's pod.
+SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
+  python supabase/functions/broker-subscriber/test_broker_subscriber.py
+
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
@@ -320,6 +345,10 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
 # prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
+# And the credential service as it ships, over HTTP, against a stand-in `mosquitto_rr`: a read-only
+# account is made holding the subscriber role alone under a username it generates, the caller
+# names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
+# command.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
@@ -711,6 +740,30 @@ python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
 # Other Sessions. Every test rolls back.
 python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
+# A person can put a picture on their account (0213), and nobody else sees it. Only the owner sets
+# or clears person_profiles.avatar_path, through set_own_picture(), which takes no id; it names only
+# <their id>/avatar; every person role sets their own, and a machine identity, a removed person and
+# anon are refused. An Administrator naming the person, or clearing their name, keeps the picture.
+# A picture writes no rename row and display_names_for() leaves a row with no name out. Only
+# service_role forgets a picture, for a person whose access is removed. The avatars policies run
+# verbatim on a stand-in table: the owner reads, writes, replaces and deletes their own <id>/avatar
+# and nothing else, nobody else reaches it, and the self-check refuses a wider arm, a missing policy
+# and another bucket's policy that is not confined to it. Every test rolls back.
+python supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py
+# Each device shows its place in the Unified Namespace (0214). device_uns_paths answers every
+# device with a path below the root at the levels it occupies (a cell's device under area and
+# cell, an Area-Wide one under its area, a Site-Wide one under the site), under the group its
+# gateway last published under, or with the one reason the bridge skips it for, in the bridge's
+# order: no site name, a lane, unassigned, a cell in no area, a name a topic cannot carry. It runs
+# as its caller; a person and the ingestion principal read it, anon does not. Every test rolls back.
+python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py
+# An Administrator resets a person's second factor (0216). record_person_mfa_reset() with
+# p_check_only true or NULL decides and writes nothing; with false it writes one MFA_RESET row in
+# the person's lane naming the Administrator, with the person's email and how many factors went,
+# none included. Only an Administrator may call it. Your own account, an unknown person, a machine
+# identity and a missing or negative count are refused with no row; a removed person's factors may
+# be reset, and no session ends. Every test rolls back.
+python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor.py
 # Apps that sign people in are listed and revoked (0217). list_apps() shows an Administrator every
 # app not removed, Aber's four marked, with how many people allow each and never a secret;
 # app_approvals() shows who allows one, and list_my_app_approvals() a person their own alone.
@@ -720,6 +773,14 @@ python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
+# writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
+# lane of the security domain, naming the Administrator, with the account's name, description and
+# MQTT username, under one entity id. Only an Administrator may write either. A username outside
+# the subscriber scheme, and a name or description outside the credential service's rule, are
+# refused with no row. An Auditor reads the rows and a Shopfloor Manager does not. Every test
+# rolls back.
+python supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

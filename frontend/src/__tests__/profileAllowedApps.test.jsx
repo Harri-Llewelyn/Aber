@@ -66,9 +66,9 @@ describe('Apps you have allowed', () => {
   it('comes after Sessions, with its own heading, About tip and line', async () => {
     renderSecurity()
     const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
-    expect(headings).toEqual(['Sessions', 'Apps you have allowed'])
+    expect(headings).toEqual(['Sessions', 'Second factor', 'Apps you have allowed'])
     expect(screen.getByRole('button', { name: 'About apps you have allowed' })).toBeInTheDocument()
-    expect(document.querySelectorAll('.profile-section-note')[1]).toHaveTextContent(/what it can read about you/)
+    expect(document.querySelectorAll('.profile-section-note')[2]).toHaveTextContent(/what it can read about you/)
     await loaded()
   })
 

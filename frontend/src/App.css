@@ -125,6 +125,9 @@
   --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.35);
   --shadow-pin:     0 2px 8px rgba(0, 0, 0, 0.25);
   --scrim:          rgba(0, 0, 0, 0.6);
+  /* Behind a second factor's QR code in both themes: GoTrue's SVG leaves its quiet zone clear, and
+     a camera reads dark modules on a light ground. */
+  --qr-paper:       #ffffff;
   --transition:   all 0.2s ease;
   /* The z-index ladder. A layer sits above the ones listed before it; a new layer takes a rung,
      not a number picked to win.
@@ -496,6 +499,24 @@ html, body, #root {
    edge (`.sidebar-item.active::before`), with no fill. */
 .user-menu-button.active { color: var(--accent-text); font-weight: 600; }
 .user-menu-button.active .user-avatar { border-color: var(--accent); color: var(--accent); }
+
+/* The person's own picture fills the circle (AccountAvatar.jsx), which hides the icon's colour and
+   the open menu's fill. So the ring carries the state: 2px in the accent, the border and a 1px
+   shadow outside it, so nothing moves. Profile keeps the bar and the label's accent text. */
+.user-avatar-picture { overflow: hidden; }
+.user-avatar-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.user-menu-button:hover .user-avatar-picture,
+.user-menu-button-open .user-avatar-picture,
+.user-menu-button.active .user-avatar-picture { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* Initials from the display name take the icon's colours in every state. */
+.user-avatar-letters { font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.02em; }
+
+/* Profile > Account's Picture row: the mark at a size the person can check before Save. */
+.profile-picture { display: flex; align-items: center; gap: 12px; }
+.profile-picture .user-avatar { width: 64px; height: 64px; }
+.profile-picture .user-avatar-letters { font-size: 22px; }
+.profile-picture .user-avatar-icon svg { width: 26px; height: 26px; }
 
 /* Opens upward beside the rail, as the behaviour menu does: `fixed`, so the panel's overflow
    never clips it, and readable while the rail is collapsed. */
@@ -5825,6 +5846,31 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .session-where { color: var(--text-primary); }
 .session-badge { margin-left: 8px; }
 
+/* The Security tab's Second factor section, under Sessions: a rule above its heading, and its
+   table keeps its height, so the sessions list is what scrolls. */
+.second-factor-head { border-top: 1px solid var(--border); }
+.card-fill > .table-wrap.second-factor-table { flex-shrink: 0; overflow-y: visible; }
+
+/* Adding one: the QR code on its light ground, then the secret for typing in, in groups. */
+.second-factor-qr {
+  display: block;
+  width: 184px;
+  height: 184px;
+  margin: 4px auto 12px;
+  padding: 8px;
+  background: var(--qr-paper);
+  border-radius: var(--radius-xs);
+}
+.second-factor-secret {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  user-select: all;
+  color: var(--text-primary);
+}
+.second-factor-code { letter-spacing: 0.2em; }
+
 /* A person's sessions in their People drawer: the Security tab's table, narrowed to the drawer.
    Headers and cells wrap rather than scroll, and the outer columns line up with the fields. */
 .person-sessions-table th,
@@ -6114,12 +6160,13 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   padding: 0;
   font: inherit;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 2px;
 }
-.auth-link:hover { color: var(--accent-strong); }
+.auth-link:hover,
+.auth-link:focus-visible { text-decoration: underline; }
 .auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
 /* The sidebar layouts (the mode). `hover` is the rules above: a rigid gutter and a panel that paints over

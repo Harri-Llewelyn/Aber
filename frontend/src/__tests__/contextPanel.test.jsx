@@ -1060,7 +1060,7 @@ describe('Context panel layout invariants', () => {
     expect(fields).toHaveLength(1)
     expect([...fields[0].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual([
       'Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path',
-      'Serving Gateway', 'Location', 'Schema', 'Classification', 'Description'
+      'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Classification', 'Description'
     ])
 
     const section = panel().querySelector('.context-panel-body > .context-panel-facts > .model-section')

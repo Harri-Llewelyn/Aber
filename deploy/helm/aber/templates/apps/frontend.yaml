@@ -78,6 +78,13 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // Public by nature: every gateway on the site reads it from a topic. The value, not the helper
   // that fails on a blank one, so a release that runs no ingestion still renders.
   VITE_PRIMARY_HOST_ID: %q,
+  // ingestion.unsMqttEnabled, read as the ingestion pod reads UNS_MQTT_ENABLED, and false while no
+  // ingestion runs: the Devices, Areas and Cells pages then say the bridge is off instead of
+  // showing a topic nothing publishes to.
+  VITE_UNS_MQTT_ENABLED: %q,
+  // The bridge's root, from the helper the ingestion pod's UNS_MQTT_TOPIC_ROOT and the broker's
+  // grant are rendered from, so the topic a page shows is the one the bridge publishes.
+  VITE_UNS_MQTT_TOPIC_ROOT: %q,
 };
 `
   (include "aber.supabaseUrl" .)
@@ -95,7 +102,9 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   (include "aber.physicalBackupOn" .)
   (include "aber.platformBackupOn" .)
   (.Values.playback.enabled | toString)
-  (.Values.ingestion.primaryHostId | default "" | toString) -}}
+  (.Values.ingestion.primaryHostId | default "" | toString)
+  (ternary "true" "false" (and .Values.ingestion.enabled (has (.Values.ingestion.unsMqttEnabled | toString | trim | lower) (list "1" "true" "yes" "on"))))
+  (include "aber.unsTopicRoot" .) -}}
 {{- /*
 The Content-Security-Policy, as one nginx add_header line mounted over the image's empty include.
 It names what config.js hands the bundle: the API (Realtime over its WebSocket scheme) and the

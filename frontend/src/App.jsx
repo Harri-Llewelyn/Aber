@@ -19,6 +19,8 @@ import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
 import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
+import { SecondFactorScreen } from './components/auth/SecondFactorChallenge'
+import { useSecondFactorDue } from './hooks/useSecondFactorDue'
 import { HoldToReveal } from './components/common/HoldToReveal'
 import { ResetPasswordScreen } from './pages/ResetPassword'
 import { describeResetError } from './utils/authErrors'
@@ -26,6 +28,7 @@ import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
 import { useUserSettings } from './hooks/useUserSettings'
 import { useOwnDisplayName } from './hooks/useDisplayNames'
+import { useOwnPicture } from './hooks/useOwnPicture'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { useAlertFavicon } from './hooks/useAlertFavicon'
 import { Sidebar } from './components/common/Sidebar'
@@ -77,6 +80,7 @@ import { AlertPill } from './components/common/AlertPill'
 import { NotificationHistory } from './components/common/NotificationHistory'
 import { SegmentedControl } from './components/common/SegmentedControl'
 import { Tooltip } from './components/common/Tooltip'
+import { AccountAvatar } from './components/common/AccountAvatar'
 import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
@@ -312,8 +316,9 @@ const SIDEBAR_SEGMENT_LOOK = {
 const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, description: m.description, ...SIDEBAR_SEGMENT_LOOK[m.id] }))
 
 /**
- * The account control at the foot of the rail: the avatar, with the person's display name beside it
- * whenever the rail shows labels, or their address when they have no name. Its menu's head states
+ * The account control at the foot of the rail: the avatar (their own picture, else their initials,
+ * else the icon), with the person's display name beside it whenever the rail shows labels, or
+ * their address when they have no name. `pictureUrl` is theirs alone. Its menu's head states
  * the name, the address, the role and the version; the Light/Dark theme
  * switch and the Sidebar layout switch each have a section of their own under it; then come
  * Profile, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts an
@@ -321,7 +326,7 @@ const SIDEBAR_SEGMENTS = SIDEBAR_MODES.map(m => ({ id: m.id, description: m.desc
  */
 function UserMenu({
   persona, displayName, userRole, onSignOut, theme, onChangeTheme, sidebarMode, onChangeSidebarMode, onReportBug, onOpenProfile,
-  profileOpen = false,
+  profileOpen = false, pictureUrl = null,
 }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
@@ -365,7 +370,7 @@ function UserMenu({
           aria-haspopup="menu"
           aria-label={`Signed in as ${signedInAs} (${userRole}) — open account menu`}
         >
-          <span className="user-avatar" aria-hidden="true"><IconUser size={14} /></span>
+          <AccountAvatar pictureUrl={pictureUrl} displayName={displayName} />
           <span className="sidebar-item-label user-menu-email">{displayName ? <bdi>{displayName}</bdi> : persona}</span>
         </button>
       </Tooltip>
@@ -585,6 +590,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const persona = session?.user?.email || 'Administrator'
   // The person's own display name (0203), shown in the account menu and set on Profile > Account.
   const { displayName, saveDisplayName } = useOwnDisplayName(session?.user?.email ? session.user.id : null)
+  // Their own picture (0213), on the account control and Profile > Account, and nowhere else.
+  const { pictureUrl, savePicture, removePicture } = useOwnPicture(session?.user?.email ? session.user.id : null)
   // A person signs in with an email address and a password. A machine identity has neither.
   const passwordBlocked = session?.user?.email
     ? null
@@ -604,6 +611,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
       onReportBug={() => setShowBugReport(true)}
       onOpenProfile={() => handleNavClick('profile')}
       profileOpen={tab === 'profile'}
+      pictureUrl={pictureUrl}
     />
   )
 
@@ -780,6 +788,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 onChangePassword={() => setShowChangePassword(true)}
                 displayName={displayName}
                 onSaveDisplayName={saveDisplayName}
+                pictureUrl={pictureUrl}
+                onSavePicture={savePicture}
+                onRemovePicture={removePicture}
                 theme={theme}
                 onChangeTheme={setTheme}
                 sidebarMode={sidebarMode}
@@ -952,6 +963,13 @@ export default function App() {
   // A session that ended while the tab was out of sight ends here too when it is shown again.
   useSessionRecheck(!!session, endRejectedSession)
 
+  // A person with a second factor gives a code after their password, before anything opens:
+  // undefined while that is read. A prompt, not a gate: nothing on the server reads aal.
+  const secondFactor = useSecondFactorDue(session)
+  const secondFactorScreen = secondFactor === undefined
+    ? <div className="loading-wrap"><div className="spinner" /> Checking your sign-in…</div>
+    : secondFactor ? <SecondFactorScreen onSignOut={signOutOfThisBrowser} /> : null
+
   // OAuth consent, checked before the loading and auth branches. GoTrue redirects here from
   // /oauth/authorize because it ships no consent UI. The page reads the session itself and must not
   // fall through to AuthScreen, which would lose the authorization_id.
@@ -972,7 +990,8 @@ export default function App() {
       setRecovering(false)
       window.history.replaceState({}, '', '/site-map')
     }
-    if (session) return <ResetPasswordScreen email={session.user?.email} onDone={finish} />
+    // GoTrue changes the password of an account with a second factor only from an aal2 session.
+    if (session) return secondFactorScreen || <ResetPasswordScreen email={session.user?.email} onDone={finish} />
     // The link's token was rejected or already spent: no session arrived with it.
     return (
       <AuthScreen
@@ -991,6 +1010,8 @@ export default function App() {
       />
     )
   }
+
+  if (secondFactorScreen) return secondFactorScreen
 
   // The account menu's Sign Out is the /sign-out route's: this browser's sessions only.
   return <Dashboard

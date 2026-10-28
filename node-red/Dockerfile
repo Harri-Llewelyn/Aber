@@ -38,12 +38,12 @@ USER node-red
 # passport itself, passport-strategy, passport-http-bearer and oauth2orize already ship with
 # the image; only the OAuth2 strategy and the JWT verifier are missing.
 #
-# passport-oauth2, NOT passport-openidconnect. The latter always requests the `openid` scope and
-# requires an id_token in the token response -- GoTrue refuses to mint one ("HS256 is not
-# supported for ID token signing") because this whole stack is HS256 on a shared secret, and its
-# discovery document reports issuer "" with relative paths, which fails issuer validation too.
-# Identity comes from the nodered-userinfo edge function instead. Same arrangement as
-# grafana.ini's [auth.generic_oauth], and the reasoning is spelled out there.
+# passport-oauth2, NOT passport-openidconnect. The latter always requests the `openid` scope, and
+# under HS256 signing GoTrue refuses to mint the id_token ("HS256 is not supported for ID token
+# signing"); and it reads GoTrue's discovery document, which reports issuer "" with relative paths
+# under ES256 too, and fails issuer validation. settings.js asks for `openid` itself only with
+# ES256 signing, and the role comes from the nodered-userinfo edge function either way
+# (node-red/README.md).
 #
 # THE OVERRIDES lift five packages in Node-RED's own tree to the patches that fix their advisories,
 # each keyed to the major it replaces: axios; axios's follow-redirects (CVE-2026-111755 and

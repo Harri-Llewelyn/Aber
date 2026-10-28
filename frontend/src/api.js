@@ -13,12 +13,14 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
+import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
   modelContentType,
   modelStoragePath
 } from './utils/model3d';
+import { PICTURE_BUCKET, picturePath } from './utils/picture';
 
 // A device has two relationships to a cell: `devices.gateway_id -> gateways.cell_id` is the data
 // path, and `devices.cell_id` is an explicit location override (NULL means inherit). The effective
@@ -973,6 +975,56 @@ const apiMethods = {
   },
 
   /**
+   * The signed-in person's own picture (0213) as a blob URL for an <img>, or null for none. Their
+   * person_profiles row says whether there is one, so a person with none asks Storage nothing; a
+   * row naming an object that is missing or unreadable is no picture, not an error. Downloaded
+   * with the session, as loadAreaPlanUrl() downloads a plan, and never from the browser's cache:
+   * the name stays the same when the picture changes. The caller revokes the URL.
+   */
+  ownPictureUrl: async (userId) => {
+    const { data, error } = await supabase
+      .from('person_profiles')
+      .select('avatar_path')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read your picture');
+    if (!data?.avatar_path) return null;
+    const { data: blob, error: downloadError } = await supabase.storage
+      .from(PICTURE_BUCKET)
+      .download(data.avatar_path, {}, { cache: 'no-store' });
+    if (downloadError || !blob || typeof URL.createObjectURL !== 'function') return null;
+    return URL.createObjectURL(blob);
+  },
+
+  /**
+   * Make `blob` (from shrinkPicture()) the person's own picture, replacing any they had: the
+   * object first, then set_own_picture() records it. Resolves to a blob URL of what was uploaded.
+   * The sentence of a refusal is the error.
+   */
+  saveOwnPicture: async (userId, blob) => {
+    const { error: uploadError } = await supabase.storage
+      .from(PICTURE_BUCKET)
+      .upload(picturePath(userId), blob, { upsert: true, contentType: blob.type });
+    if (uploadError) {
+      if (/row-level security|Unauthorized/i.test(uploadError.message || '')) {
+        throw new Error('Your account cannot have a picture: it holds no role.');
+      }
+      throw new Error(uploadError.message || 'Your picture was not uploaded.');
+    }
+    const { error } = await supabase.rpc('set_own_picture', { p_present: true });
+    if (error) throw new Error(error.message || 'Your picture was uploaded but not recorded. Select Save again.');
+    return URL.createObjectURL(blob);
+  },
+
+  /** Delete the person's own picture, then record that they have none. */
+  removeOwnPicture: async (userId) => {
+    const { error: removeError } = await supabase.storage.from(PICTURE_BUCKET).remove([picturePath(userId)]);
+    if (removeError) throw new Error(removeError.message || 'Your picture was not removed.');
+    const { error } = await supabase.rpc('set_own_picture', { p_present: false });
+    if (error) throw new Error(error.message || 'Your picture was deleted but is still recorded. Select Remove again.');
+  },
+
+  /**
    * The signed-in person's own sessions, in every browser and service: `{ id, service_name,
    * user_agent, created_at, last_active_at, not_after, is_current }` from `list_my_sessions()`
    * (0206). An account with no role is refused, with the database's sentence.
@@ -1003,6 +1055,75 @@ const apiMethods = {
     if (error) throw new Error(error.message || 'Could not sign out of your other sessions');
     return typeof data === 'number' ? data : 0;
   },
+
+  /*
+   * Second factors: the signed-in person's own, through GoTrue's factor API (auth-js
+   * `supabase.auth.mfa`), and an Administrator's Reset MFA of someone else's, through manage-people.
+   * GoTrue's refusals are thrown as a sentence a person can act on, with GoTrue's `code` kept.
+   */
+
+  /** Every factor the person holds, verified or not: `{ id, friendly_name, factor_type, status, created_at }`. */
+  listMyFactors: async () => {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (error) throw factorError(error, 'Could not list your second factors');
+    return data?.all || [];
+  },
+
+  /**
+   * Start adding an authenticator app named `friendlyName`. An enrolment left unconfirmed earlier
+   * is removed first: GoTrue keeps it, and refuses its name again. Resolves to `{ id,
+   * friendly_name, qr_code, secret, uri }`; the factor is unverified until verifyFactorCode().
+   */
+  startFactorEnrolment: async (friendlyName) => {
+    const { data: listed, error: listError } = await supabase.auth.mfa.listFactors();
+    if (listError) throw factorError(listError, 'Could not start adding a second factor');
+    for (const stale of (listed?.all || []).filter(f => f.status !== 'verified')) {
+      await supabase.auth.mfa.unenroll({ factorId: stale.id });
+    }
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName });
+    if (error) throw factorError(error, 'Could not start adding a second factor');
+    return { id: data.id, friendly_name: data.friendly_name, ...data.totp };
+  },
+
+  /**
+   * A code from the factor's app, checked by GoTrue: it confirms a new factor, and raises this
+   * session to aal2. GoTrue then ends the person's other sessions that are still aal1.
+   */
+  verifyFactorCode: async (factorId, code) => {
+    const { data, error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: normaliseCode(code) });
+    if (error) throw factorError(error, 'Could not check the code');
+    return data;
+  },
+
+  /** An enrolment abandoned before its code: removed, so it neither lingers nor holds its name. */
+  cancelFactorEnrolment: async (factorId) => {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) console.warn('[mfa] could not remove an unconfirmed factor:', error.message);
+  },
+
+  /**
+   * Remove one of your factors. GoTrue needs an aal2 session for a verified one, and lowers the
+   * sessions that used it to aal1; the token is renewed at once so the dashboard sees that too.
+   */
+  removeFactor: async (factorId) => {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) throw factorError(error, 'Could not remove the second factor');
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) console.warn('[mfa] could not renew the session after removing a factor:', refreshError.message);
+  },
+
+  /** getAuthenticatorAssuranceLevel()'s answer: `{ currentLevel, nextLevel, currentAuthenticationMethods }`. */
+  assuranceLevel: async () => {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error) throw factorError(error, 'Could not read how this session signed in');
+    return data;
+  },
+
+  /**
+   * Reset MFA: delete every second factor someone else holds, through manage-people, recorded in
+   * the Audit Trail. Their sessions stay. Resolves to `{ user_id, factors_removed }`.
+   */
+  resetPersonMfa: (userId) => api.managePeople({ action: 'reset-mfa', user_id: userId }),
 
   /**
    * Give a person one of the four roles. The database refuses your own role, a person whose access
@@ -1402,6 +1523,64 @@ const apiMethods = {
 
     if (!res.ok) {
       throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
+   * Create a read-only broker account, holding the `subscriber` role alone, and get its password
+   * back once. Administrator only, through broker-subscriber; the username is generated there, and
+   * `name` and `description` are what the account is for. Nothing keeps the password.
+   *
+   * @returns {{ mqtt_username: string, password: string, name: string, description: string,
+   *             role: 'subscriber', audit_recorded: boolean }}
+   */
+  createBrokerSubscriber: async ({ name, description }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'create', name, description })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not create the account (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
+   * Delete a read-only broker account, which drops its live sessions. Administrator only, through
+   * broker-subscriber, which refuses any username outside the subscriber scheme.
+   *
+   * @returns {{ mqtt_username: string, deleted: true, audit_recorded: boolean }}
+   */
+  deleteBrokerSubscriber: async (username) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'delete', username })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not delete the account (${res.status})`, body)), res.status, body);
     }
 
     return body;
@@ -2278,6 +2457,16 @@ const apiMethods = {
       // unaffected by location overrides. The locations only decorate each device with where it
       // resolved to, so the page can show that a device it serves sits in another cell.
       return (data || []).map(g => mapGatewayRow(g, locations));
+    }
+
+    // Each device's place in the Unified Namespace (0214): its path below the root, or why it has
+    // none. The view runs as the reader, so it lists the devices they may read.
+    if (path.startsWith('/api/v1/uns-paths')) {
+      const { data, error } = await supabase
+        .from('device_uns_paths')
+        .select('device_id, area_id, cell_id, enterprise, uns_path, skip_reason');
+      if (error) throw error;
+      return data || [];
     }
 
     /**

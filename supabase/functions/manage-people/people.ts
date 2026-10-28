@@ -8,13 +8,16 @@
  * row. Removing, restoring, setting a password and changing an address call the database FIRST, so
  * its rules (not your own account, not the last Administrator who can sign in) are decided before
  * GoTrue changes anything. Removing bans the account and never deletes it: the Audit Trail names
- * the person through it.
+ * the person through it. It does delete the picture the person put on their account.
  *
  * A new account without a mail relay, and every new password, is minted here and returned once.
  * Nothing stores or logs it; GoTrue keeps only its hash.
  *
  * `add` takes an optional display name. It is checked before GoTrue makes the account, so a bad name
  * refuses the whole add, and set with set_display_name() in the caller's session once the role is.
+ *
+ * `reset-mfa` deletes a person's second factors and nothing else, decided and recorded in the
+ * database as a new password is.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -32,6 +35,10 @@ export const ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor
 
 /** About a hundred years. GoTrue has no permanent ban; `none` lifts one. */
 export const BAN_DURATION = "876000h";
+
+/** A person's picture: one object each, read by its owner alone (storage-policies.sql, 0213). */
+export const PICTURE_BUCKET = "avatars";
+export const picturePath = (userId: string) => `${userId}/avatar`;
 
 const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
 
@@ -222,6 +229,24 @@ async function removeAccess(req: Request, body: Record<string, unknown>, callerI
   const { error } = await caller.rpc("remove_person_access", { p_user_id: userId });
   if (error) return dbRefusal(req, error, "Access was not removed");
 
+  // The picture goes with the access: nobody needs it, and it is a photo of a person. The object,
+  // as service_role, then the column, before the ban: until the ban is made the person reads as
+  // Sign-in still open, which offers Remove Access again, and a removal already made answers false
+  // above, so selecting it again finishes every step.
+  const { error: pictureError } = await admin.storage.from(PICTURE_BUCKET).remove([picturePath(userId)]);
+  const { error: forgetError } = pictureError
+    ? { error: null }
+    : await admin.rpc("forget_person_picture", { p_user_id: userId });
+  if (pictureError || forgetError) {
+    return serverError(req, FN, pictureError ?? forgetError, {
+      status: pictureError ? 502 : 500,
+      error: "Sign-in is not blocked yet, and their picture is not deleted. Their role is removed, so " +
+        "they can do nothing that needs one, but the picture on their account could not be deleted. " +
+        "Select Remove Access again.",
+      context: `deleting the picture of ${userId}`,
+    });
+  }
+
   const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: BAN_DURATION });
   if (banError) {
     return serverError(req, FN, banError, {
@@ -283,6 +308,61 @@ async function setPassword(req: Request, body: Record<string, unknown>, callerId
     });
   }
   return json(200, { user_id: userId, password });
+}
+
+/**
+ * Reset MFA: every second factor a person holds is deleted through GoTrue's admin API, for someone
+ * who has lost their authenticator. record_person_mfa_reset() decides first with p_check_only, so a
+ * refusal changes nothing, and after GoTrue writes MFA_RESET with how many went. Their sessions are
+ * left alone (GoTrue lowers those that used a factor to aal1). A delete that fails part-way records
+ * the ones that went and says to select Reset MFA again.
+ */
+async function resetMfa(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+  const userId = targetOf(body, callerId,
+    "You cannot reset your own second factor here. Remove it on your Profile page's Security tab.");
+  if (userId instanceof Response) return userId;
+
+  const { error } = await caller.rpc("record_person_mfa_reset", { p_user_id: userId, p_check_only: true });
+  if (error) return dbRefusal(req, error, "MFA was not reset");
+
+  const { data: listed, error: listError } = await admin.auth.admin.mfa.listFactors({ userId });
+  if (listError) return authRefusal(req, listError, "MFA was not reset");
+  const factors = listed?.factors ?? [];
+
+  let removed = 0;
+  let deleteError: AuthError | null = null;
+  for (const factor of factors) {
+    const { error: e } = await admin.auth.admin.mfa.deleteFactor({ userId, id: factor.id });
+    // Gone already, say by the person's own Remove: nothing of theirs is left to delete.
+    if (e && e.status !== 404) {
+      deleteError = e;
+      break;
+    }
+    if (!e) removed++;
+  }
+  if (deleteError && removed === 0) return authRefusal(req, deleteError, "MFA was not reset");
+
+  const { error: recordError } = await caller.rpc("record_person_mfa_reset", {
+    p_user_id: userId,
+    p_check_only: false,
+    p_factors_removed: removed,
+  });
+  if (recordError) {
+    return serverError(req, FN, recordError, {
+      error: `${removed === 1 ? "One second factor was" : `${removed} second factors were`} removed, but the ` +
+        "Audit Trail did not record it. The sign-in service's own log has the removal.",
+      context: `recording a second-factor reset for ${userId}`,
+    });
+  }
+  if (deleteError) {
+    return serverError(req, FN, deleteError, {
+      status: 502,
+      error: `${removed} of their ${factors.length} second factors were removed, and the sign-in service ` +
+        "failed on the next. Select Reset MFA again to remove the rest.",
+      context: `deleting a second factor of ${userId}`,
+    });
+  }
+  return json(200, { user_id: userId, factors_removed: removed });
 }
 
 /**
@@ -386,12 +466,14 @@ export async function handler(req: Request): Promise<Response> {
         return await restoreAccess(req, body, user.id, caller, admin);
       case "set-password":
         return await setPassword(req, body, user.id, caller, admin);
+      case "reset-mfa":
+        return await resetMfa(req, body, user.id, caller, admin);
       case "change-email":
         return await changeEmail(req, body, user.id, caller, admin);
       default:
         return json(400, {
           error: "Malformed request",
-          details: "`action` must be add, remove, restore, set-password or change-email.",
+          details: "`action` must be add, remove, restore, set-password, reset-mfa or change-email.",
         });
     }
   } catch (err) {

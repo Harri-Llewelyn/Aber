@@ -1303,6 +1303,71 @@ address for someone else. So the chart now sets `GITEA__service__ENABLE_REVERSE_
 
 There is nothing to set. It is not a chart value.
 
+### From 1.7.0, sign tokens with ES256
+
+Aber 1.7.0 can sign every token with an ES256 key pair instead of the shared HS256 secret. With
+HS256, every service that checks a token holds the one secret, and could sign a token too. With
+ES256, only the sign-in service and the token mint hold the private key that signs. The others
+check tokens with the public key, which signs nothing.
+
+A site set up with `npm run setup` from 1.7.0 already uses ES256. A site set up before keeps HS256
+until it turns ES256 on, and `helm upgrade` prints a warning saying so.
+
+**HS256 signing is deprecated.** Aber 1.8.0 needs the key pair and refuses HS256 tokens. Turn ES256
+on before you upgrade to 1.8.0.
+
+Run these three steps on a machine whose kube context reaches the release:
+
+1. Add the key pair. It is made around the site's own signing secret.
+
+   ```bash
+   npm run keys:rotate -- --signing-keys
+   ```
+
+   It writes `secrets.jwtKeys` and `secrets.jwtJwks` into `deploy/helm/aber/values-local.yaml`, or
+   into the file `--values=<file>` names. With `secrets.existingSecret`, add `--apply` to write
+   `SUPABASE_JWT_KEYS` and `SUPABASE_JWT_JWKS` into the release Secret. Or copy the two values it
+   prints into your secret store. Nothing reads them yet.
+
+2. Turn ES256 on in `site.yaml`, then run `helm upgrade` with the same values:
+
+   ```yaml
+   supabaseAuth:
+     es256Signing: true
+   ```
+
+   Every service restarts once, the platform database too. People stay signed in.
+
+3. Re-sign the keys the gateway and the workers hold:
+
+   ```bash
+   npm run keys:rotate -- --apply --anon-and-service-role
+   ```
+
+   It re-signs the anon and service-role keys and the three service keys, and restarts the gateway,
+   Storage, ingestion and playback. With `secrets.existingSecret`, run it without `--apply`. Put the
+   five values it prints in your secret store, then restart those four.
+
+Tokens signed with HS256 before the switch still work through 1.7. Before you upgrade to 1.8.0,
+issue new ones:
+
+- each machine identity's token, from **Access Control** → **Issue Token**;
+- the Read-only API client's token, from `scripts/mint-api-token.mjs`.
+
+Each lasts up to 90 days. `npm run keys:check` lists the keys that are still HS256.
+
+What else changes when ES256 is on:
+
+- **Grafana and the Node-RED editor sign in with OpenID Connect.** They ask for one more scope,
+  `openid`, so each person may see the consent page once more.
+- **Studio no longer shows the signing secret** in its settings. It never needed it.
+- **Node-RED's webhook secret does not change.** `secrets.noderedWebhookJwtSecret` signs only the
+  database's messages to Node-RED, and stays HS256
+  ([node-red/README.md](../../node-red/README.md)).
+
+The reasons, and how to rotate the key pair later, are in
+[supabase/README.md](../../supabase/README.md#signing-with-es256).
+
 ---
 
 ## Backups

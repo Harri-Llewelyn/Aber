@@ -13,6 +13,10 @@ import { supabase } from '../../lib/supabaseClient'
 import { SUPABASE_GATEWAY_KEY } from '../../config'
 import { Tooltip } from '../common/Tooltip'
 import { SessionsSection } from './SessionsSection'
+import { SecondFactorSection } from './SecondFactorSection'
+import { AccountAvatar } from '../common/AccountAvatar'
+import { IconUpload, IconTrash } from '../common/Icons'
+import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
 import { AllowedAppsSection } from './AllowedAppsSection'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
@@ -226,6 +230,107 @@ function DisplayNameRow({ displayName, onSave, isPerson }) {
   )
 }
 
+/**
+ * The person's own picture (0213): on their account control and here, and seen by nobody else.
+ * Choose Picture shrinks the file to the 256x256 square that will be uploaded and shows it; Save
+ * uploads it and Discard drops it. Remove deletes the saved one. `pictureUrl` is the saved one's
+ * blob URL, or null. A machine identity has none.
+ */
+function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
+  // The shrunk picture and its preview URL until Save or Discard, or null.
+  const [draft, setDraft] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const fileInput = useRef(null)
+  useEffect(() => () => { if (draft) URL.revokeObjectURL(draft.url) }, [draft])
+
+  const choose = async (file) => {
+    if (fileInput.current) fileInput.current.value = ''
+    if (!file) return
+    const problem = pictureFileProblem(file)
+    setError(problem)
+    if (problem) return
+    setBusy(true)
+    try {
+      const blob = await shrinkPicture(file)
+      setDraft({ blob, url: URL.createObjectURL(blob) })
+    } catch (err) {
+      setError(err.message || 'That picture could not be read. Choose another.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const act = async (work, failure) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await work()
+      setDraft(null)
+    } catch (err) {
+      setError(err.message || failure)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!isPerson) {
+    return (
+      <ProfileRow
+        id="picture"
+        label="Picture"
+        description="The picture on a person's own account control."
+        value="None: a machine identity has no picture"
+      />
+    )
+  }
+  return (
+    <ProfileRow
+      id="picture"
+      label="Picture"
+      description="Shown on your account control at the foot of the sidebar, and here. Nobody else sees it. It is cropped to a square and shrunk before it is uploaded."
+      value={(
+        <div className="profile-picture">
+          <AccountAvatar pictureUrl={draft?.url ?? pictureUrl} displayName={displayName} />
+          <div id="profile-picture-detail" className="setting-bounds profile-detail">
+            {draft ? 'Not saved yet: this is how it will look.' : 'PNG, JPEG or WebP, up to 10 MB.'}
+          </div>
+          <input
+            id="profile-picture"
+            ref={fileInput}
+            type="file"
+            accept={PICTURE_TYPES.join(',')}
+            style={{ display: 'none' }}
+            onChange={e => choose(e.target.files?.[0])}
+            aria-label="Picture file"
+          />
+        </div>
+      )}
+      actions={(<>
+        {draft ? (
+          <SaveDiscard dirty disabled={busy}
+            onSave={() => act(() => onSave?.(draft.blob), 'Your picture was not saved.')}
+            onDiscard={() => { setDraft(null); setError(null) }} />
+        ) : (
+          <div className="setting-actions">
+            <button type="button" className="btn btn-ghost btn-sm" disabled={busy}
+              onClick={() => fileInput.current?.click()} aria-describedby="profile-picture-detail">
+              <IconUpload size={13} /> Choose Picture
+            </button>
+            {pictureUrl && (
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busy}
+                onClick={() => act(() => onRemove?.(), 'Your picture was not removed.')}>
+                <IconTrash size={13} /> Remove
+              </button>
+            )}
+          </div>
+        )}
+        {error && <div className="setting-error" role="status">{error}</div>}
+      </>)}
+    />
+  )
+}
+
 /** The four columns, with their header row even for a tab of one row. */
 function ProfileTable({ children }) {
   return (
@@ -257,11 +362,14 @@ function ProfileTable({ children }) {
  * `userRole` is undefined while it is still being read, and null for an account with no role.
  * `displayName` is the person's own (undefined while read, null for none); `onSaveDisplayName`
  * saves it and rejects with the database's sentence.
+ * `pictureUrl` is their own picture's blob URL, or null; `onSavePicture(blob)` and
+ * `onRemovePicture()` change it and reject with the sentence to show.
  * `showToast` is App's; the Security tab says through it what was ended.
  * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
   email, userRole, passwordBlocked = null, onChangePassword, displayName, onSaveDisplayName,
+  pictureUrl = null, onSavePicture, onRemovePicture,
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
   singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account', showToast,
 }) {
@@ -311,6 +419,8 @@ export function ProfileTab({
                 actions={email ? <span className="setting-fixed">{whoChangesThis}</span> : undefined}
               />
               <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
+              <PictureRow pictureUrl={pictureUrl} displayName={displayName} onSave={onSavePicture}
+                onRemove={onRemovePicture} isPerson={!!email} />
               <ProfileRow
                 id="role"
                 label="Role"
@@ -436,6 +546,7 @@ export function ProfileTab({
 
           {/* A section per subject, each with its own heading: Sessions is the first. */}
           {section === 'security' && <SessionsSection isPerson={!!email} showToast={showToast} />}
+          {section === 'security' && <SecondFactorSection isPerson={!!email} showToast={showToast} />}
           {section === 'security' && <AllowedAppsSection isPerson={!!email} showToast={showToast} />}
         </div>
       </div>
