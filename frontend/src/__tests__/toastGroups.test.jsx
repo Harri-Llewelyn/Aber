@@ -213,10 +213,7 @@ describe('a Grafana alert and the bell', () => {
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
     vi.spyOn(supabase, 'from').mockImplementation(() => ({
-      select: () => ({
-        order: () => Promise.resolve({ data: current, error: null }),
-        in: () => Promise.resolve({ data: [], error: null })
-      })
+      select: () => ({ order: () => Promise.resolve({ data: current, error: null }) })
     }))
     vi.spyOn(supabase, 'channel').mockReturnValue({ on() { return this }, subscribe() { return this } })
     vi.spyOn(supabase, 'removeChannel').mockImplementation(() => {})

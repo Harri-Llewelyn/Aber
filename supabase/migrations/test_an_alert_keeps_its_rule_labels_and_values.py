@@ -8,15 +8,18 @@ Requires a migrated Supabase database (54322 by default; `npm run test:db` start
 What is held here: platform_alerts carries rule_uid (text), labels and values (jsonb), all three
 nullable with no default, so a row written before 0220 reads on with NULLs. The webhook's upsert on
 (fingerprint, starts_at) writes them and a resolve updates the same occurrence. A signed-in reader
-reads them under the table's RLS and writes none; anon reads none. platform_alerts_active keeps
-0001's column list, since 0001's replay cannot drop a column a later file adds.
+reads them under the table's RLS and writes none; anon reads none. platform_alerts_active returns
+them. 0001 states the view, and its replay over the view as 1.7.0 left it drops and recreates it
+once, after which a replay drops nothing.
 
 EVERY TEST ROLLS BACK. platform_alerts is in the realtime publication: a committed row reaches every
 connected dashboard as a firing alert.
 """
 import json
 import os
+import re
 import unittest
+from pathlib import Path
 
 import psycopg2
 import psycopg2.errors
@@ -39,11 +42,14 @@ LABELS = {
 }
 VALUES = {"A": 74.5, "B": 74.5, "C": 1}
 
-# The view's columns as 0001 states them.
-ACTIVE_VIEW_COLUMNS = [
+BASELINE = Path(__file__).resolve().parent / "0001_baseline_schema.sql"
+
+# The view's columns as 1.7.0 left them, and as 0001 states them now.
+VIEW_COLUMNS_1_7 = [
     "id", "fingerprint", "entity_type", "entity_id", "sparkplug_id", "alert_name", "severity",
     "status", "summary", "starts_at", "ends_at", "recorded_at",
 ]
+ACTIVE_VIEW_COLUMNS = VIEW_COLUMNS_1_7 + ["rule_uid", "labels", "values"]
 
 # What the webhook upserts, as PostgREST's merge-duplicates writes it: every column it sends is
 # updated on a conflict with the occurrence key.
@@ -235,24 +241,80 @@ class WhoReadsThem(AlertColumnsBase):
 
 
 class TheActiveView(AlertColumnsBase):
-    def test_it_keeps_the_columns_0001_states(self):
-        # 0001 replays first on every boot. Its CREATE OR REPLACE VIEW cannot drop a column, so a
-        # later file that widened the view would fail the second boot; the dashboard reads rule_uid
-        # from the table by id instead.
+    def view(self):
+        """(oid, column names) of platform_alerts_active as it stands."""
         self.cur.execute(
-            "SELECT attname FROM pg_attribute WHERE attrelid = 'public.platform_alerts_active'::regclass"
-            "   AND attnum > 0 AND NOT attisdropped ORDER BY attnum;"
+            "SELECT 'public.platform_alerts_active'::regclass::oid,"
+            "       array_agg(attname::text ORDER BY attnum) FROM pg_attribute"
+            " WHERE attrelid = 'public.platform_alerts_active'::regclass AND attnum > 0 AND NOT attisdropped;"
         )
-        self.assertEqual([r[0] for r in self.cur.fetchall()], ACTIVE_VIEW_COLUMNS)
+        return self.cur.fetchone()
 
-    def test_a_firing_row_s_uid_is_read_from_the_table_by_its_id(self):
+    def replay_0001_view(self):
+        """0001's guard, its CREATE OR REPLACE VIEW and its grant to authenticated, as a boot runs them."""
+        sql = BASELINE.read_text(encoding="utf-8")
+        start = sql.index("DO $shape$", sql.index("-- platform_alerts_active :: VIEW"))
+        end = sql.index("WHERE (status = 'firing'::text);", start) + len("WHERE (status = 'firing'::text);")
+        self.cur.execute(sql[start:end])
+        grant = re.search(r"^GRANT SELECT ON TABLE public\.platform_alerts_active TO authenticated;$", sql, re.M)
+        self.cur.execute(grant.group(0))
+
+    def test_it_returns_the_three_columns(self):
+        self.assertEqual(self.view()[1], ACTIVE_VIEW_COLUMNS)
         row_id = self.upsert()
         rows = self.as_reader(
             OPERATOR_ID,
-            "SELECT a.id, t.rule_uid FROM public.platform_alerts_active a"
-            "  JOIN public.platform_alerts t ON t.id = a.id WHERE a.fingerprint = 'fp-0220';",
+            'SELECT id, rule_uid, labels, "values" FROM public.platform_alerts_active WHERE fingerprint = %s;',
+            ("fp-0220",),
         )
-        self.assertEqual(rows, [(row_id, UID)])
+        self.assertEqual(rows, [(row_id, UID, LABELS, VALUES)])
+
+    def test_a_replay_of_0001_drops_nothing_once_the_view_matches(self):
+        before = self.view()
+        self.replay_0001_view()
+        self.assertEqual(self.view(), before)
+
+    def test_0001_replaces_the_view_1_7_left_once_keeping_its_rows_and_rls(self):
+        # The view as 1.7.0 left it: twelve columns. 0001 drops it once and creates the new list.
+        row_id = self.upsert()
+        old_columns = ", ".join(VIEW_COLUMNS_1_7)
+        self.cur.execute(
+            "DROP VIEW public.platform_alerts_active;"
+            "CREATE VIEW public.platform_alerts_active WITH (security_invoker='true') AS"
+            f" SELECT {old_columns} FROM (SELECT DISTINCT ON (a.fingerprint) a.* FROM public.platform_alerts a"
+            "  ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest WHERE status = 'firing';"
+        )
+        self.assertEqual(self.view()[1], VIEW_COLUMNS_1_7)
+
+        self.replay_0001_view()
+        replaced = self.view()
+        self.assertEqual(replaced[1], ACTIVE_VIEW_COLUMNS)
+        self.cur.execute(
+            "SELECT 'security_invoker=true' = ANY (reloptions) FROM pg_class"
+            " WHERE oid = 'public.platform_alerts_active'::regclass;"
+        )
+        self.assertTrue(self.cur.fetchone()[0])
+        self.assertEqual(
+            self.as_reader(OPERATOR_ID, "SELECT id, rule_uid FROM public.platform_alerts_active WHERE fingerprint = 'fp-0220';"),
+            [(row_id, UID)],
+        )
+
+        self.replay_0001_view()
+        self.assertEqual(self.view(), replaced)
+
+    def test_nothing_depends_on_the_view(self):
+        # 0001 drops it without CASCADE. A view or rule built on it would make that drop fail the boot.
+        self.cur.execute(
+            "SELECT count(*) FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid"
+            " WHERE d.refobjid = 'public.platform_alerts_active'::regclass"
+            "   AND r.ev_class <> 'public.platform_alerts_active'::regclass;"
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
+        self.cur.execute(
+            "SELECT count(*) FROM pg_depend WHERE refobjid = 'public.platform_alerts_active'::regclass"
+            "   AND classid = 'pg_proc'::regclass;"
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
 
 
 if __name__ == "__main__":

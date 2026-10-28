@@ -784,8 +784,8 @@ python supabase/migrations/test_an_administrator_s_read_only_broker_account_is_r
 # An alert keeps its rule's uid, labels and values (0220). platform_alerts carries rule_uid, labels
 # and values, nullable, so a row written before reads on with NULLs. The webhook's upsert on
 # (fingerprint, starts_at) writes them and a resolve updates the same occurrence. A signed-in reader
-# reads them under the table's RLS and writes none; anon reads none. platform_alerts_active keeps
-# the columns 0001 states. Every test rolls back.
+# reads them under the table's RLS and writes none; anon reads none. platform_alerts_active returns
+# them: 0001's replay replaces the view 1.7.0 left once, then drops nothing. Every test rolls back.
 python supabase/migrations/test_an_alert_keeps_its_rule_labels_and_values.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate

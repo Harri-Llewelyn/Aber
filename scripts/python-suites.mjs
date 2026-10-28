@@ -1046,8 +1046,8 @@ export const SUITES = {
       '0220 -- that platform_alerts keeps the uid of the rule that raised each alert, its labels and ' +
       'its values, nullable so a row from before reads on; that the webhook\'s upsert on the ' +
       'occurrence key writes them and a resolve updates the same row; that a signed-in reader ' +
-      'reads them under the table\'s RLS and writes none; and that platform_alerts_active keeps the ' +
-      "columns 0001 states, since 0001's replay cannot drop one a later file adds.",
+      'reads them under the table\'s RLS and writes none; and that platform_alerts_active returns ' +
+      "them, 0001's replay replacing the view 1.7.0 left once and then dropping nothing.",
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],

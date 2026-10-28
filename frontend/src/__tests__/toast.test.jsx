@@ -385,19 +385,12 @@ describe('a firing platform alert', () => {
     summary: 'The last backup is 3 days old; run SELECT 1 FROM backups', starts_at: '2026-10-01T00:00:00Z'
   }
 
-  // `ruleUids` is what the table holds for each row id, or the error its read fails with; the view
-  // carries no rule_uid.
-  async function mountAlerts(rows, ruleUids = {}) {
+  async function mountAlerts(rows) {
     let current = []
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
-    const uidsFor = (ids) => (ruleUids instanceof Error
-      ? { data: null, error: { message: ruleUids.message } }
-      : { data: ids.map((id) => ({ id, rule_uid: ruleUids[id] ?? null })), error: null })
-    vi.spyOn(supabase, 'from').mockImplementation((table) => ({
-      select: () => (table === 'platform_alerts'
-        ? { in: (_, ids) => Promise.resolve(uidsFor(ids)) }
-        : { order: () => Promise.resolve({ data: current, error: null }) })
+    vi.spyOn(supabase, 'from').mockImplementation(() => ({
+      select: () => ({ order: () => Promise.resolve({ data: current, error: null }) })
     }))
     vi.spyOn(supabase, 'channel').mockReturnValue({ on() { return this }, subscribe() { return this } })
     vi.spyOn(supabase, 'removeChannel').mockImplementation(() => {})
@@ -473,8 +466,8 @@ describe('a firing platform alert', () => {
     expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row))
   })
 
-  it('links straight to the rule by the uid the table holds, firing and resolved', async () => {
-    const firing = await mountAlerts([{ ...row, id: 'a-1' }], { 'a-1': 'aber-backup-stale' })
+  it('links straight to the rule by its uid, firing and resolved', async () => {
+    const firing = await mountAlerts([{ ...row, rule_uid: 'aber-backup-stale' }])
     const ruleView = 'http://localhost:3002/alerting/grafana/aber-backup-stale/view'
     expect(screen.getByRole('link', { name: /Historian Backup Stale/ })).toHaveAttribute('href', ruleView)
     await firing([])
@@ -482,18 +475,9 @@ describe('a firing platform alert', () => {
   })
 
   it('searches by the rule name for a row written before the uid was kept', async () => {
-    await mountAlerts([{ ...row, id: 'a-1' }], { 'a-1': null })
+    await mountAlerts([{ ...row, rule_uid: null }])
     expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
       .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
-  })
-
-  it('still toasts when the uids cannot be read, linking by the rule name', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    await mountAlerts([{ ...row, id: 'a-1' }], new Error('permission denied for table platform_alerts'))
-    expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
-      .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
-    expect(warn).toHaveBeenCalledWith('[alerts] rule uids not read:', 'permission denied for table platform_alerts')
-    warn.mockRestore()
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

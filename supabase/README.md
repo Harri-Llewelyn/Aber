@@ -2312,7 +2312,8 @@ refusals and who may read them.
 `grafana-alert-webhook` used to keep an alert's title as `alert_name` and Grafana's English summary,
 and drop the rest. Nothing could key on the rule: a renamed rule, or two titles sharing words,
 sent the dashboard's link to the wrong list, and alert routes or acknowledgements would have had no
-stable name for what fired. `0220` adds three nullable columns to `platform_alerts`.
+stable name for what fired. `platform_alerts` now has three nullable columns, and
+`platform_alerts_active` returns them.
 
 - **`rule_uid text`**: the uid of the rule that raised the alert. Grafana names the rule in each
   alert's `generatorURL`, `<root URL>/alerting/grafana/<uid>/view`; the webhook takes the uid from
@@ -2334,17 +2335,24 @@ produces, and the fingerprint is half of the occurrence key.
 `grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
 has a uid, and otherwise Grafana's alert list searched by the rule's name, as before.
 
-**`platform_alerts_active` keeps its columns.** `0001` states the view with a column list, and
-`0001` replays first on every boot: once a later file had added a column, its
-`CREATE OR REPLACE VIEW` would try to drop it and fail the boot (`cannot drop columns from view`).
-The dashboard reads the view, then `rule_uid` from the table for those ids, under the same RLS.
-The next baseline squash can fold the columns into the view.
+**The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
+first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried
+to drop the three columns on the next boot and failed it (`cannot drop columns from view`). So
+`0001` itself declares the columns, in the `CREATE TABLE` and as `ADD COLUMN IF NOT EXISTS` for a
+database that predates them, and selects them in the view. Before the view, a `DO` block compares
+the live view's columns and types with the new list and drops the view when they differ, as `0203`
+does for `list_user_accounts()`. That happens once, on the first boot after the upgrade; every later
+boot finds the list matching and drops nothing. Nothing depends on the view, so the drop needs no
+`CASCADE`. `0001` then restates its comment and, in the ACL section, its grants, and the view keeps
+`security_invoker`. A later change to the view's columns, such as acknowledgements, edits the same
+list in both places. `0220` describes the columns and checks the result.
 
-The table's grants and policies are on the table, not on its columns, so they cover the three as
-they stand; the file's self-check asserts that `authenticated` reads them and writes none, and that
-`anon` reads none. `test_an_alert_keeps_its_rule_labels_and_values.py` holds the columns, a row from
-before, the upsert that resolves an occurrence, and who reads them. The webhook's own suite holds
-the parse.
+The grants and policies are on the table and the view, not on their columns, so they cover the
+three. The file's self-check asserts the columns' types, that the view returns them under
+`security_invoker`, that `authenticated` reads them from both and writes none, and that `anon`
+reads none. `test_an_alert_keeps_its_rule_labels_and_values.py` holds the columns, a row from
+before, the upsert that resolves an occurrence, who reads them, and `0001`'s replay over the older
+view. The webhook's own suite holds the parse.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
