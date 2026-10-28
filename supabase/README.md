@@ -237,7 +237,8 @@ catalog row is in the text. Two things hold this:
   policy the chain states in each part (roles, command, `AS RESTRICTIVE`, `USING`, `WITH CHECK`),
   every trigger (disabled, replica-only, BEFORE and AFTER swapped), and every guarded CHECK and
   foreign key (replaced by another constraint under its name). The file's own call or guard must
-  put each back. After the chain, every statement and guard must equal its live object. Running
+  put each back. A trigger on GoTrue's tables is changed as GoTrue's role; on
+  `auth.oauth_consents`, where the replay may not drop one, the replay must fail instead (`0217`). After the chain, every statement and guard must equal its live object. Running
   every call again must take no `ACCESS EXCLUSIVE` lock, and running every guard again must keep
   every constraint's oid.
 - Check-docs-drift's check 59. Every `CREATE POLICY` and `CREATE TRIGGER` in an applied migration
