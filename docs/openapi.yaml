@@ -1402,6 +1402,37 @@ paths:
         '403': { description: 'Not an Administrator, or your own password.' }
         '404': { description: 'No such person (`P0002`).' }
 
+  /rest/v1/rpc/record_person_mfa_reset:
+    post:
+      tags: [Auth]
+      summary: Decide, then record, an Administrator resetting a person's second factor
+      description: |
+        Called twice by `/functions/v1/manage-people`'s `reset-mfa` in the caller's session
+        (`0216`): with `p_check_only` true BEFORE GoTrue deletes the person's factors, which checks
+        and writes nothing, and with false AFTER, which writes one `MFA_RESET` row in the person's
+        lane with their email and `p_factors_removed`. A null `p_check_only` checks only.
+        Administrator only. It ends no session.
+
+        Refused, with the reason in the message: your own account (403; you remove your own factor
+        on Profile › Security); a machine identity (400); a record with no count, or a negative one
+        (400). A removed person's factors may be reset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_check_only]
+              properties:
+                p_user_id:    { type: string, format: uuid }
+                p_check_only: { type: boolean, description: True to check only; false to record a reset GoTrue has made. }
+                p_factors_removed: { type: integer, minimum: 0, nullable: true, description: 'How many factors GoTrue deleted. Required when `p_check_only` is false.' }
+      responses:
+        '204': { description: Allowed, and recorded when `p_check_only` is false. }
+        '400': { description: 'A machine identity, or a missing or negative count.' }
+        '403': { description: 'Not an Administrator, or your own account.' }
+        '404': { description: 'No such person (`P0002`).' }
+
   /rest/v1/rpc/end_person_session:
     post:
       tags: [Auth]
@@ -3709,9 +3740,9 @@ paths:
   /functions/v1/manage-people:
     post:
       tags: [Edge Functions]
-      summary: Add a person, remove their access, restore it, set a new password or change their email address
+      summary: Add a person, remove their access, restore it, set a new password, reset their MFA or change their email address
       description: |
-        The GoTrue half of the People tab (`0166`, `0167`, `0207`). A function because GoTrue's admin API takes the
+        The GoTrue half of the People tab (`0166`, `0167`, `0207`, `0216`). A function because GoTrue's admin API takes the
         service-role key, which is not in the database. Requires `Administrator`, checked here
         before any admin call and again by the database function each act calls in the caller's
         session, which also writes the audit row.
@@ -3738,6 +3769,14 @@ paths:
           a 500 that withholds the password: it was changed, nobody has seen it, and setting it
           again records it. GoTrue ends the person's sessions; an access token already issued lasts
           until it expires.
+        - **`reset-mfa`**: deletes every second factor the person holds, for someone who has lost
+          their authenticator. `record_person_mfa_reset()` decides first (your own account is a
+          403), GoTrue's admin API deletes each factor, then the same function records `MFA_RESET`
+          with how many went, in `factors_removed`. A person who holds none is recorded as a reset
+          of none. Their sessions stay; GoTrue lowers those that used a factor to `aal1`. If GoTrue
+          fails before any factor went, nothing changed (502). If it fails part-way, the ones that
+          went are recorded and the answer is a 502 that says how many; resetting again removes
+          the rest. If the record fails, the answer is a 500 that says the factors went.
         - **`change-email`**: `email` is trimmed and lower-cased, and refused (400) unless it is an
           address. `check_person_email_change()` decides first and answers with the address held (a
           removed person or a taken address is a 409). GoTrue's admin update then changes it with
@@ -3746,8 +3785,9 @@ paths:
           holds. If GoTrue fails, nothing changed (502). If the record fails, the answer is a 500
           that says the address did change and the sessions did not end.
 
-        Your own access, password or address is refused (403); you change your own password with
-        `PUT /auth/v1/user`. A refusal the caller can act on (4xx) carries the database's or GoTrue's
+        Your own access, password, second factor or address is refused (403); you change your own
+        password with `PUT /auth/v1/user`, and remove your own factor with
+        `DELETE /auth/v1/factors/{id}`. A refusal the caller can act on (4xx) carries the database's or GoTrue's
         sentence in `details`. A failure that is not one (500, 502) answers a fixed sentence and a
         request id, and the error goes to the log.
       requestBody:
@@ -3758,11 +3798,11 @@ paths:
               type: object
               required: [action]
               properties:
-                action:  { type: string, enum: [add, remove, restore, set-password, change-email] }
+                action:  { type: string, enum: [add, remove, restore, set-password, reset-mfa, change-email] }
                 email:   { type: string, format: email, description: '`add`, and the new address for `change-email`.' }
                 role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
                 display_name: { type: string, nullable: true, description: '`add` only, optional. Up to 80 characters after trimming, no control characters.' }
-                user_id: { type: string, format: uuid, description: '`remove`, `restore`, `set-password` and `change-email`.' }
+                user_id: { type: string, format: uuid, description: '`remove`, `restore`, `set-password`, `reset-mfa` and `change-email`.' }
       responses:
         '200':
           description: 'Done. Sent with `Cache-Control: no-store`.'
@@ -3781,15 +3821,17 @@ paths:
                   name_error: { type: string, description: '`add`, only when the person was added and their name could not be set.' }
                   password: { type: string, description: '`add` without a mail relay, and `set-password`. Shown once; nothing keeps a copy.' }
                   access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
+                  factors_removed: { type: integer, description: '`reset-mfa`: how many second factors GoTrue deleted.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Requires Administrator; or your own access, password or address.' }
+        '403': { description: 'Requires Administrator; or your own access, password, second factor or address.' }
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, a removed person, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
             GoTrue failed or did not answer. For `add`, `set-password` and `change-email` nothing was changed. For
+            `reset-mfa` nothing was changed, or the answer says how many factors went. For
             `remove` and `restore` the database act was done but the ban was not made or lifted;
             repeat it. For `remove`, also Storage not deleting the picture, before the ban; repeat
             it. A fixed sentence and a request id, as for a 500.
@@ -5730,7 +5772,7 @@ components:
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
-                 PASSWORD_SET, DISPLAY_NAME_CHANGED, EMAIL_CHANGED, SESSIONS_ENDED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PASSWORD_SET, DISPLAY_NAME_CHANGED, EMAIL_CHANGED, SESSIONS_ENDED, MFA_RESET, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
@@ -5747,7 +5789,9 @@ components:
             writes `SESSIONS_ENDED` too, through `end_my_session()` and `end_my_other_sessions()`
             (0211), with themselves in `changed_by`. An Administrator ending one of a person's
             sessions writes it through `end_person_session()` (0212), in the shape
-            `end_my_session()` writes. A read-only broker account's creation and deletion are an
+            `end_my_session()` writes. `MFA_RESET` (0216) is written by `record_person_mfa_reset()`
+            when an Administrator resets a person's second factor, in their lane, with how many
+            factors went. A read-only broker account's creation and deletion are an
             `INSERT` and a `DELETE` in the `broker_accounts` lane, written by
             `record_broker_account_created()` and `record_broker_account_deleted()` (0218).
         old_data: { type: object, nullable: true }

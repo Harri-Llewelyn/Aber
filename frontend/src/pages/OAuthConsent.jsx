@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
+import { api } from '../api'
+import { SecondFactorChallenge } from '../components/auth/SecondFactorChallenge'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { secondFactorDue } from '../utils/secondFactor'
+import { signOutOfThisBrowser } from '../utils/signOut'
 
 /**
  * OAuth consent screen for Supabase Auth's OIDC server. GoTrue implements the OAuth 2.1
@@ -8,13 +12,16 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle'
  * auth.oauth_authorizations and redirects to GOTRUE_SITE_URL +
  * GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH with ?authorization_id=..., and this page POSTs the
  * decision back. Approving requires the user's Supabase access token, so arriving without a session
- * shows a prompt to sign in first; this is not an identity provider login screen.
+ * shows a prompt to sign in first; this is not an identity provider login screen. A session that
+ * still owes its second factor's code gives it here first, as the dashboard asks for it.
  */
 const API_BASE = `${SUPABASE_URL}/auth/v1`
 
 export function OAuthConsent() {
   const [state, setState] = useState({ status: 'loading' })
   const [submitting, setSubmitting] = useState(false)
+  // Bumped once a code is accepted, so the request is read again with the aal2 session.
+  const [attempt, setAttempt] = useState(0)
   useDocumentTitle('Authorize')
 
   const authorizationId = new URLSearchParams(window.location.search).get('authorization_id')
@@ -32,6 +39,14 @@ export function OAuthConsent() {
       if (cancelled) return
       if (!session) {
         setState({ status: 'unauthenticated' })
+        return
+      }
+
+      // An answer that cannot be read asks nothing, as the dashboard does.
+      const level = await api.assuranceLevel().catch(() => null)
+      if (cancelled) return
+      if (secondFactorDue(level)) {
+        setState({ status: 'second-factor' })
         return
       }
 
@@ -62,7 +77,7 @@ export function OAuthConsent() {
 
     load()
     return () => { cancelled = true }
-  }, [authorizationId])
+  }, [authorizationId, attempt])
 
   const decide = async (action) => {
     setSubmitting(true)
@@ -102,6 +117,25 @@ export function OAuthConsent() {
   )
 
   if (state.status === 'loading') return shell(<p>Loading authorization request…</p>)
+
+  if (state.status === 'second-factor') {
+    return shell(
+      <>
+        <h2 style={{ marginTop: 0 }}>Enter your code</h2>
+        <p>
+          Your account has a second factor. Give the code your authenticator app shows before the
+          application you were connecting signs you in.
+        </p>
+        <SecondFactorChallenge
+          onVerified={() => { setState({ status: 'loading' }); setAttempt(n => n + 1) }}
+          onSignOut={async () => {
+            await signOutOfThisBrowser()
+            setState({ status: 'unauthenticated' })
+          }}
+        />
+      </>
+    )
+  }
 
   if (state.status === 'unauthenticated') {
     return shell(

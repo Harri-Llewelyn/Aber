@@ -156,10 +156,11 @@ people's accounts in GoTrue, and it is narrow by construction.
   `set_person_role()`, `record_person_added()`, `remove_person_access()`,
   `restore_person_access()`, `record_person_password_set()`, `0207`'s
   `end_person_sessions()`, `person_session_summary()`, `check_person_email_change()` and
-  `record_person_email_change()`, and `0212`'s `person_sessions()` and `end_person_session()`)
-  checks `has_role(ARRAY['Administrator'])` again in its own body.
+  `record_person_email_change()`, `0212`'s `person_sessions()` and `end_person_session()`, and
+  `0216`'s `record_person_mfa_reset()`) checks `has_role(ARRAY['Administrator'])` again in its own
+  body.
 - **Two rules no Administrator can break.** Nobody changes their own role, access, password or
-  email address here, or ends their own sessions, and no act may leave the site without an
+  email address here, ends their own sessions or resets their own second factor, and no act may leave the site without an
   Administrator who can sign in (a banned one does not count). Both are checked in SQL under one
   lock on `user_roles`, so two Administrators cannot demote each other at once. The function refuses your own access before calling the database, and calls the database
   before GoTrue, so a refused act never reaches GoTrue.
@@ -230,6 +231,30 @@ people's accounts in GoTrue, and it is narrow by construction.
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off. GoTrue keeps the session that made
   the change and ends the person's others. No Audit Trail row is written: GoTrue records
   `user_updated_password` in its own audit log (`auth.audit_log_entries`).
+- **A second factor can be enrolled; nothing requires one yet** (1.7.0). Any person, every role,
+  may add a TOTP factor on Profile › Security through GoTrue's factor API (auth-js
+  `supabase.auth.mfa`). The chart sets the `GOTRUE_MFA_*` variables in
+  `templates/supabase/auth.yaml`: TOTP enrol and verify on, as GoTrue defaults; phone off (it needs
+  an SMS provider); WebAuthn off (it needs a hostname relying-party id and a secure context);
+  recovery codes off (auth-js has no client for them). A password sign-in with a factor enrolled is
+  `aal1`. The dashboard then asks for the code before it opens, before the OAuth consent page
+  approves a service, and before a password reset, which GoTrue refuses from `aal1` for an account
+  with a factor. It does not ask when `amr` names a federated method (`oauth`, `sso/saml`). **That
+  question is the dashboard's, not enforcement:** no policy, edge function or gateway rule reads
+  `aal`, so a session that skips it keeps every right its role has, as a password-only session
+  does. GoTrue's own rules do apply. Removing a verified factor, and adding another, need an `aal2`
+  session. Verifying a code deletes every other `aal1` session the person holds, and GoTrue issues
+  the OAuth clients' sessions (Grafana, Node-RED, Studio, the forge) at `aal1`, so each code ends
+  those. A person adding or removing their own factor writes no Audit Trail row; GoTrue records it
+  in `auth.audit_log_entries`.
+- **Reset MFA, by an Administrator** (`0216`). For someone who has lost their authenticator.
+  `manage-people`'s `reset-mfa` asks `record_person_mfa_reset()` first with `p_check_only`, which
+  refuses your own account and a machine identity (a removed person's factors may be reset). Then
+  GoTrue's admin API lists the person's factors and deletes each, and the same function writes one
+  `MFA_RESET` row with how many went. The person's sessions stay; GoTrue lowers those that used a
+  deleted factor to `aal1`. End Sessions is the act that ends them. A delete that fails part-way
+  records the ones that went, and the answer says to reset again. With one Administrator, nobody
+  can reset theirs: [Resetting the only Administrator's second factor](#resetting-the-only-administrators-second-factor).
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
 - **A person's own preferences are theirs alone.** `user_settings` (`0188`) holds each person's
@@ -243,6 +268,23 @@ people's accounts in GoTrue, and it is narrow by construction.
 
 What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
 and so is what an ended session still reaches ([below it](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires)).
+
+### Resetting the only Administrator's second factor
+
+Reset MFA needs another Administrator. A site whose only Administrator has lost their
+authenticator needs whoever runs the server, with the secret key: `secrets.secretKey` in the values
+file, or `SUPABASE_SECRET_KEY` in the site's Secret. The gateway hands GoTrue's admin API the
+`service_role` token that key stands for. First find the account's id and its factors' ids, then
+delete each factor:
+
+```sh
+curl -s "https://api.<domain>/auth/v1/admin/users?filter=<their email>" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+curl -s -X DELETE "https://api.<domain>/auth/v1/admin/users/<user id>/factors/<factor id>" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+```
+
+The first answer lists the account under `users`, with its `factors`. A deletion this way writes no
+Audit Trail row; GoTrue's own audit log records it. Keep two Administrators, so that each can reset
+the other's from People.
 
 ## Machine identities
 

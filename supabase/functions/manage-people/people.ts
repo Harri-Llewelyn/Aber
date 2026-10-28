@@ -15,6 +15,9 @@
  *
  * `add` takes an optional display name. It is checked before GoTrue makes the account, so a bad name
  * refuses the whole add, and set with set_display_name() in the caller's session once the role is.
+ *
+ * `reset-mfa` deletes a person's second factors and nothing else, decided and recorded in the
+ * database as a new password is.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -308,6 +311,61 @@ async function setPassword(req: Request, body: Record<string, unknown>, callerId
 }
 
 /**
+ * Reset MFA: every second factor a person holds is deleted through GoTrue's admin API, for someone
+ * who has lost their authenticator. record_person_mfa_reset() decides first with p_check_only, so a
+ * refusal changes nothing, and after GoTrue writes MFA_RESET with how many went. Their sessions are
+ * left alone (GoTrue lowers those that used a factor to aal1). A delete that fails part-way records
+ * the ones that went and says to select Reset MFA again.
+ */
+async function resetMfa(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+  const userId = targetOf(body, callerId,
+    "You cannot reset your own second factor here. Remove it on your Profile page's Security tab.");
+  if (userId instanceof Response) return userId;
+
+  const { error } = await caller.rpc("record_person_mfa_reset", { p_user_id: userId, p_check_only: true });
+  if (error) return dbRefusal(req, error, "MFA was not reset");
+
+  const { data: listed, error: listError } = await admin.auth.admin.mfa.listFactors({ userId });
+  if (listError) return authRefusal(req, listError, "MFA was not reset");
+  const factors = listed?.factors ?? [];
+
+  let removed = 0;
+  let deleteError: AuthError | null = null;
+  for (const factor of factors) {
+    const { error: e } = await admin.auth.admin.mfa.deleteFactor({ userId, id: factor.id });
+    // Gone already, say by the person's own Remove: nothing of theirs is left to delete.
+    if (e && e.status !== 404) {
+      deleteError = e;
+      break;
+    }
+    if (!e) removed++;
+  }
+  if (deleteError && removed === 0) return authRefusal(req, deleteError, "MFA was not reset");
+
+  const { error: recordError } = await caller.rpc("record_person_mfa_reset", {
+    p_user_id: userId,
+    p_check_only: false,
+    p_factors_removed: removed,
+  });
+  if (recordError) {
+    return serverError(req, FN, recordError, {
+      error: `${removed === 1 ? "One second factor was" : `${removed} second factors were`} removed, but the ` +
+        "Audit Trail did not record it. The sign-in service's own log has the removal.",
+      context: `recording a second-factor reset for ${userId}`,
+    });
+  }
+  if (deleteError) {
+    return serverError(req, FN, deleteError, {
+      status: 502,
+      error: `${removed} of their ${factors.length} second factors were removed, and the sign-in service ` +
+        "failed on the next. Select Reset MFA again to remove the rest.",
+      context: `deleting a second factor of ${userId}`,
+    });
+  }
+  return json(200, { user_id: userId, factors_removed: removed });
+}
+
+/**
  * A new address for someone else, in use at once: GoTrue's admin API sends no mail, and
  * `email_confirm` keeps the address confirmed, as `add` without a relay does. The database decides
  * first, so a refusal changes nothing, and answers with the address held. After GoTrue, the record
@@ -408,12 +466,14 @@ export async function handler(req: Request): Promise<Response> {
         return await restoreAccess(req, body, user.id, caller, admin);
       case "set-password":
         return await setPassword(req, body, user.id, caller, admin);
+      case "reset-mfa":
+        return await resetMfa(req, body, user.id, caller, admin);
       case "change-email":
         return await changeEmail(req, body, user.id, caller, admin);
       default:
         return json(400, {
           error: "Malformed request",
-          details: "`action` must be add, remove, restore, set-password or change-email.",
+          details: "`action` must be add, remove, restore, set-password, reset-mfa or change-email.",
         });
     }
   } catch (err) {

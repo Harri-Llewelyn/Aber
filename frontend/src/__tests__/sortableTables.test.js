@@ -54,6 +54,10 @@ const TABLES = {
     fixed: ['A form: each setting in its tab\'s order, with its own Save and Discard.']
   },
   'components/tabs/SchemasTab.jsx': { sortable: 1 },
+  'components/tabs/SecondFactorSection.jsx': {
+    sortable: 0,
+    fixed: ['A person\'s own second factors, one or two: in the order they were added, as the sign-in lists them.']
+  },
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']

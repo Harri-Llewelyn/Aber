@@ -561,7 +561,7 @@ describe('a person\'s drawer', () => {
     const drawer = await openDrawer('operator@site.test')
     const actions = within(drawer.getByText('Actions').closest('.context-panel-actions'))
     const names = actions.getAllByRole('button').map(b => b.textContent.trim()).filter(Boolean)
-    expect(names).toEqual(['Change Name', 'Change Email', 'Change Role', 'Set New Password', 'End Sessions', 'Remove Access'])
+    expect(names).toEqual(['Change Name', 'Change Email', 'Change Role', 'Set New Password', 'End Sessions', 'Reset MFA', 'Remove Access'])
     expect(drawer.getByRole('button', { name: 'Remove Access' })).toHaveClass('context-action-danger')
     expect(drawer.getByRole('button', { name: 'Change Role' })).not.toHaveClass('context-action-danger')
     for (const name of names) expect(drawer.getByRole('button', { name })).toBeEnabled()

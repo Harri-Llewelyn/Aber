@@ -81,6 +81,8 @@ export const AUDIT_TRAIL_ACTIONS = {
   // every session the person held ended, with how many. A new address ends the sessions too.
   EMAIL_CHANGED:     'Email address changed',
   SESSIONS_ENDED:    'Sessions ended',
+  // An Administrator's Reset MFA (0216): every second factor the person held, deleted, with how many.
+  MFA_RESET:         'MFA reset',
   // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
   // when an appliance reports a different flow hash: the digest before and after, and what the
   // forge's main held at that moment. Actor `ingestion`, no user.

@@ -540,8 +540,8 @@ them do (`consequence` in `PERSON_ROLES`) before anything is sent. A role change
 away from the person's next request, so it asks first, as the drawer's other changes do; a select
 on the row saved a stray click or arrow key at once. Roles go through
 `set_person_role()` and ending sessions through `end_person_sessions()`; adding, removing,
-restoring, Set New Password and Change Email go through `manage-people`, because GoTrue's admin API
-needs the secret key. The drawer's Sessions row is `person_session_summary()`, a number and a time.
+restoring, Set New Password, Reset MFA and Change Email go through `manage-people`, because GoTrue's
+admin API needs the secret key. The drawer's Sessions row is `person_session_summary()`, a number and a time.
 Its Show sessions opens the list below the fields, read then (`person_sessions()`, `supabase/README.md`
 `0212`) and not with every drawer, in the Security tab's table (`components/common/SessionsTable.jsx`)
 with End on every row. End asks first with `endSessionQuestion()` naming the person, then calls
@@ -646,6 +646,22 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
   signs nobody out, even when an expired token could not be refreshed through it and supabase-js
   holds no session for the moment.
 
+### The sign-in asks for a second factor's code
+
+A password sign-in by someone with a verified factor is `aal1`. `hooks/useSecondFactorDue.js` asks
+`getAuthenticatorAssuranceLevel()` whenever the access token changes, and `secondFactorDue()` is
+true when the current level is `aal1` and the next `aal2`, unless `amr` names a federated method
+(`oauth`, `sso/saml`), which is never asked twice. While it is true, `App.jsx` shows
+`SecondFactorScreen` (`components/auth/SecondFactorChallenge.jsx`) in the sign-in page's frame
+instead of the dashboard, and
+before a password reset too: GoTrue refuses a new password from `aal1` for an account with a
+factor. The screen lists the person's factors from GoTrue, takes six digits, and has GoTrue check
+them with `challengeAndVerify()`. The `aal2` session reaches `App.jsx` through
+`onAuthStateChange`. Sign Out is on the screen. `pages/OAuthConsent.jsx` asks the same before it
+reads an authorization request, because Grafana, Node-RED, Studio and the forge sign in through
+the dashboard's session. The question is a prompt, not a gate: nothing on the server reads `aal`
+yet, and an answer that cannot be read opens the dashboard.
+
 ### Profile, and the preferences that follow the person
 
 Two pages, two scopes, and each says which in its heading's note. **Profile**
@@ -666,6 +682,14 @@ Value, Actions), header row and all, so the two read alike.
   `0211`), which keeps the session the token names. Each writes one `SESSIONS_ENDED` row, and the
   Audit Trail's drawer names that row's session with the same `sessionLabel()`. Each act toasts
   with a link back to the tab and reads the list again.
+- **The second is Second factor** (`components/tabs/SecondFactorSection.jsx`): the person's verified
+  TOTP factors, read with auth-js `supabase.auth.mfa` through `api.js`, no new dependency. Add
+  Second Factor (`modals/AddSecondFactorModal.jsx`) takes a name, enrols, and shows GoTrue's QR code
+  and the secret as text; `qrImageSource()` (`utils/secondFactor.js`) percent-encodes the SVG auth-js
+  leaves raw, and the CSP's `img-src` admits `data:`. The factor counts once GoTrue accepts a code;
+  Cancel removes the half-made one. Remove (`modals/RemoveSecondFactorModal.jsx`) asks first, and
+  takes a code first when the session is `aal1`, since GoTrue removes a verified factor only from
+  `aal2`. A removal renews the token, so the dashboard sees a session GoTrue lowered to `aal1`.
 
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way

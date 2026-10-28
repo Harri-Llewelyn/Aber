@@ -13,6 +13,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { SUPABASE_GATEWAY_KEY } from '../../config'
 import { Tooltip } from '../common/Tooltip'
 import { SessionsSection } from './SessionsSection'
+import { SecondFactorSection } from './SecondFactorSection'
 import { AccountAvatar } from '../common/AccountAvatar'
 import { IconUpload, IconTrash } from '../common/Icons'
 import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
@@ -544,6 +545,7 @@ export function ProfileTab({
 
           {/* A section per subject, each with its own heading: Sessions is the first. */}
           {section === 'security' && <SessionsSection isPerson={!!email} showToast={showToast} />}
+          {section === 'security' && <SecondFactorSection isPerson={!!email} showToast={showToast} />}
         </div>
       </div>
     </div>

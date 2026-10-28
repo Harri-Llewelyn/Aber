@@ -102,6 +102,13 @@ python supabase/functions/manage-people/test_account_pictures_stack.py
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
 # leaves the row as it was. Then it revokes the token and waits for the i3X server to refuse it.
 python supabase/test_a_token_s_use_is_recorded.py
+# A second factor end to end (0216). Needs the stack up. The seeded Administrator prepares a
+# throwaway Auditor, which enrols a TOTP factor through the gateway; codes are computed from its
+# secret (RFC 6238). A wrong code is refused, a right one raises the session to aal2, and a new
+# sign-in is aal1 until its code. Phone and WebAuthn enrolment are refused. The Administrator's
+# Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
+# reset and a non-Administrator's are refused. The account's access is removed at the end.
+python supabase/test_a_person_can_enrol_a_second_factor.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
@@ -742,6 +749,13 @@ python supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py
 # order: no site name, a lane, unassigned, a cell in no area, a name a topic cannot carry. It runs
 # as its caller; a person and the ingestion principal read it, anon does not. Every test rolls back.
 python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py
+# An Administrator resets a person's second factor (0216). record_person_mfa_reset() with
+# p_check_only true or NULL decides and writes nothing; with false it writes one MFA_RESET row in
+# the person's lane naming the Administrator, with the person's email and how many factors went,
+# none included. Only an Administrator may call it. Your own account, an unknown person, a machine
+# identity and a missing or negative count are refused with no row; a removed person's factors may
+# be reset, and no session ends. Every test rolls back.
+python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and
