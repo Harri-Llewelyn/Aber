@@ -24,6 +24,7 @@ FIRING = "firing"
 SEVERITIES = {"critical", "warning", "info"}
 ENTITY_TYPES = {"device", "gateway", "platform", "service_identity"}
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+NO_VALUE = "[no value]"
 
 
 def authorize_alert_webhook(auth_header, expected_secret):
@@ -59,7 +60,8 @@ def normalize_alert(alert):
     principal_id = (labels.get("principal_id") or "").strip() if identity else ""
     if identity and not UUID.match(principal_id):
         return None
-    sparkplug_id = None if identity else ((labels.get("sparkplug_id") or "").strip() or None)
+    wire_id = (labels.get("sparkplug_id") or "").strip() or None
+    sparkplug_id = None if identity or wire_id == NO_VALUE else wire_id
 
     if entity_type != "platform" and not identity and not sparkplug_id:
         return None
@@ -267,6 +269,88 @@ class TestMachineIdentity(unittest.TestCase):
     def test_it_resolves_like_any_other_occurrence(self):
         resolved = normalize_alert({**token_alert(), "status": "resolved", "endsAt": "2026-10-25T09:00:00Z"})
         self.assertEqual((resolved["status"], resolved["entity_id"]), ("resolved", PRINCIPAL.lower()))
+
+
+class TestPrometheusGatewayRules(unittest.TestCase):
+    """
+    The gateway rules that read Prometheus. Their series carry the gateway as `edge_node` (ingestion
+    labels them so), never `sparkplug_id`, so each rule copies it into `sparkplug_id` with a template
+    label. These read each rule's labels from the provisioned file and build what Grafana sends.
+    """
+
+    RULES = Path(__file__).resolve().parents[3] / "grafana" / "provisioning" / "alerting" / "alert-rules.yaml"
+    UIDS = (
+        "aber-ingestion-sequence-gaps",
+        "aber-ingestion-timestamps-refused",
+        "aber-gateway-outage-loss",
+        "aber-gateway-clock-skew",
+    )
+    EDGE_NODE = "gw-line-4"
+    # What one ingestion series carries after Alloy's scrape relabelling.
+    SERIES = {"edge_node": EDGE_NODE, "job": "ingestion", "component": "ingestion",
+              "instance": "ingestion-7d9f-x2", "pod": "ingestion-7d9f-x2"}
+
+    def rule(self, uid):
+        """(title, labels) of one provisioned rule, read as written."""
+        text = self.RULES.read_text(encoding="utf-8")
+        start = text.index(f"      - uid: {uid}\n")
+        end = text.find("\n      - uid: ", start + 1)
+        block = text[start:] if end == -1 else text[start:end]
+        title = re.search(r"^ {8}title: (.+)$", block, re.M).group(1).strip()
+        labels = re.search(r"^ {8}labels:\n((?: {10}\S.*\n)+)", block, re.M).group(1)
+        return title, {k: v.strip().strip("'\"") for k, v in re.findall(r"^ {10}(\w+): (.*)$", labels, re.M)}
+
+    @staticmethod
+    def expand(value, series):
+        """Grafana's expansion of a `{{ $labels.x }}` label; a missing label reads `[no value]`."""
+        out = re.sub(r"\{\{\s*\$labels\.(\w+)\s*\}\}", lambda m: series.get(m.group(1), NO_VALUE), value)
+        assert "{{" not in out, f"a template this test does not expand: {value}"
+        return out
+
+    def payload(self, uid, rule_labels=None, series=None, error=False):
+        """
+        One webhook alert for an instance of `uid`: the series' labels, the rule's labels expanded
+        over them, alertname and grafana_folder; Grafana strips its `__x__` labels before sending.
+        An evaluation error's instance has no series, gains ref_id and datasource_uid, and is renamed
+        DatasourceError with the title in `rulename`.
+        """
+        title, labels = self.rule(uid)
+        labels = labels if rule_labels is None else rule_labels
+        series = {} if error else (self.SERIES if series is None else series)
+        sent = {**series, **{k: self.expand(v, series) for k, v in labels.items()},
+                "alertname": title, "grafana_folder": "Aber - Platform Infrastructure"}
+        if error:
+            sent.update(alertname="DatasourceError", rulename=title, ref_id="A", datasource_uid="prometheus")
+        return alert(labels=sent, annotations={"summary": f"Edge node {series.get('edge_node', NO_VALUE)} ..."},
+                     fingerprint=f"{uid}-fp", generatorURL=f"http://grafana.localhost/alerting/grafana/{uid}/view")
+
+    def test_each_rule_names_its_gateway_by_its_edge_node(self):
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                row = normalize_alert(self.payload(uid))
+                self.assertIsNotNone(row, f"{uid} would be skipped as not attributable")
+                self.assertEqual((row["entity_type"], row["sparkplug_id"]), ("gateway", self.EDGE_NODE))
+                self.assertIsNone(row["entity_id"])  # looked up from gateways by sparkplug_id
+
+    def test_without_the_label_the_alert_was_skipped(self):
+        # The shape before each rule carried sparkplug_id: Grafana fired, and no row was written.
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                _, labels = self.rule(uid)
+                before = {k: v for k, v in labels.items() if k != "sparkplug_id"}
+                self.assertIsNone(normalize_alert(self.payload(uid, rule_labels=before)))
+
+    def test_an_instance_without_an_edge_node_names_no_gateway(self):
+        # An evaluation error has no series, so the template reads `[no value]`, which is no gateway.
+        row = self.payload("aber-gateway-clock-skew", error=True)
+        self.assertEqual(row["labels"]["sparkplug_id"], NO_VALUE)
+        self.assertIsNone(normalize_alert(row))
+        self.assertIsNone(normalize_alert(alert(labels={**alert()["labels"], "sparkplug_id": NO_VALUE})))
+
+    def test_the_typescript_refuses_the_same_marker(self):
+        src = INDEX_TS.read_text(encoding="utf-8")
+        self.assertIn(f'const NO_VALUE = "{NO_VALUE}";', src)
+        self.assertIn("wireId === NO_VALUE", src)
 
 
 class TestMirrorIsFaithful(unittest.TestCase):
