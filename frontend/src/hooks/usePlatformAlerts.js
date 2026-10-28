@@ -19,14 +19,30 @@ export const POLL_INTERVAL_MS = 15000
  */
 export const alertToastUrl = (row) => (row.entity_type === 'service_identity' && row.entity_id
   ? identityUrl(row.entity_id)
-  : grafanaAlertUrl(row.alert_name))
+  : grafanaAlertUrl(row))
+
+/**
+ * Each row with the uid of its rule, read from `platform_alerts` by id: the view's columns are
+ * stated in 0001, whose replay cannot drop one a later migration adds. A row the read does not
+ * answer for keeps a null uid, and its link searches Grafana by the rule's name.
+ */
+async function withRuleUids(rows) {
+  if (!rows.length) return rows
+  const { data, error } = await supabase
+    .from('platform_alerts')
+    .select('id, rule_uid')
+    .in('id', rows.map((r) => r.id))
+  if (error && classifyRefreshError(error) !== FAILURE_SESSION) console.warn('[alerts] rule uids not read:', error.message)
+  const uids = new Map((error ? [] : data ?? []).map((r) => [r.id, r.rule_uid]))
+  return rows.map((r) => ({ ...r, rule_uid: uids.get(r.id) ?? null }))
+}
 
 /**
  * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
  * transition. Grafana posts to the grafana-alert-webhook function, which writes
- * `public.platform_alerts`; this hook reads the `platform_alerts_active` view and subscribes to the
- * table, because a view cannot be in a publication. The initial fetch primes the known set so a
- * page load does not toast everything already firing.
+ * `public.platform_alerts`; this hook reads the `platform_alerts_active` view, with each row's rule
+ * uid from the table, and subscribes to the table, because a view cannot be in a publication. The
+ * initial fetch primes the known set so a page load does not toast everything already firing.
  *
  * A firing toast carries the alert name only; the summary is in the alert counter's list. Both
  * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link where
@@ -59,7 +75,7 @@ export function usePlatformAlerts(showToast) {
       return
     }
 
-    const rows = data ?? []
+    const rows = await withRuleUids(data ?? [])
     const next = new Map(rows.map((r) => [r.fingerprint, r]))
 
     if (primedRef.current) {

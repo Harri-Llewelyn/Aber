@@ -123,10 +123,27 @@ describe('grafanaAlertUrl', () => {
 
   it('falls back to the bare alert list when it has nothing to filter on', () => {
     expect(grafanaAlertUrl(null)).toBe('http://localhost:3002/alerting/list')
+    expect(grafanaAlertUrl({})).toBe('http://localhost:3002/alerting/list')
+  })
+
+  it('opens the rule itself when the row carries its uid', () => {
+    expect(grafanaAlertUrl({ rule_uid: 'aber-gateway-stale', alert_name: 'Gateway Stale' }))
+      .toBe('http://localhost:3002/alerting/grafana/aber-gateway-stale/view')
+  })
+
+  it('searches by the name for a row written before the uid was kept', () => {
+    expect(grafanaAlertUrl({ rule_uid: null, alert_name: 'Gateway Stale' }))
+      .toBe(grafanaAlertUrl({ alert_name: 'Gateway Stale' }))
+    expect(new URL(grafanaAlertUrl({ rule_uid: null, alert_name: 'Gateway Stale' })).pathname).toBe('/alerting/list')
+  })
+
+  it('escapes the uid, so it cannot leave the rule view', () => {
+    expect(new URL(grafanaAlertUrl({ rule_uid: '../../admin' })).pathname)
+      .toBe('/alerting/grafana/..%2F..%2Fadmin/view')
   })
 
   it('escapes the rule name, so a quote or a space cannot break the query string', () => {
-    const href = grafanaAlertUrl('Low OEE Availability')
+    const href = grafanaAlertUrl({ alert_name: 'Low OEE Availability' })
     expect(href).not.toMatch(/ /)
     expect(decodeURIComponent(new URL(href).searchParams.get('search')))
       .toBe('rule:"Low OEE Availability"')
@@ -150,7 +167,7 @@ describe('grafanaAlertUrl', () => {
         .map(rel => fs.readFileSync(path.resolve(__dirname, rel), 'utf8'))
         .join('\n')
       expect(rules, `${title} is not a rule title in either alert-rules file`).toContain(`title: ${title}`)
-      const href = grafanaAlertUrl(title)
+      const href = grafanaAlertUrl({ alert_name: title })
       expect(decodeURIComponent(new URL(href).searchParams.get('search'))).toBe(`rule:"${title}"`)
     }
   )

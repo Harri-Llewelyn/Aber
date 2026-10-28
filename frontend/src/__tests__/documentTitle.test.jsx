@@ -77,7 +77,8 @@ describe('the tab title in the app', () => {
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockImplementation(() => Promise.resolve({ data: rows, error: null }))
+        order: vi.fn().mockImplementation(() => Promise.resolve({ data: rows, error: null })),
+        in: vi.fn().mockImplementation(() => Promise.resolve({ data: [], error: null }))
       }
     })
   })
@@ -180,7 +181,8 @@ describe('the tab icon', () => {
         return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockImplementation(() => Promise.resolve({ data: rows, error: null }))
+          order: vi.fn().mockImplementation(() => Promise.resolve({ data: rows, error: null })),
+          in: vi.fn().mockImplementation(() => Promise.resolve({ data: [], error: null }))
         }
       })
     })

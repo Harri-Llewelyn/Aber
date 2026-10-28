@@ -1040,6 +1040,15 @@ export const SUITES = {
       'username outside the subscriber scheme, or a name or description outside the credential ' +
       "service's rule, is refused with no row.",
   },
+  'supabase/migrations/test_an_alert_keeps_its_rule_labels_and_values.py': {
+    lanes: ['db'],
+    why:
+      '0220 -- that platform_alerts keeps the uid of the rule that raised each alert, its labels and ' +
+      'its values, nullable so a row from before reads on; that the webhook\'s upsert on the ' +
+      'occurrence key writes them and a resolve updates the same row; that a signed-in reader ' +
+      'reads them under the table\'s RLS and writes none; and that platform_alerts_active keeps the ' +
+      "columns 0001 states, since 0001's replay cannot drop one a later file adds.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

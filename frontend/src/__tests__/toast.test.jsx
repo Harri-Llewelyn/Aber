@@ -385,12 +385,19 @@ describe('a firing platform alert', () => {
     summary: 'The last backup is 3 days old; run SELECT 1 FROM backups', starts_at: '2026-10-01T00:00:00Z'
   }
 
-  async function mountAlerts(rows) {
+  // `ruleUids` is what the table holds for each row id, or the error its read fails with; the view
+  // carries no rule_uid.
+  async function mountAlerts(rows, ruleUids = {}) {
     let current = []
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
-    vi.spyOn(supabase, 'from').mockImplementation(() => ({
-      select: () => ({ order: () => Promise.resolve({ data: current, error: null }) })
+    const uidsFor = (ids) => (ruleUids instanceof Error
+      ? { data: null, error: { message: ruleUids.message } }
+      : { data: ids.map((id) => ({ id, rule_uid: ruleUids[id] ?? null })), error: null })
+    vi.spyOn(supabase, 'from').mockImplementation((table) => ({
+      select: () => (table === 'platform_alerts'
+        ? { in: (_, ids) => Promise.resolve(uidsFor(ids)) }
+        : { order: () => Promise.resolve({ data: current, error: null }) })
     }))
     vi.spyOn(supabase, 'channel').mockReturnValue({ on() { return this }, subscribe() { return this } })
     vi.spyOn(supabase, 'removeChannel').mockImplementation(() => {})
@@ -432,11 +439,11 @@ describe('a firing platform alert', () => {
   it('links the toast to its rule in Grafana, in a new tab, and dismisses it when followed', async () => {
     await mountAlerts([row])
     const link = screen.getByRole('link', { name: /Historian Backup Stale/ })
-    expect(link).toHaveAttribute('href', grafanaAlertUrl('Historian Backup Stale'))
+    expect(link).toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(link).toHaveAccessibleDescription('Open in Grafana, in a new tab')
-    expect(hook.toasts[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
+    expect(hook.toasts[0].to).toBe(grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
     expect(hook.history).toEqual([])
@@ -462,8 +469,31 @@ describe('a firing platform alert', () => {
   })
 
   it('links any other alert to its rule, whatever entity_id it carries', () => {
-    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row.alert_name))
-    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row.alert_name))
+    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row))
+    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row))
+  })
+
+  it('links straight to the rule by the uid the table holds, firing and resolved', async () => {
+    const firing = await mountAlerts([{ ...row, id: 'a-1' }], { 'a-1': 'aber-backup-stale' })
+    const ruleView = 'http://localhost:3002/alerting/grafana/aber-backup-stale/view'
+    expect(screen.getByRole('link', { name: /Historian Backup Stale/ })).toHaveAttribute('href', ruleView)
+    await firing([])
+    expect(hook.toasts.find(t => t.msg === 'Resolved — Historian Backup Stale').to).toBe(ruleView)
+  })
+
+  it('searches by the rule name for a row written before the uid was kept', async () => {
+    await mountAlerts([{ ...row, id: 'a-1' }], { 'a-1': null })
+    expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
+      .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
+  })
+
+  it('still toasts when the uids cannot be read, linking by the rule name', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await mountAlerts([{ ...row, id: 'a-1' }], new Error('permission denied for table platform_alerts'))
+    expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
+      .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
+    expect(warn).toHaveBeenCalledWith('[alerts] rule uids not read:', 'permission denied for table platform_alerts')
+    warn.mockRestore()
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

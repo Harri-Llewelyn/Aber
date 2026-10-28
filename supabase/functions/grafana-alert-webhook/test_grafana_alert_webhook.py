@@ -15,6 +15,7 @@ index.ts and asserts the literals this file encodes still appear in it.
 import re
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
 INDEX_TS = Path(__file__).resolve().parent / "index.ts"
 BASELINE = Path(__file__).resolve().parents[2] / "migrations" / "0001_baseline_schema.sql"
@@ -85,7 +86,31 @@ def normalize_alert(alert):
         "starts_at": starts_at,
         "ends_at": ends_at,
         "device_name": (labels.get("device") or "").strip() or None,
+        "rule_uid": rule_uid_of(alert),
+        "labels": labels,
+        "values": values_of(alert),
     }
+
+
+RULE_UID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+RULE_VIEW_PATH = re.compile(r"/alerting/grafana/([^/?#]+)/view(?:[/?#]|$)")
+
+
+def rule_uid_of(alert):
+    """Python mirror of ruleUidOf() in index.ts."""
+    match = RULE_VIEW_PATH.search(alert.get("generatorURL") or "")
+    from_url = unquote(match.group(1)) if match else None
+    for candidate in (from_url, alert.get("ruleUID"), (alert.get("labels") or {}).get("__alert_rule_uid__")):
+        uid = candidate.strip() if isinstance(candidate, str) else ""
+        if RULE_UID.match(uid):
+            return uid
+    return None
+
+
+def values_of(alert):
+    """Python mirror of valuesOf() in index.ts."""
+    values = alert.get("values")
+    return values if isinstance(values, dict) else None
 
 
 def alert(**over):
@@ -323,6 +348,83 @@ class TestMirrorIsFaithful(unittest.TestCase):
         # over again, one layer down.
         self.assertNotIn("80.0", self.src)
         self.assertNotIn("85.0", self.src)
+
+
+class TestRuleUidLabelsAndValues(unittest.TestCase):
+    """
+    Each row keeps its rule's uid, its labels and its values. Grafana names the rule in the
+    alert's generatorURL, `<root URL>/alerting/grafana/<uid>/view`, and also sends `ruleUID`; it
+    strips the `__alert_rule_uid__` label before a contact point sees it.
+    """
+
+    UID = "aber-gateway-clock-skew"
+
+    def sent(self, **over):
+        return alert(generatorURL=f"http://grafana.localhost/alerting/grafana/{self.UID}/view?orgId=1",
+                     values={"A": 74.5, "B": 74.5, "C": 1}, **over)
+
+    def test_the_uid_comes_from_the_generator_url(self):
+        self.assertEqual(normalize_alert(self.sent())["rule_uid"], self.UID)
+
+    def test_the_host_and_root_path_are_whatever_grafana_serves_from(self):
+        for url in (
+            f"https://site.example/grafana/alerting/grafana/{self.UID}/view",
+            f"http://grafana.localhost/alerting/grafana/{self.UID}/view/",
+            f"/alerting/grafana/{self.UID}/view#history",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(rule_uid_of({"generatorURL": url}), self.UID)
+
+    def test_the_payload_s_rule_uid_and_then_the_label_stand_in(self):
+        self.assertEqual(rule_uid_of({"ruleUID": self.UID}), self.UID)
+        self.assertEqual(rule_uid_of({"labels": {"__alert_rule_uid__": self.UID}}), self.UID)
+        # The URL wins: it is the one Grafana has always sent.
+        self.assertEqual(rule_uid_of({"generatorURL": f"/alerting/grafana/{self.UID}/view", "ruleUID": "other"}), self.UID)
+
+    def test_no_generator_url_is_no_uid_and_still_a_row(self):
+        row = normalize_alert(alert())
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["rule_uid"])
+        self.assertIsNone(normalize_alert(alert(generatorURL=None))["rule_uid"])
+        self.assertIsNone(normalize_alert(alert(generatorURL=""))["rule_uid"])
+
+    def test_a_url_that_names_no_rule_is_no_uid(self):
+        for url in (
+            "http://grafana.localhost/",                                   # what Grafana sends when it knows no uid
+            "http://grafana.localhost/alerting/list",
+            "http://grafana.localhost/alerting/grafana//view",
+            "http://grafana.localhost/alerting/grafana/a%2Fb/view",        # decodes to a slash
+            "http://grafana.localhost/alerting/grafana/%E0%A4%A/view",     # not decodable
+            f"http://grafana.localhost/alerting/grafana/{'x' * 41}/view",  # longer than Grafana allows
+            "http://grafana.localhost/alerting/grafana/aber-x/edit",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(rule_uid_of({"generatorURL": url}))
+
+    def test_labels_and_values_are_stored_as_sent(self):
+        row = normalize_alert(self.sent())
+        self.assertEqual(row["labels"], alert()["labels"])
+        self.assertEqual(row["values"], {"A": 74.5, "B": 74.5, "C": 1})
+
+    def test_values_that_are_not_an_object_are_none(self):
+        for values in (None, [], [1, 2], "74.5", 74.5):
+            with self.subTest(values=values):
+                self.assertIsNone(normalize_alert(alert(values=values))["values"])
+
+    def test_the_key_is_still_the_occurrence(self):
+        # The uid, labels and values ride along; the upsert key is untouched, so no fingerprint moves.
+        src = INDEX_TS.read_text(encoding="utf-8")
+        self.assertIn('onConflict: "fingerprint,starts_at"', src)
+
+    def test_the_typescript_reads_and_writes_them_as_this_mirror_does(self):
+        src = INDEX_TS.read_text(encoding="utf-8")
+        self.assertIn(f"const RULE_UID = /{RULE_UID.pattern}/;", src)
+        ts_path = re.search(r"const RULE_VIEW_PATH = /(.+)/;", src)
+        self.assertIsNotNone(ts_path, "RULE_VIEW_PATH is no longer a regex literal in index.ts")
+        self.assertEqual(ts_path.group(1).replace("\\/", "/"), RULE_VIEW_PATH.pattern)
+        self.assertIn("[fromUrl, alert.ruleUID, alert.labels?.__alert_rule_uid__]", src)
+        for column in ("rule_uid: r.rule_uid", "labels: r.labels", "values: r.values"):
+            self.assertIn(column, src)
 
 
 if __name__ == "__main__":

@@ -2411,6 +2411,10 @@ paths:
         A row whose `entity_type` is `service_identity` is about a machine identity's token
         nearing expiry (0204). It carries the principal id and no `sparkplug_id`, and only an
         Administrator reads it; every other role is returned the other rows.
+
+        Each row written since 0220 keeps the uid of the rule that raised it (`rule_uid`) and the
+        alert's `labels` and `values` as Grafana sent them. The upsert key is still
+        `(fingerprint, starts_at)`.
       parameters:
         - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
         - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
@@ -3031,6 +3035,9 @@ paths:
         still firing means a later resolve always wins.
 
         A `service_identity` row is returned to an Administrator alone, as from `platform_alerts`.
+
+        The view does not return `rule_uid`, `labels` or `values` (0220). Read them from
+        `platform_alerts` by `id`, as the dashboard reads `rule_uid`.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -5082,7 +5089,17 @@ paths:
                       fingerprint: { type: string }
                       startsAt: { type: string, format: date-time }
                       endsAt: { type: string, description: 'Alertmanager sends 0001-01-01T00:00:00Z while still firing.' }
-                      labels:
+                      generatorURL:
+                        type: string
+                        description: |
+                          `<Grafana root URL>/alerting/grafana/<rule uid>/view`. The uid in its path is
+                          stored as `rule_uid`; the host is whatever root URL Grafana serves from.
+                      ruleUID: { type: string, description: 'The same uid, which Grafana also sends. Read when generatorURL names none.' }
+                      values:
+                        type: object
+                        nullable: true
+                        additionalProperties: { type: number }
+                        description: 'What the rule evaluated, by refId. Stored as `values`, as are the labels.'
                         type: object
                         properties:
                           alertname: { type: string }
@@ -6647,6 +6664,33 @@ components:
         starts_at: { type: string, format: date-time, description: 'When Grafana began firing this occurrence. Part of the occurrence key.' }
         ends_at: { type: string, format: date-time, nullable: true, description: 'Null while firing. A resolved row always carries one — enforced by CHECK.' }
         recorded_at: { type: string, format: date-time, description: 'When this platform wrote the row, as distinct from when Grafana observed it.' }
+        rule_uid:
+          type: string
+          nullable: true
+          description: |
+            The uid of the Grafana rule that raised the alert, from the path of the alert's
+            `generatorURL` (`…/alerting/grafana/<uid>/view`). A stable key for the rule, which
+            `alert_name` (its title) is not. Null on a row written before 0220. Returned by
+            `platform_alerts`, not by `platform_alerts_active`: read it by `id`.
+          example: aber-gateway-clock-skew
+        labels:
+          type: object
+          nullable: true
+          additionalProperties: { type: string }
+          description: |
+            The alert's labels as Grafana sent them: the rule's own, its series', `alertname` and
+            `grafana_folder`. Null on a row written before 0220. Returned by `platform_alerts`, not
+            by `platform_alerts_active`.
+          example: { alertname: Gateway Clock Skew, entity_type: gateway, severity: warning, edge_node: gw-line-4 }
+        values:
+          type: object
+          nullable: true
+          additionalProperties: { type: number }
+          description: |
+            What Grafana evaluated for the alert, by the refId of each query and expression node.
+            Null on a row written before 0220, or when Grafana sent none. Returned by
+            `platform_alerts`, not by `platform_alerts_active`.
+          example: { A: 74.5, B: 74.5, C: 1 }
 
     DeviceNameplate:
       type: object
