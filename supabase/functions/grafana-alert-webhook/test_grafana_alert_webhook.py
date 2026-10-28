@@ -379,7 +379,6 @@ class TestMirrorIsFaithful(unittest.TestCase):
         self.assertIn('onConflict: "fingerprint,starts_at"', self.src)
 
     def test_it_resolves_devices_by_sparkplug_id(self):
-        self.assertIn('.eq', self.src) if False else None
         self.assertIn('"sparkplug_id"', self.src)
         self.assertIn(".in(\"sparkplug_id\"", self.src)
         # Resolving by NAME is the deprecated identity path; it must not appear as a lookup.
