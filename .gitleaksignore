@@ -1,8 +1,9 @@
 # gitleaks findings accepted after review, by fingerprint (commit:file:rule:line).
 # Each was classified without printing its value; see scripts/scan-secrets.mjs.
 
-# Development JWTs signed with the development JWT secret committed beside them. Valid only on a
-# stack that runs with that secret; npm run setup mints a site's own.
+# Development JWTs signed with the development JWT secret, or the development ES256 key pair,
+# committed beside them. Valid only on a stack that runs with that secret or pair; npm run setup
+# mints a site's own.
 0b8a7067f454df02fad759ac4169d8ad81bb9fb0:frontend/src/test/setup.js:jwt:7
 efa37607f98ea74fcc73528f5d114470cd68f295:.github/workflows/ci.yml:jwt:51
 e04e7bc33eb762d4235b7019d9aba3d74958a094:deploy/helm/factoryplus/values-dev.yaml:jwt:26
@@ -16,6 +17,11 @@ ed536e848210b79e570097efbacc4932a6943538:.env.example:jwt:14
 ed536e848210b79e570097efbacc4932a6943538:ingestion/validate.py:jwt:21
 5247108772f54470856bce12771d4fc471de513e:.env.example:jwt:53
 f38ae2d852ffc955ff89949eb6746978aa4977ec:deploy/helm/aber/values-dev.yaml:jwt:69
+7a152a669525910a77b98786695706dd620b9738:deploy/helm/aber/values-dev.yaml:jwt:45
+7a152a669525910a77b98786695706dd620b9738:deploy/helm/aber/values-dev.yaml:jwt:46
+7a152a669525910a77b98786695706dd620b9738:deploy/helm/aber/values-dev.yaml:jwt:74
+7a152a669525910a77b98786695706dd620b9738:deploy/helm/aber/values-dev.yaml:jwt:75
+7a152a669525910a77b98786695706dd620b9738:deploy/helm/aber/values-dev.yaml:jwt:76
 
 # Supabase anon and service_role keys first committed in the initial commit, for a local
 # throwaway instance that no longer exists (confirmed by the maintainer, 2026-09-23). Signed with
