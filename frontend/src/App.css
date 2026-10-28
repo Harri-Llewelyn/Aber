@@ -4006,13 +4006,14 @@ a.chip { text-decoration: none; }
 }
 
 /* Left, from the foot of the rail: fixed like the panel, on its left border, and level with the
-   centre of the account row. The foot is 10px of padding, the 34px Collapse all tabs button, a 2px
-   gap, then the 38px account row, so the centre is 65px up. */
+   centre of the account row. The foot is 10px of padding, the 26px Collapse all tabs button (its
+   16px icon and label, 4px padding, a 1px border), a 2px gap, then the 38px account row, so the
+   centre is 57px up. */
 .user-menu:has(> .user-popover)::after {
   --arrow-turn: -45deg;
   position: fixed;
   left: 60.5px;
-  bottom: 65px;
+  bottom: 57px;
   z-index: 201;
 }
 .sidebar-mode-expanded .user-menu:has(> .user-popover)::after { left: 240.5px; }
