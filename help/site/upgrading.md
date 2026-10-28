@@ -1411,7 +1411,8 @@ Run these three steps on a machine whose kube context reaches the release:
      es256Signing: true
    ```
 
-   Every service restarts once, the platform database too. People stay signed in.
+   Each service that signs or checks a token restarts once, the platform database too. Ingestion,
+   i3X and playback keep running. People stay signed in.
 
 3. Re-sign the keys the gateway and the workers hold:
 
