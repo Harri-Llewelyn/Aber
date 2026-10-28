@@ -1,5 +1,5 @@
 // =================================================================================================
-// scripts/mint-api-token.mjs, and scripts/mint-mcp-token.mjs, its old name until 1.8.0
+// scripts/mint-api-token.mjs
 //
 // Each run records against a stand-in for PostgREST's record_service_token_issued and answers
 // GoTrue's JWKS, so no stack is needed: stackCredentials() reads the environment before it asks the
@@ -17,12 +17,10 @@ import { generateSigningKeys, signatureVerifies } from './lib/service-jwt.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'mint-api-token.mjs');
-const OLD_NAME = join(HERE, 'mint-mcp-token.mjs');
 // Fresh each run: stand-ins for the release Secret's SUPABASE_JWT_SECRET and its key set.
 const SECRET = randomBytes(32).toString('hex');
 const KEY_SET = generateSigningKeys(SECRET);
 const READ_ONLY_API_CLIENT = 'b0000000-0000-4000-8000-000000000001';
-const NOTICE = 'scripts/mint-mcp-token.mjs is now scripts/mint-api-token.mjs; the old name is removed in 1.8.0.';
 const NO_CLUSTER = { KUBECONFIG: join(tmpdir(), 'mint-api-token-test-no-such-kubeconfig') };
 
 /** Runs a script to its end, resolving with its exit code and both streams. */
@@ -107,18 +105,16 @@ test('the script records the token, then prints it alone on stdout', async () =>
     // Neutral about the client: a variable name suits one of them, and the dialog has a setup per client.
     assert.match(stderr, /Give it to the client as its bearer token\. The Issue Token dialog on Access Control/);
     assert.ok(!stderr.includes('I3X_TOKEN'), 'the plain output names no client variable');
-    assert.ok(!stderr.includes(NOTICE), 'the new name prints no deprecation notice');
   } finally {
     await stub.close();
   }
 });
 
-test('the old name says where the script went, on stderr, and --json still parses', async () => {
+test('--json prints a block that parses, holding the token it recorded', async () => {
   const stub = await stubPostgrest();
   try {
-    const { code, stdout, stderr } = await run(OLD_NAME, ['--json'], stub.env);
+    const { code, stdout, stderr } = await run(SCRIPT, ['--json'], stub.env);
     assert.equal(code, 0, stderr);
-    assert.equal(stderr.split(/\r?\n/)[0], NOTICE);
     const block = JSON.parse(stdout);
     const claims = claimsOf(block.mcpServers['aber-i3x'].env.I3X_TOKEN);
     assert.equal(claims.sub, READ_ONLY_API_CLIENT);
@@ -128,11 +124,11 @@ test('the old name says where the script went, on stderr, and --json still parse
   }
 });
 
-test('the old name passes every argument through', async () => {
+test('--principal and --days reach the token and its record', async () => {
   const stub = await stubPostgrest();
   const other = 'c0ffee00-0000-4000-8000-000000000009';
   try {
-    const { code, stdout, stderr } = await run(OLD_NAME, ['--principal', other, '--days', '7'], stub.env);
+    const { code, stdout, stderr } = await run(SCRIPT, ['--principal', other, '--days', '7'], stub.env);
     assert.equal(code, 0, stderr);
     const claims = claimsOf(stdout.trim());
     assert.equal(claims.sub, other);
@@ -143,25 +139,21 @@ test('the old name passes every argument through', async () => {
   }
 });
 
-test('the old name keeps the exit code when the recording is refused, and prints no token', async () => {
+test('a refused recording exits 1 and prints no token', async () => {
   const stub = await stubPostgrest(400);
   try {
-    const { code, stdout, stderr } = await run(OLD_NAME, [], stub.env);
+    const { code, stdout, stderr } = await run(SCRIPT, [], stub.env);
     assert.equal(code, 1);
     assert.equal(stdout, '');
-    assert.equal(stderr.split(/\r?\n/)[0], NOTICE);
     assert.match(stderr, /refused to record this issue \(HTTP 400\)/);
   } finally {
     await stub.close();
   }
 });
 
-test('an argument error exits 1 under either name, before anything is signed', async () => {
-  for (const script of [SCRIPT, OLD_NAME]) {
-    const { code, stdout, stderr } = await run(script, ['--principal', 'not-a-uuid']);
-    assert.equal(code, 1);
-    assert.equal(stdout, '');
-    assert.match(stderr, /--principal must be a service principal's UUID, got 'not-a-uuid'/);
-    assert.equal(stderr.includes(NOTICE), script === OLD_NAME);
-  }
+test('an argument error exits 1 before anything is signed', async () => {
+  const { code, stdout, stderr } = await run(SCRIPT, ['--principal', 'not-a-uuid']);
+  assert.equal(code, 1);
+  assert.equal(stdout, '');
+  assert.match(stderr, /--principal must be a service principal's UUID, got 'not-a-uuid'/);
 });
