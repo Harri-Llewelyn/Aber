@@ -130,9 +130,10 @@ CREATE TABLE IF NOT EXISTS auth.oauth_clients (
 GRANT SELECT, INSERT, DELETE ON auth.oauth_clients TO postgres;
 
 -- The columns the Apps tab lists and 0002's seed writes (0217), with GoTrue's types. Nullable
--- where GoTrue's are not, so a suite can register a client by id and name alone. On a stack
--- `postgres` holds every privilege on GoTrue's tables (the image's default privileges for
--- supabase_auth_admin); 0217 updates them and puts triggers on them.
+-- where GoTrue's are not, so a suite can register a client by id and name alone. Owned by GoTrue's
+-- role as on a stack, where `postgres` holds every privilege on GoTrue's tables (the image's
+-- default privileges for supabase_auth_admin) but is not their owner: 0217 updates them and puts
+-- triggers on them, and cannot disable or drop one.
 DO $$
 BEGIN
   CREATE TYPE auth.oauth_client_type AS ENUM ('public', 'confidential');
@@ -149,7 +150,8 @@ ALTER TABLE auth.oauth_clients
   ADD COLUMN IF NOT EXISTS token_endpoint_auth_method text,
   ADD COLUMN IF NOT EXISTS created_at                 timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS updated_at                 timestamptz NOT NULL DEFAULT now();
-GRANT UPDATE, TRIGGER ON auth.oauth_clients TO postgres;
+ALTER TABLE auth.oauth_clients OWNER TO supabase_auth_admin;
+GRANT ALL ON auth.oauth_clients TO postgres;
 
 -- `auth.oauth_consents` is GoTrue's record of a person's approval of a client, as GoTrue's own
 -- migration makes it: one row per person and client, `revoked_at` set when it is taken back.
@@ -172,7 +174,6 @@ GRANT ALL ON auth.oauth_consents TO postgres;
 -- admin API's registration) as GoTrue's role, inside its own transaction: `postgres` may SET ROLE
 -- to it, and inherits none of its privileges.
 GRANT supabase_auth_admin TO postgres WITH INHERIT FALSE, SET TRUE;
-GRANT SELECT, INSERT, UPDATE, DELETE ON auth.oauth_clients TO supabase_auth_admin;
 
 -- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
 -- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as

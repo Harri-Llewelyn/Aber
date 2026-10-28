@@ -11,7 +11,9 @@ faults are possible, and this suite holds both off:
 
   * A FALSE "SAME" leaves a stale policy or constraint live for good: an RLS hole, or a rule the
     migrations no longer state, and nothing reports it. Every policy, trigger, CHECK and foreign
-    key the chain states is changed in turn, and its own call or guard must put it back.
+    key the chain states is changed in turn, and its own call or guard must put it back. A trigger
+    on a table GoTrue owns is changed as GoTrue's role. Where the replay may not drop a trigger
+    (auth.oauth_consents, which supautils does not list), the replay must fail instead.
   * A STATEMENT THAT NEVER MATCHES is re-created on every boot. Nothing fails, and the locks are
     back. After the chain, every statement and guard equals its live object, running every call
     again takes no ACCESS EXCLUSIVE lock, and running every guard again keeps every constraint's
@@ -25,6 +27,7 @@ import re
 import unittest
 
 import psycopg2
+import psycopg2.errors
 from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
@@ -214,29 +217,83 @@ class AStalePolicyIsPutBack(ReplayTestCase):
 
 class AStaleTriggerIsPutBack(ReplayTestCase):
 
+    def owner_unless_ours(self, table):
+        """The table's owner when the chain's role is not it: GoTrue's tables are GoTrue's. The test
+        fixture lets the chain's role take GoTrue's, as GoTrue's own changes would be made."""
+        self.cur.execute("SELECT pg_has_role(current_user, relowner, 'USAGE'), pg_get_userbyid(relowner)"
+                         " FROM pg_class WHERE oid = %s::regclass", (table,))
+        owned, owner = self.cur.fetchone()
+        return None if owned else owner
+
+    def may_drop_triggers(self, table):
+        """Whether the replay can drop a trigger here: the chain's role owns the table, or supautils
+        lets it drop triggers there (supautils.drop_trigger_grants)."""
+        self.cur.execute(
+            "SELECT pg_has_role(current_user, relowner, 'USAGE')"
+            " OR (coalesce(current_setting('supautils.drop_trigger_grants', true), '{}')::jsonb -> current_user) ? %s"
+            " FROM pg_class WHERE oid = %s::regclass", (table, table))
+        return self.cur.fetchone()[0]
+
+    def as_owner(self, owner, statement):
+        if owner:
+            self.cur.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(owner)))
+        try:
+            self.cur.execute(statement)
+        finally:
+            if owner:
+                self.cur.execute("RESET ROLE")
+
     def test_every_trigger_comes_back_disabled_or_redefined(self):
-        triggers = [c for (kind, _, _), c in self.stated.items() if kind == "trigger"]
+        triggers = [c for (kind, _, _), c in self.stated.items()
+                    if kind == "trigger" and self.may_drop_triggers(c["table"])]
         self.assertGreater(len(triggers), 30)
         for c in triggers:
             timing = re.sub(r"^(CREATE TRIGGER \S+) (BEFORE|AFTER) ",
                             lambda m: f"{m.group(1)} {'AFTER' if m.group(2) == 'BEFORE' else 'BEFORE'} ",
                             c["statement"], count=1)
             table, name = sql.Identifier(*c["table"].split(".")), sql.Identifier(c["name"])
+            # Disabling a trigger, or dropping one, is the owner's; creating one is the chain's.
+            owner = self.owner_unless_ours(c["table"])
             changes = {
-                "disabled": [sql.SQL("ALTER TABLE {} DISABLE TRIGGER {}").format(table, name)],
-                "replica": [sql.SQL("ALTER TABLE {} ENABLE REPLICA TRIGGER {}").format(table, name)],
-                "timing": [DROP["trigger"].format(name, table), timing],
+                "disabled": [(owner, sql.SQL("ALTER TABLE {} DISABLE TRIGGER {}").format(table, name))],
+                "replica": [(owner, sql.SQL("ALTER TABLE {} ENABLE REPLICA TRIGGER {}").format(table, name))],
+                "timing": [(owner, DROP["trigger"].format(name, table)), (None, timing)],
             }
             for part, statements in changes.items():
                 with self.subTest(trigger=c["name"], part=part):
                     self.cur.execute("SAVEPOINT each")
-                    for statement in statements:
-                        self.cur.execute(statement)
+                    for by, statement in statements:
+                        self.as_owner(by, statement)
                     self.assertNotEqual(self.live("trigger", c["table"], c["name"]), c["statement"])
                     notices = self.replay(c)
                     self.assertEqual(self.live("trigger", c["table"], c["name"]), c["statement"])
                     self.assertTrue(any("re-created" in n for n in notices), notices)
                     self.cur.execute("ROLLBACK TO SAVEPOINT each")
+
+    def test_a_trigger_the_replay_cannot_drop_stops_the_boot_rather_than_stay_stale(self):
+        """0217's consent trigger is on auth.oauth_consents, which GoTrue owns and supautils does not
+        list. The chain's role may create a trigger there, and neither disable nor drop one. So only
+        GoTrue's own role can make it stale, and the replay then fails, since putting it back means
+        dropping it, rather than leave it stale."""
+        theirs = [c for (kind, _, _), c in self.stated.items()
+                  if kind == "trigger" and not self.may_drop_triggers(c["table"])]
+        self.assertTrue(theirs, "no trigger is on a table the replay cannot drop one on")
+        for c in theirs:
+            table, name = sql.Identifier(*c["table"].split(".")), sql.Identifier(c["name"])
+            disable = sql.SQL("ALTER TABLE {} DISABLE TRIGGER {}").format(table, name)
+            with self.subTest(trigger=c["name"]):
+                self.assertTrue(c["table"].startswith("auth."), f"{c['name']} is on {c['table']}, outside GoTrue's schema")
+                for statement in (disable, DROP["trigger"].format(name, table)):
+                    self.cur.execute("SAVEPOINT each")
+                    with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                        self.cur.execute(statement)
+                    self.cur.execute("ROLLBACK TO SAVEPOINT each")
+                self.cur.execute("SAVEPOINT each")
+                self.as_owner(self.owner_unless_ours(c["table"]), disable)
+                self.assertNotEqual(self.live("trigger", c["table"], c["name"]), c["statement"])
+                with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                    self.replay(c)
+                self.cur.execute("ROLLBACK TO SAVEPOINT each")
 
 
 class EveryConstraintKeepsItsOid(ReplayTestCase):

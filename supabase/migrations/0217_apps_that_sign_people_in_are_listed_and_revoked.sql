@@ -423,14 +423,16 @@ REVOKE ALL ON FUNCTION public.log_app_approval() FROM PUBLIC, anon, authenticate
 COMMENT ON FUNCTION public.log_app_approval() IS
   'Audit trigger for auth.oauth_consents, in the person''s lane (entity_type user_roles, entity_id '
   'the person): APP_APPROVED for a consent given, given again or re-scoped, APP_APPROVAL_REVOKED '
-  'when revoked_at is set. new_data is {email, app: {id, name}, scopes, granted_at}, with revoked_at '
-  'on a revocation. changed_by is the caller''s token; with none, GoTrue''s own role (the person''s '
-  'consent page or their revoke) records the person (0217).';
+  'when revoked_at is set; any other UPDATE writes nothing. new_data is {email, app: {id, name}, '
+  'scopes, granted_at}, with revoked_at on a revocation. changed_by is the caller''s token; with '
+  'none, GoTrue''s own role (the person''s consent page or their revoke) records the person (0217).';
 
 -- GoTrue creates and owns both tables before db-init runs; `postgres` holds every privilege on them
 -- (the image's default privileges for supabase_auth_admin), TRIGGER among them, but is not their
--- owner. Only the owner may drop a trigger, and replay_trigger() drops one whose definition
--- differs, so changing one of these four later needs GoTrue's role.
+-- owner. replay_trigger() drops a trigger whose definition differs: supautils lets `postgres` drop
+-- one on auth.oauth_clients (supautils.drop_trigger_grants), and nothing lets it on
+-- auth.oauth_consents. So the consent trigger is one, with no WHEN: what it records is decided in
+-- log_app_approval(), which a later file may redeclare, and changing the trigger needs GoTrue's role.
 DO $$
 BEGIN
   IF NOT has_table_privilege('auth.oauth_clients', 'TRIGGER') OR NOT has_table_privilege('auth.oauth_consents', 'TRIGGER') THEN
@@ -446,10 +448,7 @@ SELECT public.replay_trigger('auth.oauth_clients', 'oauth_clients_audit_trail_up
 CREATE TRIGGER oauth_clients_audit_trail_update AFTER UPDATE ON auth.oauth_clients FOR EACH ROW WHEN (((old.deleted_at IS NULL) <> (new.deleted_at IS NULL))) EXECUTE FUNCTION public.log_app_registration();
 $ddl$);
 SELECT public.replay_trigger('auth.oauth_consents', 'oauth_consents_audit_trail', $ddl$
-CREATE TRIGGER oauth_consents_audit_trail AFTER INSERT ON auth.oauth_consents FOR EACH ROW EXECUTE FUNCTION public.log_app_approval();
-$ddl$);
-SELECT public.replay_trigger('auth.oauth_consents', 'oauth_consents_audit_trail_update', $ddl$
-CREATE TRIGGER oauth_consents_audit_trail_update AFTER UPDATE ON auth.oauth_consents FOR EACH ROW WHEN (((old.revoked_at IS DISTINCT FROM new.revoked_at) OR (old.granted_at IS DISTINCT FROM new.granted_at) OR (old.scopes IS DISTINCT FROM new.scopes))) EXECUTE FUNCTION public.log_app_approval();
+CREATE TRIGGER oauth_consents_audit_trail AFTER INSERT OR UPDATE ON auth.oauth_consents FOR EACH ROW EXECUTE FUNCTION public.log_app_approval();
 $ddl$);
 
 -- -------------------------------------------------------------------------------------------------
@@ -522,7 +521,7 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
 
-  -- The owner reaches GoTrue's tables, and the four triggers are in place.
+  -- The owner reaches GoTrue's tables, and the three triggers are in place.
   FOREACH t IN ARRAY ARRAY['auth.oauth_clients', 'auth.oauth_consents', 'auth.sessions'] LOOP
     -- One privilege per call: has_table_privilege() answers true when ANY of a list is held.
     FOREACH p IN ARRAY CASE WHEN t = 'auth.sessions' THEN ARRAY['SELECT', 'DELETE']
@@ -534,8 +533,7 @@ BEGIN
   END LOOP;
   IF public.live_trigger_statement('auth.oauth_clients', 'oauth_clients_audit_trail') IS NULL
      OR public.live_trigger_statement('auth.oauth_clients', 'oauth_clients_audit_trail_update') IS NULL
-     OR public.live_trigger_statement('auth.oauth_consents', 'oauth_consents_audit_trail') IS NULL
-     OR public.live_trigger_statement('auth.oauth_consents', 'oauth_consents_audit_trail_update') IS NULL THEN
+     OR public.live_trigger_statement('auth.oauth_consents', 'oauth_consents_audit_trail') IS NULL THEN
     RAISE EXCEPTION '0217: auth.oauth_clients and auth.oauth_consents lack their audit triggers';
   END IF;
 END

@@ -2060,19 +2060,25 @@ or by SQL.
   NULL, and the update trigger fires only when `deleted_at` changes between NULL and a time. The
   first seed of a stack app on a stack that already has `0217` writes one `APP_REGISTERED`, by
   `migration`; on a fresh install `0002` runs before `0217` and writes none.
-- **The triggers are GoTrue's tables'.** `postgres` creates them with the TRIGGER privilege the
-  image's default privileges give it on every table `supabase_auth_admin` creates; the file checks it
-  first and names it if absent. It is not the tables' owner, and only the owner may drop a trigger.
-  `replay_trigger()` drops one whose definition differs, so changing one of the four later needs
-  GoTrue's role.
+- **The triggers are on GoTrue's tables, which `postgres` does not own.** It creates them with the
+  TRIGGER privilege the image's default privileges give it on every table `supabase_auth_admin`
+  creates; the file checks it first and names it if absent. Disabling a trigger needs the owner.
+  `replay_trigger()` drops a trigger whose definition differs, and `postgres` may drop one on
+  `auth.oauth_clients` only because supautils lists that table (`supautils.drop_trigger_grants`, in
+  the image's `supautils.conf`). It does not list `auth.oauth_consents`, which is newer than the
+  list. So that table has one trigger, `AFTER INSERT OR UPDATE` with no `WHEN`, and
+  `log_app_approval()` decides what is recorded: a later file changes the function, never the
+  trigger. If GoTrue's role disabled or changed it, the replay would fail the boot rather than leave
+  it stale. `test_replay_recreates_only_what_differs.py` holds both: the two client triggers come
+  back from any change GoTrue's role makes, and the consent trigger's replay refuses.
 
 The file's self-check asserts each function's `SECURITY DEFINER` and pin, that only the five calls
 are granted to `authenticated` and none to `anon` or `service_role`, that each refuses a request
 with no identity, that `app_list_items()` splits GoTrue's lists and `app_facts()` drops the hash,
-that the owner may read and update both tables and put triggers on them, and that the four triggers
+that the owner may read and update both tables and put triggers on them, and that the three triggers
 are in place. The test database's fixture (`test-harness/auth-bootstrap.sql`) gains
-`auth.oauth_consents` as GoTrue's migration makes it, owned by `supabase_auth_admin`, the client
-columns `0002` and these functions read, and lets `postgres` take GoTrue's role
+`auth.oauth_consents` as GoTrue's migration makes it, the client columns `0002` and these functions
+read, both tables owned by `supabase_auth_admin` as on a stack, and lets `postgres` take GoTrue's role
 (`WITH INHERIT FALSE, SET TRUE`) so a suite makes GoTrue's own writes in its transaction.
 `test_apps_that_sign_people_in_are_listed_and_revoked.py` holds the reads, both revokes, the
 removal, every row and its actor, and `0002`'s own Grafana block run twice. The stack suite
