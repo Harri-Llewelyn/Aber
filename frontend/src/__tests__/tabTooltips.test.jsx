@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
+import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { QUEUES } from '../components/tabs/ApprovalsTab'
 import { STAGES } from '../components/tabs/ArchivesTab'
 import { SUBJECTS } from '../components/tabs/CaptureTab'
@@ -17,7 +17,7 @@ import { CATEGORY_DESCRIPTIONS } from '../components/tabs/SettingsTab'
  * VocabularyTab.test.jsx.
  */
 const TOOLTIPS = [
-  ...[PEOPLE_SECTION, ...SECTIONS].map(t => [`Access Control: ${t.label}`, t.description]),
+  ...[PEOPLE_SECTION, APPS_SECTION, ...SECTIONS].map(t => [`Access Control: ${t.label}`, t.description]),
   ...QUEUES.map(t => [`Approvals: ${t.label}`, t.description]),
   ...STAGES.map(t => [`Archived Entities: ${t.label}`, t.description]),
   ...SUBJECTS.map(t => [`Capture: ${t.label}`, t.description]),
@@ -39,7 +39,7 @@ describe('every tab tooltip', () => {
   })
 
   it('covers every tab of the pages it lists', () => {
-    expect(TOOLTIPS).toHaveLength(5 + 2 + 2 + 2 + 2 + 4 + 3 + 3 + 5)
+    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 2 + 2 + 4 + 3 + 3 + 5)
   })
 
   it('has a sentence for each Settings category the database seeds', () => {

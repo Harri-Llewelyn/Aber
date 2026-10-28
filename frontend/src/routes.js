@@ -81,6 +81,9 @@ export const personUrl = (email, removed = false) =>
  */
 export const identityUrl = (name, withdrawn = false) => pageUrl('access-control', { search: name, withdrawn }, 'identities')
 
+/** One app that signs people in, on Access Control › Apps, with its drawer open. */
+export const appUrl = (id) => pageUrl('access-control', { app: id }, 'apps')
+
 /** One setting, by its key, on the category that holds it. */
 export const settingUrl = (key) => pageUrl('settings', { setting: key })
 

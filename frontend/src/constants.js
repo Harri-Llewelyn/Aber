@@ -81,6 +81,14 @@ export const AUDIT_TRAIL_ACTIONS = {
   // every session the person held ended, with how many. A new address ends the sessions too.
   EMAIL_CHANGED:     'Email address changed',
   SESSIONS_ENDED:    'Sessions ended',
+  // An app that signs people in (0217): written by triggers on the sign-in service's own tables,
+  // so an act inside it is recorded too. Registration and removal are in the app's lane, and a
+  // person's approval, given or revoked, in theirs.
+  APP_REGISTERED:       'App registered',
+  APP_REMOVED:          'App removed',
+  APP_RESTORED:         'App restored',
+  APP_APPROVED:         'App allowed',
+  APP_APPROVAL_REVOKED: 'App approval revoked',
   // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
   // when an appliance reports a different flow hash: the digest before and after, and what the
   // forge's main held at that moment. Actor `ingestion`, no user.
@@ -129,6 +137,8 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // shape both.
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
   { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
+  // The apps that sign people in (0217): the sign-in service's OAuth clients.
+  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },

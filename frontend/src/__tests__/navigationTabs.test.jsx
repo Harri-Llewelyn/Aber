@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import {
   TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
-  DIRECTORY_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
+  DIRECTORY_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
   currentTabOf, pageTabsOf, pageTitleOf, tabHref,
 } from '../navigation'
 import { pathSlug } from '../hooks/useUrlState'
@@ -20,7 +20,7 @@ import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
 import { SUBJECTS } from '../components/tabs/CaptureTab'
 import { STAGES } from '../components/tabs/ArchivesTab'
 import { SERVICE_GROUPS } from '../components/tabs/DirectoryTab'
-import { PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
+import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { CATEGORY_DESCRIPTIONS, SettingsTab } from '../components/tabs/SettingsTab'
 import { PROFILE_SECTIONS } from '../components/tabs/ProfileTab'
 import { mtconnectVocabularyTab } from '../components/common/MTConnectVocabularyPanel'
@@ -45,6 +45,7 @@ describe('one list per page', () => {
     expect(SUBJECTS).toBe(CAPTURE_TABS)
     expect(STAGES).toBe(ARCHIVES_TABS)
     expect(PEOPLE_SECTION).toBe(ACCESS_CONTROL_PEOPLE_TAB)
+    expect(APPS_SECTION).toBe(ACCESS_CONTROL_APPS_TAB)
     expect(SECTIONS).toBe(ACCESS_CONTROL_TABS)
     expect(PROFILE_SECTIONS).toBe(PROFILE_TABS)
     expect(SERVICE_GROUPS.map(g => [g.id, g.title, g.description]))

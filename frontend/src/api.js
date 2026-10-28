@@ -1503,6 +1503,71 @@ const apiMethods = {
   },
 
   // -------------------------------------------------------------------------------------------
+  // Apps that sign people in with Aber, and who has allowed each (0217). An app is one of the
+  // sign-in service's OAuth clients; an approval is a person's consent to one.
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Every app not removed, Aber's own first: `{ id, client_name, registration_type,
+   * part_of_stack, client_type, redirect_uris, client_uri, created_at, people_allowing }` from
+   * `list_apps()`. Administrator only.
+   */
+  listApps: async () => {
+    const { data, error } = await supabase.rpc('list_apps');
+    if (error) throw new Error(error.message || 'Could not list the apps');
+    return data || [];
+  },
+
+  /**
+   * Who allows one app now: `{ user_id, email, display_name, scopes, granted_at }` from
+   * `app_approvals()`, newest first. Administrator only; a removed app is not found.
+   */
+  appApprovals: async (clientId) => {
+    const { data, error } = await supabase.rpc('app_approvals', { p_client_id: clientId });
+    if (error) throw new Error(error.message || 'Could not list who allows the app');
+    return data || [];
+  },
+
+  /**
+   * The signed-in person's own approvals: `{ client_id, client_name, client_uri, part_of_stack,
+   * scopes, granted_at }` from `list_my_app_approvals()`, newest first.
+   */
+  listMyAppApprovals: async () => {
+    const { data, error } = await supabase.rpc('list_my_app_approvals');
+    if (error) throw new Error(error.message || 'Could not list the apps you have allowed');
+    return data || [];
+  },
+
+  /**
+   * Take back your own approval of an app, through the sign-in service's own endpoint (DELETE
+   * /user/oauth/grants): it revokes the approval and ends that app's sessions for you.
+   */
+  revokeMyAppApproval: async (clientId) => {
+    const { error } = await supabase.auth.oauth.revokeGrant({ clientId });
+    if (error) throw new Error(error.message || 'Could not revoke the app');
+  },
+
+  /**
+   * Take back another person's approval of an app (`revoke_app_approval()`), as the person's own
+   * Revoke does. Resolves to how many of the app's sessions for them ended. Administrator only.
+   */
+  revokeAppApproval: async (userId, clientId) => {
+    const { data, error } = await supabase.rpc('revoke_app_approval', { p_user_id: userId, p_client_id: clientId });
+    if (error) throw new Error(error.message || 'Could not revoke the approval');
+    return typeof data === 'number' ? data : 0;
+  },
+
+  /**
+   * Remove an app (`remove_app()`): every approval of it and every session it holds end with it.
+   * Resolves to `{ name, approvals_ended, sessions_ended }`. Aber's own apps are refused.
+   */
+  removeApp: async (clientId) => {
+    const { data, error } = await supabase.rpc('remove_app', { p_client_id: clientId });
+    if (error) throw new Error(error.message || 'Could not remove the app');
+    return data || { approvals_ended: 0, sessions_ended: 0 };
+  },
+
+  // -------------------------------------------------------------------------------------------
   // Backups (0101). Administrator only on both tables and every RPC; the bytes never come here.
   // -------------------------------------------------------------------------------------------
 

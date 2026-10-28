@@ -9,6 +9,7 @@ import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevoc
 import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateModal'
 import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
 import { PeopleSection } from './PeopleSection'
+import { AppsSection } from './AppsSection'
 import {
   IconArchive, IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconShieldAlert,
   IconShieldCheck,
@@ -22,7 +23,7 @@ import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
-import { ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation'
+import { ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -102,6 +103,9 @@ const ROLE_ENTRIES = [
 /** People comes first, and only for an Administrator; see AccessControlTab. Both lists are navigation.jsx's. */
 export const PEOPLE_SECTION = ACCESS_CONTROL_PEOPLE_TAB
 
+/** Apps comes after People, and only for an Administrator too. */
+export const APPS_SECTION = ACCESS_CONTROL_APPS_TAB
+
 /** The page's other tabs, in order. The id is the tab's path segment; the description is its tooltip. */
 export const SECTIONS = ACCESS_CONTROL_TABS
 
@@ -111,6 +115,9 @@ export const SECTIONS = ACCESS_CONTROL_TABS
  * People is the people who sign in, for an Administrator to add, re-role and remove (PeopleSection).
  * It is offered only when `userRole` is Administrator, and the page opens on it; the functions behind
  * it check the role again. `currentUserId` is the signed-in account, whose own controls are disabled.
+ *
+ * Apps is the apps that sign those people in, such as Grafana, and who has allowed each
+ * (AppsSection). Administrator only, as People is.
  *
  * Broker credentials is the per-gateway list, with two sources side by side: what the platform
  * issued and recorded (the database), and what the broker holds right now (its Dynamic Security
@@ -123,11 +130,11 @@ export const SECTIONS = ACCESS_CONTROL_TABS
  */
 export function AccessControlTab({ showToast, userRole = null, currentUserId = null }) {
   const showPeople = userRole === 'Administrator'
-  const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
+  const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, APPS_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
   const [section, setSection, sectionHref] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
   // The role whose rules the drawer shows, by name, in the address as `?broker-role=`.
   const [openRole, setOpenRole] = useUrlState('broker-role', '', { allowed: ROLE_ENTRIES.map(e => e.rolename) })
-  // Where People draws a person's drawer: beside the card, as the role drawer is.
+  // Where People draws a person's drawer, and Apps an app's: beside the card, as the role drawer is.
   const [personDrawerHost, setPersonDrawerHost] = useState(null)
   const [rows, setRows] = useState([])
   // One flag per read a card waits on, so a card that is still loading says so instead of reading
@@ -407,7 +414,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           <CardHeading
             icon={<IconLock size={15} />}
             title="Access Control"
-            description="Who may reach Aber: the people who sign in, and the credentials that let gateways and the stack's own processes reach the broker and the database."
+            description="Who may reach Aber: the people who sign in, the apps that sign them in, and the credentials that let gateways and the stack's own processes reach the broker and the database."
           />
 
           <TabStrip
@@ -420,6 +427,10 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
           {section === 'people' && showPeople && (
             <PeopleSection showToast={showToast} currentUserId={currentUserId} drawerHost={personDrawerHost} />
+          )}
+
+          {section === 'apps' && showPeople && (
+            <AppsSection showToast={showToast} drawerHost={personDrawerHost} />
           )}
 
           {section === 'credentials' && (<>

@@ -5835,6 +5835,15 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .person-sessions-table th:last-child,
 .person-sessions-table td:last-child { padding-right: 0; }
 
+/* The people who allow an app, in its drawer on Access Control › Apps: the same narrowing. */
+.app-approvals-table th,
+.app-approvals-table td { padding: 8px 6px; font-size: 12px; }
+.app-approvals-table th { white-space: normal; font-size: 11px; letter-spacing: 0.4px; }
+.app-approvals-table th:first-child,
+.app-approvals-table td:first-child { padding-left: 0; }
+.app-approvals-table th:last-child,
+.app-approvals-table td:last-child { padding-right: 0; }
+
 
 /* The sign-in screen's theme toggle. In App.css rather than inline because it needs :hover and
    :focus-visible. Every colour is a token and none has a fallback literal, the rule

@@ -82,6 +82,13 @@ export const ACCESS_CONTROL_PEOPLE_TAB = {
   description: 'Everyone who signs in to the dashboard, with their role. Add people, change roles, or remove access here.',
 }
 
+/** Administrator only too, beside People: the apps that sign those people in. */
+export const ACCESS_CONTROL_APPS_TAB = {
+  id: 'apps',
+  label: 'Apps',
+  description: 'The apps that sign people in with Aber, such as Grafana, and who has allowed each one.',
+}
+
 export const ACCESS_CONTROL_TABS = [
   { id: 'credentials', label: 'Broker credentials', description: "Every gateway's broker credential: what Aber issued and recorded, beside what the broker holds now." },
   { id: 'identities', label: 'Machine identities', description: "Aber's own processes on the database side. None can sign in: each holds a token and permissions of its own." },
@@ -194,7 +201,7 @@ export const TABS = [
   { id: 'directory',      label: 'Directory',      group: 'admin',   icon: <IconBookOpen size={16} />, pageTabs: DIRECTORY_TABS },
   // Access Control is narrower than the API behind it: seeing who holds what is an access-control
   // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
-  { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator', pageTabs: [ACCESS_CONTROL_PEOPLE_TAB, ...ACCESS_CONTROL_TABS] },
+  { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator', pageTabs: [ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ...ACCESS_CONTROL_TABS] },
   // Ungated, because every signed-in account may read a setting (rows marked `sensitive` reach
   // Administrators only); changing one is the database's Administrator gate, and the page is
   // read-only for any other role.
