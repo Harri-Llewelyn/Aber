@@ -58,4 +58,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_PLAYBACK_ENABLED: '',
   // ingestion.primaryHostId. Blank: a Third-party gateway's credential dialog says where it is set.
   VITE_PRIMARY_HOST_ID: '',
+  // ingestion.unsMqttEnabled and ingestion.unsMqttTopicRoot. Blank: the bridge reads as off, so no
+  // page shows a Unified Namespace topic, and the root as uns.
+  VITE_UNS_MQTT_ENABLED: '',
+  VITE_UNS_MQTT_TOPIC_ROOT: '',
 };

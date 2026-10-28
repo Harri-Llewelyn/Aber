@@ -7,10 +7,11 @@ ISA-95's hierarchy gives:
 
     <root>/<enterprise>/<site>/<area>/<cell>/<device>/<metric>
 
-with the enterprise being the gateway's Sparkplug group, the site the `site.name` setting, the area
-and cell from `device_locations` and the tables it joins, and the metric name as the leaf -- a
-catalog name containing `/` becomes a subtree, which is the convention the catalog's own
-`metric_group` prefix already follows.
+with the enterprise being the Sparkplug group the message arrived under, and the metric name as the
+leaf -- a catalog name containing `/` becomes a subtree, which is the convention the catalog's own
+`metric_group` prefix already follows. The rest of the path is the database's: the view
+`device_uns_paths` (supabase/README.md, 0214) answers each device's path below the root, or why it
+has none, and the dashboard shows the same rows.
 
 THE PATH IS FIXED AT THE LEVEL THE ASSET HONESTLY OCCUPIES. An area-wide asset (a building's BMS)
 publishes under `<area>/<device>` with no cell; a site-wide asset under `<site>/<device>` with
@@ -47,41 +48,41 @@ logger = get_logger("ingestion")
 # -------------------------------------------------------------------------------------------------
 UNS_MQTT_ENABLED = os.getenv("UNS_MQTT_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 
-# The root segment. Not under `spBv1.0/`, which belongs to Sparkplug and is confined per gateway.
+# The root, one level or several. Not under `spBv1.0/`, which belongs to Sparkplug and is confined
+# per gateway.
 UNS_MQTT_TOPIC_ROOT = os.getenv("UNS_MQTT_TOPIC_ROOT", "uns").strip().strip("/") or "uns"
 
-# How long a device's resolved location, a name and the site setting are believed before being
-# re-read. A relocation on the dashboard therefore moves a device's topic within this window.
+# How long a device's path and the metric catalog's units are believed before being re-read. A
+# relocation or a rename on the dashboard therefore moves a device's topic within this window.
 UNS_CONTEXT_TTL_SECONDS = int(os.getenv("UNS_CONTEXT_TTL_SECONDS", "60"))
 
-# The characters a topic segment may not carry: the separator and the two wildcards. Mirrors
-# areas_name_topic_safe, cells_name_topic_safe and gateways_sparkplug_group_format.
+# One row per device: its path below the root, or the reason it has none.
+PATH_VIEW = "device_uns_paths"
+
+# The characters a topic level may not carry: the separator and the two wildcards. The view refuses
+# them in every name on the path; here they guard the message's group, as
+# gateways_sparkplug_group_format guards a configured one.
 TOPIC_UNSAFE = re.compile(r"[/+#]")
-# The metric leaf may contain `/` (a catalog group prefix); only the wildcards are refused.
+# The metric leaf, and the root, may contain `/` (a catalog group prefix, or a root of several
+# levels); only the wildcards are refused.
 LEAF_UNSAFE = re.compile(r"[+#]")
 
 # The skip reasons, each a label value on aber_ingestion_uns_skipped_total. Listed so metrics.py's
-# table and this module cannot disagree about the set.
+# table and this module cannot disagree about the set. All but location_unknown and publish_error
+# are the view's own answers; mirror check 27 holds the view and the dashboard to this list.
 SKIP_REASONS = (
     "site_unset",        # `site.name` is empty: nothing has a complete path yet
-    "location_unknown",  # device_locations had no row, or could not be read
+    "location_unknown",  # the view had no row for the device, or could not be read
     "lane",              # shadow or simulated: not a place on the plant
     "unassigned",        # nobody has said where the device is
     "cell_unfiled",      # the cell is in no area, so the path has a hole in it
-    "unsafe_name",       # a segment carries / + or #
+    "unsafe_name",       # a segment carries / + or #, or is empty
     "publish_error",     # the client refused the publish
 )
 
-# The location_source values device_locations can answer with. Kept in step with the view.
-SOURCE_SHADOW = "shadow"
-SOURCE_SIMULATED = "simulated"
-SOURCE_SITE_WIDE = "site_wide"
-SOURCE_AREA_WIDE = "area_wide"
-SOURCE_UNASSIGNED = "unassigned"
-
 
 # -------------------------------------------------------------------------------------------------
-# A small TTL cache, so a location is one PostgREST read per device per minute rather than per DDATA
+# A small TTL cache, so a path is one PostgREST read per device per minute rather than per DDATA
 # -------------------------------------------------------------------------------------------------
 class _TtlCache:
     def __init__(self, ttl):
@@ -91,7 +92,7 @@ class _TtlCache:
 
     def get(self, key, loader):
         """The cached value for `key`, or `loader()` stored for `ttl` seconds. None is cacheable:
-        a device with no location row should not cost a round trip per message either."""
+        a device the view has no row for should not cost a round trip per message either."""
         now = time.time()
         with self._lock:
             entry = self._data.get(key)
@@ -111,7 +112,7 @@ _context = _TtlCache(UNS_CONTEXT_TTL_SECONDS)
 
 
 def reset_cache():
-    """For tests, and for a future operator control: forget every cached name and location."""
+    """For tests, and for a future operator control: forget every cached path and the units."""
     _context.clear()
 
 
@@ -123,45 +124,19 @@ def _rows(query):
     return (res.data if res else None) or []
 
 
-def site_name(supabase):
-    """The `site.name` setting, or '' when unset. Cached."""
-    def load():
-        rows = _rows(supabase.table("system_settings").select("key,value").eq("key", "site.name"))
-        value = rows[0].get("value") if rows else None
-        return str(value).strip() if isinstance(value, str) else ""
-    return _context.get(("site",), load)
-
-
-def _name_of(supabase, table, row_id):
-    if not row_id:
-        return None
-
-    def load():
-        rows = _rows(supabase.table(table).select("id,name").eq("id", row_id))
-        return rows[0].get("name") if rows else None
-    return _context.get((table, row_id), load)
-
-
-def location_of(supabase, device_id):
+def path_of(supabase, device_id):
     """
-    Where a device is, as the view answers it: `{"source", "area", "cell"}` with the names
-    resolved, or None when the view has no row for it. Cached per device.
+    The device's row in device_uns_paths, `{"enterprise", "uns_path", "skip_reason"}`, or None
+    when the view has no row for it. Cached per device.
     """
     def load():
         rows = _rows(
-            supabase.table("device_locations")
-            .select("device_id,location_source,effective_cell_id,effective_area_id")
+            supabase.table(PATH_VIEW)
+            .select("device_id,enterprise,uns_path,skip_reason")
             .eq("device_id", device_id)
         )
-        if not rows:
-            return None
-        row = rows[0]
-        return {
-            "source": row.get("location_source") or SOURCE_UNASSIGNED,
-            "area": _name_of(supabase, "areas", row.get("effective_area_id")),
-            "cell": _name_of(supabase, "cells", row.get("effective_cell_id")),
-        }
-    return _context.get(("location", device_id), load)
+        return rows[0] if rows else None
+    return _context.get(("path", device_id), load)
 
 
 def units_of(supabase):
@@ -172,45 +147,29 @@ def units_of(supabase):
     return _context.get(("units",), load)
 
 
-def topic_for(enterprise, site, location, device_name, root=None):
+def topic_for(enterprise, row, root=None):
     """
-    The device's topic base, or `(None, reason)` when the path is incomplete. Pure.
+    The device's topic base, or `(None, reason)` when it has none. Pure.
 
-    The rule: every level the asset is honestly at, and no invented ones. A cell-scoped device
-    needs its cell's area; an area-wide one needs only its area; a site-wide one needs neither.
+    `row` is the device's device_uns_paths row, which holds the rule: every level the asset is
+    honestly at, and no invented ones. Its path starts with the group last recorded for the
+    gateway; the topic takes `enterprise`, the group the message arrived under, so a change of
+    group moves the topic at once rather than when the cache expires.
     """
     root = root or UNS_MQTT_TOPIC_ROOT
-    if not site:
-        return None, "site_unset"
-    if location is None:
+    if row is None:
         return None, "location_unknown"
-
-    source = location.get("source")
-    if source in (SOURCE_SHADOW, SOURCE_SIMULATED):
-        return None, "lane"
-    if source == SOURCE_UNASSIGNED:
-        return None, "unassigned"
-
-    segments = [root, enterprise, site]
-    if source == SOURCE_SITE_WIDE:
-        pass
-    elif source == SOURCE_AREA_WIDE:
-        if not location.get("area"):
-            return None, "location_unknown"
-        segments.append(location["area"])
-    else:
-        # explicit or inherited: a real cell, which must itself be filed.
-        if not location.get("cell"):
-            return None, "location_unknown"
-        if not location.get("area"):
-            return None, "cell_unfiled"
-        segments.extend([location["area"], location["cell"]])
-    segments.append(device_name)
-
-    for segment in segments:
-        if not segment or TOPIC_UNSAFE.search(str(segment)):
-            return None, "unsafe_name"
-    return "/".join(str(s) for s in segments), None
+    reason = row.get("skip_reason")
+    if reason:
+        # A reason the counters do not label is counted as a path that could not be read.
+        return None, reason if reason in SKIP_REASONS else "location_unknown"
+    path, recorded = row.get("uns_path"), row.get("enterprise")
+    if not path or not recorded or not path.startswith(recorded + "/"):
+        return None, "location_unknown"
+    # The root may span levels, as the broker's grant on it does; the group is one level.
+    if LEAF_UNSAFE.search(root) or not enterprise or TOPIC_UNSAFE.search(str(enterprise)):
+        return None, "unsafe_name"
+    return "%s/%s/%s" % (root, enterprise, path[len(recorded) + 1:]), None
 
 
 def payload_for(metric_name, value, metric_at, units=None, asset_id=None):
@@ -251,9 +210,7 @@ def publish_ddata(client, supabase, device, group_id, rows, count=None, observe=
     started = time.perf_counter()
     published = 0
     try:
-        site = site_name(supabase)
-        location = location_of(supabase, device["id"]) if site else None
-        base, reason = topic_for(group_id, site, location, device.get("name"))
+        base, reason = topic_for(group_id, path_of(supabase, device["id"]))
         if reason:
             count("uns_skipped_%s" % reason, len(rows))
             logger.debug(

@@ -18,9 +18,11 @@
  *
  * `--out=<path>` writes the values file elsewhere. An existing file is never overwritten.
  *
- * The JWTs are a set: the anon and service-role keys are HS256 JWTs signed by the JWT secret, and
- * rotating the secret without re-minting both yields a stack that comes up healthy and rejects
- * every request. Node's built-in `crypto` does HMAC-SHA256, so this stays a zero-install script.
+ * The JWTs are a set: the anon and service-role keys are ES256 JWTs signed by the EC P-256 key
+ * pair minted here (supabaseAuth.es256Signing, which this turns on), the pair carries the JWT
+ * secret as its legacy HS256 key, and replacing one without re-minting the rest yields a stack
+ * that comes up healthy and rejects every request. Node's built-in `crypto` does ECDSA and
+ * HMAC-SHA256, so this stays a zero-install script.
  *
  * Two questions are asked, on a terminal only. The domain every host is published under, which is
  * what a browser and a Remote gateway both dial: `--domain=<base>` answers it from a script, and
@@ -43,7 +45,7 @@ import { fileURLToPath } from 'url';
 // SHARED WITH scripts/rotate-service-keys.mjs, which signs the same three keys again on a live
 // stack (issue #101). lib/service-jwt.mjs is node:crypto and nothing else.
 import {
-  mintJwt, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
+  mintJwt, generateSigningKeys, signingKeyFrom, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
 } from './lib/service-jwt.mjs';
 import { installCommand, readChartVersion } from './lib/release-chart.mjs';
 
@@ -68,6 +70,9 @@ if (fs.existsSync(outPath)) {
 }
 
 const jwtSecret = hex(32);
+// GoTrue's signing set and the verifiers' JWKS, both carrying jwtSecret as the legacy key.
+const signingKeys = generateSigningKeys(jwtSecret);
+const signingKey = signingKeyFrom(signingKeys.jwtKeys);
 
 /** Service_Ingestor and Service_Playback, seeded by 0002, and Service_ReleaseCheck, seeded by 0181.
  *  Pinned: this runs before any database exists. Separate identities because each reaches its own
@@ -77,14 +82,14 @@ const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
 const RELEASE_CHECK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000004';
 
 const ingestionKey = mintJwt({
-  role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
+  role: 'authenticated', signingKey, subject: INGESTION_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 const playbackKey = mintJwt({
-  role: 'authenticated', secret: jwtSecret, subject: PLAYBACK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
+  role: 'authenticated', signingKey, subject: PLAYBACK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 // Read only with releaseCheck.enabled, which is off by default; minted so turning it on needs no key.
 const releaseCheckKey = mintJwt({
-  role: 'authenticated', secret: jwtSecret, subject: RELEASE_CHECK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
+  role: 'authenticated', signingKey, subject: RELEASE_CHECK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 
 /**
@@ -93,10 +98,12 @@ const releaseCheckKey = mintJwt({
  */
 const secrets = {
   jwtSecret,
+  jwtKeys: signingKeys.jwtKeys,
+  jwtJwks: signingKeys.jwtJwks,
   // Ten years: they carry a `role` and no `sub`, and they are the stack's API keys, so shortening
   // them needs a story for re-issuing them to every client at once.
-  anonKey: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
-  serviceRoleKey: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  anonKey: mintJwt({ role: 'anon', signingKey, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  serviceRoleKey: mintJwt({ role: 'service_role', signingKey, days: INFRASTRUCTURE_KEY_DAYS }).token,
   // The key format Supabase replaces the two above with: opaque strings the gateway matches as
   // strings, not JWTs. Upstream's prefixes, so a leaked `sb_secret_` is recognisable on sight.
   publishableKey: `sb_publishable_${hex(24)}`,
@@ -237,12 +244,14 @@ function typeablePassword() {
 const adminEmail = await resolveAdminEmail();
 if (adminEmail) secrets.firstAdministratorPassword = typeablePassword();
 
-/** Hand-written YAML: every value is hex, a JWT or a domain, none needs quoting beyond the quotes. */
+/** Hand-written YAML: every value is hex, a JWT, a domain or compact JSON. JSON holds double
+ *  quotes and never a single one, so it is single-quoted; the rest are double-quoted. */
 const yamlLines = [
   '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '.' +
     (/^deploy\/helm\/.+\/values-(local|try)\.yaml$/.test(valuesFile) ? ' Not in git: .gitignore ignores it.' : ''),
   '# Every credential below was generated for this file and is shared with nothing;',
-  '# the anon and service-role JWTs are signed by jwtSecret, so the three are a matching set.',
+  '# the JWTs are signed ES256 by the key pair in jwtKeys, which carries jwtSecret as its legacy',
+  '# key, so they are a matching set.',
   '#',
   '# Next, write site.yaml (help/site/install.md, step 6 "Describe your site"), then install (step 7):',
   '#',
@@ -255,16 +264,19 @@ const yamlLines = [
 if (domain) {
   yamlLines.push('global:', `  publicBaseDomain: "${domain}"`, '');
 }
-if (adminEmail) {
-  yamlLines.push('supabaseAuth:', '  firstAdministrator:', `    email: "${adminEmail}"`, '');
-}
+// firstAdministrator comes first under supabaseAuth: scripts/site-rehearsal.mjs reads it there.
+yamlLines.push('supabaseAuth:');
+if (adminEmail) yamlLines.push('  firstAdministrator:', `    email: "${adminEmail}"`);
+yamlLines.push('  # Tokens are signed ES256 with the key pair in secrets.jwtKeys.', '  es256Signing: true', '');
 yamlLines.push(
   `# Gateways clone from the forge over SSH on ${FORGE_SSH_PORT}, leaving port 22 to this machine's own SSH.`,
   '# Enrolled gateways keep the port they enrolled with: do not change it once one is enrolled.',
   'gitea:', '  ssh:', '    external:', `      port: ${FORGE_SSH_PORT}`, '',
 );
 yamlLines.push('secrets:');
-for (const [key, value] of Object.entries(secrets)) yamlLines.push(`  ${key}: "${value}"`);
+for (const [key, value] of Object.entries(secrets)) {
+  yamlLines.push(value.includes('"') ? `  ${key}: '${value}'` : `  ${key}: "${value}"`);
+}
 for (const key of deliberatelyEmpty) yamlLines.push(`  # Break-glass only; left empty on purpose.`, `  ${key}: ""`);
 yamlLines.push('');
 
@@ -272,9 +284,10 @@ fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, yamlLines.join('\n'), { mode: 0o600 });
 
 console.log(`✅ Wrote ${valuesFile} with ${Object.keys(secrets).length} freshly generated credentials.`);
-console.log('   The anon and service-role JWTs were signed with the new jwtSecret, so the three are a');
-console.log('   matching set. A publishable/secret key pair was minted too; the gateway accepts both');
-console.log(`   formats. Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
+console.log(`   The JWTs are signed ES256 by a new EC P-256 key pair (kid ${signingKeys.kid}), which`);
+console.log('   carries the new jwtSecret as its legacy key, so they are a matching set. A');
+console.log('   publishable/secret key pair was minted too: the keys callers present.');
+console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
 console.log('🔑 The three service keys expire, unlike the anon and service-role keys:');
 console.log(`   ingestionKey     jti ${ingestionKey.jti}`);

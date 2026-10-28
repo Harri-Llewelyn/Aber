@@ -47,8 +47,9 @@ python ingestion/test_mqtt_tls.py
 # fails if NBIRTH, DBIRTH or an on_message handler ever appears in it. That is the design
 # issue #64 proposed and this refused -- a registry accumulated from what devices claim.
 python ingestion/test_directory_publish.py
-# The Unified Namespace bridge: the topic is fixed at the level a device honestly occupies, and
-# an incomplete path is skipped and counted rather than filled with a placeholder.
+# The Unified Namespace bridge: the topic is the root, the message's group and the path
+# device_uns_paths answers (0214), read once per device per TTL, and a device the view skips is
+# skipped and counted under its reason rather than filled with a placeholder.
 python ingestion/test_uns_publish.py
 # The Sparkplug primary-host STATE certificates. The assertion worth having is that the birth and
 # the death carry the SAME timestamp: 3.0.0 pairs them that way, and each half reading its own
@@ -87,6 +88,15 @@ python supabase/test_auth_rate_limit.py
 # signs one session out as the dashboard does (scope=local), and reads through the gateway with
 # both tokens: the signed-out one gets 401 session_not_found, and the other is still served.
 python supabase/test_sign_out_ends_one_session.py
+# A person's picture through the real Storage API (0213). Needs the stack up. It adds a throwaway
+# Operator through manage-people, who uploads, replaces, downloads and deletes their own
+# <id>/avatar. The seeded people read, list, sign, overwrite and delete none of it, the public URL
+# serves nothing, and a machine identity sees no row of the bucket. The bucket refuses SVG, GIF and
+# HTML, and holds its 512 KiB limit; it is read from the bucket, because an oversize upload resets
+# the connection and ends the shared gateway port-forward. Remove Access deletes the object and
+# clears avatar_path, and Restore Access brings the person back with no picture. The account is
+# deleted afterwards.
+python supabase/functions/manage-people/test_account_pictures_stack.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -152,13 +162,14 @@ python ingestion/test_playback_session.py
 # devices publishes live from the suite. A gateway capture of both replays under both lanes; a
 # duration cap ends a job and the manifest says so; an edge node that ignores the rebirth request
 # is recorded with no birth, and its replay is refused having published nothing; Stop ends a replay
-# CANCELLED within seconds; and each worker is restarted mid-job with `kubectl rollout restart`: the
-# job fails, the Playback gateway's Will marks it OFFLINE, the stored capture is kept, and the next
-# capture records. The restarts skip, saying why, without kubectl and the k3d-aber context
-# (ABER_KUBE_CONTEXT names another); restarting ingestion pauses it for the whole stack. It also
-# runs the broker-captures policies on the real storage.objects, in a rolled-back transaction: the
-# daemon reaches its recording and what nothing claims, the worker only the capture it replays, and
-# a device's folder only a path issued for it.
+# CANCELLED within seconds; and each worker is ended mid-job with kubectl (the playback pod deleted
+# with a one-second grace, ingestion by `rollout restart`): the job fails, the Playback gateway's
+# Will marks it OFFLINE, the stored capture is kept, and the next capture records. The restarts
+# skip, saying why, without kubectl and the k3d-aber context (ABER_KUBE_CONTEXT names another);
+# restarting ingestion pauses it for the whole stack. It also runs the broker-captures policies on
+# the real storage.objects, in a rolled-back transaction: the daemon reaches its recording and what
+# nothing claims, the worker only the capture it replays, and a device's folder only a path issued
+# for it.
 python ingestion/test_capture_lifecycle_stack.py
 
 # A STORED CAPTURE REACHES THE HISTORIAN, through the real worker, broker and daemon. Needs the
@@ -714,6 +725,23 @@ python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
 # Other Sessions. Every test rolls back.
 python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
+# A person can put a picture on their account (0213), and nobody else sees it. Only the owner sets
+# or clears person_profiles.avatar_path, through set_own_picture(), which takes no id; it names only
+# <their id>/avatar; every person role sets their own, and a machine identity, a removed person and
+# anon are refused. An Administrator naming the person, or clearing their name, keeps the picture.
+# A picture writes no rename row and display_names_for() leaves a row with no name out. Only
+# service_role forgets a picture, for a person whose access is removed. The avatars policies run
+# verbatim on a stand-in table: the owner reads, writes, replaces and deletes their own <id>/avatar
+# and nothing else, nobody else reaches it, and the self-check refuses a wider arm, a missing policy
+# and another bucket's policy that is not confined to it. Every test rolls back.
+python supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py
+# Each device shows its place in the Unified Namespace (0214). device_uns_paths answers every
+# device with a path below the root at the levels it occupies (a cell's device under area and
+# cell, an Area-Wide one under its area, a Site-Wide one under the site), under the group its
+# gateway last published under, or with the one reason the bridge skips it for, in the bridge's
+# order: no site name, a lane, unassigned, a cell in no area, a name a topic cannot carry. It runs
+# as its caller; a person and the ingestion principal read it, anon does not. Every test rolls back.
+python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and
@@ -1071,6 +1099,14 @@ the same for its tunnels' 54398 and 54399 (check 140 holds both lists to the scr
 machine that meets the same error, `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54321-54323`
 reserves them until the next reboot; add them to the list if `sysctl net.ipv4.ip_local_reserved_ports`
 already names other ports.
+
+**k8s-validation's kubelet syncs its pods every 10 seconds, faster than a site's.** The job sets
+`ABER_KUBELET_SYNC_FREQUENCY=10s`, and `dev-cluster up` passes it to the kubelet of the cluster it
+creates. A site's kubelet keeps its default of a minute, and so do the dev loop and both rehearsals.
+The kubelet refreshes a running pod's projected Secrets on that period. So a credential delivered
+to the playback worker reaches it in about 15 seconds rather than about a minute, and the playback
+replay and the two capture suites wait that much less for each one. Their timeouts stay sized for a
+site's minute. Check 154 holds the job, the script and this paragraph to one period.
 
 ## The install and upgrade rehearsals
 

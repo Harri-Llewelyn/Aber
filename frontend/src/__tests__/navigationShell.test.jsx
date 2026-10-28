@@ -704,6 +704,23 @@ describe('the current page in the rail', () => {
     expect(rule('.user-menu-button-open .user-avatar')).toMatch(/background:\s*var\(--accent-dim\)/)
   })
 
+  /* A picture covers the icon's colour and the open fill, so the ring carries hover, open and
+     Profile: 2px of accent, as the 1px border and a 1px shadow, so the circle does not move. */
+  it('rings a picture 2px in the accent on hover, open and Profile, and keeps the bar and the text', () => {
+    const ring = rule('.user-menu-button:hover .user-avatar-picture,\n.user-menu-button-open .user-avatar-picture,\n'
+      + '.user-menu-button.active .user-avatar-picture')
+    expect(ring, 'no ring rule for a picture in the three states').toBeTruthy()
+    expect(ring).toMatch(/border-color:\s*var\(--accent\)/)
+    expect(ring).toMatch(/box-shadow:\s*0 0 0 1px var\(--accent\)/)
+    expect(ring).not.toMatch(/border-width|width:|height:/)
+    expect(rule('.user-avatar')).toMatch(/border:\s*1px solid var\(--border\)/)
+    expect(rule('.user-avatar-picture')).toMatch(/overflow:\s*hidden/)
+    // Not by colour alone: Profile is also the bar and the label's accent text and weight.
+    expect(rule('.user-menu-button.active')).toMatch(/color:\s*var\(--accent-text\)/)
+    expect(rule('.user-menu-button.active')).toMatch(/font-weight:\s*600/)
+    expect(css).toMatch(/\.user-menu-button\.active::before \{[^}]*border-left:\s*3px solid var\(--accent\)/)
+  })
+
   it('keeps the rows at 36px and the dividers tight', () => {
     expect(rule('.sidebar-item')).toMatch(/padding:\s*6px 9px/)
     expect(rule('.sidebar-collapse-all')).toMatch(/padding:\s*6px 9px/)

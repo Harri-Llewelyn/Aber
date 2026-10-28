@@ -38,6 +38,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **End**, on a row of that list, signs them out of that one session. A dialog asks first, naming the session and when it was last active. Select **End Session** to end it. Their other sessions stay signed in, so use it for a lost laptop.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
+- **Remove Access also deletes the picture the person put on their account.** Nobody else could see it, and nobody needs it now. Restore Access brings them back with no picture. If the picture cannot be deleted, a message says so, and their sign-in is not blocked yet. Select **Remove Access** again to finish.
 - **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
 - A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
 - **Change Role** lists the roles, starting on theirs. Choose another, and the dialog says what it lets them do. Nothing changes until you select **Change Role** in the dialog.

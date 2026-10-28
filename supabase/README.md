@@ -1541,7 +1541,7 @@ per person who has a name. **No name is no row. The email stays the identifier.*
   beside the work a person did. Not GoTrue's `user_metadata`: a person writes any JSON there through
   `updateUser()`, with no CHECK the database can apply, and it rides in every access token. The
   table is named for the person rather than the name, so a later column about the person has a
-  place.
+  place. `0213` puts the person's picture there, and a row may then hold a picture and no name.
 - **What a name may be.** Three CHECKs: trimmed (`btrim`), 1 to 80 characters, and none of
   Unicode's control characters or bidirectional controls. A bidirectional control can make the
   email printed beside a name read in another order. The character class is also in
@@ -1549,7 +1549,8 @@ per person who has a name. **No name is no row. The email stays the identifier.*
   name before it is sent; `scripts/check-mirror-drift.mjs` (check 15) holds the three together.
 - **One writer.** `set_display_name(p_user_id, p_name)` is SECURITY DEFINER. A person sets their
   own; an Administrator sets anyone's; anything else is `42501`. It trims, and an empty or NULL
-  name deletes the row. A machine identity has no display name (`22023`): it is named under Machine
+  name deletes the row, or since `0213` clears the name of a row that holds a picture. A machine
+  identity has no display name (`22023`): it is named under Machine
   identities. A name the CHECKs refuse is re-raised as `22023` with a sentence, so the rule is
   stated once, in the table. `authenticated` holds SELECT on the table and nothing else, so no
   write can skip the audit row; the one policy returns the caller's own row.
@@ -1999,6 +2000,145 @@ check 25 (`scripts/check-mirror-drift.mjs`) holds the same columns, and holds
 `end_person_session()`'s recorded fields to them and to what `sessionLabel()` reads.
 `test_an_administrator_ends_one_of_a_person_s_sessions.py` holds the list, the end, the row, the
 refusals and the cascade.
+
+### A person can put a picture on their account (0213)
+
+The account control at the foot of the sidebar showed the same icon for every person, and the
+address beside it is a rail label, hidden whenever the rail is collapsed. On a shopfloor PC several
+people share, the only way to see whose session was open was the tooltip or the menu. A person can
+now upload a picture for their own account. It shows on that control and on their Profile page,
+and **nobody else sees it**: not People, Approvals, the Audit Trail or any page another person
+reads. So nobody can use a picture to pass as someone else, `0203`'s rule that the email stays
+beside a name is untouched, and an Administrator has nothing to moderate. Showing pictures to
+other people would be a later decision, and would need both that rule and an Administrator action
+to remove one.
+
+- **One object per person, in a private bucket.** `avatars`, at `<user id>/avatar`, written with
+  `upsert`, so nobody ever holds more than one file. PNG, JPEG or WebP, 512 KiB at most; see
+  "Storage buckets and why they differ" for what the bucket does not check.
+- **Its four policies admit the owner alone.** SELECT, INSERT, UPDATE and DELETE are each
+  `bucket_id = 'avatars' AND is_own_avatar_object(name)`. That function is true when the name is
+  exactly the caller's own `<id>/avatar` and the caller holds a role: every person role, Auditor
+  included, as with `user_settings` (`0188`). A machine identity holds none, and neither does a
+  person whose access is removed. There is no Administrator arm. `storage-policies.sql`'s
+  self-check fails the boot if one of the four is missing, if any arm of one is anything else, or
+  if any other permissive policy on `storage.objects` is not confined to another bucket by its
+  first test: permissive policies are ORed, so an unconfined one would admit somebody to a picture.
+- **`person_profiles.avatar_path` records that one exists**, as `areas.plan_path` records a plan.
+  The account control downloads only when it is set, so a person with no picture makes no failed
+  request on every page load. A CHECK holds it to `<user id>/avatar` or NULL. A row now holds a
+  name, a picture or both, so `display_name` drops NOT NULL, and a second CHECK holds that a row has
+  one of them. No name and no picture is still no row. The column sits on `0203`'s table, which was
+  named for the person for this reason.
+- **Only the owner sets or clears it.** `set_own_picture(p_present)` takes no id and acts on
+  `auth.uid()` alone, for a caller who holds a role. The dashboard uploads the object, then calls it
+  with true; Remove deletes the object, then calls it with false. A value naming a missing object is
+  shown as no picture, so a failure between the two steps leaves the fallback, not an error. It
+  writes no audit row: nobody else sees a picture, so there is nothing for the trail to show them.
+- **An Administrator's write cannot touch it.** `set_display_name()` is the one write an
+  Administrator makes to another person's row. It is redeclared so that clearing a name keeps a row
+  that holds a picture, setting `display_name` to NULL, where `0203` deleted the row. It never
+  names `avatar_path` otherwise, and the file's self-check holds that.
+- **A picture says nothing to anybody else.** `log_display_name_change()` is redeclared to write
+  nothing when the name did not change, so a row made or deleted for a picture alone is not a
+  rename. `display_names_for()` is redeclared to leave out a row with no name: before this file
+  there was no such row, and now one would tell an Approvals reader that the person has a picture.
+  `list_people()` and `list_user_accounts()` read `display_name` alone, and the table's one policy
+  still returns the caller's own row.
+- **Remove Access deletes the picture.** It bans the account and never deletes it (`0166`), so the
+  `ON DELETE CASCADE` never fires. The name stays, because the trail reads it beside the person's
+  work. Nobody needs the picture, and it is a photo of a person. So `manage-people`'s `remove`
+  deletes the object as `service_role`, then calls `forget_person_picture(p_user_id)` as
+  `service_role`, after `remove_person_access()` and before the ban. That function clears the
+  column, and refuses a person whose access is not removed. A failed delete answers as a failed ban
+  does, 502 and "Select Remove Access again", and leaves the same state: the role gone and sign-in
+  not yet blocked, which People shows as Sign-in still open and offers Remove Access for. After the
+  ban, the person would read as Access removed, offered only Restore Access, so the delete could
+  not be retried. `remove_person_access()` answers false for a removal already made and changes
+  nothing, so the second time deletes, clears and bans. Restore Access brings the account back with
+  no picture.
+- **The dashboard shrinks it before upload.** The picker accepts PNG, JPEG and WebP up to 10 MB.
+  The page crops a centred square, scales it to 256x256 on a canvas, and encodes it as WebP, or as
+  JPEG where the browser's `toBlob()` cannot give WebP. A phone photo of several MB uploads as tens
+  of KB. Only the pixels pass through the canvas, so the photo's metadata, including the GPS
+  position where it was taken, is never uploaded. The picker's limit protects the person's own
+  browser; the bucket's is the control.
+- **It is shown as a plan is.** Downloaded with the person's session, turned into a blob URL and
+  set on an `<img>` with empty alt text, since the button's label names the account, as
+  `loadAreaPlanUrl()` does. Never a public URL, and nothing outside the site is asked: no Gravatar.
+  The download asks the browser not to cache it, because the name never changes when the picture
+  does. The CSP's `img-src` already admits `blob:`.
+- **Backups keep old pictures.** `backup-databases.sh` archives every bucket, so a picture that was
+  replaced or removed stays in older backups until they rotate out. `help/pages/profile.md` says so.
+
+The file's self-check asserts the column and both CHECKs, that `set_display_name()` writes no
+`avatar_path`, the two redeclared readers' new conditions, that `set_own_picture()` takes one
+boolean and no id, who may execute each function, `SECURITY DEFINER` and the pin on all but
+`is_own_avatar_object()`, which runs as the caller, and that a request with no identity is refused.
+`test_a_person_can_put_a_picture_on_their_account.py` holds the column's writers and refusals, the
+audit rows, what others read, and the avatars policies run verbatim on a stand-in table with their
+self-check. `supabase/functions/manage-people/test_account_pictures_stack.py` holds what only
+storage-api decides, in the stack lane: the owner's upload, download and delete through the Storage
+API, everyone else refused, a wrong type refused and the size limit set, and Remove Access deleting
+the object. Mirror check 26 (`scripts/check-mirror-drift.mjs`) holds the bucket's name, types,
+limit and object name in the dashboard, `manage-people` and `storage-init.mjs` together.
+
+### Each device shows its place in the Unified Namespace (0214)
+
+The UNS bridge (`ingestion/uns_publish.py`) built each topic from four reads of its own: the
+`site.name` setting, `device_locations`, then the area's and the cell's names. The dashboard showed
+none of it, so someone connecting a BI tool put the path together by hand from four pages. A
+device the bridge skipped looked the same as one it published; only the counter
+`aber_ingestion_uns_skipped_total{reason}` said a skip happened, and not to which device. A copy
+of the rule in the dashboard would have been a second, and #487's AAS interfaces a third; i3X's tree
+already drifted from the UNS once (#496).
+
+**`device_uns_paths` is the rule, once.** One row per device: `uns_path`, its path below the root,
+or `skip_reason`, why it has none. Exactly one is set.
+
+- **The path** is `<enterprise>/<site>/<area>/<cell>/<device>` at the levels the device occupies:
+  a cell's device (its own cell or its gateway's) under area and cell, an Area-Wide one under its
+  area, a Site-Wide one under the site alone. No placeholder fills a level that is missing.
+- **The enterprise** is the group the gateway last published under (`observed_sparkplug_group`,
+  `0174`), else its configured `sparkplug_group`, else the `sparkplug.group_id` setting for a device
+  with no gateway, which is the group a new gateway takes. `uns_path` always starts with
+  `enterprise` and a slash.
+- **The reasons** are the bridge's `SKIP_REASONS` that the database can know, tested in the
+  bridge's order: `site_unset` (empty, or only spaces, tabs and line breaks), `lane` (Simulated or
+  Shadow), `unassigned`, `cell_unfiled` (a cell in no area), then `unsafe_name` (a segment that is
+  empty or holds `/`, `+` or `#`). So a lane is a lane whatever its name, and with no site name
+  every device is `site_unset`. The bridge's two run-time reasons, `location_unknown` (the read
+  failed, or the view had no row) and `publish_error`, stay counters only.
+- **`area_id` and `cell_id`** are `device_locations`' effective ones, so a page can find the devices
+  beneath an area or a cell.
+- **It runs as its caller** (`security_invoker`). A reader sees the devices, names and settings
+  their own policies allow: every signed-in role reads every device today, and a setting marked
+  `sensitive` is unset for anyone but an Administrator. `authenticated` may `SELECT`, which covers
+  the ingestion principal; `anon` holds nothing, and nobody writes through it.
+
+**The bridge reads it**, one row per device behind its TTL cache (`UNS_CONTEXT_TTL_SECONDS`), in
+place of its four lookups. Two things stay in Python. The metric name, the topic's leaf, is checked
+there, as it may carry `/` but not a wildcard. And the enterprise segment is the group the message
+arrived under, swapped for the view's first segment. The view's group lags a change of group until
+ingestion records the new one, and a gateway that has sent no node-level message since `0174` has
+none recorded, so the swap keeps every topic the bridge published before. The counters and their labels
+are unchanged. A multi-level root (`ingestion.unsMqttTopicRoot: plant/uns`), which the chart and the
+broker's grant accept, now publishes; the old code checked the root as one segment and skipped every
+device as `unsafe_name`.
+
+**The dashboard reads it** while the chart says the bridge is on (`VITE_UNS_MQTT_ENABLED`, beside
+the root as `VITE_UNS_MQTT_TOPIC_ROOT`, both rendered from the values the ingestion pod reads). A
+device's drawer shows `<root>/<uns_path>` with a copy button, or the reason in words; an area's and a
+cell's show the subscription filter for everything beneath them, cut from their devices' paths; a
+rename dialog says how many devices' topics it moves (`frontend/src/utils/unsPath.js`). With the
+bridge off, each says so and nothing is read.
+
+The file's self-check asserts `security_invoker`, the grants, the column list the bridge selects,
+and, over whatever rows exist, one row per device with a path or a reason from the set and never
+both. Mirror check 27 (`scripts/check-mirror-drift.mjs`) holds the view's reasons to the bridge's
+`SKIP_REASONS` and to the dashboard's sentences, and the bridge's selected columns to the view's.
+`test_a_device_shows_where_its_readings_appear_in_the_uns.py` holds every path shape and every
+reason, the order, the caller's policies and who may read it.
 
 ### An Administrator's read-only broker account is recorded (0218)
 
@@ -4461,7 +4601,7 @@ over-trust, and this inventory is the compensating control
 
 Revocation exists since `0074` (see
 [Tokens became revocable in `0074`](#tokens-became-revocable-in-archived-migration-0074-and-the-mint-followed-in-archived-migration-0075))
-and reaches PostgREST only: Storage, Realtime, the edge runtime and Studio verify the signature for
+and reaches PostgREST only: Storage, Realtime and the edge runtime verify the signature for
 themselves. Expiry therefore still bounds every token, and the line falls between **keys that name a
 principal** and **keys that name nobody**:
 
@@ -4483,10 +4623,11 @@ The middle row used to read *10 years*, alongside a note that a short expiry wou
 off the air "on a date nobody wrote down, and there is no refresh path". Half of that was right and
 the other half was the defect ([#101](https://github.com/Harri-Llewelyn/Aber/issues/101)):
 
-* **There is a refresh path**, and building it was cheap because these keys are signed with
-  `SUPABASE_JWT_SECRET` and **re-signing them does not rotate that secret**. A new token with a
-  later `exp` is valid the instant it is signed, so nothing else is re-issued — not the anon key,
-  not the service-role key, not a gateway credential.
+* **There is a refresh path**, and building it was cheap because these keys are signed with the
+  stack's signing key and **re-signing them does not rotate that key**. A new token with a later
+  `exp` is valid the instant it is signed, so nothing else is re-issued — not the anon key, not the
+  service-role key, not a gateway credential. It signs ES256 once the stack verifies ES256, HS256
+  until then ([Signing with ES256](#signing-with-es256)).
 * **Length never fixed "a date nobody wrote down"**, it deferred it to 2036 and removed every
   chance to notice on the way. Visibility fixes it, which is what `--check` is for.
 
@@ -4508,6 +4649,102 @@ would put the old keys back.
 validates a signature and consults no table, so the previous key stays valid until its own `exp` —
 which is the entire argument for the ceiling. Rotating a 90-day key leaves at most 90 days of
 overlap. Rotating a ten-year one left ten years.
+
+### Signing with ES256
+
+`supabaseAuth.es256Signing` makes GoTrue sign every token ES256 with an EC P-256 key pair, and
+every verifier check it with the public key. Under HS256 anything that verifies a token can also
+sign one, a `service_role` token included; with the pair, verifying needs only the public key. Off
+by default in 1.7, because a minor release keeps an upgrade's behaviour (`docs/releases.md`); on in
+`values-dev.yaml` and in what `npm run setup` writes. HS256 signing is deprecated, and 1.8
+([#1007](https://github.com/Harri-Llewelyn/Aber/issues/1007)) removes it. The upgrade steps are in
+[help/site/upgrading.md](../help/site/upgrading.md#from-170-sign-tokens-with-es256).
+
+**The key set is two values,** in upstream's shapes
+([*New API Keys and Asymmetric Authentication*](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys)):
+
+- `SUPABASE_JWT_KEYS` (`secrets.jwtKeys`): GoTrue's `GOTRUE_JWT_KEYS`, a JSON array of the private
+  key (`key_ops` `sign` and `verify`, `alg` `ES256`, a `kid`) and the secret as an `oct` JWK with no
+  `kid` and no `key_ops`. GoTrue signs with the one key whose `key_ops` hold `sign`, and refuses a
+  set with none or two. It verifies with every key, and keeps `GOTRUE_JWT_SECRET`, which it requires.
+- `SUPABASE_JWT_JWKS` (`secrets.jwtJwks`): `{"keys": [...]}`, the public key and the same `oct` JWK.
+
+The `oct` key is the transition: an HS256 token carries no `kid`, so every verifier checks it
+against that key, and a token signed before the switch keeps verifying through 1.7. #1007 takes
+it out of both values. `aber.validateSigningKeys` refuses a set that is partial or does not agree
+with itself or with `jwtSecret`. The chart cannot see an `existingSecret`'s contents, so there the
+check is the operator's.
+
+**Who holds what** (the pinned images, read at their tags):
+
+| Workload | Without the switch | With it |
+| :--- | :--- | :--- |
+| `supabase-auth` | the secret | `GOTRUE_JWT_KEYS`, and the secret GoTrue requires |
+| `supabase-rest` | the secret, `PGRST_JWT_SECRET` | the JWKS as `PGRST_JWT_SECRET`, which PostgREST reads as a JWK set when it parses as one |
+| `supabase-realtime` | the secret, `API_JWT_SECRET` | `API_JWT_JWKS` too: the seed writes it to the `realtime-dev` tenant's `jwt_jwks` on every start. The secret stays: the tenant's HS256 fallback, and the only key Realtime's `/api` routes take |
+| `supabase-storage` | the secret | `JWT_JWKS` too. The secret stays: storage-api signs its own signed URLs with it |
+| `supabase-functions` | the secret, for `mint-service-token` | `JWT_KEYS`, for `mint-service-token`, in place of it. Nothing else here verifies a token, so the runtime has no `SUPABASE_JWKS` |
+| `supabase-envoy` | the secret, as an `oct` JWKS | the JWKS, for the studio and forge listeners' `jwt_authn` |
+| `node-red` | the secret | the JWKS (`adminAuth.tokens`, and the sign-in's ID token) |
+| `supabase-studio` | the secret, which it only reports | a placeholder |
+| `supabase-db` | the secret, read by nothing | nothing |
+
+Three findings decided rows of that table:
+
+- **Studio verifies nothing.** It reports `AUTH_JWT_SECRET` (its settings endpoint and JWT pages)
+  and signs HS256 tokens with it in the browser, for GraphiQL's and the Realtime inspector's role
+  impersonation. With the switch it is given a placeholder, so the settings endpoint cannot hand the
+  secret out; unset, it would report the published demo value. Those two impersonations stop
+  working; the SQL editor's does not use it. The Administrator gate on the listener stays the control
+  for the two API keys the endpoint still returns.
+- **The platform database does not keep the secret.** The image's init scripts read no
+  `JWT_SECRET`, no database or role setting holds one, and the only vault secret named for a JWT is
+  `nodered_webhook_jwt_secret`. So with the switch the variable is not passed.
+- **Realtime's `/api` routes verify with `API_JWT_SECRET` and no JWKS** (`check_auth` in
+  `router.ex`). The tenant health endpoint its probes call is one, and with the anon key ES256 the
+  probe signs a one-minute HS256 token with that secret instead.
+
+**The forge and discovery do not change.** GoTrue's `/.well-known/openid-configuration` is built
+from `GOTRUE_JWT_ISSUER`, which the chart leaves unset, so the issuer stays empty and the endpoints
+relative under ES256 too; `id_token_signing_alg_values_supported` is a fixed list. `jwks_uri`
+(`/.well-known/jwks.json`) now serves the public key, never the `oct` one. Setting the issuer changes
+every token's `iss`, so the forge stays on reverse-proxy headers
+([the forge's door](#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
+
+**`NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret.** It is not GoTrue's: the
+database signs the webhook's 60-second token with it (pgjwt implements only the HS family), and
+Node-RED's `httpNodeAuth` alone verifies it, for `aud` `node-red-hooks`. No GoTrue verifier accepts
+it, and its holder can mint nothing any other service takes. #1007 decides its end.
+
+#### Re-signing the anon and service-role keys
+
+No client holds them: callers present `sb_publishable_*` / `sb_secret_*`, and the gateway hands
+upstreams the JWT each stands for. So re-signing them is one command once ES256 is live:
+
+```bash
+npm run keys:rotate -- --apply --anon-and-service-role
+```
+
+It re-signs both ES256 for ten years with the three service keys, patches the Secret, and restarts
+`supabase-envoy` (which substitutes them at start) and `supabase-storage` (which reads them at
+start), with ingestion and playback. It refuses while GoTrue does not publish the signing key's
+`kid`, because no verifier would take the result. Without `--apply` it prints the five values for a
+Secret kept elsewhere; then restart the four Deployments.
+
+#### Rotating the ES256 signing key
+
+Not built into `keys:rotate` (decided 2026-10-20). By hand, with `kubectl` and the values file:
+
+1. Make a second pair, and add its private key to `SUPABASE_JWT_KEYS` with `key_ops` `["verify"]`,
+   and its public key to `SUPABASE_JWT_JWKS`. `helm upgrade` (or restart every workload in the
+   table). Every verifier now takes both keys; GoTrue still signs with the first.
+2. Swap the two private keys' `key_ops`: the new one `["sign", "verify"]`, the old one `["verify"]`.
+   Exactly one may hold `sign`. Upgrade or restart again. GoTrue signs with the new key.
+3. Re-sign the keys the stack holds: `npm run keys:rotate -- --apply --anon-and-service-role`, and
+   re-issue machine identities' tokens and the Read-only API client's.
+4. After `GOTRUE_JWT_EXP` (`supabaseAuth.jwtExpiry`, an hour) has passed, every session token signed
+   with the old key has expired. Once the tokens from step 3 have replaced the rest, remove the old
+   key from both values and upgrade.
 
 ### The Access Control page states what is outstanding
 
@@ -4569,8 +4806,9 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 `record_service_token_issued()`, for an inventory that could not act on it.
 
 **Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
-`supabase-realtime`, the edge runtime (which boots `VERIFY_JWT="false"`) and Studio each verify
-`SUPABASE_JWT_SECRET` for themselves and consult no denylist. That is complete coverage for what
+`supabase-realtime` and the edge runtime (which boots `VERIFY_JWT="false"`) each verify the signature
+for themselves (`SUPABASE_JWT_SECRET`, or the JWKS with [ES256](#signing-with-es256)) and consult no
+denylist. That is complete coverage for what
 this is about — the Read-only API client and `Service_Ingestor` reach PostgREST and nothing else — but the
 expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
 
@@ -4578,9 +4816,9 @@ expiry is still the only bound that reaches every service, which is why the 90-d
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
 the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
 this database, and nothing in `vault` is that one. Putting it there would let any
-path to SQL execution mint a `service_role` token, which is valid at the four services above and
+path to SQL execution mint a `service_role` token, which is valid at the services above and
 which `0074` cannot revoke. So the signing lives in
-[`mint-service-token`](functions/mint-service-token/index.ts), which already holds `JWT_SECRET`, and
+[`mint-service-token`](functions/mint-service-token/index.ts), which already holds the signing key, and
 `0075`'s change to the database is narrower: `record_service_token_issued()` gains `p_actor_id`, so a
 mint from the page names the Administrator who asked instead of the `'service'` attribution `0043`
 pinned when every caller was a host script. The actor is **re-checked** against `user_roles` there
@@ -5433,7 +5671,7 @@ what it lacks:
 | Filter | What it does | The thing worth knowing |
 | :--- | :--- | :--- |
 | `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
-| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | An **`oct` JWKS** — the HS256 secret, not a public key — and **no issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key and the HS256 `oct` key with `supabaseAuth.es256Signing`, the `oct` key alone without it ([Signing with ES256](#signing-with-es256)). **No issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
 | `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
 | `ext_authz` | Asks [`studio-admission`](functions/studio-admission) whether the caller is an Administrator **now** | GoTrue for the session, then `user_roles`, on every request. `failure_mode_allow`: a 5xx admits on the claim `rbac` checked; a 403 and a 302 to `/oauth2/signout` are honoured |
 | `header_mutation` | Removes `Authorization` before the request reaches Studio | Studio runs as the owner and needs no Supabase JWT, so it never sees one |
@@ -5453,9 +5691,10 @@ password ends its sessions) is a `302` to `/oauth2/signout`, which clears the co
 step fails open on a 5xx because the claim has already been checked, and an outage of the edge
 runtime or the API should not also take away the console that mends it.
 
-**`openid` is absent from the requested scope and must stay absent.** GoTrue refuses to mint an ID
-token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole
-stack signs with; `grafana.ini` carries the same note for the same reason.
+**`openid` is absent from the requested scope.** The door needs the access token alone, which
+`jwt_authn` verifies, and under HS256 GoTrue refuses to mint an ID token (`HS256 is not supported
+for ID token signing`). Grafana and the Node-RED editor ask for it only with
+`supabaseAuth.es256Signing`, where GoTrue signs one ES256.
 
 #### Nothing upgrades on this listener, and that was measured rather than assumed
 
@@ -5531,7 +5770,7 @@ nobody can open, which is the same posture as the loopback binding it replaces.
 Gitea's web login is the gateway's `forge` listener in [`envoy.yaml`](envoy.yaml), on `8002`
 (`git.<domain>`). It is the Studio listener with the
 RBAC widened: an OAuth 2.1 code flow against this stack's GoTrue, a session cookie, `jwt_authn`
-against the shared secret, and a role check admitting `Administrator` and `Shopfloor_Manager`.
+against the JWKS Studio's also uses, and a role check admitting `Administrator` and `Shopfloor_Manager`.
 `Operator` and `Auditor` complete the login and meet a 403. `0094` registers the OAuth client and
 puts the forge in the Directory.
 
@@ -5539,8 +5778,9 @@ puts the forge in the Directory.
 `gitea/gitea:1.27.3`: GoTrue's discovery document carries an empty `issuer` and relative endpoint
 paths, so Gitea resolves `/oauth/authorize` against itself; its request carries `scope=openid`,
 which GoTrue refuses with `HS256 is not supported for ID token signing`; and whether it sends the
-`code_challenge` GoTrue requires is unmeasured behind the first two. Moving the stack off HS256
-would be necessary and not sufficient, since the relative paths would remain.
+`code_challenge` GoTrue requires is unmeasured behind the first two. `supabaseAuth.es256Signing`
+removes the second and not the first: discovery is built from `GOTRUE_JWT_ISSUER`, unset here, so
+the paths stay relative under ES256 ([Signing with ES256](#signing-with-es256)).
 
 **Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
@@ -7212,20 +7452,21 @@ rotated in place.
 
 ## Storage buckets and why they differ
 
-Four buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
+Five buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
 first two are opposites in the one setting that matters, and the reasoning belongs together rather
-than split across comment blocks in the policy file. `area-plans` is the odd one out below.
+than split across comment blocks in the policy file. `area-plans` is the odd one out below, and
+`avatars` is the only one whose objects each have one reader.
 
 There is no bucket for cold telemetry: it leaves the cluster entirely, for a configured S3
 endpoint. See "Cold telemetry archival" above.
 
-| | `asset-3d-models` | `broker-captures` | `area-plans` | `asset-exports` |
-| :--- | :--- | :--- | :--- | :--- |
-| Public read | **yes** | **no** | **no** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
-| Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
-| Operator | read | nothing | read | nothing |
-| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
+| | `asset-3d-models` | `broker-captures` | `area-plans` | `asset-exports` | `avatars` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` | **the owner alone**, their own `<user id>/avatar`, while they hold a role; Remove Access deletes it as `service_role` |
+| Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor | the owner alone: no Administrator arm |
+| Operator | read | nothing | read | nothing | their own picture |
+| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
 
 `asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
 an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
@@ -7238,6 +7479,15 @@ bucket admits `image/svg+xml` only, and the dashboard never inlines it. A plan n
 deleted by the hourly `area-plan-sweep` CronJob once it has gone an hour unnamed. The sweep runs as
 the ingestion principal, which the bucket admits to such a plan and nothing else (see "A plan no
 area names is swept from storage (0199)").
+
+`avatars` holds one picture per person, at `<user id>/avatar`, and each is read by its owner alone
+(see "A person can put a picture on their account (0213)"). It admits `image/png`, `image/jpeg` and
+`image/webp`: no SVG, which is active content, and no GIF, which animates. Its limit is 512 KiB;
+the dashboard uploads a 256x256 picture of tens of KB. **What the bucket does not check:**
+storage-api compares the content type an upload declares with `allowed_mime_types`, and does not
+read the bytes. So a person who bypasses the dashboard can store any file under 512 KiB at their
+own path, declared as an image. This is accepted: only they can read it, and an `<img>` runs
+nothing it is given. No edge function inspects uploads.
 
 ### How `storage-init.mjs` creates them
 

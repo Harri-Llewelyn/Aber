@@ -188,6 +188,42 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 26. A person's picture. The dashboard uploads to, downloads from and deletes `<id>/avatar` in the
+// avatars bucket; manage-people's Remove Access deletes the same object; storage-init.mjs creates
+// the bucket with its types and limit; and 0213's CHECK and is_own_avatar_object() name the object.
+// A name only one side uses is a picture nobody can read or one Remove Access leaves behind; a type
+// or a limit only one side holds is a picker that offers what the bucket refuses.
+{
+  const ui = read('frontend/src/utils/picture.js');
+  const fn = read('supabase/functions/manage-people/people.ts');
+  const init = read('scripts/storage-init.mjs');
+  const policies = read('supabase/storage-policies.sql');
+  const uiBucket = need(ui, /^export const PICTURE_BUCKET = '([^']+)'$/m, 'PICTURE_BUCKET in frontend/src/utils/picture.js');
+  const fnBucket = need(fn, /^export const PICTURE_BUCKET = "([^"]+)";$/m, 'PICTURE_BUCKET in manage-people/people.ts');
+  const uiPath = need(ui, /^export const picturePath = \(userId\) => `\$\{userId\}(\/[^`]+)`$/m, 'picturePath() in frontend/src/utils/picture.js');
+  const fnPath = need(fn, /^export const picturePath = \(userId: string\) => `\$\{userId\}(\/[^`]+)`;$/m, 'picturePath() in manage-people/people.ts');
+  const uiTypes = need(ui, /^export const PICTURE_TYPES = \[([^\]]+)\]$/m, 'PICTURE_TYPES in frontend/src/utils/picture.js');
+  const uiLimit = need(ui, /^export const PICTURE_STORED_MAX_BYTES = (\d+)$/m, 'PICTURE_STORED_MAX_BYTES in frontend/src/utils/picture.js');
+  const initTypes = need(init, /^const AVATAR_MIME_TYPES = \[([^\]]+)\];$/m, 'AVATAR_MIME_TYPES in scripts/storage-init.mjs');
+  const initLimit = need(init, /^const AVATAR_SIZE_LIMIT = (\d+);$/m, 'AVATAR_SIZE_LIMIT in scripts/storage-init.mjs');
+  const initBucket = need(init, /id: '([^']+)',\s*public: false,\s*file_size_limit: AVATAR_SIZE_LIMIT,\s*allowed_mime_types: AVATAR_MIME_TYPES,/, "the bucket storage-init.mjs gives AVATAR_SIZE_LIMIT");
+  const owner = lastDefinition('CREATE OR REPLACE FUNCTION public.is_own_avatar_object(', '$$;', 'is_own_avatar_object() in the applied chain');
+  const ownerPath = owner && need(owner.body, /\(SELECT auth\.uid\(\)\)::text \|\| '(\/[^']+)'/, `the object is_own_avatar_object() admits (${owner.file})`);
+  const check = need(SCHEMA, /CONSTRAINT person_profiles_avatar_path_is_the_owner_s CHECK \(\(\(avatar_path IS NULL\) OR \(avatar_path = \(\(user_id\)::text \|\| '(\/[^']+)'::text\)\)\)\)/, 'person_profiles_avatar_path_is_the_owner_s in the applied chain');
+  const list = (m) => [...m[1].matchAll(/'([^']+)'/g)].map((t) => t[1]).sort().join(',');
+
+  if (uiBucket && fnBucket) compare('picture', 'bucket the dashboard and manage-people name', uiBucket[1], fnBucket[1]);
+  if (uiBucket && initBucket) compare('picture', 'bucket the dashboard names and storage-init.mjs creates', uiBucket[1], initBucket[1]);
+  if (uiBucket && !new RegExp(`bucket_id = '${uiBucket[1].replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}' AND public\\.is_own_avatar_object\\(`).test(policies)) {
+    problems.push(`picture: no policy in supabase/storage-policies.sql admits the owner to the ${uiBucket[1]} bucket`);
+  }
+  if (uiPath && fnPath) compare('picture', 'object name the dashboard and manage-people use', uiPath[1], fnPath[1]);
+  if (uiPath && ownerPath) compare('picture', `object name the dashboard uses and ${owner.file}'s is_own_avatar_object() admits`, uiPath[1], ownerPath[1]);
+  if (uiPath && check) compare('picture', 'object name the dashboard uses and avatar_path\'s CHECK allows', uiPath[1], check[1]);
+  if (uiTypes && initTypes) compare('picture', 'types the picker takes and the bucket admits', list(uiTypes), list(initTypes));
+  if (uiLimit && initLimit) compare('picture', 'largest picture the page uploads and the bucket admits', uiLimit[1], initLimit[1]);
+}
+
 // 18. What an email address looks like. Add Person and Change Email refuse an address in the
 // dashboard (utils/people.js) and in manage-people before anything is asked, and
 // ensure_first_administrator() and check_person_email_change() refuse one in the database. A shape
@@ -503,6 +539,37 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|area_wide|explicit|inherited|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
     const jsSources = [...new Set([...js.matchAll(/export const SOURCE_[A-Z_]+ = '([a-z_]+)'/g)].map((m) => m[1]))].sort();
     compare('cellResolution', 'location_source labels', jsSources.join(','), sqlSources.join(','));
+  }
+}
+
+// 27. A device's place in the Unified Namespace. device_uns_paths gives each skipped device one
+// reason; the bridge counts it under that label on aber_ingestion_uns_skipped_total, and the
+// dashboard says it in words. A reason the view gives and the bridge does not label is counted as
+// location_unknown, and one the dashboard has no sentence for reads as unexplained. The bridge's
+// two run-time reasons are its own. And the bridge selects the view's columns by name.
+{
+  const view = lastDefinition('CREATE OR REPLACE VIEW public.device_uns_paths', ';', 'public.device_uns_paths');
+  const py = read('ingestion/uns_publish.py');
+  const js = read('frontend/src/utils/unsPath.js');
+  const pyReasons = need(py, /^SKIP_REASONS = \(([\s\S]*?)^\)/m, 'SKIP_REASONS in uns_publish.py');
+  const jsSentences = need(js, /^const SKIP_SENTENCES = \{([\s\S]*?)^\}/m, 'SKIP_SENTENCES in unsPath.js');
+  const pySelect = need(py, /\.table\(PATH_VIEW\)\s*\.select\("([^"]+)"\)/, "uns_publish.py's select on PATH_VIEW");
+  const pyView = need(py, /^PATH_VIEW = "([a-z_]+)"/m, 'PATH_VIEW in uns_publish.py');
+  if (view && pyReasons && jsSentences && pySelect && pyView) {
+    const sqlReasons = [...new Set([...view.body.matchAll(/THEN '([a-z_]+)'::text/g)].map((m) => m[1]))].sort();
+    const python = [...pyReasons[1].matchAll(/^\s*"([a-z_]+)",/gm)].map((m) => m[1]);
+    const runtime = python.filter((r) => !sqlReasons.includes(r)).sort();
+    const sentences = [...jsSentences[1].matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]).sort();
+    compare('unsPath', `reasons the bridge labels beyond the view's (${view.file})`, 'location_unknown,publish_error', runtime.join(','));
+    compare('unsPath', 'reasons the view gives that the bridge labels', sqlReasons.filter((r) => python.includes(r)).join(','), sqlReasons.join(','));
+    compare('unsPath', "reasons the dashboard words, and the view's", sentences.join(','), sqlReasons.join(','));
+    compare('unsPath', 'the view the bridge reads', pyView[1], 'device_uns_paths');
+    const viewColumns = need(read(`${MIGRATION_DIR}/${view.file}`), /IS DISTINCT FROM '([a-z_,]+)'/,
+      `the column list ${view.file}'s self-check asserts`);
+    if (viewColumns) {
+      const missing = pySelect[1].split(',').filter((col) => !viewColumns[1].split(',').includes(col));
+      compare('unsPath', "columns the bridge selects that the view's self-check does not hold", '', missing.join(','));
+    }
   }
 }
 

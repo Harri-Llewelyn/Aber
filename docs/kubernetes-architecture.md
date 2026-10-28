@@ -325,7 +325,9 @@ form after a separator.
 `.env` becomes a Secret. One thing must be got right or the stack fails in a way that reads as an
 auth bug:
 
-**`SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are JWTs *signed by* `SUPABASE_JWT_SECRET`.**
+**`SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are JWTs *signed by* `SUPABASE_JWT_SECRET`**,
+or by the private key in `SUPABASE_JWT_KEYS` with `supabaseAuth.es256Signing`, a pair that carries
+the secret as its legacy key ([supabase/README.md](../supabase/README.md#signing-with-es256)).
 A Helm template that generates a random `SUPABASE_JWT_SECRET` on install (the obvious convenience)
 silently invalidates both pre-minted keys, and every request through the gateway's key check then
 fails against a stack that otherwise looks healthy. The three are a **set**: either all three are
@@ -1457,7 +1459,8 @@ other than the cause. `aber.validate` runs them in order from `NOTES.txt`, most 
 so a stack with no credentials is told that and not about the hostnames it also lacks.
 
 **The Supabase credentials are a set.** `anonKey` and `serviceRoleKey` are JWTs signed by
-`jwtSecret`, and `publishableKey` and `secretKey` are what callers present for the gateway to
+`jwtSecret` (or, with `supabaseAuth.es256Signing`, by the key pair in `jwtKeys` and `jwtJwks`,
+which `aber.validateSigningKeys` holds to each other and to `jwtSecret`), and `publishableKey` and `secretKey` are what callers present for the gateway to
 translate; generating one without the others invalidates the rest, and every request then fails at
 the gateway against a stack that looks fine. The chart never generates them, and the check is
 skipped under `existingSecret`, when the values are not the chart's to see (§3.2). Beyond the set,

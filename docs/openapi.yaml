@@ -555,6 +555,44 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceLocation' } }
 
+  /rest/v1/device_uns_paths:
+    get:
+      tags: [Location]
+      summary: Each device's place in the Unified Namespace, or why it has none
+      description: |
+        Read-only view (0214), one row per device. `uns_path` is its path below the UNS bridge's
+        root, `<enterprise>/<site>/<area>/<cell>/<device>` at the levels the device occupies;
+        `skip_reason` says why it has none. Exactly one is set.
+
+        **The topic is `<root>/<uns_path>`**, and each metric publishes retained beneath it at
+        `<root>/<uns_path>/<metric name>`. The root is `ingestion.unsMqttTopicRoot` (`uns` by
+        default), and nothing is published while `ingestion.unsMqttEnabled` is off, its default.
+        The path follows names: renaming an area, a cell or a device moves every topic beneath it.
+        The Sparkplug ID never moves.
+
+        Runs as the caller (`security_invoker`): their policies on devices, gateways, cells, areas
+        and settings apply. `anon` reads nothing.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: device_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - name: area_id
+          in: query
+          schema: { type: string }
+          description: "The devices beneath an area, its cells' and its Area-Wide ones: `eq.<uuid>`."
+        - name: skip_reason
+          in: query
+          schema: { type: string }
+          description: '`not.is.null` lists the devices the bridge skips.'
+      responses:
+        '200':
+          description: One row per device the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceUnsPath' } }
+
   # ----------------------------------------------------------- Telemetry ----
   /rest/v1/telemetry:
     get:
@@ -1045,6 +1083,37 @@ paths:
         '400': { description: 'A machine identity, or a name the database refuses.' }
         '403': { description: "Another person's name, and you are not an Administrator." }
         '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/set_own_picture:
+    post:
+      tags: [Auth]
+      summary: Record that you have a picture, or that you have none
+      description: |
+        Sets or clears `avatar_path` on your own `person_profiles` row (`0213`). It takes no id:
+        nobody records or clears another person's picture, an `Administrator` included. Upload the
+        picture first, with your token, to `/storage/v1/object/avatars/<your id>/avatar` (PNG, JPEG
+        or WebP, 512 KiB at most, `x-upsert: true` to replace it), then call this with `true`. To
+        remove it, delete the object, then call this with `false`. Only you can read the object.
+        Writes no audit row.
+
+        Refused (403, `42501`) for a caller who holds no role: a machine identity, or a person whose
+        access is removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_present]
+              properties:
+                p_present: { type: boolean, nullable: true, description: 'true records `<your id>/avatar`; false or null clears it.' }
+      responses:
+        '200':
+          description: The path now recorded, or null.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        '403': { description: 'You hold no role.' }
 
   /rest/v1/rpc/display_names_for:
     post:
@@ -2679,13 +2748,15 @@ paths:
   /rest/v1/person_profiles:
     get:
       tags: [Auth]
-      summary: Read your own display name
+      summary: Read your own display name and whether you have a picture
       description: |
-        One row per person who has a display name (`0203`). RLS returns your own row and nobody
-        else's, an `Administrator` included; an empty array means you have no name. Written only
-        through `/rest/v1/rpc/set_display_name`, so every change reaches the Audit Trail. Other
-        people's names are read through `list_people()`, `list_user_accounts()` and
-        `display_names_for()`. `anon` and `service_role` hold nothing on the table.
+        One row per person who has a display name, a picture or both (`0203`, `0213`). RLS returns
+        your own row and nobody else's, an `Administrator` included; an empty array means you have
+        neither. The name is written only through `/rest/v1/rpc/set_display_name`, so every change
+        reaches the Audit Trail, and `avatar_path` only through `/rest/v1/rpc/set_own_picture`.
+        Other people's names are read through `list_people()`, `list_user_accounts()` and
+        `display_names_for()`; nobody reads another person's picture. `anon` and `service_role`
+        hold nothing on the table.
       parameters:
         - { name: user_id, in: query, schema: { type: string }, description: 'e.g. `eq.<your auth.uid()>`' }
         - $ref: '#/components/parameters/Select'
@@ -2700,9 +2771,10 @@ paths:
                   type: object
                   properties:
                     user_id:      { type: string, format: uuid }
-                    display_name: { type: string, description: 'Trimmed, 1 to 80 characters, no control characters.' }
-                    updated_at:   { type: string, format: date-time }
-                    updated_by:   { type: string, format: uuid, nullable: true, description: 'You, or the Administrator who set it.' }
+                    display_name: { type: string, nullable: true, description: 'Trimmed, 1 to 80 characters, no control characters. NULL on a row that holds only a picture.' }
+                    avatar_path:  { type: string, nullable: true, description: 'Your picture in the private `avatars` bucket, `<your id>/avatar`, or NULL for none. Download it from `/storage/v1/object/authenticated/avatars/<your id>/avatar` with your token.' }
+                    updated_at:   { type: string, format: date-time, description: 'When the name was last set or cleared.' }
+                    updated_by:   { type: string, format: uuid, nullable: true, description: 'You, or the Administrator who set the name.' }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
   /rest/v1/user_settings:
@@ -3531,15 +3603,18 @@ paths:
       tags: [Edge Functions]
       summary: Sign a long-lived token for a service principal and reveal it once
       description: |
-        Signs an HS256 JWT naming a **service principal** as its subject, records the issue, and
-        returns the token. It is shown once and is not recoverable: nothing in the stack keeps a
-        copy, and the signature is reproducible only from `JWT_SECRET`.
+        Signs a JWT naming a **service principal** as its subject, records the issue, and returns
+        the token. It is shown once and is not recoverable: nothing in the stack keeps a copy, and
+        the signature is reproducible only from the signing key. With `supabaseAuth.es256Signing`
+        it is ES256, with the `kid` of the private key in `JWT_KEYS`, GoTrue's signing set;
+        without, HS256 with `JWT_SECRET`. HS256 tokens stop verifying in 1.8, so one minted before
+        the switch is minted again then.
 
         **Why this is a function and not an RPC.** `pgjwt` is installed, so a `SECURITY DEFINER`
-        RPC could sign in-database — but `SUPABASE_JWT_SECRET` is *not* in that database, and
-        putting it there is the thing to avoid. That key signs anything, `service_role` included,
-        and such a token is accepted by storage, realtime, the edge runtime and Studio, none of
-        which consult the revocation denylist. The edge runtime already holds the key for signing,
+        RPC could sign in-database — but the signing key is *not* in that database, and putting
+        it there is the thing to avoid. That key signs anything, `service_role` included, and such
+        a token is accepted by storage, realtime and the edge runtime, none of which consult the
+        revocation denylist. The edge runtime already holds the key for signing,
         so the key stays put and the mint comes to it.
 
         **Minting ADDS a credential; it does not replace one.** This is the opposite of
@@ -3558,8 +3633,8 @@ paths:
 
         > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
         > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > the edge runtime and Studio verify the signature independently. For those four the expiry
-        > is still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > and the edge runtime verify the signature independently. For those three the expiry is
+        > still the only bound, which is why the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:
@@ -3651,6 +3726,10 @@ paths:
           and `name_error` says why the name was not set.
         - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
           changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
+          The person's picture is deleted before the ban: its object in `avatars` as
+          `service_role`, then `forget_person_picture()` clears `person_profiles.avatar_path`
+          (`0213`). If either fails, nothing more is done, and the answer says to remove access
+          again, which finishes it.
         - **`restore`**: `restore_person_access()`, then the ban is lifted.
         - **`set-password`**: a new password minted as `add` mints one, with or without a relay,
           returned once in `password`. `record_person_password_set()` decides first (a person whose
@@ -3712,7 +3791,8 @@ paths:
           description: >-
             GoTrue failed or did not answer. For `add`, `set-password` and `change-email` nothing was changed. For
             `remove` and `restore` the database act was done but the ban was not made or lifted;
-            repeat it. A fixed sentence and a request id, as for a 500.
+            repeat it. For `remove`, also Storage not deleting the picture, before the ban; repeat
+            it. A fixed sentence and a request id, as for a 500.
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
 
@@ -5544,6 +5624,26 @@ components:
             are kept out of it.
           example: inherited
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
+
+    DeviceUnsPath:
+      type: object
+      readOnly: true
+      description: One device's place in the Unified Namespace, from `public.device_uns_paths` (0214).
+      properties:
+        device_id: { type: string, format: uuid }
+        area_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_area_id`." }
+        cell_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_cell_id`." }
+        enterprise: { type: string, nullable: true, description: "The group the gateway last published under, else its configured `sparkplug_group`, else the site's `sparkplug.group_id` for a device with no gateway. `uns_path` starts with it." }
+        uns_path: { type: string, nullable: true, description: 'The path below the root, e.g. `Aber/Cardiff/Machine Shop/Bay 1/CNC_01`. NULL when `skip_reason` is set.', example: 'Aber/Cardiff/Machine Shop/Bay 1/CNC_01' }
+        skip_reason:
+          type: string
+          nullable: true
+          enum: [site_unset, lane, unassigned, cell_unfiled, unsafe_name]
+          description: >-
+            Why the bridge publishes nothing for the device, in the order tested: the `site.name`
+            setting is empty; it is a Simulated or Shadow lane; nothing places it; its cell is in no
+            area; a name on its path is empty or holds `/`, `+` or `#`. NULL when `uns_path` is set.
+            The same labels as `aber_ingestion_uns_skipped_total{reason}`.
 
     DeviceSubmodel:
       type: object
