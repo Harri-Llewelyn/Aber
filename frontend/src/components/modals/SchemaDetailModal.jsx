@@ -16,12 +16,15 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
-import { MetricGroupHeading } from './SchemaBuilderModal'
+import {
+  MetricGroupHeading, PropertyRange, rangeProblems, PICKER_ROW, PICKER_ROW_LABEL
+} from './SchemaBuilderModal'
+import { boundText, catalogPropertyEntry, isNumericType, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
-/** The keys of a stored property entry that this dialog names but does not edit: all but `type`. */
+/** The keys of a property entry beyond `type`, which a metric's row names after it. */
 const keysBeyondType = (entry) =>
   isPlainObject(entry) ? Object.keys(entry).filter(k => k !== 'type') : []
 
@@ -47,8 +50,9 @@ export function SchemaDetailModal({
   const editable = isSchemaEditable(schema)
   const status = schemaStatus(schema)
 
-  // The names the stored definition models, from `properties` and `required`. This list is all the
-  // dialog edits; a save keeps the rest of the definition as stored (buildDefinition).
+  // The names the stored definition models, from `properties` and `required`. This list and each
+  // entry's description, permitted values and range are all the dialog edits; a save keeps the rest
+  // of the definition as stored (buildDefinition).
   const [selectedNames, setSelectedNames] = useState(
     () => new Set(modelledMetrics(schema) || [])
   )
@@ -60,6 +64,9 @@ export function SchemaDetailModal({
     () => storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   )
   const [search, setSearch] = useState('')
+  // Metric name -> the range typed beside it. A metric with no entry shows, and keeps, its stored
+  // bounds, so only a range somebody touched is rewritten.
+  const [ranges, setRanges] = useState({})
   // Which write is running, not merely whether one is -- see `run` below.
   const [busyAction, setBusyAction] = useState(null)
   const busy = busyAction !== null
@@ -100,28 +107,72 @@ export function SchemaDetailModal({
   const modelledNow = modelledMetrics(schema) || new Set()
   const added = [...selectedNames].filter(n => !modelledNow.has(n))
   const removed = [...modelledNow].filter(n => !selectedNames.has(n))
-  const metricsEdited = added.length > 0 || removed.length > 0
+
+  const activeByName = useMemo(() => new Map(activeCatalog.map(m => [m.name, m])), [activeCatalog])
 
   /**
-   * The stored definition with the metric list changed and nothing else. A kept metric keeps its
-   * stored entry, every key included. An added one gets `{ type }` from the catalog, in `properties`
-   * only: `required` means modelled, and the editor never adds to it. A removed one leaves both.
+   * The JSON type of a metric whose range this dialog edits, or null. Only an active catalog metric
+   * with an entry in `properties` (stored as an object, or being added) and a numeric type has one.
+   */
+  const rangeTypeOf = (name) => {
+    const metric = activeByName.get(name)
+    const stored = storedEntry(name)
+    const inProperties = Object.hasOwn(storedProperties, name) || !modelledNow.has(name)
+    if (!metric || !inProperties || (stored !== undefined && !isPlainObject(stored))) return null
+    const type = typeof stored?.type === 'string' ? stored.type : datatypeToJsonSchemaType(metric.datatype)
+    return isNumericType(type) ? type : null
+  }
+  const shownRange = (name) => ranges[name] || {
+    minimum: boundText(storedEntry(name)?.minimum),
+    maximum: boundText(storedEntry(name)?.maximum)
+  }
+
+  /**
+   * A selected metric's entry as a save writes it. An active catalog metric's entry is built by
+   * catalogPropertyEntry(): its description and permitted values are the catalog's as they are now,
+   * its range what is typed beside it, and every other stored key stays. A metric no longer in the
+   * active catalog, or stored as something other than an object, keeps its stored entry as it is.
+   */
+  const entryFor = (name) => {
+    const stored = storedEntry(name)
+    const metric = activeByName.get(name)
+    if (!metric || (stored !== undefined && !isPlainObject(stored))) return stored
+    return catalogPropertyEntry(metric, { stored, range: rangeTypeOf(name) ? ranges[name] : undefined })
+  }
+
+  /**
+   * The stored definition with the metric list and its entries brought up to date, and nothing else.
+   * An added metric goes into `properties` only: `required` means modelled, and the editor never adds
+   * to it. A removed one leaves both. Everything outside `properties` and `required` stays as stored.
    */
   const buildDefinition = () => {
     const stored = isPlainObject(schema?.schema_definition) ? schema.schema_definition : { type: 'object' }
     const next = { ...stored }
     if (isPlainObject(stored.properties) || added.length > 0) {
-      const byName = new Map((catalog || []).map(m => [m.name, m]))
-      next.properties = Object.fromEntries(
-        Object.entries(storedProperties).filter(([name]) => selectedNames.has(name))
-      )
-      for (const name of added) {
-        next.properties[name] = { type: datatypeToJsonSchemaType(byName.get(name)?.datatype) }
+      next.properties = {}
+      for (const name of Object.keys(storedProperties)) {
+        if (selectedNames.has(name)) next.properties[name] = entryFor(name)
       }
+      for (const name of added) next.properties[name] = entryFor(name)
     }
     if (Array.isArray(stored.required)) next.required = stored.required.filter(n => selectedNames.has(n))
     return next
   }
+
+  // Only a draft is built: a published version's definition is shown as stored.
+  const built = editable ? buildDefinition() : null
+  const builtEntry = (name) => (built?.properties && Object.hasOwn(built.properties, name) ? built.properties[name] : undefined)
+  // Kept metrics whose entry a save would rewrite, and those of them the catalog alone changes.
+  const changed = editable
+    ? [...selectedNames].filter(n => Object.hasOwn(storedProperties, n) && builtEntry(n) !== undefined &&
+        !sameJson(builtEntry(n), storedProperties[n]))
+    : []
+  const fromCatalog = changed.filter(n =>
+    !sameJson(catalogPropertyEntry(activeByName.get(n), { stored: storedProperties[n] }), storedProperties[n]))
+  const metricsEdited = added.length > 0 || removed.length > 0 || changed.length > 0
+  const badRanges = editable
+    ? rangeProblems([...selectedNames].filter(n => rangeTypeOf(n) && ranges[n]).map(n => [n, ranges[n]]))
+    : []
 
   const semanticNow = storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   const semanticEdited = storedSemanticIdPair(semantic.semanticId, semantic.semanticIdType)
@@ -133,8 +184,8 @@ export function SchemaDetailModal({
     semanticEdited.semanticIdType !== semanticNow.semanticIdType
 
   /**
-   * Everything a draft save writes. The definition goes only when the metric list changed; api.js
-   * writes only the keys it is given, and sends the type as NULL when the id is blank.
+   * Everything a draft save writes. The definition goes only when the metric list or an entry
+   * changed; api.js writes only the keys it is given, and sends the type as NULL when the id is blank.
    */
   const draftPatch = () => ({
     ...(metricsEdited && { schema_definition: buildDefinition() }),
@@ -175,7 +226,8 @@ export function SchemaDetailModal({
     await onPublish?.()
   })
 
-  const canSaveDraft = editable && canManage && selectedNames.size > 0
+  const canSaveDraft = editable && canManage && selectedNames.size > 0 && badRanges.length === 0
+  const rangeTitle = badRanges.length > 0 ? `Fix the range of ${badRanges.join(' ')}` : null
 
   const footer = (
     <>
@@ -208,7 +260,7 @@ export function SchemaDetailModal({
           onClick={handleSaveDraft}
           title={!canManage
             ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-            : !dirty ? 'No changes to save' : 'Save this draft without activating it'}
+            : rangeTitle || (!dirty ? 'No changes to save' : 'Save this draft without activating it')}
         >
           Save Draft
         </ActionButton>
@@ -225,7 +277,7 @@ export function SchemaDetailModal({
             ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
             : selectedNames.size === 0
               ? 'A published version must model at least one metric'
-              : `Activate v${schemaVersion(schema)}, archive its predecessor, and move every device across`}
+              : rangeTitle || `Activate v${schemaVersion(schema)}, archive its predecessor, and move every device across`}
         >
           <IconCheck size={13} /> {`Publish Version v${schemaVersion(schema)}`}
         </ActionButton>
@@ -362,11 +414,25 @@ export function SchemaDetailModal({
           {editable && metricsEdited && (
             <span style={{ fontWeight: 400, fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
               {added.length > 0 && <span style={{ color: 'var(--success-text)' }}>+{added.length} </span>}
-              {removed.length > 0 && <span style={{ color: 'var(--danger)' }}>−{removed.length}</span>}
-              {' '}vs. the last saved draft
+              {removed.length > 0 && <span style={{ color: 'var(--danger)' }}>−{removed.length} </span>}
+              {changed.length > 0 && <span>{changed.length} changed </span>}
+              vs. the last saved draft
             </span>
           )}
         </label>
+        {/* Opening a draft can be enough to change it: a forked version takes the catalog as it is
+            now, which is how a new version comes to carry permitted values its parent lacked. */}
+        {editable && fromCatalog.length > 0 && (
+          <p className="form-hint" style={{ marginTop: 0 }}>
+            {fromCatalog.length === 1 ? 'One metric takes its' : `${fromCatalog.length} metrics take their`} description
+            or permitted values from the Metrics page as it is now. Saving or publishing writes them into this draft.
+          </p>
+        )}
+        {editable && badRanges.length > 0 && (
+          <div role="alert" style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '4px' }}>
+            Fix the range of {badRanges.join(' ')}
+          </div>
+        )}
 
         {editable ? (
           <>
@@ -388,20 +454,35 @@ export function SchemaDetailModal({
                       group={group}
                       picked={group.metrics.filter(m => selectedNames.has(m.name)).length}
                     />
-                    {group.metrics.map(m => (
-                      <label key={m.metric_uuid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedNames.has(m.name)}
-                          onChange={() => toggleMetric(m.name)}
-                          aria-label={m.name}
-                        />
-                        <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
-                        <StoredKeys entry={storedEntry(m.name)} />
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
-                      </label>
-                    ))}
+                    {group.metrics.map(m => {
+                      const ticked = selectedNames.has(m.name)
+                      const ranged = ticked && rangeTypeOf(m.name) !== null
+                      return (
+                        // The range sits outside the label, so typing in it never toggles the tick.
+                        <div key={m.metric_uuid} style={{ ...PICKER_ROW, paddingRight: ranged ? '12px' : 0 }}>
+                          <label style={PICKER_ROW_LABEL}>
+                            <input
+                              type="checkbox"
+                              checked={ticked}
+                              onChange={() => toggleMetric(m.name)}
+                              aria-label={m.name}
+                            />
+                            <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+                            {/* What a save writes for a ticked metric; what is stored for the rest. */}
+                            <StoredKeys entry={ticked && builtEntry(m.name) !== undefined ? builtEntry(m.name) : storedEntry(m.name)} />
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
+                          </label>
+                          {ranged && (
+                            <PropertyRange
+                              name={m.name}
+                              range={shownRange(m.name)}
+                              onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 ))
               )}

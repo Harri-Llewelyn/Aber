@@ -265,9 +265,12 @@ misbehaving device opt itself out by declaring something permissive.
 
 The reader understands `type`, `enum`, `minimum`, `maximum`, `pattern` and `additionalProperties`.
 It did not until the schema-conformance work — it read `type` alone, so the rest sat in stored schemas doing
-nothing. `exclusiveMinimum` / `exclusiveMaximum` are still **not** read: Draft 4 spells them as
-booleans modifying `minimum`, Draft 6+ as numbers replacing it, and guessing the dialect would move
-a boundary in whichever direction the guess was wrong. An unread facet reports nothing; a misread
+nothing. The dashboard's schema builders write `type`, `enum` (from the catalog's
+`permitted_values`), `minimum` and `maximum`; `test_schema_builder_contract.py` holds their output,
+`test-harness/fixtures/schema-builder-output.json`, to what this reader finds.
+`exclusiveMinimum` / `exclusiveMaximum` are still **not** read: Draft 4 spells them as booleans
+modifying `minimum`, Draft 6+ as numbers replacing it, and guessing the dialect would move a
+boundary in whichever direction the guess was wrong. An unread facet reports nothing; a misread
 one rejects good telemetry.
 
 Where a device carries several submodels the constraints **union permissively** — the answer is

@@ -413,6 +413,72 @@ describe('the schema builder builds a schema', () => {
 })
 
 /**
+ * What each metric's entry carries: its type, and the catalog's description and permitted values,
+ * and a numeric metric the range typed beside it. These are the keys ingestion holds a device set
+ * to Enforce to; schemaBuilderContract.test.jsx holds the whole shape to ingestion's reading of it.
+ */
+describe('the schema builder writes what the catalog and the ranges say', () => {
+  const ROWS = [
+    { metric_uuid: 'e1', name: 'Controller/EXECUTION', datatype: 12, standard: 'MTConnect', deprecated: false, description: 'Execution state', permitted_values: ['READY', 'ACTIVE'] },
+    { metric_uuid: 'l1', name: 'Axes/S/LOAD', datatype: 10, standard: 'MTConnect', deprecated: false, description: null, permitted_values: null }
+  ]
+
+  const openBuilder = async () => {
+    api.get.mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/metric-catalog') ? ROWS : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    renderTab()
+    await waitForRegistry()
+    fireEvent.click(screen.getByRole('button', { name: /Build Schema from Catalog/ }))
+    await waitFor(() => expect(screen.getByLabelText(/Schema Name/)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText(/Schema Name/), { target: { value: 'Spindle' } })
+  }
+  const tick = (name) => fireEvent.click(screen.getByText(name).closest('label').querySelector('input'))
+  const bound = (which, name) => screen.queryByRole('spinbutton', { name: `${which} of ${name}` })
+  const saved = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/schemas', expect.anything()))
+    return api.post.mock.calls.find(([path]) => path === '/api/v1/schemas')[1].schema_definition.properties
+  }
+
+  it('writes the catalog’s permitted values as enum, and its description', async () => {
+    await openBuilder()
+    tick('Controller/EXECUTION')
+    expect((await saved())['Controller/EXECUTION'])
+      .toEqual({ type: 'string', description: 'Execution state', enum: ['READY', 'ACTIVE'] })
+  })
+
+  it('offers a range only once a numeric metric is ticked, and writes what is typed', async () => {
+    await openBuilder()
+    expect(bound('Minimum', 'Axes/S/LOAD')).toBeNull()
+    tick('Axes/S/LOAD')
+    tick('Controller/EXECUTION')
+    expect(bound('Minimum', 'Controller/EXECUTION')).toBeNull()
+
+    fireEvent.change(bound('Minimum', 'Axes/S/LOAD'), { target: { value: '0' } })
+    fireEvent.change(bound('Maximum', 'Axes/S/LOAD'), { target: { value: '150' } })
+    expect((await saved())['Axes/S/LOAD']).toEqual({ type: 'number', minimum: 0, maximum: 150 })
+  })
+
+  it('writes nothing beyond the type where the catalog has nothing and no range is typed', async () => {
+    await openBuilder()
+    tick('Axes/S/LOAD')
+    expect((await saved())['Axes/S/LOAD']).toEqual({ type: 'number' })
+  })
+
+  it('will not save a minimum above its maximum, and says which', async () => {
+    await openBuilder()
+    tick('Axes/S/LOAD')
+    fireEvent.change(bound('Minimum', 'Axes/S/LOAD'), { target: { value: '10' } })
+    fireEvent.change(bound('Maximum', 'Axes/S/LOAD'), { target: { value: '5' } })
+    expect(tooltipOf(screen.getByRole('button', { name: /^Save Schema$/ }))).toMatch(/a valid range/)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save Schema$/ }))
+    await waitFor(() => expect(screen.getByText(/Fix the range of Axes\/S\/LOAD: The minimum is above the maximum/)).toBeTruthy())
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
+/**
  * Saving used to be refused by a disabled button with no explanation, which cannot answer the
  * question a reader who has just tried to save is asking. The button stays clickable and the click
  * is what says what is missing.

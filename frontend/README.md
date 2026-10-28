@@ -95,6 +95,12 @@ match as Python's `re` does (`.`, `$`, `\d`, `\w`, `\s` and `\b` all differ). A 
 translation is reported as not checked here, never guessed. The translation leaves Unicode
 versions aside: a character newer than one side's tables can still class differently.
 
+What the two schema builders write is held to what ingestion reads the same way:
+`test-harness/fixtures/schema-builder-output.json` is a catalog, some typed ranges and the
+definition both builders must produce from them (`schemaBuilderContract.test.jsx`), plus readings
+whose findings `ingestion/test_schema_builder_contract.py` asserts against that definition. Both
+builders build each entry with `catalogPropertyEntry()` in `utils/schemaProperty.js`.
+
 ### Permission gating
 
 `hasPermission(uuid)` from `usePermissions`, against `PERMISSION_UUIDS` in `constants.js`. Gating
