@@ -195,7 +195,7 @@ jobs:
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
-          docker build -f supabase/db-init/Dockerfile -t "$IMG_NS/db-init:$V" supabase
+          docker build -f supabase/db-init/Dockerfile --build-context licenses=./licenses -t "$IMG_NS/db-init:$V" supabase
           docker build -f backup-service/Dockerfile -t "$IMG_NS/backup-service:$V" .
           docker build -f gateway-credential/Dockerfile -t "$IMG_NS/gateway-credential:$V" .
           k3d image import -c aber "$IMG_NS/db-init:$V" "$IMG_NS/backup-service:$V" "$IMG_NS/gateway-credential:$V"
