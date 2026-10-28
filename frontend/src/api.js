@@ -2266,6 +2266,16 @@ const apiMethods = {
       return (data || []).map(g => mapGatewayRow(g, locations));
     }
 
+    // Each device's place in the Unified Namespace (0214): its path below the root, or why it has
+    // none. The view runs as the reader, so it lists the devices they may read.
+    if (path.startsWith('/api/v1/uns-paths')) {
+      const { data, error } = await supabase
+        .from('device_uns_paths')
+        .select('device_id, area_id, cell_id, enterprise, uns_path, skip_reason');
+      if (error) throw error;
+      return data || [];
+    }
+
     /**
      * Latest value per metric for one device, for the Devices page's telemetry drawer.
      *

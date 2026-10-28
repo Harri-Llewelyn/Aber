@@ -2083,6 +2083,63 @@ API, everyone else refused, a wrong type refused and the size limit set, and Rem
 the object. Mirror check 26 (`scripts/check-mirror-drift.mjs`) holds the bucket's name, types,
 limit and object name in the dashboard, `manage-people` and `storage-init.mjs` together.
 
+### Each device shows its place in the Unified Namespace (0214)
+
+The UNS bridge (`ingestion/uns_publish.py`) built each topic from four reads of its own: the
+`site.name` setting, `device_locations`, then the area's and the cell's names. The dashboard showed
+none of it, so someone connecting a BI tool put the path together by hand from four pages. A
+device the bridge skipped looked the same as one it published; only the counter
+`aber_ingestion_uns_skipped_total{reason}` said a skip happened, and not to which device. A copy
+of the rule in the dashboard would have been a second, and #487's AAS interfaces a third; i3X's tree
+already drifted from the UNS once (#496).
+
+**`device_uns_paths` is the rule, once.** One row per device: `uns_path`, its path below the root,
+or `skip_reason`, why it has none. Exactly one is set.
+
+- **The path** is `<enterprise>/<site>/<area>/<cell>/<device>` at the levels the device occupies:
+  a cell's device (its own cell or its gateway's) under area and cell, an Area-Wide one under its
+  area, a Site-Wide one under the site alone. No placeholder fills a level that is missing.
+- **The enterprise** is the group the gateway last published under (`observed_sparkplug_group`,
+  `0174`), else its configured `sparkplug_group`, else the `sparkplug.group_id` setting for a device
+  with no gateway, which is the group a new gateway takes. `uns_path` always starts with
+  `enterprise` and a slash.
+- **The reasons** are the bridge's `SKIP_REASONS` that the database can know, tested in the
+  bridge's order: `site_unset` (empty, or only spaces, tabs and line breaks), `lane` (Simulated or
+  Shadow), `unassigned`, `cell_unfiled` (a cell in no area), then `unsafe_name` (a segment that is
+  empty or holds `/`, `+` or `#`). So a lane is a lane whatever its name, and with no site name
+  every device is `site_unset`. The bridge's two run-time reasons, `location_unknown` (the read
+  failed, or the view had no row) and `publish_error`, stay counters only.
+- **`area_id` and `cell_id`** are `device_locations`' effective ones, so a page can find the devices
+  beneath an area or a cell.
+- **It runs as its caller** (`security_invoker`). A reader sees the devices, names and settings
+  their own policies allow: every signed-in role reads every device today, and a setting marked
+  `sensitive` is unset for anyone but an Administrator. `authenticated` may `SELECT`, which covers
+  the ingestion principal; `anon` holds nothing, and nobody writes through it.
+
+**The bridge reads it**, one row per device behind its TTL cache (`UNS_CONTEXT_TTL_SECONDS`), in
+place of its four lookups. Two things stay in Python. The metric name, the topic's leaf, is checked
+there, as it may carry `/` but not a wildcard. And the enterprise segment is the group the message
+arrived under, swapped for the view's first segment. The view's group lags a change of group until
+ingestion records the new one, and a gateway that has sent no node-level message since `0174` has
+none recorded, so the swap keeps every topic the bridge published before. The counters and their labels
+are unchanged. A multi-level root (`ingestion.unsMqttTopicRoot: plant/uns`), which the chart and the
+broker's grant accept, now publishes; the old code checked the root as one segment and skipped every
+device as `unsafe_name`.
+
+**The dashboard reads it** while the chart says the bridge is on (`VITE_UNS_MQTT_ENABLED`, beside
+the root as `VITE_UNS_MQTT_TOPIC_ROOT`, both rendered from the values the ingestion pod reads). A
+device's drawer shows `<root>/<uns_path>` with a copy button, or the reason in words; an area's and a
+cell's show the subscription filter for everything beneath them, cut from their devices' paths; a
+rename dialog says how many devices' topics it moves (`frontend/src/utils/unsPath.js`). With the
+bridge off, each says so and nothing is read.
+
+The file's self-check asserts `security_invoker`, the grants, the column list the bridge selects,
+and, over whatever rows exist, one row per device with a path or a reason from the set and never
+both. Mirror check 27 (`scripts/check-mirror-drift.mjs`) holds the view's reasons to the bridge's
+`SKIP_REASONS` and to the dashboard's sentences, and the bridge's selected columns to the view's.
+`test_a_device_shows_where_its_readings_appear_in_the_uns.py` holds every path shape and every
+reason, the order, the caller's policies and who may read it.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

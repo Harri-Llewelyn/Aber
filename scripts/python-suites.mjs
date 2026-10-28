@@ -177,8 +177,9 @@ export const SUITES = {
   'ingestion/test_uns_publish.py': {
     lanes: ['unit'],
     why:
-      'Pure-logic tests of the Unified Namespace bridge: the topic is fixed at the level a device ' +
-      'honestly occupies and an incomplete path is skipped and counted rather than filled with a ' +
+      'Pure-logic tests of the Unified Namespace bridge: the topic is the root, the message\'s ' +
+      'group and the path device_uns_paths answers, read once per device per TTL, and a device ' +
+      'the view skips is skipped and counted under its reason rather than filled with a ' +
       'placeholder. A fake query builder and a fake client; no broker, no database.',
   },
   'ingestion/test_primary_host.py': {
@@ -1002,6 +1003,15 @@ export const SUITES = {
       'display_names_for() nothing, Remove Access alone forgets it as service_role, and the ' +
       'avatars policies, run verbatim on a stand-in table, admit the owner to their own ' +
       '<id>/avatar and nobody else, with a self-check that refuses a wider arm.',
+  },
+  'supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py': {
+    lanes: ['db'],
+    why:
+      "0214 -- that device_uns_paths answers each device's path below the Unified Namespace root at " +
+      'the levels it occupies, under the group its gateway publishes under, or the one reason the ' +
+      'bridge skips it for, in the bridge\'s order; that it runs as its caller; and that a person ' +
+      'and the ingestion principal read it and anon does not. The bridge publishes these rows, so ' +
+      'a wrong answer is a wrong topic.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],

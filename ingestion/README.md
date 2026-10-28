@@ -1672,9 +1672,15 @@ uns/<enterprise>/<site>/<area>/<device>/<metric>            area-wide -- a build
 uns/<enterprise>/<site>/<device>/<metric>                   site-wide -- serves the whole campus
 ```
 
+**The path comes from the database.** The view `device_uns_paths` answers each device's path below
+the root, or the reason it has none, and the Devices, Areas and Cells pages read the same rows
+([`supabase/README.md`, 0214](../supabase/README.md#each-device-shows-its-place-in-the-unified-namespace-0214)).
+The bridge reads one row per device, puts the root before it and the metric name after it, and
+checks only the metric name and the message's group itself.
+
 | Segment | ISA-95 | Where it comes from |
 | :--- | :--- | :--- |
-| `<enterprise>` | Enterprise | The message's Sparkplug group (`gateways.sparkplug_group`), already on the wire |
+| `<enterprise>` | Enterprise | The message's Sparkplug group, already on the wire. The view's path starts with the group last recorded for the gateway, and the bridge swaps in the message's |
 | `<site>` | Site | The `site.name` setting. One campus, so one value; a second campus is the migration that makes it a table |
 | `<area>` | Area | `areas.name` (`0097`) — one part of the site. A cell files into one; an area-wide asset names one |
 | `<cell>` | Work center | `cells.name`, through `device_locations.effective_cell_id` |
@@ -1699,9 +1705,10 @@ not the table's.
 
 **An incomplete path is skipped, never filled with a placeholder.** A device that is unassigned, a
 cell filed in no area, a site whose name is unset: none is published, each is counted under
-`aber_ingestion_uns_skipped_total{reason=...}`, and the Areas page's unfiled queue and the Site Map's
-Unassigned lane are where an operator completes the path. An invented segment would put a word
-nobody chose in every topic, which is the trap the derived lanes exist to avoid. Names are checked
+`aber_ingestion_uns_skipped_total{reason=...}`, the device's drawer on the Devices page says which
+reason in words, and the Areas page's unfiled queue and the Site Map's Unassigned lane are where an
+operator completes the path. An invented segment would put a word nobody chose in every topic,
+which is the trap the derived lanes exist to avoid. Names are checked
 for `/`, `+` and `#` on the way in (`areas_name_topic_safe`, `cells_name_topic_safe`; the cell
 rule is `NOT VALID`, so a cell named before `0097` keeps its row and is skipped with
 `reason="unsafe_name"` until renamed).
@@ -1729,10 +1736,10 @@ which reads `<root>/#`, derived from the same value, and `spBv1.0/#`, and publis
 
 **The cost is on the single-writer path**, one publish per metric per message on the same thread
 as the historian write, and it is measured the same way: `aber_ingestion_uns_publish_seconds` sits
-beside `aber_ingestion_write_seconds`, and the two together are the per-message cost. The location
-context — the device's resolved cell and area, their names, the site — is cached for
-`UNS_CONTEXT_TTL_SECONDS`, so a message costs no directory read and a relocation on the dashboard
-moves a device's topic within that window.
+beside `aber_ingestion_write_seconds`, and the two together are the per-message cost. A device's
+row in `device_uns_paths`, and the catalog's units, are cached for `UNS_CONTEXT_TTL_SECONDS`, so a
+message costs no directory read and a relocation or a rename on the dashboard moves a device's
+topic within that window.
 
 ### Configuration
 
@@ -1740,7 +1747,7 @@ moves a device's topic within that window.
 | :--- | :--- | :--- |
 | `UNS_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
 | `UNS_MQTT_TOPIC_ROOT` | `uns` | Set by the chart from `ingestion.unsMqttTopicRoot`, which also gives the broker's `ingestion` role its `<root>/#` grant |
-| `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's location and the site name are believed |
+| `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's path and the catalog's units are believed |
 
 ## Device Liveness Watchdog
 

@@ -555,6 +555,44 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceLocation' } }
 
+  /rest/v1/device_uns_paths:
+    get:
+      tags: [Location]
+      summary: Each device's place in the Unified Namespace, or why it has none
+      description: |
+        Read-only view (0214), one row per device. `uns_path` is its path below the UNS bridge's
+        root, `<enterprise>/<site>/<area>/<cell>/<device>` at the levels the device occupies;
+        `skip_reason` says why it has none. Exactly one is set.
+
+        **The topic is `<root>/<uns_path>`**, and each metric publishes retained beneath it at
+        `<root>/<uns_path>/<metric name>`. The root is `ingestion.unsMqttTopicRoot` (`uns` by
+        default), and nothing is published while `ingestion.unsMqttEnabled` is off, its default.
+        The path follows names: renaming an area, a cell or a device moves every topic beneath it.
+        The Sparkplug ID never moves.
+
+        Runs as the caller (`security_invoker`): their policies on devices, gateways, cells, areas
+        and settings apply. `anon` reads nothing.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: device_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - name: area_id
+          in: query
+          schema: { type: string }
+          description: "The devices beneath an area, its cells' and its Area-Wide ones: `eq.<uuid>`."
+        - name: skip_reason
+          in: query
+          schema: { type: string }
+          description: '`not.is.null` lists the devices the bridge skips.'
+      responses:
+        '200':
+          description: One row per device the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceUnsPath' } }
+
   # ----------------------------------------------------------- Telemetry ----
   /rest/v1/telemetry:
     get:
@@ -5445,6 +5483,26 @@ components:
             are kept out of it.
           example: inherited
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
+
+    DeviceUnsPath:
+      type: object
+      readOnly: true
+      description: One device's place in the Unified Namespace, from `public.device_uns_paths` (0214).
+      properties:
+        device_id: { type: string, format: uuid }
+        area_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_area_id`." }
+        cell_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_cell_id`." }
+        enterprise: { type: string, nullable: true, description: "The group the gateway last published under, else its configured `sparkplug_group`, else the site's `sparkplug.group_id` for a device with no gateway. `uns_path` starts with it." }
+        uns_path: { type: string, nullable: true, description: 'The path below the root, e.g. `Aber/Cardiff/Machine Shop/Bay 1/CNC_01`. NULL when `skip_reason` is set.', example: 'Aber/Cardiff/Machine Shop/Bay 1/CNC_01' }
+        skip_reason:
+          type: string
+          nullable: true
+          enum: [site_unset, lane, unassigned, cell_unfiled, unsafe_name]
+          description: >-
+            Why the bridge publishes nothing for the device, in the order tested: the `site.name`
+            setting is empty; it is a Simulated or Shadow lane; nothing places it; its cell is in no
+            area; a name on its path is empty or holds `/`, `+` or `#`. NULL when `uns_path` is set.
+            The same labels as `aber_ingestion_uns_skipped_total{reason}`.
 
     DeviceSubmodel:
       type: object
