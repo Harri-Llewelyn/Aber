@@ -121,11 +121,11 @@ const KEYS = [
  * record, and ten years like setup.mjs's. The gateway substitutes them into its config at start and
  * storage-api reads them at start, so both restart.
  */
-const API_KEYS = [
+const API_JWTS = [
   { env: 'SUPABASE_ANON_KEY', valuesKey: 'anonKey', role: 'anon' },
   { env: 'SUPABASE_SERVICE_ROLE_KEY', valuesKey: 'serviceRoleKey', role: 'service_role' },
 ];
-const API_KEY_RESTARTS = ['supabase-envoy', 'supabase-storage'];
+const API_JWT_RESTARTS = ['supabase-envoy', 'supabase-storage'];
 
 const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
@@ -276,7 +276,7 @@ if (checkOnly) {
     worst = Math.min(worst, remaining);
   }
   // Not a failure in 1.7: HS256 still verifies everywhere, until 1.8.
-  const hs256 = [...KEYS, ...API_KEYS].filter((k) => envValue(k.env) && algorithmOf(envValue(k.env)) === 'HS256');
+  const hs256 = [...KEYS, ...API_JWTS].filter((k) => envValue(k.env) && algorithmOf(envValue(k.env)) === 'HS256');
   if (hs256.length) {
     console.log('');
     console.log(`  HS256, which stops verifying in 1.8: ${hs256.map((k) => k.env).join(', ')}.`);
@@ -323,7 +323,7 @@ const minted = KEYS.map((key) => ({
   ...mintJwt({ role: 'authenticated', secret, signingKey: signing.key, subject: key.principal, days }),
 }));
 const mintedApi = apiKeys
-  ? API_KEYS.map((key) => ({ ...key, ...mintJwt({ role: key.role, signingKey: signing.key, days: INFRASTRUCTURE_KEY_DAYS }) }))
+  ? API_JWTS.map((key) => ({ ...key, ...mintJwt({ role: key.role, signingKey: signing.key, days: INFRASTRUCTURE_KEY_DAYS }) }))
   : [];
 
 // -------------------------------------------------------------------------------------------------
@@ -370,7 +370,7 @@ for (const key of minted) {
 const all = [...minted, ...mintedApi];
 const restart = [...new Set([
   ...minted.filter((k) => k.restart).map((k) => `deploy/${k.restart}`),
-  ...(mintedApi.length ? API_KEY_RESTARTS.map((name) => `deploy/${name}`) : []),
+  ...(mintedApi.length ? API_JWT_RESTARTS.map((name) => `deploy/${name}`) : []),
 ])];
 if (existsSync(valuesPath)) {
   let values = readFileSync(valuesPath, 'utf8');
