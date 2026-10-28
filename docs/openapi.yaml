@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Aber API
-  version: "1.6.0"
+  version: "1.7.0"
   description: |
     The HTTP surface of Aber, the shopfloor data platform. Every request goes through
     the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
