@@ -8,7 +8,7 @@
  * row. Removing, restoring, setting a password and changing an address call the database FIRST, so
  * its rules (not your own account, not the last Administrator who can sign in) are decided before
  * GoTrue changes anything. Removing bans the account and never deletes it: the Audit Trail names
- * the person through it.
+ * the person through it. It does delete the picture the person put on their account.
  *
  * A new account without a mail relay, and every new password, is minted here and returned once.
  * Nothing stores or logs it; GoTrue keeps only its hash.
@@ -35,6 +35,10 @@ export const ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor
 
 /** About a hundred years. GoTrue has no permanent ban; `none` lifts one. */
 export const BAN_DURATION = "876000h";
+
+/** A person's picture: one object each, read by its owner alone (storage-policies.sql, 0213). */
+export const PICTURE_BUCKET = "avatars";
+export const picturePath = (userId: string) => `${userId}/avatar`;
 
 const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
 
@@ -224,6 +228,24 @@ async function removeAccess(req: Request, body: Record<string, unknown>, callerI
 
   const { error } = await caller.rpc("remove_person_access", { p_user_id: userId });
   if (error) return dbRefusal(req, error, "Access was not removed");
+
+  // The picture goes with the access: nobody needs it, and it is a photo of a person. The object,
+  // as service_role, then the column, before the ban: until the ban is made the person reads as
+  // Sign-in still open, which offers Remove Access again, and a removal already made answers false
+  // above, so selecting it again finishes every step.
+  const { error: pictureError } = await admin.storage.from(PICTURE_BUCKET).remove([picturePath(userId)]);
+  const { error: forgetError } = pictureError
+    ? { error: null }
+    : await admin.rpc("forget_person_picture", { p_user_id: userId });
+  if (pictureError || forgetError) {
+    return serverError(req, FN, pictureError ?? forgetError, {
+      status: pictureError ? 502 : 500,
+      error: "Sign-in is not blocked yet, and their picture is not deleted. Their role is removed, so " +
+        "they can do nothing that needs one, but the picture on their account could not be deleted. " +
+        "Select Remove Access again.",
+      context: `deleting the picture of ${userId}`,
+    });
+  }
 
   const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: BAN_DURATION });
   if (banError) {

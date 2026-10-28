@@ -38,7 +38,8 @@ export const BROKER_PRINCIPALS = [
     role: 'subscriber',
     purpose: 'A consumer outside Aber that only reads, such as a SCADA system or a dashboard. Reads '
       + 'every Sparkplug topic and the Unified Namespace across the whole site, never the Directory, '
-      + 'and publishes nothing. No account holds it until an operator creates one.',
+      + 'and publishes nothing. No account holds it until an Administrator creates one under Broker '
+      + 'accounts.',
     writes: false,
   },
   {
@@ -50,7 +51,8 @@ export const BROKER_PRINCIPALS = [
   {
     role: 'admin',
     purpose: 'The credential service. Speaks to the broker’s Dynamic Security plugin to issue, '
-      + 'disable and list accounts, and reaches no telemetry topic.',
+      + 'disable and list accounts, and to create and delete read-only ones, and reaches no '
+      + 'telemetry topic.',
     writes: true,
   },
 ]
@@ -88,6 +90,19 @@ const FIXTURE_ACCOUNTS = {
 export function describeBrokerAccount(username) {
   return FIXTURE_ACCOUNTS[username] || null
 }
+
+/**
+ * A read-only account an Administrator made under Broker accounts: "sub" and 21 lowercase hex
+ * characters, the credential service's SUBSCRIBER_ID_PATTERN. It holds the subscriber role alone,
+ * and only these offer Delete.
+ */
+export const SUBSCRIBER_USERNAME = /^sub[0-9a-f]{21}$/
+
+export const isSubscriberAccount = (username) => SUBSCRIBER_USERNAME.test(String(username || ''))
+
+/** What a read-only account is for, as broker-subscriber accepts it. */
+export const SUBSCRIBER_NAME_MAX = 80
+export const SUBSCRIBER_DESCRIPTION_MAX = 500
 
 /**
  * What the dashboard knows about each machine identity's database principal, keyed by the id a

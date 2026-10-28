@@ -4,7 +4,7 @@ This page shows who and what may reach Aber. Its first tab, **People**, lists ev
 
 The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. Point at a tab, or move to it with the keyboard, to read what it holds.
 
-People, Broker credentials and Machine identities each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
+People, Broker credentials, Machine identities and Broker accounts each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities, **New Read-Only Account** on Broker accounts. Broker roles has no controls, so its list starts straight under the tabs.
 
 There is no Refresh button. Every change you make here reads the list again. To pick up a change made somewhere else, such as by another Administrator, reload the page: it opens on the same tab and filters.
 
@@ -38,6 +38,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **End**, on a row of that list, signs them out of that one session. A dialog asks first, naming the session and when it was last active. Select **End Session** to end it. Their other sessions stay signed in, so use it for a lost laptop.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
+- **Remove Access also deletes the picture the person put on their account.** Nobody else could see it, and nobody needs it now. Restore Access brings them back with no picture. If the picture cannot be deleted, a message says so, and their sign-in is not blocked yet. Select **Remove Access** again to finish.
 - **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
 - A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
 - **Change Role** lists the roles, starting on theirs. Choose another, and the dialog says what it lets them do. Nothing changes until you select **Change Role** in the dialog.
@@ -106,6 +107,26 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Rules** on a broker role is the number of rules the broker reports for it. To see the rules exactly as the broker holds them, click the role's row, or press Enter or Space on it. They open in a side panel. A row ending in a chevron opens a panel. Leaving the **Broker roles** tab closes the panel.
 - Each role's purpose is declared in `mosquitto/dynsec-roles.json`, and checked when Aber is built.
 - Every gateway account holds the one **gateway** role. In its rules, **%u** stands for the account's own username, which is the gateway's Sparkplug ID. So each gateway can publish and receive only under its own edge node.
+
+## Read-only broker accounts
+
+A system outside Aber that only reads the broker can have an account of its own. It might be a SCADA system, a dashboard or an analytics client.
+
+1. Open **Broker accounts** and select **New Read-Only Account**.
+2. Give the account a name, and say what it is for. Both are needed. The name can be up to 80 characters, and the purpose up to 500.
+3. Select **Create Read-Only Account**.
+4. Copy the settings the dialog shows into the system that will connect. Then select **I have copied it**.
+
+- **The password is shown once.** The broker keeps only a hash of it. If it is lost, delete the account and create another.
+- The dialog shows everything the system needs: the broker's address and port, the username, the password, the topics it may read and the root certificate.
+- **What it can read:** every Sparkplug topic, `spBv1.0/#`, and the Unified Namespace. It reads every area of the site. It does not read the Directory.
+- **It cannot publish.** The broker drops anything it sends. It is a plain MQTT reader, not a Sparkplug Host Application. It sends no STATE, and cannot ask an edge node to rebirth.
+- The account holds the **subscriber** role and nothing else. Its username is `sub` and 21 more letters and digits. If someone adds a second role to it by hand, Aber takes it away when the broker next starts.
+- Its row on **Broker accounts** shows its name, what it is for, and whether anything is connected as it.
+- **Delete** is on the row of a read-only account, and on no other. A dialog asks first, naming the account. Select **Delete Account** to delete it.
+- Deleting it disconnects anything connected as it, at once, and the password stops working. To give the system access again, create a new account.
+- Creating and deleting an account are each recorded in the Audit Trail, under **Broker accounts**. The record names the account and who acted. It never holds the password.
+- An account made by hand, on a site without the dashboard, is listed too, with no **Delete**. `mosquitto/README.md` says how to make and remove one.
 
 ## What the states mean
 

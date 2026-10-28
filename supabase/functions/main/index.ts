@@ -40,13 +40,21 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // plugin; the read returns names, roles and state and no hash material.
   "broker-inventory": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
-  // Signs a long-lived JWT for a service principal and reveals it once. JWT_SECRET is the widest
-  // secret in this map: it signs anything, including a `service_role` token that storage, realtime,
-  // the edge runtime and Studio accept without consulting the denylist. It is signed here rather
+  // Creates and deletes a read-only broker account (the subscriber role alone), Administrator only.
+  // The same bearer token: the credential service's two verbs for it refuse any username outside
+  // the subscriber scheme, so it can delete no gateway or platform account. No service-role key:
+  // the audit rows (0218) are written as the caller.
+  "broker-subscriber": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
+
+  // Signs a long-lived JWT for a service principal and reveals it once. Its signing key, JWT_KEYS
+  // (the ES256 private key, with supabaseAuth.es256Signing) or JWT_SECRET (HS256, without), is the
+  // widest secret in this map: it signs anything, including a `service_role` token that storage,
+  // realtime and the edge runtime accept without consulting the denylist. It is signed here rather
   // than in the database because the runtime already holds the key, and moving it into SQL would
   // turn every path to SQL execution into a path to an unrevocable credential. No service-role key:
-  // record_service_token_issued() is SECURITY DEFINER and re-checks the actor.
-  "mint-service-token": ["JWT_SECRET"],
+  // record_service_token_issued() is SECURITY DEFINER and re-checks the actor. The chart sets one
+  // of the two; an unset one is not forwarded.
+  "mint-service-token": ["JWT_KEYS", "JWT_SECRET"],
 
   // Adds a person, removes their access, restores it or sets a new password, for the People tab:
   // GoTrue's admin API takes the service-role key. Administrator only, checked here and again by

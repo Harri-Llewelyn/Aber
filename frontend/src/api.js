@@ -20,6 +20,7 @@ import {
   modelContentType,
   modelStoragePath
 } from './utils/model3d';
+import { PICTURE_BUCKET, picturePath } from './utils/picture';
 
 // A device has two relationships to a cell: `devices.gateway_id -> gateways.cell_id` is the data
 // path, and `devices.cell_id` is an explicit location override (NULL means inherit). The effective
@@ -974,6 +975,56 @@ const apiMethods = {
   },
 
   /**
+   * The signed-in person's own picture (0213) as a blob URL for an <img>, or null for none. Their
+   * person_profiles row says whether there is one, so a person with none asks Storage nothing; a
+   * row naming an object that is missing or unreadable is no picture, not an error. Downloaded
+   * with the session, as loadAreaPlanUrl() downloads a plan, and never from the browser's cache:
+   * the name stays the same when the picture changes. The caller revokes the URL.
+   */
+  ownPictureUrl: async (userId) => {
+    const { data, error } = await supabase
+      .from('person_profiles')
+      .select('avatar_path')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read your picture');
+    if (!data?.avatar_path) return null;
+    const { data: blob, error: downloadError } = await supabase.storage
+      .from(PICTURE_BUCKET)
+      .download(data.avatar_path, {}, { cache: 'no-store' });
+    if (downloadError || !blob || typeof URL.createObjectURL !== 'function') return null;
+    return URL.createObjectURL(blob);
+  },
+
+  /**
+   * Make `blob` (from shrinkPicture()) the person's own picture, replacing any they had: the
+   * object first, then set_own_picture() records it. Resolves to a blob URL of what was uploaded.
+   * The sentence of a refusal is the error.
+   */
+  saveOwnPicture: async (userId, blob) => {
+    const { error: uploadError } = await supabase.storage
+      .from(PICTURE_BUCKET)
+      .upload(picturePath(userId), blob, { upsert: true, contentType: blob.type });
+    if (uploadError) {
+      if (/row-level security|Unauthorized/i.test(uploadError.message || '')) {
+        throw new Error('Your account cannot have a picture: it holds no role.');
+      }
+      throw new Error(uploadError.message || 'Your picture was not uploaded.');
+    }
+    const { error } = await supabase.rpc('set_own_picture', { p_present: true });
+    if (error) throw new Error(error.message || 'Your picture was uploaded but not recorded. Select Save again.');
+    return URL.createObjectURL(blob);
+  },
+
+  /** Delete the person's own picture, then record that they have none. */
+  removeOwnPicture: async (userId) => {
+    const { error: removeError } = await supabase.storage.from(PICTURE_BUCKET).remove([picturePath(userId)]);
+    if (removeError) throw new Error(removeError.message || 'Your picture was not removed.');
+    const { error } = await supabase.rpc('set_own_picture', { p_present: false });
+    if (error) throw new Error(error.message || 'Your picture was deleted but is still recorded. Select Remove again.');
+  },
+
+  /**
    * The signed-in person's own sessions, in every browser and service: `{ id, service_name,
    * user_agent, created_at, last_active_at, not_after, is_current }` from `list_my_sessions()`
    * (0206). An account with no role is refused, with the database's sentence.
@@ -1472,6 +1523,64 @@ const apiMethods = {
 
     if (!res.ok) {
       throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
+   * Create a read-only broker account, holding the `subscriber` role alone, and get its password
+   * back once. Administrator only, through broker-subscriber; the username is generated there, and
+   * `name` and `description` are what the account is for. Nothing keeps the password.
+   *
+   * @returns {{ mqtt_username: string, password: string, name: string, description: string,
+   *             role: 'subscriber', audit_recorded: boolean }}
+   */
+  createBrokerSubscriber: async ({ name, description }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'create', name, description })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not create the account (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
+   * Delete a read-only broker account, which drops its live sessions. Administrator only, through
+   * broker-subscriber, which refuses any username outside the subscriber scheme.
+   *
+   * @returns {{ mqtt_username: string, deleted: true, audit_recorded: boolean }}
+   */
+  deleteBrokerSubscriber: async (username) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'delete', username })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not delete the account (${res.status})`, body)), res.status, body);
     }
 
     return body;
@@ -2283,6 +2392,16 @@ const apiMethods = {
       // unaffected by location overrides. The locations only decorate each device with where it
       // resolved to, so the page can show that a device it serves sits in another cell.
       return (data || []).map(g => mapGatewayRow(g, locations));
+    }
+
+    // Each device's place in the Unified Namespace (0214): its path below the root, or why it has
+    // none. The view runs as the reader, so it lists the devices they may read.
+    if (path.startsWith('/api/v1/uns-paths')) {
+      const { data, error } = await supabase
+        .from('device_uns_paths')
+        .select('device_id, area_id, cell_id, enterprise, uns_path, skip_reason');
+      if (error) throw error;
+      return data || [];
     }
 
     /**

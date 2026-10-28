@@ -1,43 +1,55 @@
 // =================================================================================================
 // scripts/mint-api-token.mjs, and scripts/mint-mcp-token.mjs, its old name until 1.8.0
 //
-// Each run records against a stand-in for PostgREST's record_service_token_issued, so no stack is
-// needed: stackCredentials() reads the environment before it asks the cluster.
+// Each run records against a stand-in for PostgREST's record_service_token_issued and answers
+// GoTrue's JWKS, so no stack is needed: stackCredentials() reads the environment before it asks the
+// cluster, and KUBECONFIG names no file, so a name left out of the environment asks no cluster.
 // =================================================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHmac, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateSigningKeys, signatureVerifies } from './lib/service-jwt.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'mint-api-token.mjs');
 const OLD_NAME = join(HERE, 'mint-mcp-token.mjs');
-// Fresh each run: a stand-in for the release Secret's SUPABASE_JWT_SECRET.
+// Fresh each run: stand-ins for the release Secret's SUPABASE_JWT_SECRET and its key set.
 const SECRET = randomBytes(32).toString('hex');
+const KEY_SET = generateSigningKeys(SECRET);
 const READ_ONLY_API_CLIENT = 'b0000000-0000-4000-8000-000000000001';
 const NOTICE = 'scripts/mint-mcp-token.mjs is now scripts/mint-api-token.mjs; the old name is removed in 1.8.0.';
+const NO_CLUSTER = { KUBECONFIG: join(tmpdir(), 'mint-api-token-test-no-such-kubeconfig') };
 
 /** Runs a script to its end, resolving with its exit code and both streams. */
 function run(script, args, env = {}) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [script, ...args], { env: { ...process.env, ...env } }, (err, stdout, stderr) => {
+    execFile(process.execPath, [script, ...args], { env: { ...process.env, ...NO_CLUSTER, ...env } }, (err, stdout, stderr) => {
       resolve({ code: err ? err.code : 0, stdout, stderr });
     });
   });
 }
 
-/** A stand-in for the recording RPC, answering every request with `status`. */
-async function stubPostgrest(status = 200) {
+/**
+ * A stand-in for the recording RPC, answering every request with `status`, and for GoTrue's JWKS,
+ * which publishes `published` (the public half of KEY_SET when GoTrue signs ES256).
+ */
+async function stubPostgrest(status = 200, { published = [] } = {}) {
   const calls = [];
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
-      calls.push({ url: req.url, body: JSON.parse(body || '{}') });
       res.writeHead(status, { 'Content-Type': 'application/json' });
+      if (req.url === '/auth/v1/.well-known/jwks.json') {
+        res.end(JSON.stringify({ keys: published }));
+        return;
+      }
+      calls.push({ url: req.url, body: JSON.parse(body || '{}') });
       res.end(status < 300 ? '1' : '{"message":"refused by the stand-in"}');
     });
   });
@@ -51,13 +63,35 @@ async function stubPostgrest(status = 200) {
   return { calls, env, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
-/** The claims of a token, once its signature is checked against the stack secret. */
+const headerOf = (token) => JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+
+/** The claims of a token, once its signature verifies as the stack's verifiers verify it. */
 function claimsOf(token) {
-  const [header, payload, signature] = token.split('.');
-  const expected = createHmac('sha256', SECRET).update(`${header}.${payload}`).digest('base64url');
-  assert.equal(signature, expected, 'signed with the stack secret');
-  return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  assert.ok(signatureVerifies(token, { jwks: KEY_SET.jwtJwks }), `signed with the stack's key (${headerOf(token).alg})`);
+  return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
 }
+
+test('it signs ES256 under the kid once GoTrue publishes it, and HS256 while it does not', async () => {
+  const live = await stubPostgrest(200, { published: JSON.parse(KEY_SET.jwtJwks).keys.filter((k) => k.kty === 'EC') });
+  const off = await stubPostgrest(200);
+  try {
+    const es = await run(SCRIPT, [], { ...live.env, SUPABASE_JWT_KEYS: KEY_SET.jwtKeys });
+    assert.equal(es.code, 0, es.stderr);
+    assert.deepEqual(headerOf(es.stdout.trim()), { alg: 'ES256', typ: 'JWT', kid: KEY_SET.kid });
+    assert.equal(claimsOf(es.stdout.trim()).jti, live.calls[0].body.p_jti);
+    assert.match(es.stderr, new RegExp(`# signed ES256, kid ${KEY_SET.kid}`));
+
+    // The key set is in the Secret, but the release has not turned ES256 on: no verifier takes it yet.
+    const hs = await run(SCRIPT, [], { ...off.env, SUPABASE_JWT_KEYS: KEY_SET.jwtKeys });
+    assert.equal(hs.code, 0, hs.stderr);
+    assert.deepEqual(headerOf(hs.stdout.trim()), { alg: 'HS256', typ: 'JWT' });
+    claimsOf(hs.stdout.trim());
+    assert.match(hs.stderr, /# signed HS256 \(GoTrue does not publish kid .+: supabaseAuth\.es256Signing is off/);
+  } finally {
+    await live.close();
+    await off.close();
+  }
+});
 
 test('the script records the token, then prints it alone on stdout', async () => {
   const stub = await stubPostgrest();

@@ -56,6 +56,11 @@ export const RUNTIME_SETTING_NAMES = [
   // ingestion.primaryHostId, the site's Sparkplug primary host: one of the settings the credential
   // dialog gives the engineer of a Third-party gateway. Absent, the dialog says where it is set.
   'VITE_PRIMARY_HOST_ID',
+  // ingestion.unsMqttEnabled, and the root the bridge publishes under (ingestion.unsMqttTopicRoot):
+  // the Devices, Areas and Cells pages show a topic only while the bridge publishes one.
+  // utils/unsPath.js reads both; absent reads as off and `uns`.
+  'VITE_UNS_MQTT_ENABLED',
+  'VITE_UNS_MQTT_TOPIC_ROOT',
 ];
 
 /**
@@ -80,6 +85,8 @@ const BUILD_TIME_SETTINGS = {
   VITE_PLATFORM_PHYSICAL_BACKUP: import.meta.env.VITE_PLATFORM_PHYSICAL_BACKUP,
   VITE_PLAYBACK_ENABLED: import.meta.env.VITE_PLAYBACK_ENABLED,
   VITE_PRIMARY_HOST_ID: import.meta.env.VITE_PRIMARY_HOST_ID,
+  VITE_UNS_MQTT_ENABLED: import.meta.env.VITE_UNS_MQTT_ENABLED,
+  VITE_UNS_MQTT_TOPIC_ROOT: import.meta.env.VITE_UNS_MQTT_TOPIC_ROOT,
 };
 
 /**

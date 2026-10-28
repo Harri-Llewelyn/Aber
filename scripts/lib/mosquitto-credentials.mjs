@@ -1,5 +1,6 @@
-// What every issuer of a broker credential shares: the gateway id shape, the password alphabet and
-// generator, the hashing argv, and the playback delivery store. Pure functions over strings with no
+// What every issuer of a broker credential shares: the gateway id shape, the read-only account's
+// username and purpose, the password alphabet and generator, the hashing argv, and the playback
+// delivery store. Pure functions over strings with no
 // I/O, used by the boot reconcile, the credential service, the operator CLI and the tests. The
 // policy itself is in mosquitto-dynsec.mjs; the reasoning is in mosquitto/README.md.
 import { randomBytes } from 'node:crypto';
@@ -8,6 +9,17 @@ import { randomBytes } from 'node:crypto';
 // what the broker confines the account to (spBv1.0/+/+/<username>/#). Any other username
 // authenticates perfectly and then drops every message.
 export const GATEWAY_ID_PATTERN = /^gwy[0-9a-f]{21}$/;
+
+// 'sub' plus 21 lowercase hex characters: a read-only account an Administrator makes on the Access
+// Control page. Random, since no table records it, and shaped like a gateway id so the boot
+// reconcile can tell one at sight and hold it to the subscriber role. The broker-subscriber
+// function, 0218's audit functions and the page spell the same pattern (check-docs-drift 156).
+export const SUBSCRIBER_ID_PATTERN = /^sub[0-9a-f]{21}$/;
+
+// What a subscriber account is for, in the plugin's textname and textdescription: each required,
+// trimmed, on one line, at most this many characters.
+export const SUBSCRIBER_NAME_MAX = 80;
+export const SUBSCRIBER_DESCRIPTION_MAX = 500;
 
 // A username mosquitto_passwd and the plugin both accept, for the platform principals.
 export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -87,6 +99,49 @@ export function assertGatewayId(value) {
     );
   }
   return value;
+}
+
+export function isSubscriberId(value) {
+  return typeof value === 'string' && SUBSCRIBER_ID_PATTERN.test(value);
+}
+
+export function assertSubscriberId(value) {
+  if (!isSubscriberId(value)) {
+    throw new CredentialError(
+      `'${value}' is not a read-only account ("sub" followed by 21 lowercase hex characters). `
+      + 'Only those are created or deleted here: never a gateway, a platform principal or an account made by hand.',
+      'invalid_subscriber_id',
+    );
+  }
+  return value;
+}
+
+// A fresh username in the subscriber scheme. 84 random bits: a collision is refused by the plugin
+// ("already exists"), never resolved by taking the existing account over.
+export function generateSubscriberId() {
+  return `sub${randomBytes(11).toString('hex').slice(0, 21)}`;
+}
+
+// eslint-disable-next-line no-control-regex -- refusing control characters is the point
+const CONTROL_CHARACTER = /[\x00-\x1f\x7f]/;
+
+// The name and description, trimmed, or a CredentialError naming which one is wrong. Counted in
+// characters, as Postgres's char_length counts them.
+export function assertSubscriberPurpose(name, description) {
+  const fields = [['name', name, SUBSCRIBER_NAME_MAX], ['description', description, SUBSCRIBER_DESCRIPTION_MAX]];
+  const out = {};
+  for (const [field, value, max] of fields) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    const length = [...text].length;
+    if (length === 0 || length > max || CONTROL_CHARACTER.test(text)) {
+      throw new CredentialError(
+        `the account's ${field} must be 1-${max} characters on one line`,
+        `invalid_subscriber_${field}`,
+      );
+    }
+    out[field] = text;
+  }
+  return out;
 }
 
 // 32 bytes of base64url: long enough that the credential is not the weak link, and free of

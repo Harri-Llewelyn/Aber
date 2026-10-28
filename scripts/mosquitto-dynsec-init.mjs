@@ -222,6 +222,10 @@ function main() {
   log(
     `wrote ${FILE}: ${config.clients.length} client(s), ${config.roles.length} role(s); `
     + `${report.managed.length} managed, ${report.gateways.length} gateway(s) kept`
+    + (report.subscribers.length ? `, ${report.subscribers.length} read-only account(s) kept` : '')
+    + (report.reassertedSubscribers.length
+      ? `, held ${report.reassertedSubscribers.join(', ')} to the subscriber role alone`
+      : '')
     + (report.retiredRoles.length || report.retiredMemberships
       ? `, retired ${report.retiredRoles.length} per-gateway role(s) and ${report.retiredMemberships} membership(s)`
       : '')

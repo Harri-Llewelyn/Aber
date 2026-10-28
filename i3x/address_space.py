@@ -36,8 +36,8 @@ UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 SITE_NAME_SETTING = "site.name"
 SITE_FALLBACK_NAME = "Site"
 
-# The `device_locations.location_source` labels placement reads; ingestion/uns_publish.py mirrors
-# the same set. test_i3x_service.py holds these to the view's own labels.
+# The `device_locations.location_source` labels placement reads; the UNS's device_uns_paths view
+# reads the same set. test_i3x_service.py holds these to the view's own labels.
 SOURCE_SHADOW = "shadow"
 SOURCE_SIMULATED = "simulated"
 SOURCE_SITE_WIDE = "site_wide"

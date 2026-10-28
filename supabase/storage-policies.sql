@@ -473,3 +473,99 @@ BEGIN
   RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/; the '
     'area-plan sweep deletes only a plan no area names).';
 END $$;
+
+-- avatars: private, one picture per person at <user id>/avatar, reached by its owner alone. Every
+-- policy is the one test is_own_avatar_object() makes (0213): the object is the caller's own path,
+-- and the caller holds a role. So another person, an Administrator and a machine identity are each
+-- refused. SELECT too, because storage-api reads back what it writes or deletes, and an upsert is
+-- checked against it. No Administrator arm: nobody else sees a picture, so there is nothing to
+-- moderate. Remove Access deletes the object as service_role, which RLS does not apply to.
+DROP POLICY IF EXISTS "avatars_select_own" ON storage.objects;
+CREATE POLICY "avatars_select_own" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (bucket_id = 'avatars' AND public.is_own_avatar_object(storage.objects.name));
+
+DROP POLICY IF EXISTS "avatars_insert_own" ON storage.objects;
+CREATE POLICY "avatars_insert_own" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'avatars' AND public.is_own_avatar_object(storage.objects.name));
+
+-- UPDATE covers upsert: true, which replacing a picture uses.
+DROP POLICY IF EXISTS "avatars_update_own" ON storage.objects;
+CREATE POLICY "avatars_update_own" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'avatars' AND public.is_own_avatar_object(storage.objects.name))
+  WITH CHECK (bucket_id = 'avatars' AND public.is_own_avatar_object(storage.objects.name));
+
+DROP POLICY IF EXISTS "avatars_delete_own" ON storage.objects;
+CREATE POLICY "avatars_delete_own" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'avatars' AND public.is_own_avatar_object(storage.objects.name));
+
+-- Last in the file, so it reads every policy the file made. Permissive policies are ORed, so a
+-- policy of another bucket admits nobody to a picture only while its bucket test comes first and
+-- is ANDed with the rest. Every policy above is written that way.
+DO $$
+DECLARE
+  v_own      CONSTANT text := '^\(\(bucket_id = ''avatars''::text\) AND (public\.)?is_own_avatar_object\((objects\.)?name\)\)$';
+  v_confined CONSTANT text := '^(\(bucket_id = ''([^'']+)''::text\)|\(\(bucket_id = ''([^'']+)''::text\) AND .*\))$';
+  v_cmd      text;
+  v_found    integer;
+  v_wide     text[];
+  v_loose    text[];
+BEGIN
+  FOREACH v_cmd IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
+    SELECT count(*) INTO v_found FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname = 'avatars_' || lower(v_cmd) || '_own' AND cmd = v_cmd;
+    IF v_found <> 1 THEN
+      RAISE EXCEPTION
+        'avatars: the % policy avatars_%_own is missing. A missing one does not error -- '
+        'storage.objects is RLS-enabled, so pictures simply stop loading, saving or being removed '
+        'for everyone.', v_cmd, lower(v_cmd);
+    END IF;
+  END LOOP;
+
+  -- Each avatars policy is permissive, for signed-in sessions, and every arm of it is the owner's
+  -- test and nothing else. A name this file does not create is refused too: nothing maintains it.
+  SELECT array_agg(policyname ORDER BY policyname) INTO v_wide FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'avatars\_%'
+     AND (policyname NOT IN ('avatars_select_own', 'avatars_insert_own', 'avatars_update_own',
+                             'avatars_delete_own')
+          OR permissive <> 'PERMISSIVE'
+          OR roles <> '{authenticated}'::name[]
+          OR (cmd IN ('SELECT', 'UPDATE', 'DELETE') AND coalesce(qual, '') !~ v_own)
+          OR (cmd IN ('INSERT', 'UPDATE') AND coalesce(with_check, '') !~ v_own)
+          OR (cmd IN ('SELECT', 'DELETE') AND with_check IS NOT NULL));
+  IF v_wide IS NOT NULL THEN
+    RAISE EXCEPTION
+      'avatars: % admit(s) somebody other than the picture''s owner, or are not this file''s. Every '
+      'avatars policy must be bucket_id = ''avatars'' AND is_own_avatar_object(name), alone, TO '
+      'authenticated: an Administrator arm or a wider path would show a person''s picture to '
+      'somebody else (0213).', v_wide;
+  END IF;
+
+  -- Every other permissive policy on the table is confined to another bucket by its first test.
+  SELECT array_agg(policyname ORDER BY policyname) INTO v_loose FROM (
+    SELECT policyname, cmd, qual, with_check,
+           (regexp_match(qual, v_confined)) AS q, (regexp_match(with_check, v_confined)) AS w
+      FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname NOT LIKE 'avatars\_%' AND permissive = 'PERMISSIVE'
+  ) p
+   WHERE (cmd <> 'INSERT' AND (q IS NULL OR coalesce(q[2], q[3]) = 'avatars'))
+      OR (with_check IS NOT NULL AND (w IS NULL OR coalesce(w[2], w[3]) = 'avatars'))
+      OR (cmd = 'INSERT' AND with_check IS NULL);
+  IF v_loose IS NOT NULL THEN
+    RAISE EXCEPTION
+      'storage.objects: % is not confined to a bucket other than avatars by its first test. A '
+      'permissive policy admits whoever any of its arms admits, so it could admit somebody to '
+      'another person''s picture. Put bucket_id = ''<its bucket>'' first, ANDed with the rest (0213).',
+      v_loose;
+  END IF;
+
+  RAISE NOTICE
+    'avatars policies reconciled (4 policies, each the owner''s own <id>/avatar and nothing else; '
+    'every other policy on storage.objects confined to its own bucket).';
+END $$;

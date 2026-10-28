@@ -481,6 +481,7 @@ const SECTION_ICONS = {
   // then the contracts and settings that shape both.
   ACCESS:             IconShieldCheck,
   'SERVICE IDENTITY': IconLock,
+  'BROKER ACCOUNT':   IconRadio,
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
   SETTING:            IconSettings,

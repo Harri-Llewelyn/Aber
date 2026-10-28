@@ -131,6 +131,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // shape both.
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
   { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
+  // A read-only broker account made or deleted on Access Control (0218): an INSERT and a DELETE,
+  // filed under security by audit_domain_for()'s fail-closed default. No table holds the account.
+  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },

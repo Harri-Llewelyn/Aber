@@ -555,6 +555,44 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceLocation' } }
 
+  /rest/v1/device_uns_paths:
+    get:
+      tags: [Location]
+      summary: Each device's place in the Unified Namespace, or why it has none
+      description: |
+        Read-only view (0214), one row per device. `uns_path` is its path below the UNS bridge's
+        root, `<enterprise>/<site>/<area>/<cell>/<device>` at the levels the device occupies;
+        `skip_reason` says why it has none. Exactly one is set.
+
+        **The topic is `<root>/<uns_path>`**, and each metric publishes retained beneath it at
+        `<root>/<uns_path>/<metric name>`. The root is `ingestion.unsMqttTopicRoot` (`uns` by
+        default), and nothing is published while `ingestion.unsMqttEnabled` is off, its default.
+        The path follows names: renaming an area, a cell or a device moves every topic beneath it.
+        The Sparkplug ID never moves.
+
+        Runs as the caller (`security_invoker`): their policies on devices, gateways, cells, areas
+        and settings apply. `anon` reads nothing.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: device_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - name: area_id
+          in: query
+          schema: { type: string }
+          description: "The devices beneath an area, its cells' and its Area-Wide ones: `eq.<uuid>`."
+        - name: skip_reason
+          in: query
+          schema: { type: string }
+          description: '`not.is.null` lists the devices the bridge skips.'
+      responses:
+        '200':
+          description: One row per device the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceUnsPath' } }
+
   # ----------------------------------------------------------- Telemetry ----
   /rest/v1/telemetry:
     get:
@@ -773,8 +811,8 @@ paths:
 
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
         `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
-        the asset lane, and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and
-        `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
+        the asset lane, and `user_roles`, `service_principals`, `broker_accounts` (a read-only broker
+        account, 0218), `system_settings`, `backup_jobs` and `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -1045,6 +1083,37 @@ paths:
         '400': { description: 'A machine identity, or a name the database refuses.' }
         '403': { description: "Another person's name, and you are not an Administrator." }
         '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/set_own_picture:
+    post:
+      tags: [Auth]
+      summary: Record that you have a picture, or that you have none
+      description: |
+        Sets or clears `avatar_path` on your own `person_profiles` row (`0213`). It takes no id:
+        nobody records or clears another person's picture, an `Administrator` included. Upload the
+        picture first, with your token, to `/storage/v1/object/avatars/<your id>/avatar` (PNG, JPEG
+        or WebP, 512 KiB at most, `x-upsert: true` to replace it), then call this with `true`. To
+        remove it, delete the object, then call this with `false`. Only you can read the object.
+        Writes no audit row.
+
+        Refused (403, `42501`) for a caller who holds no role: a machine identity, or a person whose
+        access is removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_present]
+              properties:
+                p_present: { type: boolean, nullable: true, description: 'true records `<your id>/avatar`; false or null clears it.' }
+      responses:
+        '200':
+          description: The path now recorded, or null.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        '403': { description: 'You hold no role.' }
 
   /rest/v1/rpc/display_names_for:
     post:
@@ -1562,6 +1631,65 @@ paths:
         '400': { description: 'The account does not hold the new address, or no old address was given.' }
         '403': { description: 'Not an Administrator, or your own address.' }
         '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_broker_account_created:
+    post:
+      tags: [Auth]
+      summary: Record a read-only broker account made
+      description: |
+        Called by `/functions/v1/broker-subscriber` in the caller's session (`0218`), AFTER the
+        broker made the account. Writes one `INSERT` row in the `broker_accounts` lane of the
+        security domain: the name, description, MQTT username and role (`subscriber`), with you
+        in `changed_by`. Never a password. The entity id is the username's 21 hex characters
+        padded with zeros, so the deletion's row shares it. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_username, p_name, p_description]
+              properties:
+                p_username:    { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                p_name:        { type: string, description: '1-80 characters after trimming, on one line.' }
+                p_description: { type: string, description: '1-500 characters after trimming, on one line.' }
+      responses:
+        '200':
+          description: The audit row's id.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A username outside the subscriber scheme, or a name or description outside the rule (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/record_broker_account_deleted:
+    post:
+      tags: [Auth]
+      summary: Record a read-only broker account deleted
+      description: |
+        Called by `/functions/v1/broker-subscriber` in the caller's session (`0218`), AFTER the
+        broker deleted the account. Writes one `DELETE` row in the `broker_accounts` lane: the
+        name and description the broker held (NULL where it held none) and the MQTT username, with
+        you in `changed_by`, under the entity id the creation's row carries. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_username]
+              properties:
+                p_username:    { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                p_name:        { type: string, nullable: true }
+                p_description: { type: string, nullable: true }
+      responses:
+        '200':
+          description: The audit row's id.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A username outside the subscriber scheme (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
 
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
@@ -2651,13 +2779,15 @@ paths:
   /rest/v1/person_profiles:
     get:
       tags: [Auth]
-      summary: Read your own display name
+      summary: Read your own display name and whether you have a picture
       description: |
-        One row per person who has a display name (`0203`). RLS returns your own row and nobody
-        else's, an `Administrator` included; an empty array means you have no name. Written only
-        through `/rest/v1/rpc/set_display_name`, so every change reaches the Audit Trail. Other
-        people's names are read through `list_people()`, `list_user_accounts()` and
-        `display_names_for()`. `anon` and `service_role` hold nothing on the table.
+        One row per person who has a display name, a picture or both (`0203`, `0213`). RLS returns
+        your own row and nobody else's, an `Administrator` included; an empty array means you have
+        neither. The name is written only through `/rest/v1/rpc/set_display_name`, so every change
+        reaches the Audit Trail, and `avatar_path` only through `/rest/v1/rpc/set_own_picture`.
+        Other people's names are read through `list_people()`, `list_user_accounts()` and
+        `display_names_for()`; nobody reads another person's picture. `anon` and `service_role`
+        hold nothing on the table.
       parameters:
         - { name: user_id, in: query, schema: { type: string }, description: 'e.g. `eq.<your auth.uid()>`' }
         - $ref: '#/components/parameters/Select'
@@ -2672,9 +2802,10 @@ paths:
                   type: object
                   properties:
                     user_id:      { type: string, format: uuid }
-                    display_name: { type: string, description: 'Trimmed, 1 to 80 characters, no control characters.' }
-                    updated_at:   { type: string, format: date-time }
-                    updated_by:   { type: string, format: uuid, nullable: true, description: 'You, or the Administrator who set it.' }
+                    display_name: { type: string, nullable: true, description: 'Trimmed, 1 to 80 characters, no control characters. NULL on a row that holds only a picture.' }
+                    avatar_path:  { type: string, nullable: true, description: 'Your picture in the private `avatars` bucket, `<your id>/avatar`, or NULL for none. Download it from `/storage/v1/object/authenticated/avatars/<your id>/avatar` with your token.' }
+                    updated_at:   { type: string, format: date-time, description: 'When the name was last set or cleared.' }
+                    updated_by:   { type: string, format: uuid, nullable: true, description: 'You, or the Administrator who set the name.' }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
   /rest/v1/user_settings:
@@ -3503,15 +3634,18 @@ paths:
       tags: [Edge Functions]
       summary: Sign a long-lived token for a service principal and reveal it once
       description: |
-        Signs an HS256 JWT naming a **service principal** as its subject, records the issue, and
-        returns the token. It is shown once and is not recoverable: nothing in the stack keeps a
-        copy, and the signature is reproducible only from `JWT_SECRET`.
+        Signs a JWT naming a **service principal** as its subject, records the issue, and returns
+        the token. It is shown once and is not recoverable: nothing in the stack keeps a copy, and
+        the signature is reproducible only from the signing key. With `supabaseAuth.es256Signing`
+        it is ES256, with the `kid` of the private key in `JWT_KEYS`, GoTrue's signing set;
+        without, HS256 with `JWT_SECRET`. HS256 tokens stop verifying in 1.8, so one minted before
+        the switch is minted again then.
 
         **Why this is a function and not an RPC.** `pgjwt` is installed, so a `SECURITY DEFINER`
-        RPC could sign in-database — but `SUPABASE_JWT_SECRET` is *not* in that database, and
-        putting it there is the thing to avoid. That key signs anything, `service_role` included,
-        and such a token is accepted by storage, realtime, the edge runtime and Studio, none of
-        which consult the revocation denylist. The edge runtime already holds the key for signing,
+        RPC could sign in-database — but the signing key is *not* in that database, and putting
+        it there is the thing to avoid. That key signs anything, `service_role` included, and such
+        a token is accepted by storage, realtime and the edge runtime, none of which consult the
+        revocation denylist. The edge runtime already holds the key for signing,
         so the key stays put and the mint comes to it.
 
         **Minting ADDS a credential; it does not replace one.** This is the opposite of
@@ -3530,8 +3664,8 @@ paths:
 
         > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
         > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > the edge runtime and Studio verify the signature independently. For those four the expiry
-        > is still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > and the edge runtime verify the signature independently. For those three the expiry is
+        > still the only bound, which is why the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:
@@ -3623,6 +3757,10 @@ paths:
           and `name_error` says why the name was not set.
         - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
           changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
+          The person's picture is deleted before the ban: its object in `avatars` as
+          `service_role`, then `forget_person_picture()` clears `person_profiles.avatar_path`
+          (`0213`). If either fails, nothing more is done, and the answer says to remove access
+          again, which finishes it.
         - **`restore`**: `restore_person_access()`, then the ban is lifted.
         - **`set-password`**: a new password minted as `add` mints one, with or without a relay,
           returned once in `password`. `record_person_password_set()` decides first (a person whose
@@ -3695,7 +3833,8 @@ paths:
             GoTrue failed or did not answer. For `add`, `set-password` and `change-email` nothing was changed. For
             `reset-mfa` nothing was changed, or the answer says how many factors went. For
             `remove` and `restore` the database act was done but the ban was not made or lifted;
-            repeat it. A fixed sentence and a request id, as for a 500.
+            repeat it. For `remove`, also Storage not deleting the picture, before the ban; repeat
+            it. A fixed sentence and a request id, as for a 500.
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
 
@@ -3811,6 +3950,18 @@ paths:
                             counting the credential service's own request on the plugin's admin
                             account. NULL when the broker's reply carries no session list (before
                             Mosquitto 2.1).
+                        textname:
+                          type: string
+                          nullable: true
+                          description: >-
+                            The plugin's name for the account: the name a read-only account was
+                            created with on the Access Control page. NULL where it holds none.
+                        textdescription:
+                          type: string
+                          nullable: true
+                          description: >-
+                            What the account is for, as a read-only account was created with. NULL
+                            where the plugin holds none.
                   roles:
                     type: array
                     items:
@@ -3847,6 +3998,76 @@ paths:
                     description: The configuration error. `details`, when present, names the unset variable.
                     properties: { error: { type: string }, details: { type: string } }
         '503': { description: The credential service is unreachable, or could not read the broker. }
+
+  /functions/v1/broker-subscriber:
+    post:
+      tags: [Edge Functions]
+      summary: Create or delete a read-only broker account
+      description: |
+        New Read-Only Account and Delete on Access Control › Broker accounts. The account is for a
+        consumer outside Aber that only reads: it holds the broker's `subscriber` role and nothing
+        else, so it subscribes to and receives `spBv1.0/#` and the Unified Namespace's `<root>/#`,
+        and every publish it makes is dropped. It is a plain MQTT reader, not a Sparkplug Host
+        Application: it publishes no STATE. The role is site-wide.
+
+        - **`create`**: `name` (1-80 characters) and `description` (1-500), each trimmed and on
+          one line, are what the account is for; the broker keeps them as the client's textname
+          and textdescription. The credential service generates the username, `sub` and 21
+          lowercase hex characters, and the password, which is returned here once and kept
+          nowhere. Then `record_broker_account_created()` writes the Audit Trail row as the
+          caller. If that fails the password is still returned, with `audit_recorded: false`.
+        - **`delete`**: `username` must be in the subscriber scheme; a gateway's account, one of
+          Aber's own and any account made by hand are refused (400) before the credential service
+          is asked. The broker deletes the client (`deleteClient`), which drops its live sessions
+          and refuses its next CONNECT. Then `record_broker_account_deleted()` writes the row.
+
+        Administrator only, checked before the credential service is asked anything. No
+        service-role key: the audit functions run as the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:      { type: string, enum: [create, delete] }
+                name:        { type: string, maxLength: 80, description: '`create`: what the Access Control page lists the account as.' }
+                description: { type: string, maxLength: 500, description: '`create`: what the account is for.' }
+                username:    { type: string, pattern: '^sub[0-9a-f]{21}$', description: '`delete`: the account to delete.' }
+      responses:
+        '200':
+          description: 'Done. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mqtt_username:  { type: string, pattern: '^sub[0-9a-f]{21}$' }
+                  password:       { type: string, description: '`create` only. Shown once; the broker stores a hash.' }
+                  name:           { type: string, description: '`create` only.' }
+                  description:    { type: string, description: '`create` only.' }
+                  role:           { type: string, enum: [subscriber], description: '`create` only.' }
+                  deleted:        { type: boolean, description: '`delete` only.' }
+                  audit_recorded: { type: boolean, description: 'False when the Audit Trail row could not be written; the act was done.' }
+        '400': { description: 'Malformed request, an unknown action, a missing or malformed name or description, or a username outside the subscriber scheme.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '404': { description: '`delete`: the broker holds no account by that name. Nothing was recorded.' }
+        '405': { description: Method not allowed. }
+        '500':
+          description: >-
+            The credential service is not configured on this deployment (`details` names the unset
+            variable). Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    properties: { error: { type: string }, details: { type: string } }
+        '503': { description: 'The credential service is unreachable or refused. For `create` nothing the page can use was made; retry.' }
 
   /functions/v1/enroll-gateway:
     post:
@@ -5446,6 +5667,26 @@ components:
           example: inherited
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
 
+    DeviceUnsPath:
+      type: object
+      readOnly: true
+      description: One device's place in the Unified Namespace, from `public.device_uns_paths` (0214).
+      properties:
+        device_id: { type: string, format: uuid }
+        area_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_area_id`." }
+        cell_id: { type: string, format: uuid, nullable: true, description: "`device_locations.effective_cell_id`." }
+        enterprise: { type: string, nullable: true, description: "The group the gateway last published under, else its configured `sparkplug_group`, else the site's `sparkplug.group_id` for a device with no gateway. `uns_path` starts with it." }
+        uns_path: { type: string, nullable: true, description: 'The path below the root, e.g. `Aber/Cardiff/Machine Shop/Bay 1/CNC_01`. NULL when `skip_reason` is set.', example: 'Aber/Cardiff/Machine Shop/Bay 1/CNC_01' }
+        skip_reason:
+          type: string
+          nullable: true
+          enum: [site_unset, lane, unassigned, cell_unfiled, unsafe_name]
+          description: >-
+            Why the bridge publishes nothing for the device, in the order tested: the `site.name`
+            setting is empty; it is a Simulated or Shadow lane; nothing places it; its cell is in no
+            area; a name on its path is empty or holds `/`, `+` or `#`. NULL when `uns_path` is set.
+            The same labels as `aber_ingestion_uns_skipped_total{reason}`.
+
     DeviceSubmodel:
       type: object
       description: One schema attached to one device, becoming one AAS Submodel.
@@ -5519,8 +5760,8 @@ components:
         entity_type:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
-                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups,
-                 capture_jobs, captures, playback_jobs]
+                 change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
+                 backups, capture_jobs, captures, playback_jobs]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -5550,7 +5791,9 @@ components:
             sessions writes it through `end_person_session()` (0212), in the shape
             `end_my_session()` writes. `MFA_RESET` (0216) is written by `record_person_mfa_reset()`
             when an Administrator resets a person's second factor, in their lane, with how many
-            factors went.
+            factors went. A read-only broker account's creation and deletion are an
+            `INSERT` and a `DELETE` in the `broker_accounts` lane, written by
+            `record_broker_account_created()` and `record_broker_account_deleted()` (0218).
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

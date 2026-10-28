@@ -185,12 +185,34 @@ spec:
               # key in a YAML flow mapping, not a key and a value, and Envoy refuses the whole
               # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
+              {{- if .Values.supabaseAuth.es256Signing }}
+
+              # The JWKS the studio and forge listeners verify session tokens against: ES256 by kid,
+              # and HS256 by its legacy `oct` key. sed substitutes it into a single-quoted YAML
+              # string, so it is made one line and may hold no quote, backslash, ampersand or bar;
+              # a JWK never needs them.
+              require_set SUPABASE_JWT_JWKS "$SUPABASE_JWT_JWKS"
+              JWT_JWKS=$(printf '%s' "$SUPABASE_JWT_JWKS" | tr -d '\r\n')
+              case "$JWT_JWKS" in
+                *"'"*|*'\'*|*'&'*|*'|'*)
+                  echo 'SUPABASE_JWT_JWKS holds a quote, backslash, ampersand or bar, which no JWKS needs; npm run setup writes one without.' >&2
+                  exit 1
+                  ;;
+                '{'*'"keys"'*'}') ;;
+                *)
+                  echo 'SUPABASE_JWT_JWKS must be a JWKS: a JSON object with a "keys" array.' >&2
+                  exit 1
+                  ;;
+              esac
+              {{- else }}
 
               # The signing secret as an `oct` JWKS key, which the studio listener verifies session
               # tokens against. base64url, so the wrapping, the +/ alphabet and the padding all
               # have to go -- a stray newline yields a JWKS Envoy parses and then rejects every
               # token against.
               JWT_B64URL=$(printf '%s' "$SUPABASE_JWT_SECRET" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+              JWT_JWKS="{\"keys\":[{\"kty\":\"oct\",\"alg\":\"HS256\",\"k\":\"$JWT_B64URL\"}]}"
+              {{- end }}
 
               # FAIL CLOSED, NOT SHUT. The chart does not publish the studio
               # listener at all by default (routes.studio is false), so an unset pair here is the
@@ -257,7 +279,7 @@ spec:
                   -e "s|__STUDIO_UPSTREAM_ADDRESS__|$STUDIO_UPSTREAM_ADDRESS|g" \
                   -e "s|__GITEA_PUBLIC_URL__|$GITEA_PUBLIC_URL|g" \
                   -e "s|__GITEA_UPSTREAM_ADDRESS__|$GITEA_UPSTREAM_ADDRESS|g" \
-                  -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
+                  -e "s|__SUPABASE_JWT_JWKS__|$JWT_JWKS|g" \
                   -e "s|__XFF_TRUSTED_HOPS__|$XFF_TRUSTED_HOPS|g" \
                   -e "s|__SIGN_IN_LIMIT_PERCENT__|$SIGN_IN_LIMIT_PERCENT|g" \
                   -e "s|__SIGN_IN_LIMIT_PER_CLIENT__|$SIGN_IN_LIMIT_PER_CLIENT|g" \
@@ -306,9 +328,15 @@ spec:
             # ------------------------------------------------------------------------------
             # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
             # ------------------------------------------------------------------------------
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # What jwt_authn verifies the session token against: the JWKS of the key GoTrue signs
+            # with, the legacy secret among them.
+            {{- include "aber.secretEnv" (dict "name" "SUPABASE_JWT_JWKS" "secretName" (include "aber.secretName" .) "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
+            {{- else }}
             # What jwt_authn verifies the session token against -- the same secret GoTrue signs
             # with, which is why it is this key and not one of its own.
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" (include "aber.secretName" .) "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- end }}
             # OPTIONAL, unlike every secret above. `routes.studio` is false by default, so most
             # installs never publish this listener and have no reason to hold its credential; a
             # required ref would fail those pods on a key nothing reads. The init container's

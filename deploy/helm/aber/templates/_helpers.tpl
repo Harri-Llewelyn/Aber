@@ -411,6 +411,73 @@ matching set.
 {{- end -}}
 
 {{/*
+With supabaseAuth.es256Signing the signing set is part of the SET: jwtKeys and jwtJwks are both
+required, hold one EC P-256 pair under one kid (the private half only in jwtKeys, the one key there
+GoTrue signs with), and both carry jwtSecret as the `oct` legacy key, or the stack comes up and
+refuses every token one side signed. Skipped under existingSecret, as aber.validateSecrets is.
+*/}}
+{{- define "aber.validateSigningKeys" -}}
+{{- if and .Values.supabaseAuth.es256Signing (not .Values.secrets.existingSecret) -}}
+{{- $s := .Values.secrets -}}
+{{- $problems := list -}}
+{{- if not $s.jwtKeys -}}
+{{- $problems = append $problems "secrets.jwtKeys (SUPABASE_JWT_KEYS) is not set" -}}
+{{- end -}}
+{{- if not $s.jwtJwks -}}
+{{- $problems = append $problems "secrets.jwtJwks (SUPABASE_JWT_JWKS) is not set" -}}
+{{- end -}}
+{{- if not $problems -}}
+{{- $legacy := (b64enc ($s.jwtSecret | default "")) | replace "+" "-" | replace "/" "_" | trimSuffix "=" | trimSuffix "=" -}}
+{{- $keys := list -}}
+{{- if hasPrefix "[" (trim $s.jwtKeys) -}}{{- $keys = fromJsonArray $s.jwtKeys -}}{{- end -}}
+{{- $jwks := dict -}}
+{{- if hasPrefix "{" (trim $s.jwtJwks) -}}{{- $jwks = fromJson $s.jwtJwks -}}{{- end -}}
+{{- $published := $jwks.keys | default list -}}
+{{- if not (kindIs "slice" $published) -}}{{- $published = list -}}{{- end -}}
+{{- $signing := list -}}
+{{- $keysLegacy := false -}}
+{{- range $keys -}}
+{{- if kindIs "map" . -}}
+{{- if has "sign" (.key_ops | default list) -}}{{- $signing = append $signing . -}}{{- end -}}
+{{- if and (eq (.kty | default "") "oct") (eq (.k | default "") $legacy) -}}{{- $keysLegacy = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if ne (len $signing) 1 -}}
+{{- $problems = append $problems (printf "secrets.jwtKeys must be a JSON array holding exactly one key with \"sign\" in key_ops (it holds %d)" (len $signing)) -}}
+{{- else -}}
+{{- $key := first $signing -}}
+{{- if not (and (eq ($key.kty | default "") "EC") (eq ($key.crv | default "") "P-256") (eq ($key.alg | default "") "ES256") $key.kid $key.d) -}}
+{{- $problems = append $problems "the signing key in secrets.jwtKeys must be an EC P-256 private key with alg ES256, a kid and its d" -}}
+{{- else -}}
+{{- $public := false -}}
+{{- range $published -}}
+{{- if and (kindIs "map" .) (eq (.kid | default "") $key.kid) (eq (.x | default "") $key.x) (eq (.y | default "") $key.y) -}}{{- $public = true -}}{{- end -}}
+{{- end -}}
+{{- if not $public -}}
+{{- $problems = append $problems (printf "secrets.jwtJwks has no public key with the signing key's kid %q and coordinates: the two values are from different pairs" $key.kid) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $jwksLegacy := false -}}
+{{- range $published -}}
+{{- if kindIs "map" . -}}
+{{- if hasKey . "d" -}}
+{{- $problems = append $problems "secrets.jwtJwks carries a private key (a \"d\" member): it goes to every verifier, so it must hold public keys only" -}}
+{{- end -}}
+{{- if and (eq (.kty | default "") "oct") (eq (.k | default "") $legacy) -}}{{- $jwksLegacy = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not (and $keysLegacy $jwksLegacy) -}}
+{{- $problems = append $problems "secrets.jwtKeys and secrets.jwtJwks must both carry secrets.jwtSecret as the legacy `oct` key (k, base64url), or HS256 tokens signed before stop verifying" -}}
+{{- end -}}
+{{- end -}}
+{{- if $problems -}}
+{{- fail (printf "\n\naber: supabaseAuth.es256Signing is on, and the signing key set is not complete:\n  - %s\n\nThe key set is a SET with jwtSecret: GoTrue signs with the private key in jwtKeys, every\nverifier checks the public key in jwtJwks, and both keep jwtSecret as the legacy key so tokens\nsigned before keep verifying. A partial set gives a stack that reports healthy and refuses every\ntoken one side signed. The chart does not generate them.\n\nFor a new site:       npm run setup   (mints the whole set)\nFor an existing site: npm run keys:rotate -- --signing-keys   (help/site/upgrading.md)\n" (join "\n  - " $problems)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Realtime's two keys have lengths enforced by the container (dbEncKey exactly 16, secretKeyBase at
 least 64), asserted here so the failure is one Helm error instead of a restarting pod with an
 Elixir stack trace. Only when realtime is enabled and the chart owns the secret.
@@ -433,6 +500,21 @@ Elixir stack trace. Only when realtime is enabled and the chart owns the secret.
 {{- fail "\n\naber: secrets.realtimeMetricsJwtSecret is required (METRICS_JWT_SECRET).\nsupabase/realtime v2.102.3 refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n\nDeliberately NOT secrets.jwtSecret: it signs the bearer token realtime's /metrics endpoint\nrequires, and sharing the API signing key would let anyone holding it mint metrics tokens.\n" -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Realtime's tenant health check with an HS256 token the probe signs itself, for when the anon key is
+ES256: the /api routes verify with API_JWT_SECRET alone. The image has openssl. A list item, so a
+probe's `command` includes it after `/bin/sh -c`.
+*/}}
+{{- define "aber.realtimeHealthCommand" -}}
+- |
+  b64url () { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+  now=$(date +%s)
+  head=$(printf '%s' '{"alg":"HS256","typ":"JWT"}' | b64url)
+  body=$(printf '{"iss":"supabase","role":"anon","iat":%s,"exp":%s}' "$now" "$(expr "$now" + 60)" | b64url)
+  sig=$(printf '%s.%s' "$head" "$body" | openssl dgst -sha256 -hmac "$API_JWT_SECRET" -binary | b64url)
+  curl -sf -H "Authorization: Bearer $head.$body.$sig" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health
 {{- end -}}
 
 {{/*
@@ -700,6 +782,7 @@ existingSecret the password is not the chart's to see, and 0163 refuses an empty
 
 {{- define "aber.validate" -}}
 {{- include "aber.validateSecrets" . -}}
+{{- include "aber.validateSigningKeys" . -}}
 {{- include "aber.validateFirstAdministrator" . -}}
 {{- include "aber.validateStudioRoute" . -}}
 {{- include "aber.validateMqttPrincipals" . -}}
@@ -1364,7 +1447,13 @@ when read makes the settings look wrong and get rewritten on every boot, silentl
 {{ include "aber.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") }}
 {{ include "aber.secretEnv" (dict "name" "NODERED_WEBHOOK_JWT_SECRET" "secretName" $secretName "key" "NODERED_WEBHOOK_JWT_SECRET") }}
 {{ include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") }}
+{{- if .Values.supabaseAuth.es256Signing }}
+{{- /* adminAuth.tokens verifies with the JWKS: ES256 by kid, HS256 by its legacy key. Its presence
+       also turns on the editor sign-in's `openid` scope, whose ID token is verified the same way. */}}
+{{ include "aber.secretEnv" (dict "name" "SUPABASE_JWT_JWKS" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") }}
+{{- else }}
 {{ include "aber.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") }}
+{{- end }}
 {{ include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") }}
 - name: NODERED_OAUTH_CLIENT_ID
   value: {{ .Values.nodeRed.oauthClientId | default "c0ffee00-0000-4000-8000-000000000002" | quote }}

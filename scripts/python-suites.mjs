@@ -177,8 +177,9 @@ export const SUITES = {
   'ingestion/test_uns_publish.py': {
     lanes: ['unit'],
     why:
-      'Pure-logic tests of the Unified Namespace bridge: the topic is fixed at the level a device ' +
-      'honestly occupies and an incomplete path is skipped and counted rather than filled with a ' +
+      'Pure-logic tests of the Unified Namespace bridge: the topic is the root, the message\'s ' +
+      'group and the path device_uns_paths answers, read once per device per TTL, and a device ' +
+      'the view skips is skipped and counted under its reason rather than filled with a ' +
       'placeholder. A fake query builder and a fake client; no broker, no database.',
   },
   'ingestion/test_primary_host.py': {
@@ -994,6 +995,24 @@ export const SUITES = {
       "Administrator and the session; and that another person's session, a missing one and your " +
       'own are refused with no row.',
   },
+  'supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py': {
+    lanes: ['db'],
+    why:
+      "0213 -- that a person's picture is theirs alone: only they set or clear avatar_path, an " +
+      "Administrator naming them never touches it, a picture writes no rename row and tells " +
+      'display_names_for() nothing, Remove Access alone forgets it as service_role, and the ' +
+      'avatars policies, run verbatim on a stand-in table, admit the owner to their own ' +
+      '<id>/avatar and nobody else, with a self-check that refuses a wider arm.',
+  },
+  'supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py': {
+    lanes: ['db'],
+    why:
+      "0214 -- that device_uns_paths answers each device's path below the Unified Namespace root at " +
+      'the levels it occupies, under the group its gateway publishes under, or the one reason the ' +
+      'bridge skips it for, in the bridge\'s order; that it runs as its caller; and that a person ' +
+      'and the ingestion principal read it and anon does not. The bridge publishes these rows, so ' +
+      'a wrong answer is a wrong topic.',
+  },
   'supabase/migrations/test_an_administrator_resets_a_person_s_second_factor.py': {
     lanes: ['db'],
     why:
@@ -1002,6 +1021,15 @@ export const SUITES = {
       'many factors went; that only an Administrator may call it; and that your own account, an ' +
       'unknown person, a machine identity and a missing count are refused with no row, while a ' +
       "removed person's factors may be reset and no session ends.",
+  },
+  'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0218 -- that creating and deleting a read-only broker account each write one row in the " +
+      'broker_accounts lane of the security domain, naming the Administrator and what the account ' +
+      'is for, under one entity id; that only an Administrator may write either; and that a ' +
+      'username outside the subscriber scheme, or a name or description outside the credential ' +
+      "service's rule, is refused with no row.",
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
@@ -1212,6 +1240,16 @@ export const SUITES = {
       'not a deployment detail, and nothing else checks it. Revocation and the inventory are ' +
       'asserted here too, against the running plugin.',
   },
+  'supabase/functions/broker-subscriber/test_broker_subscriber.py': {
+    lanes: ['stack'],
+    why:
+      'A read-only broker account through the path the Access Control page takes: an ' +
+      'Administrator creates one and a Shopfloor Manager cannot; connected with the password ' +
+      'shown, it receives a Sparkplug and a UNS message, and its own publishes reach nobody; ' +
+      'deleting it drops the live session and refuses the next CONNECT; and each act is one ' +
+      'Audit Trail row. All of it is silent at QoS 0, so it is asserted by delivery. Skips ' +
+      'without a stack.',
+  },
   'timescaledb/test_historian_role_grants.py': {
     lanes: ['stack'],
     why:
@@ -1348,6 +1386,15 @@ export const SUITES = {
       'gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the ' +
       'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
       'still read.',
+  },
+  'supabase/functions/manage-people/test_account_pictures_stack.py': {
+    lanes: ['stack'],
+    why:
+      "A person's picture through the real Storage API (0213), which the db lane has none of: the " +
+      'owner uploads, replaces, downloads and deletes their own <id>/avatar; every seeded role ' +
+      'reads, lists, signs, overwrites and deletes none of it and the public URL serves nothing; ' +
+      'the bucket refuses SVG, GIF and HTML and holds its 512 KiB limit; and Remove Access deletes the ' +
+      'object and clears the column. Adds and deletes its own throwaway person.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],
