@@ -2331,8 +2331,10 @@ take no lock on `cells`.
 - **Then the column goes.** Only the audit trigger fires on an `UPDATE` of it, and no view, index
   or constraint names it. The column comment `0202` set goes with it.
 - **`approve_proposal()` sets no `grafana_url`.** Its cells branch set the column from the merged
-  row. `0001` and `0165` now declare it without that line, so no replay names a column that is not
-  there, and this file declares the same final form.
+  row. `0001` and `0165` now declare it without that line, and this file does not redeclare it.
+  That edit in place is what keeps every boot safe. `0165` replays before `0219` on every boot, so
+  `approve_proposal()` never names the column while the column is gone, not even for a moment
+  between two files. A third copy here would only be something to keep in step.
 
 The earlier files are in their final form, as `0175` left the files before it. `0001` no longer
 creates the column, adds it, drops its default or admits it in `proposable_columns()`. `0202`
@@ -2340,7 +2342,7 @@ moves and checks only while the column exists, and no longer comments on it. An 
 still writes or reads the column gets PostgREST's unknown-column error.
 
 The file's self-check asserts that the column is gone, that the cell lane does not admit it, and
-that `approve_proposal()` neither names it nor loses its `SECURITY DEFINER` or pin. Check 162
+that the live `approve_proposal()` neither names it nor loses its `SECURITY DEFINER` or pin. Check 162
 (`scripts/check-docs-drift.mjs`) holds that no other migration names the column, that `0202` keeps
 its guard, that the API spec documents it on neither `Cell` nor `CellWrite`, and that no code reads
 it but the Audit Trail's list of governance fields, which past rows carry.

@@ -154,7 +154,7 @@ class TheColumnIsGone(Base):
 
 
 class AnApprovedCellProposalStillApplies(Base):
-    """approve_proposal()'s cells branch, redeclared without the column, writes what it names."""
+    """approve_proposal()'s cells branch, as 0001 and 0165 declare it without the column."""
 
     def setUp(self):
         super().setUp()
