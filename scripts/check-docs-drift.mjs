@@ -2444,8 +2444,12 @@ const OPERATOR_PAIRS = [
   }
 
   const spec = read('docs/openapi.yaml');
-  for (const name of ['Cell', 'CellWrite']) {
-    const body = spec.match(new RegExp(`^ {4}${name}:\\n([\\s\\S]*?)(?=^ {4}\\S)`, 'm'))?.[1] ?? null;
+  // A component schema's body: the lines after its 4-space key, up to the next 4-space key.
+  const components = {
+    Cell: spec.match(/^ {4}Cell:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+    CellWrite: spec.match(/^ {4}CellWrite:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+  };
+  for (const [name, body] of Object.entries(components)) {
     if (body === null) offences.push(`docs/openapi.yaml has no ${name} schema`);
     else if (/^ {8}grafana_url:/m.test(body)) offences.push(`docs/openapi.yaml's ${name} still documents grafana_url`);
   }
