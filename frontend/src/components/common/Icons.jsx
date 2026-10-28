@@ -1,7 +1,7 @@
 /*!
  * Most glyphs in this file are copied from, or drawn after, Lucide (https://lucide.dev, ISC) and
  * Feather (https://feathericons.com, MIT). Both licences ask for their notice, below, in every
- * copy. `/*!` marks this a legal comment, which a minifier keeps only when told to. NOTICE.md,
+ * copy. `/*!` marks this a legal comment, which vite.config.js tells the build to keep. NOTICE.md,
  * "The dashboard's icons".
  *
  * ISC License

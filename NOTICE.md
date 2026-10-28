@@ -46,7 +46,7 @@ one.
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.7` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) notices are not in the bundle yet |
+| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
@@ -101,9 +101,16 @@ above does not cover the copied glyphs.
 | Feather ([`github.com/feathericons/feather`](https://github.com/feathericons/feather), `v4.29.2`) | 2013-2023 Cole Bemis | MIT |
 
 Both licences ask for their notice in every copy. `Icons.jsx` carries both notices in its header,
-as a `/*!` legal comment. **The built dashboard does not carry them yet.** The build's minifier
-drops legal comments unless it is told to keep them, so the frontend image serves the glyphs
-without the notices.
+as a `/*!` legal comment, and the build keeps legal comments (`frontend/vite.config.js`), so the
+bundle the frontend image serves carries them too. So do the npm dependencies' `@license` headers.
+To check a build, search its JavaScript for the Lucide notice:
+
+```
+grep -l "Lucide Icons and Contributors" frontend/dist/assets/*.js
+```
+
+`frontend/src/__tests__/legalComments.test.js` fails if the build stops keeping legal comments or
+the header loses either notice.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 
