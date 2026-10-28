@@ -278,7 +278,8 @@ class TheBucketPolicies(Base):
         """The bucket's policies and the DO block that checks them, pointed at the stand-in."""
         with open(STORAGE_POLICIES, encoding="utf-8") as f:
             text = edit(f.read())
-        block = text[text.index("-- area-plans:"):]
+        start = text.index("-- area-plans:")
+        block = text[start:text.index("-- avatars:", start)]
         block = (block.replace("storage.objects", PROBE + ".objects")
                       .replace("schemaname = 'storage'", f"schemaname = '{PROBE}'"))
         self.assertNotIn("storage.", block)

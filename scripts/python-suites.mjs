@@ -994,6 +994,15 @@ export const SUITES = {
       "Administrator and the session; and that another person's session, a missing one and your " +
       'own are refused with no row.',
   },
+  'supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py': {
+    lanes: ['db'],
+    why:
+      "0213 -- that a person's picture is theirs alone: only they set or clear avatar_path, an " +
+      "Administrator naming them never touches it, a picture writes no rename row and tells " +
+      'display_names_for() nothing, Remove Access alone forgets it as service_role, and the ' +
+      'avatars policies, run verbatim on a stand-in table, admit the owner to their own ' +
+      '<id>/avatar and nobody else, with a self-check that refuses a wider arm.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1339,6 +1348,15 @@ export const SUITES = {
       'gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the ' +
       'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
       'still read.',
+  },
+  'supabase/functions/manage-people/test_account_pictures_stack.py': {
+    lanes: ['stack'],
+    why:
+      "A person's picture through the real Storage API (0213), which the db lane has none of: the " +
+      'owner uploads, replaces, downloads and deletes their own <id>/avatar; every seeded role ' +
+      'reads, lists, signs, overwrites and deletes none of it and the public URL serves nothing; ' +
+      'the bucket refuses SVG, GIF and HTML and holds its 512 KiB limit; and Remove Access deletes the ' +
+      'object and clears the column. Adds and deletes its own throwaway person.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],

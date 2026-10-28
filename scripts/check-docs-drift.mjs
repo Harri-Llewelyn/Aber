@@ -1090,6 +1090,9 @@ function edgeFunctionNames() {
     'public.audit_trail_user_ids_matching': '0203 matches a person\'s display name as well as their email, since the Audit Trail labels a person\'s lane with the name; the baseline matches the email alone. It restates 0176\'s search_path pin',
     'public.end_my_session': '0211 writes a SESSIONS_ENDED row in the caller\'s lane, with the session as list_my_sessions() returned it, in the delete\'s transaction; 0206 wrote none',
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Security tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
+    'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
+    'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture; 0203 had no such row',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

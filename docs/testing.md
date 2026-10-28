@@ -87,6 +87,15 @@ python supabase/test_auth_rate_limit.py
 # signs one session out as the dashboard does (scope=local), and reads through the gateway with
 # both tokens: the signed-out one gets 401 session_not_found, and the other is still served.
 python supabase/test_sign_out_ends_one_session.py
+# A person's picture through the real Storage API (0213). Needs the stack up. It adds a throwaway
+# Operator through manage-people, who uploads, replaces, downloads and deletes their own
+# <id>/avatar. The seeded people read, list, sign, overwrite and delete none of it, the public URL
+# serves nothing, and a machine identity sees no row of the bucket. The bucket refuses SVG, GIF and
+# HTML, and holds its 512 KiB limit; it is read from the bucket, because an oversize upload resets
+# the connection and ends the shared gateway port-forward. Remove Access deletes the object and
+# clears avatar_path, and Restore Access brings the person back with no picture. The account is
+# deleted afterwards.
+python supabase/functions/manage-people/test_account_pictures_stack.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -703,6 +712,16 @@ python supabase/migrations/test_ending_another_of_your_sessions_is_recorded.py
 # removed person's may be ended. end_person_sessions() refuses your own by naming Sign Out of All
 # Other Sessions. Every test rolls back.
 python supabase/migrations/test_an_administrator_ends_one_of_a_person_s_sessions.py
+# A person can put a picture on their account (0213), and nobody else sees it. Only the owner sets
+# or clears person_profiles.avatar_path, through set_own_picture(), which takes no id; it names only
+# <their id>/avatar; every person role sets their own, and a machine identity, a removed person and
+# anon are refused. An Administrator naming the person, or clearing their name, keeps the picture.
+# A picture writes no rename row and display_names_for() leaves a row with no name out. Only
+# service_role forgets a picture, for a person whose access is removed. The avatars policies run
+# verbatim on a stand-in table: the owner reads, writes, replaces and deletes their own <id>/avatar
+# and nothing else, nobody else reaches it, and the self-check refuses a wider arm, a missing policy
+# and another bucket's policy that is not confined to it. Every test rolls back.
+python supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

@@ -47,6 +47,8 @@ function stack(replies: Record<string, Reply | Reply[]> = {}, role = "Administra
     "POST /rest/v1/rpc/record_person_email_change": { status: 200, body: 3 },
     [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 200, body: { id: TARGET_ID } },
     [`DELETE /auth/v1/admin/users/${NEW_ID}`]: { status: 200, body: {} },
+    "DELETE /storage/v1/object/avatars": { status: 200, body: [] },
+    "POST /rest/v1/rpc/forget_person_picture": { status: 204, body: null },
   };
   const original = globalThis.fetch;
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
@@ -365,21 +367,91 @@ Deno.test("an account the database would not record is deleted again, and its pa
   assert.ok(!logged.join("\n").includes(password), "the password is not logged");
 });
 
-Deno.test("removing access asks the database first, then bans and never deletes", async () => {
+Deno.test("removing access asks the database first, then bans and never deletes the account", async () => {
   env(false);
   const s = stack();
   const { response, body } = await run(post({ action: "remove", user_id: TARGET_ID }), s);
   assert.equal(response.status, 200);
   assert.equal(body.access, "removed");
-  assert.equal(s.paths().slice(2), [
-    "POST /rest/v1/rpc/remove_person_access",
-    `PUT /auth/v1/admin/users/${TARGET_ID}`,
-  ]);
+  assert.equal(s.paths()[2], "POST /rest/v1/rpc/remove_person_access");
+  assert.equal(s.paths().at(-1), `PUT /auth/v1/admin/users/${TARGET_ID}`);
   const ban = s.calls.find((c) => c.method === "PUT")!;
   assert.equal(ban.body, { ban_duration: BAN_DURATION });
   assert.equal(ban.auth, `Bearer ${SERVICE_KEY}`);
   assert.equal(s.calls.find((c) => c.path === "/rest/v1/rpc/remove_person_access")?.auth, `Bearer ${CALLER_TOKEN}`);
-  assert.equal(s.paths().some((p) => p.startsWith("DELETE")), false);
+  assert.equal(s.paths().some((p) => p.startsWith("DELETE /auth/")), false);
+});
+
+Deno.test("removing access deletes the person's picture as service_role and clears its column, before the ban", async () => {
+  env(false);
+  const s = stack();
+  const { response } = await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 200);
+  assert.equal(s.paths().slice(2), [
+    "POST /rest/v1/rpc/remove_person_access",
+    "DELETE /storage/v1/object/avatars",
+    "POST /rest/v1/rpc/forget_person_picture",
+    `PUT /auth/v1/admin/users/${TARGET_ID}`,
+  ]);
+  const deleted = s.calls.find((c) => c.path === "/storage/v1/object/avatars")!;
+  assert.equal(deleted.body, { prefixes: [`${TARGET_ID}/avatar`] });
+  assert.equal(deleted.auth, `Bearer ${SERVICE_KEY}`);
+  const forgotten = s.calls.find((c) => c.path === "/rest/v1/rpc/forget_person_picture")!;
+  assert.equal(forgotten.body, { p_user_id: TARGET_ID });
+  assert.equal(forgotten.auth, `Bearer ${SERVICE_KEY}`);
+});
+
+// The ban waits for the picture, so the person reads as Sign-in still open, which offers Remove
+// Access again: an account already banned would offer only Restore Access.
+Deno.test("a picture the bucket did not delete is reported as a failed ban, and nothing more is done", async () => {
+  env(false);
+  const s = stack({ "DELETE /storage/v1/object/avatars": { status: 500, body: { statusCode: "500", error: "x", message: "disk at 10.0.0.9 gone" } } });
+  const answer = await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 502, "disk at 10.0.0.9 gone");
+  assert.ok(/picture/.test(answer.body.error) && /Remove Access again/.test(answer.body.error), answer.body.error);
+  assert.ok(/^Sign-in is not blocked yet/.test(answer.body.error), answer.body.error);
+  assert.equal(s.paths().includes("POST /rest/v1/rpc/forget_person_picture"), false);
+  assert.equal(gotrueAdmin(s.paths()), []);
+});
+
+Deno.test("a picture deleted but not forgotten says to remove access again, and bans nobody yet", async () => {
+  env(false);
+  const s = stack({
+    "POST /rest/v1/rpc/forget_person_picture": {
+      status: 500,
+      body: { code: "XX000", message: "relation public.person_profiles is broken", details: null, hint: null },
+    },
+  });
+  const answer = await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 500, "relation public.person_profiles is broken");
+  assert.ok(/Remove Access again/.test(answer.body.error), answer.body.error);
+  assert.equal(gotrueAdmin(s.paths()), []);
+});
+
+Deno.test("removing access again deletes the picture again and bans", async () => {
+  env(false);
+  const s = stack({ "POST /rest/v1/rpc/remove_person_access": { status: 200, body: false } });
+  const { response, body } = await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 200);
+  assert.equal(body, { user_id: TARGET_ID, access: "removed" });
+  assert.equal(s.paths().slice(2), [
+    "POST /rest/v1/rpc/remove_person_access",
+    "DELETE /storage/v1/object/avatars",
+    "POST /rest/v1/rpc/forget_person_picture",
+    `PUT /auth/v1/admin/users/${TARGET_ID}`,
+  ]);
+});
+
+Deno.test("a removal the database refuses deletes no picture", async () => {
+  env(false);
+  const s = stack({
+    "POST /rest/v1/rpc/remove_person_access": {
+      status: 400,
+      body: { code: "P0001", message: "this would leave no Administrator who can sign in.", details: null, hint: null },
+    },
+  });
+  await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assert.equal(s.paths().some((p) => p.includes("/storage/") || p.endsWith("forget_person_picture")), false);
 });
 
 Deno.test("a removal the database refuses never reaches GoTrue", async () => {
