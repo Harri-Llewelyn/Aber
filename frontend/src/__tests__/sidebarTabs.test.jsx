@@ -51,6 +51,15 @@ describe('a page with tabs', () => {
     expect(within(primary()).getByRole('link', { name: 'Devices' })).toHaveAttribute('href', '/devices')
   })
 
+  it('calls the page that lists the services System, at /system, and nothing in the rail Directory', () => {
+    renderRail()
+    expect(within(primary()).getByRole('link', { name: 'System' })).toHaveAttribute('href', '/system')
+    expect(within(primary()).queryByRole('link', { name: /directory/i })).toBeNull()
+    fireEvent.click(chevron('System'))
+    expect(entry('System', 'Applications & User Interfaces')).toHaveAttribute('href', '/system')
+    expect(entry('System', 'Ingestion & Messaging')).toHaveAttribute('href', '/system/ingestion')
+  })
+
   it('opens the tabs beneath it as links to each tab\'s address, and closes them again', () => {
     renderRail()
     fireEvent.click(chevron('Devices'))
@@ -71,7 +80,7 @@ describe('a page with tabs', () => {
       expect(screen.queryByRole('button', { name: `Show the ${page} tabs` })).toBeNull()
     }
     expect(screen.queryByRole('button', { name: 'Show the Profile tabs' })).toBeNull()
-    for (const page of ['Approvals', 'Devices', 'Metrics', 'Vocabulary', 'Capture', 'Archived Entities', 'Directory', 'Access Control', 'Settings']) {
+    for (const page of ['Approvals', 'Devices', 'Metrics', 'Vocabulary', 'Capture', 'Archived Entities', 'System', 'Access Control', 'Settings']) {
       expect(chevron(page)).toBeInTheDocument()
     }
   })
@@ -219,7 +228,7 @@ describe('Collapse all tabs', () => {
     window.history.replaceState(null, '', '/devices')
     renderRail({ currentTab: 'devices' })
     fireEvent.click(chevron('Metrics'))
-    fireEvent.click(chevron('Directory'))
+    fireEvent.click(chevron('System'))
     expect(collapseAll()).toHaveAttribute('aria-disabled', 'false')
 
     fireEvent.click(collapseAll())

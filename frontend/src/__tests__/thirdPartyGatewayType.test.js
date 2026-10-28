@@ -85,7 +85,7 @@ describe('where a Third-party gateway is', () => {
 describe('the settings its edge node is configured with', () => {
   afterEach(() => { delete globalThis.__ABER_CONFIG__ })
 
-  it("take the broker from the Directory's broker row, by its id", () => {
+  it('take the broker from its directory_services row, by its id', () => {
     const rows = [
       { service_uuid: 'other', service_type: 'MQTT_BROKER', endpoint_url: 'mqtt://elsewhere:1883' },
       { service_uuid: BROKER_DIRECTORY_ID, service_type: 'MQTT_BROKER', endpoint_url: 'mqtts://mqtt.plant:8883' },
@@ -102,7 +102,7 @@ describe('the settings its edge node is configured with', () => {
     expect(brokerAddress(null)).toBeNull()
   })
 
-  it('say when the Directory still names an address only Aber can resolve', () => {
+  it("say when the broker's row still names an address only Aber can resolve", () => {
     expect(brokerAddress('mqtt://mosquitto:1883').problem).toMatch(/resolves only inside Aber/)
     expect(brokerAddress('mqtt://localhost:1883').problem).toMatch(/resolves only inside Aber/)
   })

@@ -104,7 +104,7 @@ by the database.
 ### What looks clickable
 
 Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
-means a real link (the Directory's open chip, a `.count-link`). A value that copies is a
+means a real link (the System page's open chip, a `.count-link`). A value that copies is a
 `CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
 id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
 label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
@@ -163,8 +163,8 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   click away, so a click on a tabbed page's icon opens the page, as any page's does.
 - **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
   copy in the database's order, before the page has read them. A category missing from it still
-  shows on the page. Directory lists its three groups; the page adds a tab for any service type
-  no group claims.
+  shows on the page. System lists its three groups; the page adds a tab for any service type no
+  group claims.
 - **Profile** is not in the rail, so its tabs are on its tab bar only.
 
 ### Tooltips
@@ -251,7 +251,7 @@ screen, and screen readers read it unevenly.
   like). Settings' categories come from the database, which has no description for one, so their
   sentences are `CATEGORY_DESCRIPTIONS` in `SettingsTab.jsx`; a category missing from it has no
   tooltip. Vocabulary's are each standard's `hint`, and each standard's description and caveats
-  are on the Vocabulary page's help page. Directory's are its groups' descriptions.
+  are on the Vocabulary page's help page. System's are its groups' descriptions.
 
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
@@ -599,9 +599,9 @@ Its credential dialog shows `EdgeNodeSettings` (`components/modals/EdgeNodeSetti
 of the Node-RED steps, and so does Show Broker Credential. Each value comes from where the dashboard
 already learns it (`utils/edgeNodeSettings.js`):
 
-- **The broker address and port** from the Directory's broker row, which db-init keeps to the
-  chart's public broker address, the one an appliance is handed. A row still naming an in-stack
-  host is shown with a warning, and an unreadable Directory is said rather than guessed.
+- **The broker address and port** from the broker's `directory_services` row, which db-init keeps
+  to the chart's public broker address, the one an appliance is handed. A row still naming an
+  in-stack host is shown with a warning, and a failed read is said rather than guessed.
 - **The primary host id** from `VITE_PRIMARY_HOST_ID`, which the chart renders from
   `ingestion.primaryHostId`. Absent, the dialog says where it is set.
 - **The root certificate** from `/.well-known/aber/ca.pem` on the dashboard's own host, which
@@ -977,6 +977,11 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 - **Any path loads.** nginx serves `index.html` for any path (`try_files`), and every asset URL is
   absolute (Vite's `base` is `/`). An address carrying the sign-in callback's `code` or `state` is
   left alone for supabase-js to read.
+- **A renamed page keeps its old address.** `MOVED_PAGES` in `hooks/useAppRouting.js` maps the old
+  first path segment to the new one, and the router replaces the address with the new page's, tab
+  and query string kept: `/directory/ingestion?sort=name` becomes `/system/ingestion?sort=name`.
+  `tabFromUrl` reads the old address as the new page, so nothing else mounts first. An entry stays
+  for as long as a bookmark or an old link may name it.
 - **Tests start at `/`** (`src/test/setup.js`). A test that needs a view sets the address before it
   renders the page.
 
@@ -994,7 +999,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device` | `stored`, `search`, `gateway`, `sort`; `subject` |
 | Archives | `retired` | `sort` |
-| Directory | the group | `sort` |
+| System | the group | `sort` |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
@@ -1049,7 +1054,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `DirectoryTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1149,7 +1154,7 @@ in "building management system".
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
   bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
   in the toolbar, never the heading ([The toolbar](#the-toolbar)).
-- **Scroll.** Every page scrolls inside its card, Access Control, Directory and Approvals included.
+- **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
 - **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
   loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
   deleted entities (3351)"), what an export will write, or how much work is waiting (a Quarantine
@@ -1187,7 +1192,7 @@ in "building management system".
 
 **Earlier decisions the 2026-10-01 review reversed**, recorded so the next audit does not undo them:
 counts always showing, including on headings; Settings and Vocabulary keeping a `PageHeading`;
-Access Control, Directory and Approvals scrolling the page; the Devices queue as a card above the
+Access Control, System and Approvals scrolling the page; the Devices queue as a card above the
 roster.
 
 ---

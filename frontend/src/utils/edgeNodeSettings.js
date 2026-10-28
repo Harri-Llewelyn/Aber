@@ -1,21 +1,21 @@
 /**
  * What the engineer of a Third-party gateway configures on its edge node, from where the dashboard
- * already learns each value: the broker from the Directory's broker row (db-init writes it from the
- * chart's public broker address, the one an appliance is handed), the primary host id from the
+ * already learns each value: the broker from its `directory_services` row (db-init writes it from
+ * the chart's public broker address, the one an appliance is handed), the primary host id from the
  * runtime config, and the root certificate from the path the dashboard's own host serves it at.
  */
 import { readSetting } from '../config'
 import { GITHUB_REPO_URL } from '../constants'
 import { APP_VERSION } from '../version'
 
-/** The Directory's broker row (0002), whose address db-init keeps to the published broker. */
+/** The broker's `directory_services` row (0002). db-init keeps it to the published broker. */
 export const BROKER_DIRECTORY_ID = 'f1111111-0000-0000-0000-000000000004'
 
 /** The names publicAddresses.ts refuses for MQTT_PUBLIC_HOST: they resolve only inside Aber. */
 const IN_STACK_HOSTS = new Set(['mosquitto', 'localhost', '127.0.0.1', '::1', '[::1]', 'supabase-envoy'])
 
 /**
- * The Directory's broker row out of a `/api/v1/directory` listing: by its id, else the only
+ * The broker's row out of a `/api/v1/directory` listing: by its id, else the only
  * MQTT_BROKER row. Null when neither is there.
  */
 export function brokerRow(services) {
@@ -27,7 +27,7 @@ export function brokerRow(services) {
 }
 
 /**
- * The broker as an edge node dials it, from a Directory URL such as `mqtts://mqtt.plant:8883`:
+ * The broker as an edge node dials it, from its row's URL such as `mqtts://mqtt.plant:8883`:
  * `{ host, port, tls, problem }`, with `problem` a sentence when the node could not use it. Null
  * when there is no URL.
  */
@@ -37,7 +37,7 @@ export function brokerAddress(endpointUrl) {
   try {
     url = new URL(endpointUrl)
   } catch {
-    return { host: '', port: '', tls: false, problem: `The Directory lists the broker as '${endpointUrl}', which is not an address.` }
+    return { host: '', port: '', tls: false, problem: `The System page lists the broker as '${endpointUrl}', which is not an address.` }
   }
   const tls = url.protocol === 'mqtts:'
   const host = url.hostname

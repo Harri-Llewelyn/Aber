@@ -49,7 +49,7 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 // Pages with no permission or role gate: the rail shows them to any session.
 const ALWAYS_VISIBLE = [
   'Site Map', 'Cells', 'Gateways', 'Devices',
-  'Schemas', 'Vocabulary', 'Directory'
+  'Schemas', 'Vocabulary', 'System'
 ]
 
 const topbar = () => document.querySelector('.topbar')

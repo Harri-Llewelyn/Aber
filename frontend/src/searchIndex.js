@@ -40,7 +40,8 @@ export const PAGE_KEYWORDS = {
   // that name as often as by its own.
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
-  'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
+  // 'directory' is the page's old name, which habits keep, as with 'archives' above.
+  'system':         ['directory', 'services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
   'audit-trail':    ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
@@ -80,9 +81,9 @@ export const CARDS = [
   { id: 'vocab-iso22400',       ...tabCard('vocabulary', 'iso-22400'), keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          ...tabCard('vocabulary', 'opc-ua'), keywords: ['companion', 'machinery', 'robotics'] },
   { id: 'vocab-ashrae',         ...tabCard('vocabulary', 'ashrae-223p'), keywords: ['bms', 'building', 'hvac'] },
-  { id: 'dir-applications',     ...tabCard('directory', 'applications'), keywords: ['grafana', 'node-red', 'studio', 'uis'] },
-  { id: 'dir-ingestion',        ...tabCard('directory', 'ingestion'), keywords: ['mosquitto', 'broker', 'daemon'] },
-  { id: 'dir-infrastructure',   ...tabCard('directory', 'infrastructure'), keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  { id: 'system-applications',  ...tabCard('system', 'applications'), keywords: ['grafana', 'node-red', 'studio', 'uis'] },
+  { id: 'system-ingestion',     ...tabCard('system', 'ingestion'), keywords: ['mosquitto', 'broker', 'daemon'] },
+  { id: 'system-infrastructure', ...tabCard('system', 'infrastructure'), keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },

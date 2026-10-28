@@ -1,10 +1,10 @@
 ## What this page is for
 
-This page lists every service Aber runs, what each one is for, and how to reach it. Use it to find where a service answers, such as which port Grafana is on, without searching a deployment file.
+This page lists every service Aber runs, what each one is for, whether it is up, and how to reach it. Use it to find where a service answers, such as which port Grafana is on, without searching a deployment file.
 
 ## What the controls do
 
-- **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door: a link there is where you go to do something the dashboard does not do itself. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. If telemetry has stopped arriving, the fault is almost always one of these. **Data & Backend Infrastructure** is what the other two are built on. It is listed so that the directory does not make the stack look smaller than it is.
+- **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door: a link there is where you go to do something the dashboard does not do itself. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. If telemetry has stopped arriving, the fault is almost always one of these. **Data & Backend Infrastructure** is what the other two are built on. It is listed so that this page does not make the stack look smaller than it is.
 - **Other Registered Services** holds any service whose type fits none of those three. It appears only while something is in it, because that is the sign of a type nobody expected. Any group with nothing in it has no tab.
 - Point at a tab, or move to it with the keyboard, to read what its group holds.
 - **Service Name** and **Service Type** say what the service is. The type is a category in words, such as Edge node or REST API. Hover it to see the type the service was registered with.
@@ -30,11 +30,11 @@ This page lists every service Aber runs, what each one is for, and how to reach 
 
 ## What the states mean
 
-A service is listed here because Aber knows it deploys it. Nothing on this page searches the network for services it was not told about. So an empty directory means nothing is registered, not that nothing is running.
+A service is listed here because Aber knows it deploys it. Nothing on this page searches the network for services it was not told about. So an empty page means nothing is registered, not that nothing is running.
 
 The deployment registers the rows at each install and upgrade. You cannot add one here.
 
-**Local identifiers are marked as local.** The directory can give service and schema identifiers to other systems. Aber creates those identifiers itself; they are not registered in a shared namespace. So each one is sent with a note saying it is local. Without that note, a local identifier could be mistaken for a shared one. That is how a claim that two systems work together becomes false.
+**Local identifiers are marked as local.** Aber's [Factory+](../guides/glossary.md#factory) Directory can give service and schema identifiers to other systems. Aber creates those identifiers itself; they are not registered in a shared namespace. So each one is sent with a note saying it is local. Without that note, a local identifier could be mistaken for a shared one. That is how a claim that two systems work together becomes false.
 
 ## What this page cannot tell you
 

@@ -169,7 +169,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
 
 /**
  * What the consumer is configured with, in the order a client's own settings ask for it. The
- * broker comes from the Directory's broker row, as a Third-party gateway's does.
+ * broker comes from its `directory_services` row, as a Third-party gateway's does.
  */
 function SubscriberSettings({ account, topics, copy, copied }) {
   const broker = useDirectoryBroker()
@@ -184,7 +184,7 @@ function SubscriberSettings({ account, topics, copy, copied }) {
         copy={copy}
         copied={copied}
         warning={broker === null
-          ? 'The Directory could not be read, so the broker address is not shown. The Directory page lists it.'
+          ? 'The broker address could not be read, so it is not shown. The System page lists it.'
           : broker?.problem}
       />
       <Setting

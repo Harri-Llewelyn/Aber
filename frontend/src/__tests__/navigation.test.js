@@ -102,7 +102,7 @@ describe('groupedNav', () => {
    * The case the function exists for: an Operator holds none of the three retention pages -- Cold
    * Storage admits three roles and not theirs, Backups is Administrator, Archived Entities needs
    * `archive:manage` -- so the whole group goes, and a separator with nothing under it never
-   * renders. `admin` is no longer the example: Directory is ungated and keeps it alive.
+   * renders. `admin` is no longer the example: System is ungated and keeps it alive.
    */
   it('drops a group whose every page this session is refused', () => {
     const groups = groupedNav(operator())
@@ -113,13 +113,13 @@ describe('groupedNav', () => {
   })
 
   /**
-   * The other half of the same move: a group with some visible pages still renders. Directory tells
+   * The other half of the same move: a group with some visible pages still renders. System tells
    * anyone where Grafana and Node-RED are, and Settings is readable by every role, so filing them
    * with Access Control must not gate them by association.
    */
   it('keeps a group alive for its ungated pages', () => {
     const admin = groupedNav(operator()).find(g => g.id === 'admin')
-    expect(admin?.tabs.map(t => t.id)).toEqual(['directory', 'settings'])
+    expect(admin?.tabs.map(t => t.id)).toEqual(['system', 'settings'])
   })
 
   it('returns nothing at all rather than a row of empty headings', () => {
