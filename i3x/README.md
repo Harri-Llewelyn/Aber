@@ -749,7 +749,7 @@ and bending objects and history into that shape would export a claim the protoco
 
 The package is spawned **per-user as a subprocess** by the MCP host, despite "Server" in the
 repository name. There is nothing to deploy in the cluster, nothing to add to the chart,
-and nothing that belongs in the Directory page. A shared hosted MCP endpoint would need a
+and nothing that belongs on the System page. A shared hosted MCP endpoint would need a
 remote-transport wrapper, which is a separate piece of work.
 
 ### Writes are refused, and that was tested rather than assumed

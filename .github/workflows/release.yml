@@ -18,7 +18,7 @@
 # attested. Every image is scanned before it is pushed, on the policy image-scan.yml applies to the
 # third-party ones. Those are scanned here too, without gating the release, and every report is
 # kept: the packaged chart carries a dated summary of each image's known CVEs
-# (files/image-scans.json), which the Directory shows. The SBOMs are also attached to the GitHub
+# (files/image-scans.json), which the System page shows. The SBOMs are also attached to the GitHub
 # Release as files, for the site that asks for one without a registry client.
 name: Release
 

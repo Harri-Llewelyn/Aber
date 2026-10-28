@@ -3396,7 +3396,7 @@ paths:
       tags: [Registry]
       summary: List registered stack services
       description: |
-        The service directory backing the dashboard's Directory tab — the URLs of *this
+        The service directory backing the dashboard's System page — the URLs of *this
         stack's* components.
 
         > This is **not** the Factory+ Directory service. It answers "where is Grafana", not

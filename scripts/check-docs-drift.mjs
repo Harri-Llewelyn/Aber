@@ -215,7 +215,7 @@ const chartPins = new Map();
 // -------------------------------------------------------------------------------------------------
 // 2c. Every Prometheus job the Directory maps is one the collector produces. Alloy labels each
 // scraped pod's job with its component, and the host series `node`; a job named in
-// `directory_liveness_job_map()` that no pod carries makes the Directory report "not observed"
+// `directory_liveness_job_map()` that no pod carries makes the System page report "not observed"
 // for a healthy service.
 // -------------------------------------------------------------------------------------------------
 {
@@ -252,7 +252,7 @@ const chartPins = new Map();
       fail(
         `directory_liveness_job_map() names Prometheus job(s) no scraped pod carries: ` +
         `${orphaned.join(', ')}. The join matches nothing, so those services report as ` +
-        `UNKNOWN on the Directory page -- which reads as a missing exporter, not a stale mapping.`
+        `UNKNOWN on the System page -- which reads as a missing exporter, not a stale mapping.`
       );
     } else {
       pass(`all ${mapped.length} Directory liveness job(s) are jobs the collector produces`);

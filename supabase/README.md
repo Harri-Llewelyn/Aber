@@ -893,7 +893,7 @@ which had already become `envoy` by the time it was built.
 ### The Directory names the image each service runs (archived migration 0140)
 
 `directory_services.image` is the image reference the release deploys for a row's workload, and
-the Directory's Version column shows its tag. It comes from the chart, not from the cluster:
+the System page's Version column shows its tag. It comes from the chart, not from the cluster:
 
 - `aber.directoryImages` in `_helpers.tpl` renders a JSON map, component to image, using the same
   expression each workload's own `image:` uses. A component the chart does not deploy is left out.

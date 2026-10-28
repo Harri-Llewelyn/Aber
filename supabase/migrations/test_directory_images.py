@@ -1,5 +1,5 @@
 """
-The Directory's Version column, its known-CVE badge, and the name of its Node-RED entry.
+The System page's Version column, its known-CVE badge, and the name of its Node-RED entry.
 
 `record_directory_images()` writes `directory_services.image` from the chart's component -> image
 map on every db-init run. Four properties, each of which would fail quietly:

@@ -3,7 +3,7 @@
  * The known-CVE summary a release's chart carries, built from the Trivy JSON reports release.yml
  * keeps: per image reference, the fixable CRITICAL and HIGH findings, when it was scanned and the
  * date of the vulnerability database the scan used. db-init writes it into directory_services, and
- * the Directory shows it beside each version.
+ * the dashboard's System page shows it beside each version.
  *
  *   node scripts/image-scan-summary.mjs --reports <dir> --version <V> --out <file>
  *   node scripts/image-scan-summary.mjs --check <chart directory or packaged .tgz>
@@ -28,8 +28,8 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const NAMESPACE = 'ghcr.io/harri-llewelyn/aber'
 const SUMMARY_FILE = 'files/image-scans.json'
 
-// Images this repository builds FROM a third-party product and tags with Aber's version. The
-// Directory shows the product's version for these, which is the tag of the Dockerfile's last FROM.
+// Images this repository builds FROM a third-party product and tags with Aber's version. The System
+// page shows the product's version for these, which is the tag of the Dockerfile's last FROM.
 const UPSTREAM = {
   'node-red': 'node-red/Dockerfile',
   'swagger-ui': 'swagger-ui/Dockerfile',

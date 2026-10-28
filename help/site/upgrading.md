@@ -1492,6 +1492,17 @@ Every workload rolls once, as at every release. Beyond that:
   **The forge restarts** with its email fallback off. **Grafana** gains one alert rule, **Service
   Token Expiring**, which warns a week before a machine identity's token expires.
 
+### From 1.8.0, the Directory page is called System
+
+The dashboard page that lists Aber's services is now called **System**. Its address is `/system`,
+and each tab's address is under it, such as `/system/ingestion`.
+
+Old links and bookmarks still work. `/directory` and each of its tab addresses open the same view
+of System, with its sort order and other settings.
+
+Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
+So does the Factory+ Directory, at `/ping` and `/v1/`.
+
 ---
 
 ## Backups
