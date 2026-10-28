@@ -35,6 +35,10 @@ export const trailKindFilter = (type) => {
 export const trailUrl = (id, type = '', deleted = false) =>
   pageUrl('audit-trail', { search: id, type: trailKindFilter(type), deleted })
 
+/** The readings ingestion refused or flagged for one device: its SCHEMA_REJECTION rows. */
+export const schemaRejectionsUrl = (deviceId) =>
+  pageUrl('audit-trail', { search: deviceId, action: 'SCHEMA_REJECTION' })
+
 /** The open proposals about one entity. */
 export const approvalsForUrl = (subject) => pageUrl('approvals', { search: subject })
 
