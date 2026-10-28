@@ -102,6 +102,19 @@ test('a dev cluster also publishes the forge\'s SSH port, the one values-dev.yam
   assert.equal(args.at(-1), '--wait');
 });
 
+test('a dev cluster keeps the kubelet\'s sync period unless ABER_KUBELET_SYNC_FREQUENCY gives whole seconds', () => {
+  const kubelet = (args) => args.filter((a) => a.startsWith('--kubelet-arg='));
+  // null rather than undefined, which would read the variable from this shell.
+  for (const unset of [null, '', '  ']) assert.deepEqual(kubelet(clusterCreateArgs('aber', unset)), [], `${JSON.stringify(unset)}`);
+  const args = clusterCreateArgs('aber', '10s');
+  const at = args.indexOf('--kubelet-arg=sync-frequency=10s@server:*');
+  assert.ok(at > 0 && args[at - 1] === '--k3s-arg', 'passed to the server\'s k3s, for its kubelet');
+  assert.equal(args.at(-1), '--wait');
+  for (const bad of ['10', '0s', '1m', '10 s', '-5s', '10s@agent:*']) {
+    assert.throws(() => clusterCreateArgs('aber', bad), /ABER_KUBELET_SYNC_FREQUENCY must be whole seconds/, bad);
+  }
+});
+
 test('dev:forward forwards a load-balancer port only where the cluster does not publish it', () => {
   const locals = (opts) => wantedForwards(opts).map((f) => f.local);
   const forge = (opts) => wantedForwards(opts).find((f) => f.local === 2222);

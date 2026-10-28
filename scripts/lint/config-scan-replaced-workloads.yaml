@@ -26,3 +26,8 @@ mosquitto:
     # Off, the broker's 1883 listener binds to loopback: the end state the example describes once
     # every gateway is on 8883.
     plaintext: false
+
+supabaseAuth:
+  # ES256 signing replaces the HS256 path, which hands the platform database the signing secret and
+  # Realtime the anon key for its probe; off here, so that path is scanned too.
+  es256Signing: false

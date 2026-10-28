@@ -39,8 +39,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
 // response headers; v8 the editor's role re-checked every minute, the persisted map retired; v9
 // Strict-Transport-Security on the editor and the http-in routes; v10 the editor's report-only
-// Content-Security-Policy.
-const SETTINGS_VERSION = 10;
+// Content-Security-Policy; v11 GoTrue's tokens verified against the JWKS (ES256 and HS256) when it
+// is set, and the sign-in's OpenID Connect ID token.
+const SETTINGS_VERSION = 11;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -63,18 +64,36 @@ const REQUIRED_AUTH_ENV = [
   'NODERED_OAUTH_TOKEN_URL',
   'NODERED_OAUTH_CALLBACK_URL',
   'NODERED_USERINFO_URL',
-  'SUPABASE_JWT_SECRET',
   'SUPABASE_PUBLISHABLE_KEY',
   'NODERED_WEBHOOK_JWT_SECRET'
 ];
 
 const missingAuthEnv = REQUIRED_AUTH_ENV.filter((name) => !process.env[name]);
+// What GoTrue's tokens verify against: the JWKS with supabaseAuth.es256Signing, the secret without.
+if (!process.env.SUPABASE_JWT_JWKS && !process.env.SUPABASE_JWT_SECRET) {
+  missingAuthEnv.push('SUPABASE_JWT_JWKS (or SUPABASE_JWT_SECRET)');
+}
 if (missingAuthEnv.length > 0) {
   fail(
     `${missingAuthEnv.join(', ')} not set; refusing to write a settings.js with no adminAuth. ` +
       'Node-RED would come up with its editor and /flows admin API open on port 1880. ' +
       'See secrets.nodered* in values.yaml.'
   );
+}
+
+// settings.js reads the JWKS when Node-RED loads it; a set it cannot use is refused here, legibly,
+// rather than as an editor nobody can sign in to.
+if (process.env.SUPABASE_JWT_JWKS) {
+  let keys = null;
+  try {
+    keys = JSON.parse(process.env.SUPABASE_JWT_JWKS).keys;
+  } catch {
+    // Reported below.
+  }
+  const usable = Array.isArray(keys) && keys.some((k) => k?.kty === 'EC' && k.kid && k.crv === 'P-256');
+  if (!usable) {
+    fail('SUPABASE_JWT_JWKS is not a JWKS with an EC P-256 key and its kid (secrets.jwtJwks in values.yaml).');
+  }
 }
 
 // The flow file name is declared in settings.js below, and the credentials file name is derived
@@ -339,9 +358,54 @@ const SETTINGS_JS = `/**
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
 const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
 // A Node builtin, so it resolves without the absolute path the two above need.
-const { timingSafeEqual } = require('crypto');
+const { createPublicKey, createSecretKey, timingSafeEqual } = require('crypto');
 
 const env = process.env;
+
+/**
+ * What a GoTrue token verifies against, by algorithm. With SUPABASE_JWT_JWKS (ES256 signing): its
+ * EC keys by kid, and its legacy \`oct\` key, which has no kid, for HS256 tokens signed before. Without
+ * it: SUPABASE_JWT_SECRET, HS256 alone. A JWKS that cannot be read verifies nothing.
+ */
+const gotrueKeys = (() => {
+  if (!env.SUPABASE_JWT_JWKS) return { HS256: env.SUPABASE_JWT_SECRET || null, ES256: new Map() };
+  try {
+    const keys = JSON.parse(env.SUPABASE_JWT_JWKS).keys || [];
+    const legacy = keys.find((k) => k.kty === 'oct' && !k.kid && k.k);
+    return {
+      HS256: legacy ? createSecretKey(Buffer.from(legacy.k, 'base64url')) : null,
+      ES256: new Map(keys.filter((k) => k.kty === 'EC' && k.kid)
+        .map((k) => [k.kid, createPublicKey({ key: { kty: 'EC', crv: k.crv, x: k.x, y: k.y }, format: 'jwk' })])),
+    };
+  } catch (err) {
+    console.warn('[aber] SUPABASE_JWT_JWKS could not be read (' + err.message + '); no token will verify.');
+    return { HS256: null, ES256: new Map() };
+  }
+})();
+
+/**
+ * Verifies a token GoTrue signed: the signature with the key its header names, its expiry and its
+ * audience. Throws on any failure, as jwt.verify does; returns the claims.
+ */
+function verifyGotrueToken(token, audience) {
+  const header = (jwt.decode(token, { complete: true }) || {}).header || {};
+  const key = header.alg === 'ES256' ? gotrueKeys.ES256.get(header.kid)
+    : header.alg === 'HS256' ? gotrueKeys.HS256
+    : null;
+  if (!key) throw new Error('no key verifies a ' + header.alg + ' token here');
+  return jwt.verify(token, key, { algorithms: [header.alg], audience: audience });
+}
+
+/**
+ * passport-oauth2 hands a five-parameter verify the token response, whose id_token GoTrue adds for
+ * the \`openid\` scope; Node-RED's wrapper takes four. This passes the ID token on in the profile.
+ */
+class GotrueStrategy extends OAuth2Strategy {
+  constructor(options, verify) {
+    super(options, (accessToken, refreshToken, params, profile, done) =>
+      verify(accessToken, refreshToken, Object.assign({}, profile, { idToken: params && params.id_token }), done));
+  }
+}
 
 /**
  * Constant-time secret comparison. timingSafeEqual throws on a length mismatch, so unequal
@@ -553,7 +617,7 @@ module.exports = {
       name: 'oauth2',
       label: 'Sign in with Aber',
       icon: 'fa-cube',
-      strategy: OAuth2Strategy,
+      strategy: env.SUPABASE_JWT_JWKS ? GotrueStrategy : OAuth2Strategy,
       options: {
         authorizationURL: env.NODERED_OAUTH_AUTH_URL,
         tokenURL: env.NODERED_OAUTH_TOKEN_URL,
@@ -561,10 +625,10 @@ module.exports = {
         clientSecret: env.NODERED_OAUTH_CLIENT_SECRET,
         callbackURL: env.NODERED_OAUTH_CALLBACK_URL,
 
-        // No 'openid' scope, deliberately: requesting it makes GoTrue try to mint an ID token and
-        // refuse with "HS256 is not supported for ID token signing". Identity comes from userinfo().
-        // Same decision as grafana.ini.
-        scope: ['email', 'profile'],
+        // 'openid' only with the JWKS, which is ES256 signing: under HS256 GoTrue refuses to mint
+        // an ID token ("HS256 is not supported for ID token signing") and the sign-in fails. The
+        // permissions come from userinfo() either way. Same decision as the chart's Grafana scopes.
+        scope: env.SUPABASE_JWT_JWKS ? ['openid', 'email', 'profile'] : ['email', 'profile'],
 
         // GoTrue's OAuth server requires PKCE. pkce implies state, and state needs the session store
         // Node-RED's genericStrategy installs.
@@ -581,7 +645,22 @@ module.exports = {
          */
         async verify(accessToken, refreshToken, profile, done) {
           try {
+            // With 'openid' asked for, GoTrue's ID token for this client is required, and must name
+            // the person userinfo() answers for below.
+            let idClaims = null;
+            if (env.SUPABASE_JWT_JWKS) {
+              try {
+                idClaims = verifyGotrueToken(profile && profile.idToken, env.NODERED_OAUTH_CLIENT_ID);
+              } catch (err) {
+                console.warn('[aber] sign-in refused: the ID token did not verify (' + err.message + ').');
+                return done(null, false);
+              }
+            }
             const info = await userinfo(accessToken);
+            if (idClaims && info && info.sub !== idClaims.sub) {
+              console.warn('[aber] sign-in refused: the ID token names another person than userinfo.');
+              return done(null, false);
+            }
             // No permissions key means the edge function could not map this user's role -- an
             // unmapped or revoked role. Refuse the login rather than admitting them read-only:
             // a provisioning error should be visible as one.
@@ -667,10 +746,7 @@ module.exports = {
 
       // Signature, expiry and audience first, so an unverified token never reaches the network.
       try {
-        jwt.verify(token, env.SUPABASE_JWT_SECRET, {
-          algorithms: ['HS256'],
-          audience: 'authenticated'
-        });
+        verifyGotrueToken(token, 'authenticated');
       } catch (err) {
         return null;
       }

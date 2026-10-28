@@ -16,8 +16,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
-  mintJwt, decodeJwt, expiryOf, daysUntilExpiry,
-  SERVICE_KEY_MAX_DAYS, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS,
+  mintJwt, decodeJwt, expiryOf, daysUntilExpiry, generateSigningKeys, signingKeyFrom, signatureVerifies,
+  legacyJwk, SERVICE_KEY_MAX_DAYS, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS,
 } from './service-jwt.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -148,6 +148,55 @@ test('expiry helpers report a lapsed key as negative rather than zero', () => {
   const later = now + 15 * 86_400_000;
   assert.ok(daysUntilExpiry(token, later) < 0, 'an expired key must report negative days');
   assert.ok(expiryOf(token) instanceof Date);
+});
+
+const headerOf = (token) => JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+
+test('the key set carries one signing key, and the secret as the legacy key in both halves', () => {
+  // GoTrue refuses GOTRUE_JWT_KEYS with no key, or more than one, whose key_ops hold `sign`; the
+  // legacy key must not be one, and the JWKS must carry no private part.
+  const set = generateSigningKeys(SECRET);
+  const keys = JSON.parse(set.jwtKeys);
+  const jwks = JSON.parse(set.jwtJwks);
+  assert.deepEqual(keys.filter((k) => k.key_ops?.includes('sign')).map((k) => k.kid), [set.kid]);
+  assert.deepEqual(keys[1], legacyJwk(SECRET));
+  assert.deepEqual(jwks.keys[1], legacyJwk(SECRET));
+  assert.equal(Buffer.from(legacyJwk(SECRET).k, 'base64url').toString(), SECRET);
+  assert.ok(jwks.keys.every((k) => !('d' in k)), 'the JWKS holds no private key');
+  assert.deepEqual(jwks.keys[0].key_ops, ['verify']);
+  assert.equal(jwks.keys[0].x, keys[0].x);
+  assert.equal(signingKeyFrom(set.jwtKeys).kid, set.kid);
+});
+
+test('with the signing key a token is ES256 with its kid, and verifies against the JWKS alone', () => {
+  const set = generateSigningKeys(SECRET);
+  const minted = mintJwt({ role: 'authenticated', signingKey: signingKeyFrom(set.jwtKeys), subject: PRINCIPAL });
+  assert.equal(minted.alg, 'ES256');
+  assert.deepEqual(headerOf(minted.token), { alg: 'ES256', typ: 'JWT', kid: set.kid });
+  assert.ok(signatureVerifies(minted.token, { jwks: set.jwtJwks }));
+  assert.ok(!signatureVerifies(minted.token, { secret: SECRET }), 'the secret cannot verify an ES256 token');
+  assert.ok(!signatureVerifies(minted.token, { jwks: generateSigningKeys(SECRET, { kid: set.kid }).jwtJwks }),
+    'another pair under the same kid does not verify it');
+});
+
+test('without it a token is HS256 with no kid, and still verifies against the JWKS legacy key', () => {
+  // The transition: tokens minted before the key set keep verifying wherever the JWKS is taken.
+  const minted = mintJwt({ role: 'anon', secret: SECRET });
+  assert.equal(minted.alg, 'HS256');
+  assert.deepEqual(headerOf(minted.token), { alg: 'HS256', typ: 'JWT' });
+  assert.ok(signatureVerifies(minted.token, { secret: SECRET }));
+  assert.ok(signatureVerifies(minted.token, { jwks: generateSigningKeys(SECRET).jwtJwks }));
+  assert.ok(!signatureVerifies(minted.token, { jwks: generateSigningKeys('another-secret').jwtJwks }));
+});
+
+test('a key set GoTrue would refuse is refused here too', () => {
+  const set = JSON.parse(generateSigningKeys(SECRET).jwtKeys);
+  assert.throws(() => signingKeyFrom('not json'), /not JSON/);
+  assert.throws(() => signingKeyFrom('{}'), /JSON array/);
+  assert.throws(() => signingKeyFrom([set[1]]), /exactly one key/);
+  assert.throws(() => signingKeyFrom([set[0], { ...set[0], kid: 'second' }]), /exactly one key/);
+  assert.throws(() => signingKeyFrom([{ ...set[0], kid: undefined }]), /a kid/);
+  assert.throws(() => mintJwt({ role: 'anon' }), /a secret or a signing key/);
 });
 
 test('a token with no exp reports null, which --check treats as the worst case', () => {

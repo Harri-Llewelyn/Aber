@@ -107,6 +107,24 @@ const gitignored = (path) => IGNORED.some((p) => p.test(path));
 }
 
 // -------------------------------------------------------------------------------------------------
+// 152. A reference to the upgrade guide outside markdown (its path, a comma, then a heading in double
+// quotes) names one of its headings exactly. NOTES.txt prints such a reference on every upgrade,
+// and the chart's values and the key scripts carry it, where check 1 cannot see a renamed heading.
+// -------------------------------------------------------------------------------------------------
+{
+  const GUIDE = 'help/site/upgrading.md';
+  const headings = new Set(read(GUIDE).split('\n').map((l) => l.match(/^#{1,6}\s+(.*?)\s*$/)?.[1]).filter(Boolean));
+  const refs = [];
+  for (const file of allFiles.filter((f) => !f.endsWith('.md') && !gitignored(f) && /\.(mjs|js|ts|ya?ml|txt|tpl|example)$/.test(f))) {
+    for (const m of read(file).matchAll(/help\/site\/upgrading\.md,\s*"([^"\n]+)"/g)) refs.push({ file, heading: m[1] });
+  }
+  const missing = refs.filter((r) => !headings.has(r.heading));
+  for (const r of missing) fail(`${r.file} names "${r.heading}" in ${GUIDE}, which has no such heading`);
+  if (!refs.length) fail(`check 152 found no reference to a heading of ${GUIDE}, so it compares nothing`);
+  else if (!missing.length) pass(`the ${refs.length} references to a heading of ${GUIDE} outside markdown name one`);
+}
+
+// -------------------------------------------------------------------------------------------------
 // 2. The component table (docs/architecture.md) pins the same image tags the chart does. The chart's values are
 // parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
@@ -1072,6 +1090,9 @@ function edgeFunctionNames() {
     'public.audit_trail_user_ids_matching': '0203 matches a person\'s display name as well as their email, since the Audit Trail labels a person\'s lane with the name; the baseline matches the email alone. It restates 0176\'s search_path pin',
     'public.end_my_session': '0211 writes a SESSIONS_ENDED row in the caller\'s lane, with the session as list_my_sessions() returned it, in the delete\'s transaction; 0206 wrote none',
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Security tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
+    'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
+    'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture; 0203 had no such row',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -7460,6 +7481,35 @@ const OPERATOR_PAIRS = [
     fail(`a fixed forward port in the runner's ephemeral range is not reserved, or a reservation is stale:\n${wrong.map((w) => `        ${w}`).join('\n')}`);
   } else {
     pass(`every fixed forward port inside ${LOW}-${HIGH} is reserved before its cluster exists (${[...devPorts, ...tunnelPorts].filter(inRange).join(', ')})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 154. k8s-validation sets its kubelet's sync period in the variable scripts/dev-cluster.mjs reads,
+// and docs/testing.md names the same period. A renamed variable fails silently: the cluster keeps
+// the kubelet's minute, and the stack lane is only slower.
+// -------------------------------------------------------------------------------------------------
+{
+  const WORKFLOW = '.github/workflows/ci.yml';
+  const JOB = '\n  k8s-validation:\n';
+  const text = read(WORKFLOW);
+  const start = text.indexOf(JOB);
+  const rest = start < 0 ? '' : text.slice(start + JOB.length);
+  const end = rest.search(/^ {2}[a-z0-9_-]+:$/m);
+  const block = end < 0 ? rest : rest.slice(0, end);
+  const set = /^\s+ABER_KUBELET_SYNC_FREQUENCY:\s*(\d+)s\s*$/m.exec(block)?.[1];
+  const reads = read('scripts/dev-cluster.mjs').includes('process.env.ABER_KUBELET_SYNC_FREQUENCY');
+  const said = /kubelet syncs its pods every (\d+) seconds/.exec(read('docs/testing.md'))?.[1];
+  const wrong = [];
+  if (start < 0) wrong.push(`${WORKFLOW} has no job k8s-validation`);
+  else if (!set) wrong.push(`${WORKFLOW}'s k8s-validation job no longer sets ABER_KUBELET_SYNC_FREQUENCY to whole seconds; the extraction no longer matches`);
+  if (!reads) wrong.push('scripts/dev-cluster.mjs no longer reads process.env.ABER_KUBELET_SYNC_FREQUENCY, so the job\'s setting reaches no cluster');
+  if (!said) wrong.push('docs/testing.md no longer says "kubelet syncs its pods every <n> seconds"; the extraction no longer matches');
+  else if (set && said !== set) wrong.push(`${WORKFLOW} sets ABER_KUBELET_SYNC_FREQUENCY to ${set}s and docs/testing.md says every ${said} seconds. Make them agree`);
+  if (wrong.length) {
+    fail(`k8s-validation's kubelet sync period and what reads and describes it disagree:\n${wrong.map((w) => `        ${w}`).join('\n')}`);
+  } else {
+    pass(`k8s-validation's kubelet syncs every ${set}s, set in the variable scripts/dev-cluster.mjs reads, as docs/testing.md says`);
   }
 }
 

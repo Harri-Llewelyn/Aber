@@ -1,9 +1,10 @@
 /**
  * Mint a long-lived JWT for a service principal, and reveal it once. A function and not an RPC,
- * because JWT_SECRET is not in the database and must not be: it signs anything, including a
- * `service_role` token that storage, realtime, the edge runtime and Studio accept without
- * consulting the denylist, so storing it in SQL would turn every path to SQL execution into a path
- * to an unrevocable credential. The edge runtime already holds the key, so the mint comes to it.
+ * because the signing key (JWT_KEYS' private key, or JWT_SECRET under HS256) is not in the
+ * database and must not be: it signs anything, including a `service_role` token that storage,
+ * realtime and the edge runtime accept without consulting the denylist, so storing it in SQL would
+ * turn every path to SQL execution into a path to an unrevocable credential. The edge runtime
+ * already holds the key, so the mint comes to it. sign.ts signs.
  *
  * Two checks: this function verifies the caller's session and role, and
  * `record_service_token_issued()` re-checks the actor against `user_roles` itself, so authorisation
@@ -13,7 +14,8 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import { create, getNumericDate } from "djwt";
+import { getNumericDate } from "djwt";
+import { signServiceToken } from "./sign.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 // Imported from another function's directory: this validator exists in exactly two places, the
@@ -58,12 +60,12 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = gatewayKey();
-    const jwtSecret = Deno.env.get("JWT_SECRET");
+    const signing = { jwtKeys: Deno.env.get("JWT_KEYS"), jwtSecret: Deno.env.get("JWT_SECRET") };
 
     // 500 WITH NOTHING SPECIFIC, matching every other function here. A response naming the missing
     // variable would tell an unauthenticated caller how this endpoint is wired.
-    if (!jwtSecret) {
-      console.error("mint-service-token: JWT_SECRET is not set; this worker cannot sign.");
+    if (!signing.jwtKeys && !signing.jwtSecret) {
+      console.error("mint-service-token: neither JWT_KEYS nor JWT_SECRET is set; this worker cannot sign.");
       return jsonResponse({ error: "Server misconfiguration" }, 500);
     }
 
@@ -123,25 +125,13 @@ export default async function handler(req: Request): Promise<Response> {
     const jti = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + days * 86400_000);
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(jwtSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
-
-    const token = await create(
-      { alg: "HS256", typ: "JWT" },
-      {
-        sub: principalId,
-        role: "authenticated",
-        iat: getNumericDate(0),
-        exp: getNumericDate(expiresAt),
-        jti,
-      },
-      key,
-    );
+    const { token } = await signServiceToken({
+      sub: principalId,
+      role: "authenticated",
+      iat: getNumericDate(0),
+      exp: getNumericDate(expiresAt),
+      jti,
+    }, signing);
 
     // Record before returning, and refuse to return if that fails. As the caller, not as
     // service_role: `record_service_token_issued()` is SECURITY DEFINER and re-checks `p_actor_id`
@@ -171,8 +161,8 @@ export default async function handler(req: Request): Promise<Response> {
       }, 400);
     }
 
-    // Reveal once. Nothing stores it: the signature is reproducible only from JWT_SECRET, and no
-    // row holds the token. A later change that caches this response has to argue with this comment
+    // Reveal once. Nothing stores it: the signature is reproducible only from the signing key, and
+    // no row holds the token. A later change that caches this response has to argue with this comment
     // first.
     return jsonResponse({
       token,

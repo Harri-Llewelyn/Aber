@@ -93,7 +93,13 @@ spec:
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # mint-service-token's signing key (ES256), in place of the secret: nothing else here
+            # signs or verifies a token, so the runtime holds no SUPABASE_JWKS.
+            {{- include "aber.secretEnv" (dict "name" "JWT_KEYS" "secretName" $secretName "key" "SUPABASE_JWT_KEYS") | nindent 12 }}
+            {{- else }}
             {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- end }}
             # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine
             # allow-lists Administrator/Shopfloor_Manager; aas-export also allows the read-scoped
             # roles. Verifying here would be a second, coarser gate that

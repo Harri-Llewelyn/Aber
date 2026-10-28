@@ -10,6 +10,7 @@ The settings for the whole site are on the **Settings** page, not here.
 
 - **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on **Access Control › People**. That is true for an Administrator too: another Administrator changes yours.
 - **Display name**, on the **Account** tab, is the name other people see you by. Type it, then select **Save**. To remove it, empty the box and select **Save**. **Your display name**, below, says where it shows.
+- **Picture**, on the **Account** tab, puts a picture on your account control at the foot of the sidebar. Select **Choose Picture**, then pick a PNG, JPEG or WebP file of up to 10 MB. The row shows how it will look. Select **Save** to keep it, or **Discard** to drop it. **Remove** takes it off. **Your picture**, below, says who sees it.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.
 - **Copy Key**, on the **Publishable key** row, copies the site's publishable key. Some tools ask for it beside your token. It is public: every browser that opens the dashboard is given it.
@@ -70,6 +71,18 @@ Your display name is shown first wherever you appear. Your email address stays t
 **A new name shows everywhere at once.** Pages read the name when they open. So a person who changes their name is shown under the new one, even beside things they did before.
 
 **The email address beside it is the one they had at the time.** Approvals keeps the address a proposal was made from. Archived Entities keeps the address of the person who deleted the entity. The Audit Trail and People show the address the account has now.
+
+## Your picture
+
+Your picture shows at a glance whose session is open. That helps on a shared PC, even with the sidebar collapsed.
+
+- **Only you see it.** It shows on your account control at the foot of the sidebar, and on this page. It does not show on People, Approvals, the Audit Trail or any other page. An Administrator cannot see it either.
+- **Without a picture,** the control shows the initials of your display name. Without a display name, it shows the person icon.
+- **It is shrunk before it is uploaded.** The page keeps the middle square of the picture and makes it 256 by 256 pixels. A phone photo of several megabytes uploads as a few tens of kilobytes.
+- **Only the picture is uploaded.** A camera or phone stores other details in a photo, such as where it was taken. Those are left behind.
+- **Nothing outside the site is asked for a picture.** Aber does not use Gravatar or any similar service.
+- **Older backups keep a picture you replaced or removed** until they are deleted in turn. The site's backups copy every stored file.
+- **If an Administrator removes your access,** your picture is deleted. If your access is restored, you come back with no picture.
 
 ## Your sessions
 
