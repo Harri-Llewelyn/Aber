@@ -994,6 +994,15 @@ export const SUITES = {
       "Administrator and the session; and that another person's session, a missing one and your " +
       'own are refused with no row.',
   },
+  'supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py': {
+    lanes: ['db'],
+    why:
+      '0217 -- that an Administrator lists every app and who allows it, and a person only their own ' +
+      "approvals; that revoking one ends that app's sessions for that person alone, with their " +
+      "refresh tokens; that the stack's own apps cannot be removed and another's removal ends every " +
+      'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
+      "row naming who did it, while a boot's re-seed writes none.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1339,6 +1348,15 @@ export const SUITES = {
       'gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the ' +
       'raise into the 401 and the code the dashboard signs in again on. The other session must ' +
       'still read.',
+  },
+  'supabase/test_revoking_an_app_ends_its_refresh_token.py': {
+    lanes: ['stack'],
+    why:
+      "Revoking a person's approval of an app ends the app's access (0217): a seeded account " +
+      "completes Grafana's authorization-code flow, the app's refresh token works, then the " +
+      'person revokes through GoTrue and an Administrator revokes through the dashboard\'s call, ' +
+      'and each time the refresh token is refused. Only GoTrue itself can show that its token ' +
+      'endpoint honours the ended session.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],

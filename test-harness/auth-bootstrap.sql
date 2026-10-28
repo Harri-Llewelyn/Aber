@@ -129,6 +129,51 @@ CREATE TABLE IF NOT EXISTS auth.oauth_clients (
 );
 GRANT SELECT, INSERT, DELETE ON auth.oauth_clients TO postgres;
 
+-- The columns the Apps tab lists and 0002's seed writes (0217), with GoTrue's types. Nullable
+-- where GoTrue's are not, so a suite can register a client by id and name alone. On a stack
+-- `postgres` holds every privilege on GoTrue's tables (the image's default privileges for
+-- supabase_auth_admin); 0217 updates them and puts triggers on them.
+DO $$
+BEGIN
+  CREATE TYPE auth.oauth_client_type AS ENUM ('public', 'confidential');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$$;
+ALTER TABLE auth.oauth_clients
+  ADD COLUMN IF NOT EXISTS client_secret_hash         text,
+  ADD COLUMN IF NOT EXISTS redirect_uris              text,
+  ADD COLUMN IF NOT EXISTS grant_types                text,
+  ADD COLUMN IF NOT EXISTS client_uri                 text,
+  ADD COLUMN IF NOT EXISTS logo_uri                   text,
+  ADD COLUMN IF NOT EXISTS client_type                auth.oauth_client_type NOT NULL DEFAULT 'confidential',
+  ADD COLUMN IF NOT EXISTS token_endpoint_auth_method text,
+  ADD COLUMN IF NOT EXISTS created_at                 timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at                 timestamptz NOT NULL DEFAULT now();
+GRANT UPDATE, TRIGGER ON auth.oauth_clients TO postgres;
+
+-- `auth.oauth_consents` is GoTrue's record of a person's approval of a client, as GoTrue's own
+-- migration makes it: one row per person and client, `revoked_at` set when it is taken back.
+-- Owned by GoTrue's role as on a stack, with the privileges the image's defaults give `postgres`.
+CREATE TABLE IF NOT EXISTS auth.oauth_consents (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  client_id  uuid NOT NULL REFERENCES auth.oauth_clients (id) ON DELETE CASCADE,
+  scopes     text NOT NULL,
+  granted_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz,
+  CONSTRAINT oauth_consents_user_client_unique UNIQUE (user_id, client_id),
+  CONSTRAINT oauth_consents_scopes_not_empty CHECK (char_length(trim(scopes)) > 0),
+  CONSTRAINT oauth_consents_revoked_after_granted CHECK (revoked_at IS NULL OR revoked_at >= granted_at)
+);
+ALTER TABLE auth.oauth_consents OWNER TO supabase_auth_admin;
+GRANT ALL ON auth.oauth_consents TO postgres;
+
+-- A suite makes GoTrue's own writes (a person's approval on the consent page, their revoke, the
+-- admin API's registration) as GoTrue's role, inside its own transaction: `postgres` may SET ROLE
+-- to it, and inherits none of its privileges.
+GRANT supabase_auth_admin TO postgres WITH INHERIT FALSE, SET TRUE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON auth.oauth_clients TO supabase_auth_admin;
+
 -- `auth.sessions` is GoTrue's too: one row per sign-in, deleted when the session ends. The API
 -- refuses a token whose `session_id` names no row (0205), so the suites start and end sessions as
 -- GoTrue does. The columns are the ones the chain reads (0206, 0207, 0208), with GoTrue's types:
@@ -152,6 +197,8 @@ ALTER TABLE auth.sessions
   ADD COLUMN IF NOT EXISTS user_agent      text,
   ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
 GRANT SELECT, INSERT, DELETE ON auth.sessions TO postgres;
+-- GoTrue's revoke of a person's approval deletes that client's sessions for them (0217's suite).
+GRANT SELECT, DELETE ON auth.sessions TO supabase_auth_admin;
 
 -- `auth.refresh_tokens` is GoTrue's: a session's refresh tokens, deleted with it by GoTrue's
 -- foreign key (ON DELETE CASCADE), which is what makes deleting a session end it (0206, 0207,
