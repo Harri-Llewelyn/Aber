@@ -1022,6 +1022,15 @@ export const SUITES = {
       'unknown person, a machine identity and a missing count are refused with no row, while a ' +
       "removed person's factors may be reset and no session ends.",
   },
+  'supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py': {
+    lanes: ['db'],
+    why:
+      '0217 -- that an Administrator lists every app and who allows it, and a person only their own ' +
+      "approvals; that revoking one ends that app's sessions for that person alone, with their " +
+      "refresh tokens; that the stack's own apps cannot be removed and another's removal ends every " +
+      'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
+      "row naming who did it, while a boot's re-seed writes none.",
+  },
   'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1395,6 +1404,15 @@ export const SUITES = {
       'reads, lists, signs, overwrites and deletes none of it and the public URL serves nothing; ' +
       'the bucket refuses SVG, GIF and HTML and holds its 512 KiB limit; and Remove Access deletes the ' +
       'object and clears the column. Adds and deletes its own throwaway person.',
+  },
+  'supabase/test_revoking_an_app_ends_its_refresh_token.py': {
+    lanes: ['stack'],
+    why:
+      "Revoking a person's approval of an app ends the app's access (0217): a seeded account " +
+      "completes Grafana's authorization-code flow, the app's refresh token works, then the " +
+      'person revokes through GoTrue and an Administrator revokes through the dashboard\'s call, ' +
+      'and each time the refresh token is refused. Only GoTrue itself can show that its token ' +
+      'endpoint honours the ended session.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],

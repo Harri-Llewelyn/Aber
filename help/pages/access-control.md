@@ -1,10 +1,10 @@
 ## What this page is for
 
-This page shows who and what may reach Aber. Its first tab, **People**, lists everyone who signs in to the dashboard, with their role. The other four tabs cover the things that do not sign in: gateways, and Aber's own processes. Only Administrators can open it.
+This page shows who and what may reach Aber. Its first tab, **People**, lists everyone who signs in to the dashboard, with their role. **Apps** lists the apps that sign those people in, such as Grafana. The other four tabs cover the things that do not sign in: gateways, and Aber's own processes. Only Administrators can open it.
 
-The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. Point at a tab, or move to it with the keyboard, to read what it holds.
+The page is one card with six tabs: **People**, **Apps**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. Point at a tab, or move to it with the keyboard, to read what it holds.
 
-People, Broker credentials, Machine identities and Broker accounts each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities, **New Read-Only Account** on Broker accounts. Broker roles has no controls, so its list starts straight under the tabs.
+People, Apps, Broker credentials, Machine identities and Broker accounts each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities, **New Read-Only Account** on Broker accounts. Broker roles has no controls, so its list starts straight under the tabs.
 
 There is no Refresh button. Every change you make here reads the list again. To pick up a change made somewhere else, such as by another Administrator, reload the page: it opens on the same tab and filters.
 
@@ -67,6 +67,28 @@ There is no Refresh button. Every change you make here reads the list again. To 
 
 **A new password ends their other sessions, some of them later.** Their old password stops working straight away. Studio and the forge sign them out at their next request. Node-RED and an open dashboard do within a minute, and Grafana within the hour. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
 
+## Apps that sign people in
+
+An app such as Grafana can sign a person in with their Aber account. The first time it does, it asks the person to allow it. They answer once, and it remembers. **Apps** lists every app that can do this, and who has allowed each.
+
+- **App** is the app's name. The name it was registered with is shown under it.
+- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own four apps: Grafana, Node-RED, Studio and the forge. **Added by hand** is an app added through the sign-in service's admin API.
+- **Sends people back to** lists the addresses the sign-in service may send a person to after they sign in. It refuses any other.
+- **Type** is **Confidential** for an app that holds a secret, on a server. A **Public** app holds none.
+- **People** is how many people allow the app now.
+- The **search** box matches an app's name and the addresses it sends people back to. **Clear filters** empties it.
+- No app can register itself, because Aber keeps that turned off. Only someone holding the secret key can add one.
+
+**Click an app's row**, or press Enter on it, to open its drawer. It lists the people who allowed the app, when, and what it may read.
+
+- **Revoke**, on a person's row, takes back their approval. A dialog asks first. Select **Revoke Approval** to do it.
+- The app's sessions for that person end at once. The API refuses them straight away. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within an hour.
+- The app asks them to allow it again the next time it signs them in. Their role and their other sessions do not change.
+- A person can revoke their own approval on their **Profile** page, on the **Security** tab.
+- **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
+- **Aber's own four apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
+- Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.
+
 ## The other tabs
 
 - **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
@@ -79,7 +101,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Bundle** is offered for a Remote gateway. It produces the setup bundle. The gateway creates its own credential when it enrols, so the password never passes through a browser.
 - An archived gateway offers neither, only **Restore to issue**. Its credential was disabled at the broker. Once the gateway is restored, it can be issued a new one.
 - The Playback gateway's credential is shown only once. If it is lost, issue another.
-- **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the five tab names in the search bar to open the page on that tab.
+- **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the six tab names in the search bar to open the page on that tab.
 - On **Machine identities**, the search box matches an identity's name, or its whole principal ID. Withdrawn identities are hidden. Select **Show withdrawn** to list them.
 - **No gateway** marks a broker account that looks like a gateway's, but that no gateway claims and nothing declares. It is listed under **Broker accounts**, after Aber's own accounts. It is usually the account of a gateway that was deleted before deleting a gateway also disabled its broker account. `scripts/revoke-orphaned-broker-accounts.mjs` lists such accounts and disables them. It never deletes one.
 - Aber's own broker accounts are made each time the broker starts, by `mosquitto-init`. There is one for each `MQTT_…_USER` and `MQTT_…_PASSWORD` pair in the deployment's environment.

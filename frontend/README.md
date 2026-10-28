@@ -555,6 +555,16 @@ and the drawer moves with it rather than being tidied away. A password
 by `PasswordShownOnce` and lives in its dialog's state until it closes, as a minted token does in
 `ServiceTokenModal`.
 
+The **Apps** tab (`components/tabs/AppsSection.jsx`), after People and gated as it is, lists the
+apps that sign people in: GoTrue's OAuth clients, from `list_apps()` (`supabase/README.md`
+`0217`). A row is the app by the name the Sessions list uses (`appLabel()` in `utils/apps.js`),
+how and when it was registered, the addresses it sends people back to, its client type and how many
+people allow it. A click or Enter opens its drawer, `?app=<id>` (`appUrl()`), into the same host
+as a person's. The drawer reads `app_approvals()` when it opens and draws the people in
+`components/common/AppApprovalsTable.jsx`, the table Profile's list of approvals shares; Revoke calls
+`revoke_app_approval()` and Remove App `remove_app()`, each after a dialog that says what ends.
+Remove App is disabled for Aber's own four, which db-init registers again on every boot.
+
 **Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
 `utils/passwords.js` sends the current password with the new one in one
 `supabase.auth.updateUser()`, and GoTrue checks the current one before it sets anything
@@ -690,6 +700,11 @@ Value, Actions), header row and all, so the two read alike.
   Cancel removes the half-made one. Remove (`modals/RemoveSecondFactorModal.jsx`) asks first, and
   takes a code first when the session is `aal1`, since GoTrue removes a verified factor only from
   `aal2`. A removal renews the token, so the dashboard sees a session GoTrue lowered to `aal1`.
+- **The third is Apps you have allowed** (`components/tabs/AllowedAppsSection.jsx`): each app
+  the person allowed (`list_my_app_approvals()`, `supabase/README.md` `0217`), in
+  `components/common/AppApprovalsTable.jsx`. Revoke calls GoTrue's own `DELETE /user/oauth/grants`
+  through `supabase.auth.oauth.revokeGrant()`, which also ends that app's sessions for the person,
+  then toasts and reads the list again. A trigger on GoTrue's table writes the Audit Trail row.
 
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way

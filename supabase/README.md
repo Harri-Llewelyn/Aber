@@ -237,7 +237,8 @@ catalog row is in the text. Two things hold this:
   policy the chain states in each part (roles, command, `AS RESTRICTIVE`, `USING`, `WITH CHECK`),
   every trigger (disabled, replica-only, BEFORE and AFTER swapped), and every guarded CHECK and
   foreign key (replaced by another constraint under its name). The file's own call or guard must
-  put each back. After the chain, every statement and guard must equal its live object. Running
+  put each back. A trigger on GoTrue's tables is changed as GoTrue's role; on
+  `auth.oauth_consents`, where the replay may not drop one, the replay must fail instead (`0217`). After the chain, every statement and guard must equal its live object. Running
   every call again must take no `ACCESS EXCLUSIVE` lock, and running every guard again must keep
   every constraint's oid.
 - Check-docs-drift's check 59. Every `CREATE POLICY` and `CREATE TRIGGER` in an applied migration
@@ -2177,6 +2178,91 @@ the pin, who may execute it, one signature only (PostgREST calls by argument nam
 request with no identity is refused.
 `test_an_administrator_resets_a_person_s_second_factor.py` holds the check, the row and the
 refusals; `supabase/test_a_person_can_enrol_a_second_factor.py` drives the whole path on a stack.
+
+### Apps that sign people in are listed and revoked (0217)
+
+GoTrue's OAuth server signs people in to Grafana, Node-RED and the Studio and forge doors. An app
+is one row of `auth.oauth_clients`; a person's approval of it, given once on the consent page
+(`pages/OAuthConsent.jsx`), is one row of `auth.oauth_consents`. Both were readable only in Studio.
+Dynamic registration has been off since `0197` (measured on 2026-10-27: `POST
+/auth/v1/oauth/clients/register` answers 403 `oauth_dynamic_client_registration_disabled`, with the
+publishable key or none), so an app is added only through GoTrue's admin API, with the secret key,
+or by SQL.
+
+- **Reading.** `list_apps()` returns every app not removed (`deleted_at` null), Aber's four first:
+  its name, `registration_type`, `part_of_stack`, `client_type`, `redirect_uris` as an array (GoTrue
+  keeps them comma-separated), `client_uri`, `created_at` and `people_allowing`, the approvals in
+  force. Never `client_secret_hash`. `app_approvals(p_client_id)` lists who allows one app, with
+  their email and display name; a removed app is a 404. Both are Administrator only.
+  `list_my_app_approvals()` is the caller's own, for any person role; it leaves out a removed app,
+  as GoTrue's own `GET /user/oauth/grants` does. `stack_app_ids()` names the four ids `0002` pins;
+  mirror check 30 holds the two lists together.
+- **A person takes their own approval back through GoTrue**, `DELETE /user/oauth/grants`
+  (`supabase.auth.oauth.revokeGrant()`). Its handler (`UserRevokeOAuthGrant`, v2.197.0) sets the
+  consent's `revoked_at` and runs `DELETE FROM sessions WHERE user_id = ? AND oauth_client_id = ?`;
+  the refresh tokens cascade from their sessions. Deleting the consent row alone would only bring
+  the question back: the app's sessions, and so its refresh tokens, would live on.
+- **An Administrator takes one person's back with `revoke_app_approval(p_user_id, p_client_id)`.**
+  GoTrue has no endpoint for revoking another person's grant, so the function runs the handler's
+  two statements. It refuses through `check_person_act()` (`0166`): Administrator only, under the
+  People lock, an unknown person a 404 and a machine identity `22023`. An approval not in force is
+  a 404. It returns how many sessions ended. Your own may be revoked here too; it is the same act
+  as Profile's Revoke.
+- **Removing an app is SQL, not GoTrue's admin API.** GoTrue's admin `DELETE
+  /admin/oauth/clients/{id}` (`deleteOAuthServerClient`) sets `deleted_at` and nothing else: the
+  app's consents stay, and so do its sessions, whose access tokens `auth_pre_request()` would go on
+  serving (`0205` asks only whether the session exists). `remove_app(p_client_id)` sets `deleted_at`
+  the same way, so GoTrue's own reads (`deleted_at IS NULL`) stop finding it, and in the same
+  transaction revokes every approval of it and deletes every session it holds. It needs no secret
+  key and no edge function, and the Audit Trail rows carry the Administrator. It returns `{name,
+  approvals_ended, sessions_ended}`.
+- **Aber's own four cannot be removed** (`42501`). `0002` upserts each with `deleted_at = NULL` on
+  every boot, so a removal would undo itself at the next one; the four are part of the stack.
+- **Each act is an Audit Trail row, written by a trigger**, because registration and approval happen
+  inside GoTrue. On `auth.oauth_clients`, in the app's lane (`entity_type = 'oauth_clients'`, filed
+  under `security` by `audit_domain_for()`'s default): `APP_REGISTERED` for an insert,
+  `APP_REMOVED` when `deleted_at` is set or a live row is deleted, and `APP_RESTORED` when it is
+  cleared, which is `0002` bringing back a stack app removed behind the dashboard. On
+  `auth.oauth_consents`, in the person's lane (`user_roles`): `APP_APPROVED` when a consent is
+  inserted, given again or re-scoped (GoTrue stamps `granted_at` at each approval, and at nothing
+  else), and `APP_APPROVAL_REVOKED` when `revoked_at` is set. Every row is one-sided: `old_data` is
+  NULL and `new_data` holds the app's facts (`app_facts()`, never the secret's hash) or the
+  approval's `{email, app: {id, name}, scopes, granted_at}`, with `removed_at` or `revoked_at`.
+- **Who did it.** A dashboard call carries a token, so `changed_by` is `auth.uid()`: the
+  Administrator who revoked or removed. GoTrue writes with its own role and no token. For a consent
+  that is always the person whose consent it is, at their consent page or their own revoke (in
+  v2.197.0 nothing else in GoTrue writes `oauth_consents`; `RevokeOAuthServerConsentsByClient` and
+  `…ByUser` are never called), so the trigger records the person, `actor_source = 'user'`. For a
+  client it is the admin API, `actor_source = 'service'` with no person. A migration is
+  `migration`.
+- **A boot writes nothing.** `0002`'s upsert of an existing row is an UPDATE that leaves `deleted_at`
+  NULL, and the update trigger fires only when `deleted_at` changes between NULL and a time. The
+  first seed of a stack app on a stack that already has `0217` writes one `APP_REGISTERED`, by
+  `migration`; on a fresh install `0002` runs before `0217` and writes none.
+- **The triggers are on GoTrue's tables, which `postgres` does not own.** It creates them with the
+  TRIGGER privilege the image's default privileges give it on every table `supabase_auth_admin`
+  creates; the file checks it first and names it if absent. Disabling a trigger needs the owner.
+  `replay_trigger()` drops a trigger whose definition differs, and `postgres` may drop one on
+  `auth.oauth_clients` only because supautils lists that table (`supautils.drop_trigger_grants`, in
+  the image's `supautils.conf`). It does not list `auth.oauth_consents`, which is newer than the
+  list. So that table has one trigger, `AFTER INSERT OR UPDATE` with no `WHEN`, and
+  `log_app_approval()` decides what is recorded: a later file changes the function, never the
+  trigger. If GoTrue's role disabled or changed it, the replay would fail the boot rather than leave
+  it stale. `test_replay_recreates_only_what_differs.py` holds both: the two client triggers come
+  back from any change GoTrue's role makes, and the consent trigger's replay refuses.
+
+The file's self-check asserts each function's `SECURITY DEFINER` and pin, that only the five calls
+are granted to `authenticated` and none to `anon` or `service_role`, that each refuses a request
+with no identity, that `app_list_items()` splits GoTrue's lists and `app_facts()` drops the hash,
+that the owner may read and update both tables and put triggers on them, and that the three triggers
+are in place. The test database's fixture (`test-harness/auth-bootstrap.sql`) gains
+`auth.oauth_consents` as GoTrue's migration makes it, the client columns `0002` and these functions
+read, both tables owned by `supabase_auth_admin` as on a stack, and lets `postgres` take GoTrue's role
+(`WITH INHERIT FALSE, SET TRUE`) so a suite makes GoTrue's own writes in its transaction.
+`test_apps_that_sign_people_in_are_listed_and_revoked.py` holds the reads, both revokes, the
+removal, every row and its actor, and `0002`'s own Grafana block run twice. The stack suite
+`supabase/test_revoking_an_app_ends_its_refresh_token.py` completes Grafana's code flow and shows
+that each revoke refuses the app's refresh token.
 
 ### An Administrator's read-only broker account is recorded (0218)
 

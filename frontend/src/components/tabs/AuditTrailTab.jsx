@@ -10,7 +10,7 @@ import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
-  IconRecord, IconFileText, IconRefreshCw
+  IconRecord, IconFileText, IconRefreshCw, IconGlobe
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -482,6 +482,7 @@ const SECTION_ICONS = {
   ACCESS:             IconShieldCheck,
   'SERVICE IDENTITY': IconLock,
   'BROKER ACCOUNT':   IconRadio,
+  APP:                IconGlobe,
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
   SETTING:            IconSettings,
@@ -718,7 +719,9 @@ const formatValue = (v) => {
 const shownAfter = (action, d) =>
   action === 'SESSIONS_ENDED' && d.field === 'session' && d.after && typeof d.after === 'object'
     ? sessionLabel(d.after)
-    : formatValue(d.after)
+    : APP_ACT_LABELS[action] && d.field === 'app' && d.after?.name
+      ? d.after.name
+      : formatValue(d.after)
 
 const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</span>
 
@@ -855,14 +858,26 @@ const CAPTURE_ACT_LABELS = {
 }
 
 /**
+ * The acts on an app that signs people in (0217): the section heading and value column for each.
+ * Every one carries `new_data` alone; an approval's `app` is shown by its name.
+ */
+const APP_ACT_LABELS = {
+  APP_REGISTERED:       ['App registered', 'Registered'],
+  APP_REMOVED:          ['App removed', 'Removed'],
+  APP_RESTORED:         ['App restored', 'Restored'],
+  APP_APPROVED:         ['App allowed', 'Allowed'],
+  APP_APPROVAL_REVOKED: ['App approval revoked', 'Revoked'],
+}
+
+/**
  * The property diff, passed to ContextPanel through `beforeActions`. ContextPanel is presentational
  * and knows nothing about audit payloads.
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
-  const captureAct = CAPTURE_ACT_LABELS[action]
+  const captureAct = CAPTURE_ACT_LABELS[action] || APP_ACT_LABELS[action]
   // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
-  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, the capture lane's): `old_data`
+  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, the capture and app acts): `old_data`
   // is NULL by construction, and a Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'

@@ -11,6 +11,10 @@ import path from 'node:path'
  * table takes one of the hooks below, so the file holds one hook call per sortable table.
  */
 const TABLES = {
+  'components/common/AppApprovalsTable.jsx': {
+    sortable: 0,
+    fixed: ["Approvals of apps, a handful: newest first, as the sign-in service lists them. The Security tab and an app's drawer on Apps both draw it."]
+  },
   'components/common/HelpMarkdown.jsx': {
     sortable: 0,
     fixed: ['A table in a help page: its rows in the order the page writes them, as GitHub shows them.']
@@ -27,6 +31,7 @@ const TABLES = {
   },
   'components/modals/TelemetryModal.jsx': { sortable: 1 },
   'components/tabs/AccessControlTab.jsx': { sortable: 4 },
+  'components/tabs/AppsSection.jsx': { sortable: 1 },
   'components/tabs/ApprovalsTab.jsx': {
     sortable: 1,
     fixed: ['A proposal\'s changes: its fields in the order its form lists them, beside their values.']

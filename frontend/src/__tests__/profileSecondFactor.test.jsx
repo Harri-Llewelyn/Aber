@@ -74,7 +74,7 @@ describe('the Second factor section', () => {
   it('follows Sessions, with an About tip, and offers Add Second Factor to every role', async () => {
     renderSecurity({ userRole: 'Auditor' })
     const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
-    expect(headings).toEqual(['Sessions', 'Second factor'])
+    expect(headings).toEqual(['Sessions', 'Second factor', 'Apps you have allowed'])
     expect(screen.getByRole('button', { name: 'About second factors' })).toBeInTheDocument()
     expect(await screen.findByText('You have no second factor. Your password alone signs you in.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Add Second Factor/ })).toBeEnabled()

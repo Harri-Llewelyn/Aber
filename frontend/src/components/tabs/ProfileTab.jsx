@@ -17,6 +17,7 @@ import { SecondFactorSection } from './SecondFactorSection'
 import { AccountAvatar } from '../common/AccountAvatar'
 import { IconUpload, IconTrash } from '../common/Icons'
 import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
+import { AllowedAppsSection } from './AllowedAppsSection'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = PROFILE_TABS
@@ -546,6 +547,7 @@ export function ProfileTab({
           {/* A section per subject, each with its own heading: Sessions is the first. */}
           {section === 'security' && <SessionsSection isPerson={!!email} showToast={showToast} />}
           {section === 'security' && <SecondFactorSection isPerson={!!email} showToast={showToast} />}
+          {section === 'security' && <AllowedAppsSection isPerson={!!email} showToast={showToast} />}
         </div>
       </div>
     </div>

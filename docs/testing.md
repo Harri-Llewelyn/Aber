@@ -97,6 +97,14 @@ python supabase/test_sign_out_ends_one_session.py
 # clears avatar_path, and Restore Access brings the person back with no picture. The account is
 # deleted afterwards.
 python supabase/functions/manage-people/test_account_pictures_stack.py
+# Revoking an app ends its refresh token (0217). Needs the stack up, with GRAFANA_OAUTH_CLIENT_SECRET.
+# The seeded Operator signs in to Grafana's client as Grafana does (the code flow with PKCE, the
+# consent page's approval, the code exchanged with the secret) and the app's refresh token works.
+# Then the person revokes through GoTrue, and in a second round an Administrator revokes through
+# revoke_app_approval(): each time the refresh token is refused, the API refuses the app's access
+# token, the next sign-in asks again, the person's dashboard is still served, and the Audit Trail
+# names who revoked it.
+python supabase/test_revoking_an_app_ends_its_refresh_token.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -756,6 +764,15 @@ python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_
 # identity and a missing or negative count are refused with no row; a removed person's factors may
 # be reset, and no session ends. Every test rolls back.
 python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor.py
+# Apps that sign people in are listed and revoked (0217). list_apps() shows an Administrator every
+# app not removed, Aber's four marked, with how many people allow each and never a secret;
+# app_approvals() shows who allows one, and list_my_app_approvals() a person their own alone.
+# revoke_app_approval() revokes one person's approval and ends that app's sessions for them, with
+# their refresh tokens, and nothing else. remove_app() refuses Aber's own; for another it revokes
+# every approval and ends every session in one act. Each act writes its row naming who did it,
+# whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
+# writes none. Every test rolls back.
+python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and

@@ -90,6 +90,7 @@ export const CARDS = [
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
   { id: 'people',               ...tabCard('access-control', 'people'), keywords: ['users', 'accounts', 'add person', 'invite', 'change role', 'remove access', 'restore access', 'set new password', 'lost password'] },
+  { id: 'apps',                 ...tabCard('access-control', 'apps'), keywords: ['oauth', 'oauth clients', 'authorized apps', 'connected apps', 'third-party apps', 'consent', 'revoke approval', 'remove app', 'sign in with aber'] },
   { id: 'broker-credentials',   ...tabCard('access-control', 'credentials'), keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
   { id: 'machine-identities',   ...tabCard('access-control', 'identities'), keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
   { id: 'broker-accounts',      ...tabCard('access-control', 'accounts'), keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
@@ -98,7 +99,7 @@ export const CARDS = [
 
   { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['email', 'role', 'password', 'change password', 'my role'] },
   { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] },
-  { id: 'profile-security',     ...tabCard('profile', 'security'), keywords: ['sessions', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop', 'second factor', 'mfa', 'two-factor', '2fa', 'authenticator', 'totp'] }
+  { id: 'profile-security',     ...tabCard('profile', 'security'), keywords: ['sessions', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop', 'second factor', 'mfa', 'two-factor', '2fa', 'authenticator', 'totp', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }
 ]
 
 /**

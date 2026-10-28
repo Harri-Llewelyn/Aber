@@ -83,6 +83,14 @@ export const AUDIT_TRAIL_ACTIONS = {
   SESSIONS_ENDED:    'Sessions ended',
   // An Administrator's Reset MFA (0216): every second factor the person held, deleted, with how many.
   MFA_RESET:         'MFA reset',
+  // An app that signs people in (0217): written by triggers on the sign-in service's own tables,
+  // so an act inside it is recorded too. Registration and removal are in the app's lane, and a
+  // person's approval, given or revoked, in theirs.
+  APP_REGISTERED:       'App registered',
+  APP_REMOVED:          'App removed',
+  APP_RESTORED:         'App restored',
+  APP_APPROVED:         'App allowed',
+  APP_APPROVAL_REVOKED: 'App approval revoked',
   // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
   // when an appliance reports a different flow hash: the digest before and after, and what the
   // forge's main held at that moment. Actor `ingestion`, no user.
@@ -134,6 +142,8 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // A read-only broker account made or deleted on Access Control (0218): an INSERT and a DELETE,
   // filed under security by audit_domain_for()'s fail-closed default. No table holds the account.
   { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
+  // The apps that sign people in (0217): the sign-in service's OAuth clients.
+  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
