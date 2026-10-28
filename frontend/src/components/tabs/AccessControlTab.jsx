@@ -414,7 +414,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           <CardHeading
             icon={<IconLock size={15} />}
             title="Access Control"
-            description="Who may reach Aber: the people who sign in, the apps that sign them in, and the credentials that let gateways and the stack's own processes reach the broker and the database."
+            description="Who may reach Aber: the people who sign in, and the credentials that let gateways and the stack's own processes reach the broker and the database."
           />
 
           <TabStrip

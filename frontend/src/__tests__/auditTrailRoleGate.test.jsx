@@ -20,7 +20,7 @@ vi.mock('../api', async () => {
 // The three audit_domain_for() names, and the two backup kinds it files there by its
 // fail-closed default: an act on the whole database is an Administrator's to perform, so it is an
 // Administrator's and an Auditor's to read.
-const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Settings', 'Backup jobs', 'Backups']
+const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Apps', 'Settings', 'Backup jobs', 'Backups']
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -37,7 +37,7 @@ describe('which entity types a role is offered', () => {
     for (const e of AUDIT_TRAIL_ENTITY_TYPES) expect(['asset', 'security']).toContain(e.domain)
   })
 
-  it('the security kinds are exactly the five the policy guards', () => {
+  it('the security kinds are exactly the six the policy guards', () => {
     const security = AUDIT_TRAIL_ENTITY_TYPES.filter(e => e.domain === 'security').map(e => e.label)
     expect(security.sort()).toEqual([...SECURITY_LABELS].sort())
   })
