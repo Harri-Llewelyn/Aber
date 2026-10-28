@@ -119,6 +119,11 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # Verifies ES256 by kid and HS256 by the legacy key. The secret above stays: storage-api
+            # signs its own signed URLs with it, and falls back to it for an HS256 token.
+            {{- include "aber.secretEnv" (dict "name" "JWT_JWKS" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
+            {{- end }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

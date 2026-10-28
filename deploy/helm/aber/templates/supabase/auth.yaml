@@ -86,6 +86,12 @@ spec:
             - name: API_EXTERNAL_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # Signs with the one key whose key_ops hold `sign` (ES256, with its kid) and verifies
+            # with every key, the legacy secret among them. GOTRUE_JWT_SECRET stays: GoTrue
+            # requires it, and it is that legacy key.
+            {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_KEYS" "secretName" $secretName "key" "SUPABASE_JWT_KEYS") | nindent 12 }}
+            {{- end }}
             - name: GOTRUE_JWT_EXP
               value: {{ .Values.supabaseAuth.jwtExpiry | quote }}
             {{- /* Unset is off. GoTrue exits on a duration of zero or less, or one with no unit. */}}

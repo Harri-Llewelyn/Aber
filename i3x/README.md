@@ -801,8 +801,8 @@ two ways:
   on stderr.
 
 Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
-the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
-GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
+the key GoTrue signs with (ES256 with `supabaseAuth.es256Signing`, the HS256 secret without), so
+PostgREST validates it exactly as it validates a GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
 Read-only API client, seeded by archived migration 0034. The ceiling is
 `service_token_max_days()`, which the database enforces as well as both issuers.
@@ -839,13 +839,14 @@ consults; withdrawing the principal refuses every token that names it. What that
 - **This server** refuses it within 15 seconds, because it authenticates every request but
   `GET /info` through PostgREST ([Security](#security)). An open stream ends at its next
   15-second keepalive.
-- **Storage, Realtime, the edge runtime and Studio do not.** They check only the signature, and
-  accept a revoked token until it expires.
+- **Storage, Realtime and the edge runtime do not.** They check only the signature, and accept a
+  revoked token until it expires.
 
-So the expiry still bounds those four, which is why `--days` is a real decision: a token revoked
-after a laptop left the building still reaches them until it expires. **Do not rotate
-`secrets.jwtSecret` to withdraw one token**: that invalidates every token in the stack, including
-the stack's own keys.
+So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
+after a laptop left the building still reaches them until it expires. **Do not rotate the signing
+key to withdraw one token**: that invalidates every token in the stack, including the stack's own
+keys. An HS256 token stops verifying in 1.8, so one issued before `supabaseAuth.es256Signing` is
+issued again before that upgrade.
 
 **The script's closing lines print both halves on purpose.** Until archived migration 0074 made a
 single token revocable, they said there was no revocation short of rotating that secret, which is

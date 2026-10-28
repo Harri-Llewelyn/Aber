@@ -55,8 +55,9 @@ preflight:
 # Credentials
 #
 # The Supabase values are a SET: `anonKey`, `serviceRoleKey`, `ingestionKey` and `playbackKey`
-# are JWTs signed by `jwtSecret`, so none is generated and the render fails if any is missing.
-# Claims: {"iss":"supabase","role":"anon"} / {"iss":"supabase","role":"service_role"}, HS256.
+# are JWTs signed by `jwtSecret` (HS256), or by the private key in `jwtKeys` (ES256) with
+# supabaseAuth.es256Signing, so none is generated and the render fails if any is missing.
+# Claims: {"iss":"supabase","role":"anon"} / {"iss":"supabase","role":"service_role"}.
 # External secret management attaches through `existingSecret`.
 # ---------------------------------------------------------------------------------------------
 secrets:
@@ -64,8 +65,17 @@ secrets:
   # and the named Secret must carry the same keys.
   existingSecret: ""
 
-  # HS256 signing key shared by GoTrue, PostgREST, Realtime, Storage, the gateway and Node-RED.
+  # The HS256 signing secret. Without supabaseAuth.es256Signing every token is signed with it and
+  # GoTrue, PostgREST, Realtime, Storage, the gateway and Node-RED verify with it. With it, it is
+  # the legacy key in the two values below and verifies tokens signed before, until 1.8.
   jwtSecret: ""
+  # Read only with supabaseAuth.es256Signing, and both required then. `npm run setup` mints them;
+  # `npm run keys:rotate -- --signing-keys` adds them to an existing site (help/site/upgrading.md).
+  # jwtKeys is GoTrue's signing set: a JSON array of the EC P-256 private key (key_ops sign and
+  # verify, a kid) and jwtSecret as an `oct` JWK. jwtJwks is what every verifier takes: a JWKS of
+  # the public key and the same `oct` JWK.
+  jwtKeys: ""
+  jwtJwks: ""
   # The JWTs the upstreams require. No caller presents them: the gateway substitutes them for
   # the two keys below and refuses them as an apikey.
   anonKey: ""
@@ -85,7 +95,7 @@ secrets:
 
   # The release check's credential, subject b0000000-0000-4000-8000-000000000004
   # (Service_ReleaseCheck). It reaches record_release_check() and nothing else. Required only
-  # with releaseCheck.enabled; signed by jwtSecret like the two above.
+  # with releaseCheck.enabled; signed like the two above.
   releaseCheckKey: ""
 
   # The broker passwords the playback worker holds, keyed by gateway sparkplug_id:
@@ -608,6 +618,12 @@ supabaseAuth:
   # The four demo personas in supabase/seed.sql, admin@aber.local and three others, with a published
   # password. For a development stack only; values-dev.yaml turns them on.
   demoAccounts: false
+  # Sign with an EC P-256 key pair (secrets.jwtKeys, secrets.jwtJwks) instead of secrets.jwtSecret.
+  # Every verifier takes the public key and still accepts HS256 tokens signed before, and the
+  # Grafana and Node-RED sign-ins take an OpenID Connect ID token. Off is HS256, deprecated in 1.7:
+  # 1.8 requires the key set. Turning it on, in three steps:
+  # help/site/upgrading.md, "From 1.7.0, sign tokens with ES256".
+  es256Signing: false
   jwtExpiry: 3600
   # GoTrue ends a session nothing has refreshed for this long, so the person signs in again. An
   # open dashboard refreshes about hourly and stays signed in, as a wall display must; a closed

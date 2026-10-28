@@ -19,9 +19,23 @@ Node-RED mounts them separately — `adminAuth` guards `httpAdminRoot`, `httpNod
 
 | Surface | Who | How |
 | :--- | :--- | :--- |
-| `adminAuth.strategy` | humans | `passport-oauth2` against GoTrue (**not** `passport-openidconnect`) |
-| `adminAuth.tokens` | services | the caller's own Supabase access token, verified HS256 then resolved through `nodered-userinfo` |
+| `adminAuth.strategy` | humans | `passport-oauth2` against GoTrue (**not** `passport-openidconnect`); with `supabaseAuth.es256Signing` it asks for `openid` and requires the ID token |
+| `adminAuth.tokens` | services | the caller's own Supabase access token, verified (ES256 and HS256 against `SUPABASE_JWT_JWKS`, or HS256 against `SUPABASE_JWT_SECRET`) then resolved through `nodered-userinfo` |
 | `httpNodeAuth` | `http in` nodes | a **function**, not `{user, pass}` — Express middleware, which is what allows a bearer check |
+
+### GoTrue's tokens, and the sign-in's ID token
+
+With `supabaseAuth.es256Signing` the chart gives Node-RED `SUPABASE_JWT_JWKS` in place of
+`SUPABASE_JWT_SECRET`. `adminAuth.tokens` then verifies an ES256 token by its `kid`, and an HS256
+one, signed before the switch, by the JWKS's legacy `oct` key, until 1.8 removes it. Without it,
+HS256 against the secret, as before.
+
+The editor's sign-in asks for `openid` with the JWKS only: under HS256 GoTrue refuses to sign an ID
+token and the sign-in fails. With it, the ID token is required: it must verify against the JWKS,
+name this client in `aud`, and name the person `nodered-userinfo` answers for. The permissions
+still come from `nodered-userinfo`, because the ID token carries no role. `passport-oauth2` passes
+the token response, `id_token` with it, only to a five-parameter verify, and Node-RED's wrapper
+takes four, so `settings.js` subclasses the strategy to carry the ID token in the profile.
 
 ### `adminAuth.users` is required, and its absence breaks nothing at login
 
@@ -83,6 +97,11 @@ HS256 because pgjwt implements only the HS family. The consequence — Node-RED 
 would itself accept — is bounded by that same scope, and is the trade for not adding an asymmetric
 signing dependency to a fire-and-forget notification path.
 
+So `NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret under ES256 signing too. It is
+not GoTrue's: the database signs with it and `httpNodeAuth` alone verifies it, and no GoTrue
+verifier accepts it. Moving it to the key set would mean the database signing with a private key.
+[#1007](https://github.com/Harri-Llewelyn/Aber/issues/1007) (1.8) decides its end.
+
 `NODERED_ADMIN_TOKEN` survives as **break-glass only**: `settings.js` reads it from Node-RED's
 environment and accepts it on the admin API when set, for when Supabase Auth is down and the flows
 still have to be reachable. It is empty by default, and the database keeps no copy of it (`0161`).
@@ -93,9 +112,9 @@ still have to be reachable. It is empty by default, and the database keeps no co
   `passport.authenticate(['bearer','tokens','anon'])`; with no default the `anon` arm has nothing
   to return. Setting it reopens the hole wholesale, so `settingsAreCorrect()` treats its presence
   as a broken file rather than a preference to preserve.
-- **`passport-openidconnect` cannot be used.** It always requests `openid` and requires an
-  `id_token` GoTrue refuses to sign under HS256; its discovery document also reports `issuer: ""`
-  with relative paths.
+- **`passport-openidconnect` cannot be used.** It always requests `openid`, which fails under
+  HS256, and it reads GoTrue's discovery document, which reports `issuer: ""` with relative paths
+  under ES256 too.
 - **The client is registered `client_secret_post`**, unlike Grafana's `client_secret_basic` — that
   is what `passport-oauth2` sends by default, and GoTrue enforces whichever is registered exactly.
   `publicUrls.nodered` (by default `<scheme>://nodered.<domain>`) feeds both the `redirect_uris`

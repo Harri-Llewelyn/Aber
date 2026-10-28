@@ -1,11 +1,15 @@
 // =================================================================================================
-// Minting and inspecting the stack's own HS256 JWTs.
+// Minting and inspecting the stack's own JWTs, and the key set they are signed with.
 //
 // EXTRACTED SO THAT SETUP AND ROTATION CANNOT DRIFT (issue #101). `scripts/setup.mjs` signs these
 // keys once, at install; `scripts/rotate-service-keys.mjs` signs the same keys again, on a live
 // stack. Two copies of the claim set would diverge on the first change to either -- and the claims
 // are not cosmetic: PostgREST switches database role on `role`, RLS resolves `auth.uid()` from
 // `sub`, and `record_service_token_issued()` (0043) keys its audit row on `jti`.
+//
+// ES256 with a `kid` when given the signing key (`supabaseAuth.es256Signing`), HS256 with the
+// secret otherwise. generateSigningKeys() makes the pair as GOTRUE_JWT_KEYS and the verifiers'
+// JWKS take it, with the secret as the legacy `oct` key in both, so HS256 tokens keep verifying.
 //
 // -------------------------------------------------------------------------------------------------
 // TWO KINDS OF KEY, AND THE DIFFERENCE IS WHETHER ANYONE IS BEHIND THEM
@@ -31,16 +35,17 @@
 // down. Length does not fix that, visibility does, which is why `--check` exists.
 //
 // What the bound buys is the only revocation available. There is none otherwise: PostgREST checks
-// the signature, not a session table, so withdrawing a leaked key means rotating
-// SUPABASE_JWT_SECRET -- which invalidates every token in the stack, anon and service-role
-// included. A 90-day key that leaks is valid for at most 90 days. A ten-year key that leaks is
-// valid until 2036.
+// the signature, not a session table, so withdrawing a leaked key means rotating the signing key
+// -- which invalidates every token in the stack, anon and service-role included. A 90-day key that
+// leaks is valid for at most 90 days. A ten-year key that leaks is valid until 2036.
 //
 // 90 IS NOT AN INVENTION. It mirrors `service_token_max_days()` (0043), which
 // `record_service_token_issued()` and `scripts/mint-api-token.mjs` both already enforce -- so the
 // state this replaces was a rule the platform applied to operators and exempted itself from.
 // =================================================================================================
-import { createHmac, randomUUID } from 'node:crypto';
+import {
+  createHmac, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, timingSafeEqual, verify,
+} from 'node:crypto';
 
 /**
  * THE CEILING, MIRRORED FROM `service_token_max_days()` IN 0043.
@@ -70,21 +75,104 @@ export const EXPIRY_WARN_DAYS = 14;
 const b64url = (input) =>
   Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+/** The secret as the legacy JWK, in upstream's shape: no kid and no key_ops, so it never signs. */
+export function legacyJwk(secret) {
+  return { kty: 'oct', k: b64url(secret), alg: 'HS256' };
+}
+
 /**
- * Sign a Supabase-shaped HS256 JWT.
+ * A new EC P-256 pair as the two Secret values: SUPABASE_JWT_KEYS (GoTrue's GOTRUE_JWT_KEYS: the
+ * private key, the one with `sign` in key_ops, and the legacy key) and SUPABASE_JWT_JWKS (what
+ * every verifier takes: the public key and the legacy key).
+ *
+ * @returns {{kid: string, jwtKeys: string, jwtJwks: string}}
+ */
+export function generateSigningKeys(secret, { kid = randomUUID() } = {}) {
+  if (!secret) throw new Error('generateSigningKeys: the secret is required; it stays in the set as the legacy key');
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const { crv, x, y, d } = privateKey.export({ format: 'jwk' });
+  const pub = { kty: 'EC', kid, use: 'sig', alg: 'ES256', crv, x, y };
+  return {
+    kid,
+    jwtKeys: JSON.stringify([{ ...pub, key_ops: ['sign', 'verify'], d }, legacyJwk(secret)]),
+    jwtJwks: JSON.stringify({ keys: [{ ...pub, key_ops: ['verify'] }, legacyJwk(secret)] }),
+  };
+}
+
+/**
+ * The signing key in SUPABASE_JWT_KEYS, found as GoTrue finds it: the one key whose key_ops holds
+ * `sign`. Throws on anything GoTrue would refuse or this module cannot sign with.
+ */
+export function signingKeyFrom(jwtKeys) {
+  let keys;
+  try {
+    keys = typeof jwtKeys === 'string' ? JSON.parse(jwtKeys) : jwtKeys;
+  } catch {
+    throw new Error('SUPABASE_JWT_KEYS is not JSON');
+  }
+  if (!Array.isArray(keys)) throw new Error('SUPABASE_JWT_KEYS must be a JSON array of JWKs');
+  const signing = keys.filter((k) => Array.isArray(k?.key_ops) && k.key_ops.includes('sign'));
+  if (signing.length !== 1) {
+    throw new Error(`SUPABASE_JWT_KEYS must hold exactly one key with "sign" in key_ops; it holds ${signing.length}`);
+  }
+  const [key] = signing;
+  if (key.kty !== 'EC' || key.crv !== 'P-256' || key.alg !== 'ES256' || !key.kid || !key.d) {
+    throw new Error('the signing key in SUPABASE_JWT_KEYS must be an EC P-256 private key with alg ES256 and a kid');
+  }
+  return key;
+}
+
+/**
+ * Whether a token's signature verifies as the stack's verifiers verify it: HS256 against the secret
+ * or the JWKS's legacy key, ES256 against the JWKS's EC key with the token's kid. The signature
+ * only: no claim is checked.
+ */
+export function signatureVerifies(token, { secret = null, jwks = null } = {}) {
+  const parts = typeof token === 'string' ? token.split('.') : [];
+  if (parts.length !== 3) return false;
+  let header;
+  try {
+    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  } catch {
+    return false;
+  }
+  const set = typeof jwks === 'string' ? JSON.parse(jwks) : jwks;
+  const data = Buffer.from(`${parts[0]}.${parts[1]}`);
+  const signature = Buffer.from(parts[2], 'base64url');
+  if (header.alg === 'HS256') {
+    const legacy = (set?.keys || []).find((k) => k.kty === 'oct' && typeof k.k === 'string' && !k.kid);
+    const key = secret ? Buffer.from(secret) : legacy ? Buffer.from(legacy.k, 'base64url') : null;
+    if (!key) return false;
+    const expected = createHmac('sha256', key).update(data).digest();
+    return expected.length === signature.length && timingSafeEqual(expected, signature);
+  }
+  if (header.alg === 'ES256' && set) {
+    const jwk = (set.keys || []).find((k) => k.kty === 'EC' && k.kid === header.kid);
+    if (!jwk) return false;
+    const { kty, crv, x, y } = jwk;
+    const key = createPublicKey({ key: { kty, crv, x, y }, format: 'jwk' });
+    return verify('sha256', data, { key, dsaEncoding: 'ieee-p1363' }, signature);
+  }
+  return false;
+}
+
+/**
+ * Sign a Supabase-shaped JWT: ES256 with the key's kid when `signingKey` is given, HS256 with the
+ * secret otherwise.
  *
  * @param {object}  opts
- * @param {string}  opts.role     `anon`, `service_role` or `authenticated`.
- * @param {string}  opts.secret   SUPABASE_JWT_SECRET.
- * @param {string} [opts.subject] Principal uuid. Its presence is what makes this a SERVICE key.
- * @param {number} [opts.days]    Lifetime. Defaults to SERVICE_KEY_DEFAULT_DAYS when a subject is
- *                                given, INFRASTRUCTURE_KEY_DAYS when one is not.
- * @param {number} [opts.now]     Epoch ms, injectable so the tests are not clock-dependent.
- * @returns {{token: string, jti: string|null, issuedAt: Date, expiresAt: Date, days: number}}
+ * @param {string}  opts.role         `anon`, `service_role` or `authenticated`.
+ * @param {string} [opts.secret]      SUPABASE_JWT_SECRET, for HS256.
+ * @param {object} [opts.signingKey]  The private JWK signingKeyFrom() returns, for ES256.
+ * @param {string} [opts.subject]     Principal uuid. Its presence is what makes this a SERVICE key.
+ * @param {number} [opts.days]        Lifetime. Defaults to SERVICE_KEY_DEFAULT_DAYS when a subject
+ *                                    is given, INFRASTRUCTURE_KEY_DAYS when one is not.
+ * @param {number} [opts.now]         Epoch ms, injectable so the tests are not clock-dependent.
+ * @returns {{token: string, jti: string|null, issuedAt: Date, expiresAt: Date, days: number, alg: string}}
  */
-export function mintJwt({ role, secret, subject = null, days = null, now = Date.now() }) {
+export function mintJwt({ role, secret = null, signingKey = null, subject = null, days = null, now = Date.now() }) {
   if (!role) throw new Error('mintJwt: role is required');
-  if (!secret) throw new Error('mintJwt: secret is required');
+  if (!secret && !signingKey) throw new Error('mintJwt: a secret or a signing key is required');
 
   const ttlDays = days ?? (subject ? SERVICE_KEY_DEFAULT_DAYS : INFRASTRUCTURE_KEY_DAYS);
   if (!Number.isFinite(ttlDays) || ttlDays <= 0) {
@@ -99,7 +187,7 @@ export function mintJwt({ role, secret, subject = null, days = null, now = Date.
       `mintJwt: ${ttlDays} days exceeds the ${SERVICE_KEY_MAX_DAYS}-day ceiling for a service key. `
       + 'That ceiling is service_token_max_days() (0043), which record_service_token_issued() also '
       + 'enforces -- a longer key could not be recorded in the credential inventory, and could not '
-      + 'be withdrawn short of rotating SUPABASE_JWT_SECRET.'
+      + 'be withdrawn short of rotating the signing key.'
     );
   }
 
@@ -113,27 +201,41 @@ export function mintJwt({ role, secret, subject = null, days = null, now = Date.
   // keys have no principal and can never be recorded, so one there would identify nothing.
   const jti = subject ? randomUUID() : null;
 
-  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = b64url(JSON.stringify({
+  const { token, alg } = signJwt({
     iss: 'supabase',
     role,
     ...(subject ? { sub: subject } : {}),
     ...(jti ? { jti } : {}),
     iat: issuedAt,
     exp: expiresAt,
-  }));
-  const signature = createHmac('sha256', secret)
-    .update(`${header}.${payload}`)
-    .digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }, { secret, signingKey });
 
   return {
-    token: `${header}.${payload}.${signature}`,
+    token,
     jti,
     issuedAt: new Date(issuedAt * 1000),
     expiresAt: new Date(expiresAt * 1000),
     days: ttlDays,
+    alg,
   };
+}
+
+/**
+ * Sign `claims` as they are: ES256 with the key's kid when `signingKey` is given, HS256 with the
+ * secret otherwise. The kid is what Realtime and PostgREST pick the public key by; an HS256 token
+ * carries none, so it matches the legacy key, which has none either.
+ *
+ * @returns {{token: string, alg: 'ES256'|'HS256'}}
+ */
+export function signJwt(claims, { secret = null, signingKey = null }) {
+  if (!secret && !signingKey) throw new Error('signJwt: a secret or a signing key is required');
+  const alg = signingKey ? 'ES256' : 'HS256';
+  const header = b64url(JSON.stringify(signingKey ? { alg, typ: 'JWT', kid: signingKey.kid } : { alg, typ: 'JWT' }));
+  const data = `${header}.${b64url(JSON.stringify(claims))}`;
+  const signature = signingKey
+    ? sign('sha256', Buffer.from(data), { key: createPrivateKey({ key: signingKey, format: 'jwk' }), dsaEncoding: 'ieee-p1363' })
+    : createHmac('sha256', secret).update(data).digest();
+  return { token: `${data}.${b64url(signature)}`, alg };
 }
 
 /**

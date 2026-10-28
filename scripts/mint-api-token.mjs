@@ -10,8 +10,10 @@
 // every other request starts returning 401. That failure names nothing useful, which is why this
 // exists.
 //
-// WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. The same HS256 secret the whole stack shares, so
-// PostgREST validates it exactly as it validates a GoTrue token -- there is no second trust path.
+// WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. With the key GoTrue signs with, so PostgREST
+// validates it exactly as it validates a GoTrue token -- there is no second trust path: ES256 with
+// the private key in SUPABASE_JWT_KEYS once the stack verifies ES256 (liveSigningKey() in
+// lib/stack-credentials.mjs decides), HS256 with SUPABASE_JWT_SECRET until then.
 // The subject is `b0000000-0000-4000-8000-000000000001`, the Read-only API client seeded by
 // archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off
 // `Operator`): it reads every relation the i3X address space is assembled from and writes nothing,
@@ -27,7 +29,7 @@
 // `revoke_service_token('<jti>')` withdraws it from PostgREST, and so from i3X, which authenticates
 // every request through PostgREST. Storage, realtime and the edge runtime check only the signature
 // and accept it until it expires, so for them the expiry is the only bound: 30 days is the default
-// and 90 the ceiling. Never rotate SUPABASE_JWT_SECRET to withdraw one token; that invalidates every
+// and 90 the ceiling. Never rotate the signing key to withdraw one token; that invalidates every
 // token in the stack.
 //
 // IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (Machine Identities, supabase/README.md).
@@ -47,9 +49,10 @@
 //   node scripts/mint-api-token.mjs --principal <uuid> # any service principal
 //   node scripts/mint-api-token.mjs --json             # a ready-to-paste mcpServers block
 // =================================================================================================
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
-import { missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
+import { liveSigningKey, missingCredentialAdvice, stackCredentials } from './lib/stack-credentials.mjs';
+import { signJwt } from './lib/service-jwt.mjs';
 
 /** The Read-only API client, seeded by archived migration 0034: the default without --principal. */
 const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
@@ -93,47 +96,49 @@ if (days > MAX_DAYS) {
   console.error(`--days may not exceed ${MAX_DAYS}, got ${days}.`);
   console.error(
     'Revoking a token reaches PostgREST and i3X, but storage, realtime and the edge runtime check\n' +
-    'only the signature, so for them the expiry is the only bound. Never rotate SUPABASE_JWT_SECRET\n' +
+    'only the signature, so for them the expiry is the only bound. Never rotate the signing key\n' +
     'to withdraw one token: that invalidates every token in the stack.'
   );
   process.exit(1);
 }
 
-// The secret the running stack signs with, from the release's own Secret.
-const { SUPABASE_JWT_SECRET: secret } = stackCredentials(['SUPABASE_JWT_SECRET']);
-if (!secret) {
+// The key the running stack signs with, from the release's own Secret, and the stack's URL and
+// keys: GoTrue says whether ES256 is live, and PostgREST records the issue below.
+const creds = stackCredentials([
+  'SUPABASE_JWT_KEYS', 'SUPABASE_JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY',
+]);
+const supabaseUrl = (creds.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
+const signing = await liveSigningKey({
+  jwtKeys: creds.SUPABASE_JWT_KEYS, supabaseUrl, apikey: creds.SUPABASE_PUBLISHABLE_KEY,
+});
+if (!signing.key && !creds.SUPABASE_JWT_SECRET) {
   console.error(missingCredentialAdvice('SUPABASE_JWT_SECRET'));
+  console.error(`It signs HS256 because ES256 is not live: ${signing.why}.`);
   process.exit(1);
 }
 
-const b64url = (buf) => Buffer.from(buf).toString('base64url');
 const now = Math.floor(Date.now() / 1000);
 const exp = now + Math.round(days * 86400);
 const jti = randomUUID();
 
-// NO `kid`. PostgREST 13+ validates that header against a JSON Web Key when it is present, and
-// this stack is a shared HS256 secret with no JWKS to match against. The rest of the stack's
-// pre-minted tokens omit it for the same reason.
-const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-const payload = b64url(
-  JSON.stringify({
-    sub: SUBJECT,
-    // `authenticated` is the POSTGRES role PostgREST switches to. The principal's own grant --
-    // is not carried in the token at all: it is read from public.user_roles by has_role(), so a
-    // token cannot claim a privilege it was not granted in the database.
-    role: 'authenticated',
-    iat: now,
-    exp,
-    // THE REVOCATION HANDLE: revoke_service_token() denylists it and auth_pre_request() refuses it.
-    // The audit row names it too, so a re-mint -- a second live credential, not a replacement -- is
-    // told apart from the first.
-    jti,
-  })
-);
-const signature = b64url(createHmac('sha256', secret).update(`${header}.${payload}`).digest());
-const token = `${header}.${payload}.${signature}`;
+// A `kid` under ES256 alone: PostgREST and Realtime pick the public key by it. An HS256 token
+// carries none and matches the JWKS's legacy key, which has none either.
+const { token, alg } = signJwt({
+  sub: SUBJECT,
+  // `authenticated` is the POSTGRES role PostgREST switches to. The principal's own grant --
+  // is not carried in the token at all: it is read from public.user_roles by has_role(), so a
+  // token cannot claim a privilege it was not granted in the database.
+  role: 'authenticated',
+  iat: now,
+  exp,
+  // THE REVOCATION HANDLE: revoke_service_token() denylists it and auth_pre_request() refuses it.
+  // The audit row names it too, so a re-mint -- a second live credential, not a replacement -- is
+  // told apart from the first.
+  jti,
+}, { secret: creds.SUPABASE_JWT_SECRET, signingKey: signing.key });
 
 const until = new Date(exp * 1000).toISOString().slice(0, 10);
+const signedWith = alg === 'ES256' ? `ES256, kid ${signing.key.kid}` : `HS256 (${signing.why})`;
 
 // =================================================================================================
 // RECORD IT, AND ONLY THEN PRINT IT.
@@ -149,13 +154,11 @@ const until = new Date(exp * 1000).toISOString().slice(0, 10);
 // through auth.uid() and this caller has no session. So the RPC is reachable by service_role alone
 // and pins `actor_source` itself -- see 0043, and 0026 for the pattern it copies.
 //
-// THIS IS THE FIRST TIME THIS SCRIPT TOUCHES THE DATABASE. It read the release Secret and computed
-// an HMAC and nothing else, which is why it needs the URL and the key below and why their absence
-// is an error with a fix in it rather than a stack trace. The URL defaults to the gateway as
+// THIS IS THE FIRST TIME THIS SCRIPT TOUCHES THE DATABASE. It read the release Secret, asked GoTrue
+// for its public keys and signed, and nothing else, which is why it needs the key below and why its
+// absence is an error with a fix in it rather than a stack trace. The URL defaults to the gateway as
 // `npm run dev:forward` publishes it.
 // =================================================================================================
-const creds = stackCredentials(['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY']);
-const supabaseUrl = (creds.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
 const serviceKey = creds.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!serviceKey || !creds.SUPABASE_PUBLISHABLE_KEY) {
@@ -235,10 +238,12 @@ if (asJson) {
     )
   );
   console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until} (jti ${jti})`);
+  console.error(`# signed ${signedWith}`);
   console.error('# recorded in the Audit Trail as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
   console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until}`);
+  console.error(`# signed ${signedWith}`);
   console.error('# Give it to the client as its bearer token. The Issue Token dialog on Access Control');
   console.error('# shows a setup for each client.');
   // The revocation and its scope go together: auth_pre_request() is a PostgREST hook, so a revoked

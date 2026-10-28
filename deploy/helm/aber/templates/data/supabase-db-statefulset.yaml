@@ -163,7 +163,11 @@ spec:
             # The supabase/postgres image reads these at first boot to provision the scoped roles
             # and the auth schema helpers. They must be the SAME values every other service is
             # given -- see the note on `secrets` in values.yaml for why the three are a set.
+            {{- /* No JWT_SECRET with supabaseAuth.es256Signing: nothing in the image reads it (no init
+                   script, and no database setting holds it), so the database is not a holder. */}}
+            {{- if not .Values.supabaseAuth.es256Signing }}
             {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- end }}
             {{- include "aber.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             {{- if include "aber.platformBackupOn" . }}

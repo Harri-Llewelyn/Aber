@@ -13,6 +13,7 @@
  * ABER_NAMESPACE and ABER_RELEASE select the release (default aber, aber).
  */
 import { spawnSync } from 'node:child_process';
+import { signingKeyFrom } from './service-jwt.mjs';
 
 export const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
 export const RELEASE = process.env.ABER_RELEASE || 'aber';
@@ -46,6 +47,31 @@ export function stackCredentials(names) {
     out[name] = secret[name] ?? '';
   }
   return out;
+}
+
+/**
+ * The ES256 signing key, when the stack verifies ES256: SUPABASE_JWT_KEYS holds it AND GoTrue
+ * publishes its kid at /auth/v1/.well-known/jwks.json, which it does only with
+ * supabaseAuth.es256Signing on, the release that also gives every verifier the JWKS. Otherwise
+ * null, with why: an HS256 token verifies on either path through 1.7, and an ES256 one only on
+ * the second, so a script signs ES256 only on evidence.
+ *
+ * @returns {Promise<{key: object|null, why: string}>}
+ */
+export async function liveSigningKey({ jwtKeys, supabaseUrl, apikey }) {
+  if (!jwtKeys) return { key: null, why: 'the release Secret holds no SUPABASE_JWT_KEYS' };
+  const key = signingKeyFrom(jwtKeys);
+  const url = `${supabaseUrl.replace(/\/+$/, '')}/auth/v1/.well-known/jwks.json`;
+  try {
+    const res = await fetch(url, { headers: apikey ? { apikey } : {} });
+    if (!res.ok) return { key: null, why: `${url} answered ${res.status}` };
+    const { keys = [] } = await res.json();
+    return keys.some((k) => k.kid === key.kid)
+      ? { key, why: `GoTrue publishes kid ${key.kid}` }
+      : { key: null, why: `GoTrue does not publish kid ${key.kid}: supabaseAuth.es256Signing is off on this release` };
+  } catch (err) {
+    return { key: null, why: `${url} could not be reached (${err.message})` };
+  }
 }
 
 /** The sentence a script prints when a credential is missing from both places. */

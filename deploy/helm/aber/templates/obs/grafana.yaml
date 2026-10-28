@@ -415,6 +415,13 @@ spec:
             # own login lifetime (7 days idle, 30 in all).
             - name: GF_AUTH_GENERIC_OAUTH_USE_REFRESH_TOKEN
               value: "true"
+            {{- if .Values.supabaseAuth.es256Signing }}
+            # OpenID Connect: GoTrue signs an ID token under ES256, and Grafana reads the identity
+            # claims from it. The role still comes from api_url (grafana-userinfo): the ID token
+            # carries none.
+            - name: GF_AUTH_GENERIC_OAUTH_SCOPES
+              value: "openid email profile"
+            {{- end }}
             # Alert state history (grafana.ini) goes to the Loki the logs datasource reads.
             - name: GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL
               value: {{ include "aber.lokiUrl" . | quote }}

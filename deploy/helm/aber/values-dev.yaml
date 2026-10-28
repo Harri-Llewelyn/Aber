@@ -8,8 +8,9 @@
 # That is fine for a laptop k3s and is NEVER acceptable anywhere else -- values-prod.yaml.example
 # is the starting point for anything reachable by another person.
 #
-# The anon and service-role keys are JWTs signed by jwtSecret below; the three are a matching set
-# and must be replaced together. See the note on `secrets` in values.yaml.
+# The anon and service-role keys are JWTs signed ES256 by the demonstration key pair in jwtKeys
+# below, which carries jwtSecret as its legacy key; the set is matching and must be replaced
+# together. See the note on `secrets` in values.yaml.
 # =============================================================================================
 
 global:
@@ -27,6 +28,8 @@ supabaseAuth:
   # The four demo personas (supabase/seed.sql), whose password is published. This file is the only
   # place they are turned on; validate.py and the stack lane sign in as them.
   demoAccounts: true
+  # ES256, so the stack lane tests the signing new sites get; the upgrade rehearsal keeps HS256.
+  es256Signing: true
 
 dbInit:
   # The example metric catalog (supabase/example-metrics.sql). validate.py and the AAS conformance
@@ -35,8 +38,12 @@ dbInit:
 
 secrets:
   jwtSecret: super-secret-jwt-token-with-at-least-32-characters
-  anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
-  serviceRoleKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9.GWSHLKn253lfP0FAYobjuXvQkQGcYhKVJ6Y0IJOo-lA
+  # The DEMONSTRATION EC P-256 pair, for development only like everything here: GoTrue's signing
+  # set and the verifiers' JWKS, each with jwtSecret above as the legacy `oct` key.
+  jwtKeys: '[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["sign","verify"],"d":"_ZIWwzwKT1hRrDYRBv5EuCpn-r1ZS_nkFh8ISZQVbaM"},{"kty":"oct","k":"c3VwZXItc2VjcmV0LWp3dC10b2tlbi13aXRoLWF0LWxlYXN0LTMyLWNoYXJhY3RlcnM","alg":"HS256"}]'
+  jwtJwks: '{"keys":[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["verify"]},{"kty":"oct","k":"c3VwZXItc2VjcmV0LWp3dC10b2tlbi13aXRoLWF0LWxlYXN0LTMyLWNoYXJhY3RlcnM","alg":"HS256"}]}'
+  anonKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.JMb7HUEgwdqrj-6LwYAEYRassYEe7ZXBwRrBcmNJ77d0w9xG0dynSoCcNTOc_QMQdR2J4Z7JFRV5prMWdBxL6w
+  serviceRoleKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9._7pCG15S37d0VzyCq5F2jHhRgMonld1k26pQV8U9NRyBUy9PkodxdEOsI9s_vNI0d7pDc4_pZA1kiC30aGj0yQ
   # The keys callers present; demo values, as the two JWTs above are.
   publishableKey: sb_publishable_aber_dev_00000000000000000000
   secretKey: sb_secret_aber_dev_000000000000000000000000
@@ -59,14 +66,14 @@ secrets:
   # start MQTT loop in fail-open state." Correct behaviour, ten minutes of `0 of 1 updated
   # replicas are available`, and a failure that names neither the chart nor this file.
   #
-  # Demonstration JWTs signed by the jwtSecret above:
+  # Demonstration JWTs signed ES256 by the key pair above:
   # Service_Ingestor is sub b0000000-...-0002 (0046), Service_Playback is ...-0003 (0056) and
   # Service_ReleaseCheck is ...-0004 (0181).
   # None is `service_role` -- that is the whole point of Machine Identities, and copying the
   # service key here instead would produce a working stack that proves nothing.
-  ingestionKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.j-rSyTImEPP3Etuq304tYycMSKrk0mxcI_9Pmew3seI
-  playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
-  releaseCheckKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA0IiwiZXhwIjoyMDAwMDAwMDAwfQ._x9WpSqAU4DwSo940iqEnTkh8U-YPqAwhbflmQF4p3k
+  ingestionKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.DHKaCbVTO-HtuwaYNDYAuECayJiZvAIuBY0RsQzmCr-V8KWxy5f66XnW61SY9Y8qtxMD241wFA8nX4I6SRkXXA
+  playbackKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.jawkPFYTd_7y-KX2iyF96O3UlezB3OiU5BDwgviVWo5TnfTayn_AuJrbCsCzbmsCgSVc-yVOqjt02bF2FqNSLg
+  releaseCheckKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA0IiwiZXhwIjoyMDAwMDAwMDAwfQ.ZPRR0A0dLCvz4rqYUnU6dTC1o-2KTqLHFOWleJoKdgAUkhS1mc7SiXv2JVqgJw-io69NQpjtIPPo-BFH2DOpWg
 
   # Realtime's own metrics endpoint, separate from the session JWT secret.
   realtimeMetricsJwtSecret: aber_realtime_metrics_jwt_secret_development_only

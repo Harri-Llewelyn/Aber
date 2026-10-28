@@ -491,8 +491,8 @@ static_resources:
     # own and runs as the database owner, so: an OAuth 2.1 code flow against this stack's GoTrue, a
     # session cookie, and an Administrator check. Its own listener because machine principals on 8000
     # cannot complete a browser login. The role claim in the access token is checked first, then
-    # user_roles on every request (studio-admission). No openid scope: GoTrue refuses to sign an ID
-    # token with HS256. Minimum Envoy 1.34 (PKCE).
+    # user_roles on every request (studio-admission). No openid scope: the door needs the access token
+    # alone, and GoTrue refuses an ID token under HS256. Minimum Envoy 1.34 (PKCE).
     - name: studio
       address:
         socket_address: { address: 0.0.0.0, port_value: 8001 }
@@ -582,9 +582,10 @@ static_resources:
                             name: studio-proxy-hmac-secret
                             sds_config:
                               path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
-                  # 2. THE TOKEN: verifies what GoTrue signed; oct is the JWKS key type for HMAC. No issuer check,
-                  # because GoTrue's OAuth access token carries no iss. Forwarded after verification for step 4;
-                  # step 5 strips it, so Studio never sees a Supabase JWT.
+                  # 2. THE TOKEN: verifies what GoTrue signed, against the JWKS the initContainer renders (ES256 by
+                  # kid and the HS256 `oct` key, or the `oct` key alone). No issuer check, because GoTrue's OAuth
+                  # access token carries no iss. Forwarded after verification for step 4; step 5 strips it, so
+                  # Studio never sees a Supabase JWT.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
@@ -593,7 +594,7 @@ static_resources:
                           audiences: [authenticated]
                           forward: true
                           local_jwks:
-                            inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
+                            inline_string: '__SUPABASE_JWT_JWKS__'
                           payload_in_metadata: jwt_payload
                       rules:
                         - match: { prefix: "/" }
@@ -829,7 +830,7 @@ static_resources:
                           # before Gitea except on /api/.
                           forward: true
                           local_jwks:
-                            inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
+                            inline_string: '__SUPABASE_JWT_JWKS__'
                           payload_in_metadata: jwt_payload
                       rules:
                         # The two exemptions, second of three places; first, because rules match in order.
