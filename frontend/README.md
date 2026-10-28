@@ -513,6 +513,14 @@ unknown is not *Not connected*. The broker also reports each session's address, 
 `summariseInventory()` drops it: every client outside the cluster reaches the broker under the
 node's address.
 
+*Broker accounts* makes and deletes read-only accounts through `broker-subscriber`. *New Read-Only
+Account* (`modals/BrokerSubscriberModal.jsx`) is offered once the broker was read, which only an
+Administrator can do. It shows the password once, as `GatewayCredentialModal` shows a gateway's,
+with the broker address `EdgeNodeSettings`' `useDirectoryBroker()` reads and the topics the page's
+read of the `subscriber` role reports. An account in the scheme (`isSubscriberAccount()` in
+`utils/serviceIdentities.js`) shows the name and description the broker holds, and is the only row
+with *Delete*, which a `ConfirmModal` names first.
+
 People, Broker credentials and Machine identities are searched and filtered in the browser: each
 list is tens of rows, read whole. What is gone is hidden the same way on every tab, behind a **Show
 … (N)** toggle that appears only while N is above 0: removed people (`accessRemoved()` in

@@ -2140,6 +2140,49 @@ both. Mirror check 27 (`scripts/check-mirror-drift.mjs`) holds the view's reason
 `test_a_device_shows_where_its_readings_appear_in_the_uns.py` holds every path shape and every
 reason, the order, the caller's policies and who may read it.
 
+### An Administrator's read-only broker account is recorded (0218)
+
+Access Control › Broker accounts makes an account for a consumer outside Aber that only reads: a
+SCADA system, a dashboard, an analytics client. It holds the broker's `subscriber` role and nothing
+else ([`mosquitto/README.md`](../mosquitto/README.md)). `broker-subscriber` asks the credential
+service to create or delete it; the service generates the username (`sub` and 21 lowercase hex
+characters) and the password, and the broker holds the account, with its name and description in
+the plugin's own textname and textdescription. Nothing in the database stores the account. `0218`
+writes the record of who made it, and who deleted it, and when.
+
+- **`record_broker_account_created(p_username, p_name, p_description)`** writes one `INSERT` row
+  once the broker has made the account: `new_data` is the name, the description, `mqtt_username`
+  and `role: 'subscriber'`, with the Administrator in `changed_by` and `audit_actor_source()` in
+  `actor_source`. Never a password. The function holds the name (1-80 characters) and description
+  (1-500) to the credential service's rule, trimmed and on one line, so the record says what the
+  broker holds.
+- **`record_broker_account_deleted(p_username, p_name, p_description)`** writes one `DELETE` row
+  once the broker has deleted it: `old_data` is the name and description the broker held, NULL
+  where it held none (an account in the scheme made by hand may have neither), and the username.
+- **One lane per account.** `entity_type` is `broker_accounts`, and `entity_id` is the username's
+  21 hex characters padded with eleven zeros, so the two rows of one account share an id without a
+  table to key them. `audit_domain_for()` files every type it does not name in the security lane,
+  which is right here: only an Administrator may make one, and an Auditor reads the rows. The
+  self-check asserts it, so a later change that files the type in the asset lane fails the boot.
+  The Audit Trail page draws the lane as *Broker accounts*, named by the account's name.
+- **No new action, and no CHECK changed.** `INSERT` and `DELETE` are what the trigger writes for any
+  audited row, and nothing constrains `action` or `entity_type`. `create_machine_principal()`
+  records an identity's creation the same way.
+- **Administrator only, and only the scheme.** Both are `SECURITY DEFINER` with `search_path`
+  pinned and check `has_role()` themselves; every other role is `42501`, and `anon` and
+  `service_role` hold no `EXECUTE`. A username outside the scheme is `22023`, so neither function
+  records an act on a gateway's account or a platform principal, which the path cannot perform.
+- **The act comes first.** `broker-subscriber` calls each function after the credential service
+  answered, as `gateway-credential` records an issue. A failed record does not withhold a new
+  account's password, since the broker keeps only its hash; the answer carries
+  `audit_recorded: false` and the dialog says so.
+
+The file's self-check asserts both functions' `SECURITY DEFINER` and pin, who may execute them, that
+a request with no identity is refused by both, and the lane. Check 156 (`scripts/check-docs-drift.mjs`)
+holds the username scheme and the two limits to the credential library, the function and the page.
+`test_an_administrator_s_read_only_broker_account_is_recorded.py` holds the rows, the shared id, the
+refusals and who may read them.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -4732,6 +4775,14 @@ now `disableClient`: the live session is dropped at once, the account stays list
 a re-issue re-enables it. When the broker cannot be read the column says *Not read* and the page
 says why once, rather than drawing an empty column that reads as no accounts.
 
+**It makes and deletes read-only broker accounts (`0218`).** *New Read-Only Account* on *Broker
+accounts* asks for a name and what the account is for, and `broker-subscriber` has the credential
+service create a client holding the `subscriber` role alone, under a generated `sub…` username,
+with both in the plugin's textname and textdescription. The password is shown once. *Delete* is
+offered on those accounts alone, and the service refuses any other username. No table holds
+these accounts; the broker does, and each act writes one Audit Trail row
+([*An Administrator's read-only broker account is recorded (0218)*](#an-administrators-read-only-broker-account-is-recorded-0218)).
+
 `tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
 adds a live credential rather than replacing one — reporting the newer of two would state half the
 exposure on the one page whose job is to state all of it.
@@ -4904,6 +4955,7 @@ refuses a missing or wrong token or secret.
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 | [`aas-api`](functions/aas-api) | any authenticated user | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
+| [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |

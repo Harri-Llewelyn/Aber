@@ -306,6 +306,14 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # material) are asserted here too, against the running plugin.
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
+# A read-only broker account, through broker-subscriber as the Access Control page calls it. An
+# Administrator creates one and a Shopfloor Manager cannot. Connected with the password shown, it
+# receives a Sparkplug message and a UNS message, which the ingestion account publishes, and its own
+# publishes reach nobody. Deleting it drops the live session and refuses the next CONNECT. Each act
+# is one Audit Trail row naming the Administrator. Needs kubectl to the broker's pod.
+SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
+  python supabase/functions/broker-subscriber/test_broker_subscriber.py
+
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
@@ -322,6 +330,10 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
 # prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
+# And the credential service as it ships, over HTTP, against a stand-in `mosquitto_rr`: a read-only
+# account is made holding the subscriber role alone under a username it generates, the caller
+# names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
+# command.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
@@ -730,6 +742,14 @@ python supabase/migrations/test_a_person_can_put_a_picture_on_their_account.py
 # order: no site name, a lane, unassigned, a cell in no area, a name a topic cannot carry. It runs
 # as its caller; a person and the ingestion principal read it, anon does not. Every test rolls back.
 python supabase/migrations/test_a_device_shows_where_its_readings_appear_in_the_uns.py
+# An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
+# writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
+# lane of the security domain, naming the Administrator, with the account's name, description and
+# MQTT username, under one entity id. Only an Administrator may write either. A username outside
+# the subscriber scheme, and a name or description outside the credential service's rule, are
+# refused with no row. An Auditor reads the rows and a Shopfloor Manager does not. Every test
+# rolls back.
+python supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

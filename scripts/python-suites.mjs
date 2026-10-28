@@ -1013,6 +1013,15 @@ export const SUITES = {
       'and the ingestion principal read it and anon does not. The bridge publishes these rows, so ' +
       'a wrong answer is a wrong topic.',
   },
+  'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0218 -- that creating and deleting a read-only broker account each write one row in the " +
+      'broker_accounts lane of the security domain, naming the Administrator and what the account ' +
+      'is for, under one entity id; that only an Administrator may write either; and that a ' +
+      'username outside the subscriber scheme, or a name or description outside the credential ' +
+      "service's rule, is refused with no row.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1221,6 +1230,16 @@ export const SUITES = {
       'telemetry as that gateway -- so "it is not published on the host" is a security boundary, ' +
       'not a deployment detail, and nothing else checks it. Revocation and the inventory are ' +
       'asserted here too, against the running plugin.',
+  },
+  'supabase/functions/broker-subscriber/test_broker_subscriber.py': {
+    lanes: ['stack'],
+    why:
+      'A read-only broker account through the path the Access Control page takes: an ' +
+      'Administrator creates one and a Shopfloor Manager cannot; connected with the password ' +
+      'shown, it receives a Sparkplug and a UNS message, and its own publishes reach nobody; ' +
+      'deleting it drops the live session and refuses the next CONNECT; and each act is one ' +
+      'Audit Trail row. All of it is silent at QoS 0, so it is asserted by delivery. Skips ' +
+      'without a stack.',
   },
   'timescaledb/test_historian_role_grants.py': {
     lanes: ['stack'],

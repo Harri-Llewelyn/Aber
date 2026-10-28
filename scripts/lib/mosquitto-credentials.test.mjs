@@ -12,11 +12,18 @@ import assert from 'node:assert/strict';
 
 import {
   GATEWAY_ID_PATTERN,
+  SUBSCRIBER_DESCRIPTION_MAX,
+  SUBSCRIBER_ID_PATTERN,
+  SUBSCRIBER_NAME_MAX,
   CredentialError,
   assertEntry,
   assertGatewayId,
   assertSafePassword,
+  assertSubscriberId,
+  assertSubscriberPurpose,
   assertUsername,
+  generateSubscriberId,
+  isSubscriberId,
   generatePassword,
   hashArgv,
   hashArgvForUsername,
@@ -84,6 +91,40 @@ describe('assertGatewayId', () => {
       '', null, undefined, 42, {},
     ]) {
       assert.throws(() => assertGatewayId(bad), CredentialError, `accepted ${String(bad)}`);
+    }
+  });
+});
+
+describe('the read-only account scheme', () => {
+  test('a generated username is in the scheme, is never a gateway id, and is new each time', () => {
+    const names = new Set(Array.from({ length: 50 }, () => generateSubscriberId()));
+    assert.equal(names.size, 50);
+    for (const name of names) {
+      assert.ok(SUBSCRIBER_ID_PATTERN.test(name) && isSubscriberId(name), name);
+      assert.equal(assertSubscriberId(name), name);
+      assert.ok(!GATEWAY_ID_PATTERN.test(name), name);
+    }
+  });
+
+  test('refuses a gateway, a platform principal and anything near the scheme', () => {
+    for (const bad of [GW_A, 'aber_ingestion', 'dynsec-admin', 'scada-reader', 'sub0a1b2c3d4e5f60718293', 'SUB0A1B2C3D4E5F60718293A', 'sub0a1b2c3d4e5f60718293g', '', null, 42]) {
+      assert.ok(!isSubscriberId(bad), String(bad));
+      assert.throws(() => assertSubscriberId(bad), (e) => e.code === 'invalid_subscriber_id', String(bad));
+    }
+  });
+
+  test('a purpose is a name and a description, each required, trimmed and on one line', () => {
+    assert.deepEqual(assertSubscriberPurpose('  BI feed ', ' Reads the plant for the board. '), {
+      name: 'BI feed', description: 'Reads the plant for the board.',
+    });
+    assert.deepEqual([SUBSCRIBER_NAME_MAX, SUBSCRIBER_DESCRIPTION_MAX], [80, 500]);
+    for (const [name, description, code] of [
+      ['', 'ok', 'invalid_subscriber_name'], [null, 'ok', 'invalid_subscriber_name'],
+      ['a\nb', 'ok', 'invalid_subscriber_name'], ['x'.repeat(81), 'ok', 'invalid_subscriber_name'],
+      ['ok', ' ', 'invalid_subscriber_description'], ['ok', 'a\u007fb', 'invalid_subscriber_description'],
+      ['ok', 'x'.repeat(501), 'invalid_subscriber_description'], ['ok', undefined, 'invalid_subscriber_description'],
+    ]) {
+      assert.throws(() => assertSubscriberPurpose(name, description), (e) => e.code === code, JSON.stringify([name, description]));
     }
   });
 });

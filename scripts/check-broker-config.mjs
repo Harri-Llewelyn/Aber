@@ -13,7 +13,8 @@
  * roles, the environment and a seeded stored document, so the reconcile of stored clients, the
  * hash transplant and a second idempotent run are exercised. The plugin's control API is then
  * driven through mosquitto_rr the way the credential service drives it: issue, re-issue, disable,
- * re-enable, with a live session held across the two that drop one. The ingestion daemon's
+ * re-enable, and create and delete a read-only account, with a live session held across each of
+ * the three that drop one. The ingestion daemon's
  * connection is opened as the daemon opens it, and its will must fire the moment it dies. The TLS
  * listener is checked when a certificate can be produced.
  *
@@ -34,7 +35,7 @@ import { tmpdir } from 'node:os';
 import { hashArgvForUsername } from './lib/mosquitto-credentials.mjs';
 import {
   CONTROL_TOPIC, PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, controlArgv, controlInput, controlPayload,
-  isRefusal, issueCommand, issueWithControl, summariseInventory,
+  createSubscriberWithControl, deleteSubscriberWithControl, isRefusal, issueCommand, issueWithControl, summariseInventory,
 } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
@@ -216,6 +217,11 @@ const OBSERVER = 'check-observer';
  * stored document, so the reconcile keeps it as it would keep an account an operator created.
  */
 const SUBSCRIBER = 'check-subscriber';
+/**
+ * A read-only account in the subscriber scheme, stored holding a second role as if one had been
+ * added by hand. The reconcile must hold it to the subscriber role alone.
+ */
+const DRIFTED_SUBSCRIBER = 'sub000000000000000000d1f';
 
 /**
  * The username each PLATFORM_PRINCIPALS entry boots with, so the reconcile below runs on the list
@@ -236,6 +242,7 @@ const ACCOUNTS = {
   probe: 'probe-secret-00000001',
   [OBSERVER]: 'observer-secret-0001',
   [SUBSCRIBER]: 'subscriber-secret-0001',
+  [DRIFTED_SUBSCRIBER]: 'drifted-subscriber-secret-0001',
 };
 
 /**
@@ -435,14 +442,15 @@ try {
     // holds the shared role and the role generated for it, which the reconcile must retire. `probe`
     // holds none and must be kept as it is. The `ingestion` role holds the reads of the UNS and the
     // Directory that every release before 1.7 reconciled beside each write, which the reconcile must
-    // drop. OBSERVER and its role are this check's own; SUBSCRIBER holds the declared subscriber role.
+    // drop. OBSERVER and its role are this check's own; SUBSCRIBER holds the declared subscriber role,
+    // and DRIFTED_SUBSCRIBER holds it and the ingestion role.
     const retired = `gateway-${GATEWAY_B}`;
     const subtreeAcls = (acltypes) => [UNS_FILTER, DIRECTORY_FILTER]
       .flatMap((topic) => acltypes.map((acltype) => ({ acltype, topic, allow: true })));
     const stored = {
       clients: [
         storedClient(GATEWAY_B, ['gateway', retired]), storedClient('probe', []), storedClient(OBSERVER, [OBSERVER]),
-        storedClient(SUBSCRIBER, ['subscriber']),
+        storedClient(SUBSCRIBER, ['subscriber']), storedClient(DRIFTED_SUBSCRIBER, ['subscriber', 'ingestion']),
       ],
       roles: [{
         rolename: retired,
@@ -488,6 +496,11 @@ try {
       ok.push('a stored client matching no principal is kept with no role');
     } else {
       problems.push(`stored client 'probe' was given roles ${rolesOf('probe').join(', ')}`);
+    }
+    if (JSON.stringify(rolesOf(DRIFTED_SUBSCRIBER)) === JSON.stringify(['subscriber'])) {
+      ok.push('a stored read-only account holding a second role is held to the subscriber role alone');
+    } else {
+      problems.push(`stored read-only account ${DRIFTED_SUBSCRIBER} holds roles ${rolesOf(DRIFTED_SUBSCRIBER).join(', ') || '(none)'}; it must hold subscriber alone`);
     }
     if (doc.clients.every((c) => typeof c.salt === 'string' && Number.isInteger(c.iterations))) {
       ok.push('every stored client is a PBKDF2 hash with its salt and iterations, never a password');
@@ -1224,6 +1237,67 @@ try {
             }
           } catch (err) {
             problems.push(`enableClient ${GATEWAY_C} failed: ${err.message}`);
+          }
+        }
+      }
+
+      // A read-only account, created and deleted as the credential service does it, the delete
+      // while a session holds it. Ten rounds of this were clean on 2.1.2 (mosquitto/README.md); one
+      // round here re-measures it when the pin moves. The positive control proves the session
+      // was live, as for disableClient above.
+      {
+        const password = 'read-only-secret-00000001';
+        const purpose = { name: 'Check read-only account', description: 'Created and deleted by check-broker-config.mjs.' };
+        let made;
+        try {
+          made = createSubscriberWithControl(send, purpose, password);
+        } catch (err) {
+          problems.push(`creating a read-only account over the control API failed: ${err.message}`);
+        }
+        if (made) {
+          const listedAs = inventory().clients.find((c) => c.username === made.username);
+          if (JSON.stringify(listedAs?.roles) === '["subscriber"]' && listedAs?.textname === purpose.name
+            && listedAs?.textdescription === purpose.description) {
+            ok.push('a read-only account is created holding the subscriber role, with its name and description');
+          } else {
+            problems.push(`the read-only account was listed as ${JSON.stringify(listedAs)}`);
+          }
+          const held = '/tmp/read-only.txt';
+          docker(['exec', '-d', r.name, 'sh', '-c',
+            `mosquitto_sub -u ${made.username} -P ${password} -t 'spBv1.0/#' -W 60 > ${held} 2>&1; echo EXIT:$? >> ${held}`]);
+          const ncmd = `mosquitto_pub -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} -t 'spBv1.0/Aber/NCMD/${GATEWAY_C}' -m ${MARKER}`;
+          const live = pollInBroker(r.name, `{ ${ncmd}; grep -q ${MARKER} ${held}; }`, DELIVERY_DEADLINE_S);
+          const before = docker(['exec', r.name, 'cat', held]).stdout || '';
+          let deleted;
+          try {
+            deleted = deleteSubscriberWithControl(send, made.username);
+          } catch (err) {
+            problems.push(`deleteClient on the read-only account failed: ${err.message}`);
+          }
+          if (!live.done || before.includes('EXIT:')) {
+            problems.push(`the read-only account's session was not proven live before the delete (waited ${secs(live.waited)}), `
+              + 'so nothing here proves what deleteClient does to one');
+          } else if (deleted) {
+            const exited = pollInBroker(r.name, `grep -q EXIT: ${held}`, DELIVERY_DEADLINE_S);
+            if (exited.done) ok.push('deleteClient drops the live session of a read-only account (the subscriber exited)');
+            else problems.push(`deleteClient did NOT drop the read-only account's live session in ${secs(exited.waited)}`);
+            let after;
+            try {
+              after = inventory();
+            } catch (err) {
+              problems.push(`THE BROKER DID NOT ANSWER after deleteClient on an account with a live session: ${err.message}`);
+            }
+            const running = (docker(['inspect', '-f', '{{.State.Running}}', r.name]).stdout || '').trim() === 'true';
+            if (after && running && !after.clients.some((c) => c.username === made.username)
+              && deleteSubscriberWithControl(send, made.username).existed === false) {
+              ok.push('after deleteClient on a live session the broker is up and answers, and no longer holds the account');
+            } else if (after) {
+              problems.push(`after deleteClient the broker ${running ? 'still lists the account, or still finds it' : 'container is not running'}`);
+            }
+            const again = docker(['exec', r.name, 'mosquitto_sub', '-u', made.username, '-P', password,
+              '-t', 'spBv1.0/#', '-C', '1', '-W', '3']);
+            if (refusedConnect(again)) ok.push('a deleted read-only account is refused on its next CONNECT');
+            else problems.push('a DELETED read-only account was accepted on CONNECT');
           }
         }
       }

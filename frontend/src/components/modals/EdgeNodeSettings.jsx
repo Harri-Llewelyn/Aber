@@ -7,8 +7,26 @@ import {
   primaryHostId,
 } from '../../utils/edgeNodeSettings'
 
+/**
+ * The broker as the Directory's broker row publishes it, read when shown: undefined while it is
+ * read, null when the Directory could not be read, otherwise `brokerAddress()`'s answer. An
+ * unreadable Directory is said, not guessed.
+ */
+export function useDirectoryBroker() {
+  const [broker, setBroker] = useState(undefined)
+  useEffect(() => {
+    let cancelled = false
+    Promise.resolve()
+      .then(() => api.get('/api/v1/directory'))
+      .then(rows => { if (!cancelled) setBroker(brokerAddress(brokerRow(rows)?.endpoint_url)) })
+      .catch(() => { if (!cancelled) setBroker(null) })
+    return () => { cancelled = true }
+  }, [])
+  return broker
+}
+
 /** One value the engineer types into the node, with its copy button. */
-function Setting({ id, label, value, copyLabel, copy, copied, hint, warning }) {
+export function Setting({ id, label, value, copyLabel, copy, copied, hint, warning }) {
   return (
     <div className="form-group">
       <label className="form-label" htmlFor={id}>{label}</label>
@@ -38,18 +56,7 @@ function Setting({ id, label, value, copyLabel, copy, copied, hint, warning }) {
  * `copy(id, value)` and `copied` are the dialog's, so a refused copy is reported in one place.
  */
 export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
-  const [broker, setBroker] = useState(undefined)
-
-  // The Directory's broker row. Read when shown; an unreadable Directory is said, not guessed.
-  useEffect(() => {
-    let cancelled = false
-    Promise.resolve()
-      .then(() => api.get('/api/v1/directory'))
-      .then(rows => { if (!cancelled) setBroker(brokerAddress(brokerRow(rows)?.endpoint_url)) })
-      .catch(() => { if (!cancelled) setBroker(null) })
-    return () => { cancelled = true }
-  }, [])
-
+  const broker = useDirectoryBroker()
   const sparkplugId = credential?.mqtt_username || gateway.sparkplug_id
   const hostId = primaryHostId()
   const rootUrl = `${window.location.origin}${ROOT_CERTIFICATE_PATH}`

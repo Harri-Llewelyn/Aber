@@ -251,7 +251,9 @@ Six identities here are held by software rather than people, and each is narrow 
 grant of their own** rather than a person's role (`0080`), `Service_ReleaseCheck` holds nothing and reaches one
 gate, `record_release_check()` (`0181`), `aber_i3x` reads the broker namespace and
 publishes nothing, and `gateway-credential-service` can issue, re-issue and disable gateway broker
-accounts, list them and serve the broker's root, and nothing else.
+accounts, create and delete read-only accounts holding the `subscriber` role alone, list them and
+serve the broker's root, and nothing else. Its delete refuses any username outside the read-only
+scheme, so it cannot remove a gateway's account or a platform principal (`0218`).
 The four database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a

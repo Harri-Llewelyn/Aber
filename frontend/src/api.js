@@ -1459,6 +1459,64 @@ const apiMethods = {
   },
 
   /**
+   * Create a read-only broker account, holding the `subscriber` role alone, and get its password
+   * back once. Administrator only, through broker-subscriber; the username is generated there, and
+   * `name` and `description` are what the account is for. Nothing keeps the password.
+   *
+   * @returns {{ mqtt_username: string, password: string, name: string, description: string,
+   *             role: 'subscriber', audit_recorded: boolean }}
+   */
+  createBrokerSubscriber: async ({ name, description }) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'create', name, description })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not create the account (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
+   * Delete a read-only broker account, which drops its live sessions. Administrator only, through
+   * broker-subscriber, which refuses any username outside the subscriber scheme.
+   *
+   * @returns {{ mqtt_username: string, deleted: true, audit_recorded: boolean }}
+   */
+  deleteBrokerSubscriber: async (username) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-subscriber`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'delete', username })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not delete the account (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
    * Mint a Host or Third-party gateway's broker credential and get it back once.
    *
    * A raw fetch so both gateway-credential paths read the same way. The password is returned once

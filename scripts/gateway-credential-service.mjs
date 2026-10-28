@@ -1,10 +1,14 @@
 #!/usr/bin/env node
-// The broker credential service: the authority to issue and revoke gateway accounts, kept out of the
-// edge worker that enrols them and behind four verbs that name a gateway and nothing else:
-//   POST /credentials   issue (or re-issue) one gateway's account: the client and a password
-//   POST /revocations   disable one gateway's account, which disconnects its live session
-//   GET  /clients       the broker's own list of clients and roles, for the Access Control page
-//   GET  /ca            the root the broker presents, its dates, and its public key's pin
+// The broker credential service: the authority to issue and revoke gateway accounts, and to create
+// and delete read-only ones, kept out of the edge workers that ask and behind six verbs, each
+// naming a gateway or a read-only account and nothing else:
+//   POST /credentials           issue (or re-issue) one gateway's account: the client and a password
+//   POST /revocations           disable one gateway's account, which disconnects its live session
+//   POST /subscribers           create a read-only account holding the subscriber role alone, and
+//                               its password; the username is generated in the subscriber scheme
+//   POST /subscriber-deletions  delete one read-only account; any other username is refused
+//   GET  /clients               the broker's own list of clients and roles, for the Access Control page
+//   GET  /ca                    the root the broker presents, its dates, and its public key's pin
 // A sidecar in the broker's pod, speaking mosquitto_rr from the broker's own image to the plugin on
 // loopback; it holds no database credential and is not published outside the container network.
 // Reasoning: mosquitto/README.md, "The credential service and the boot reconcile".
@@ -22,7 +26,9 @@ import {
   pruneDelivery,
   serialiseDelivery,
 } from './lib/mosquitto-credentials.mjs';
-import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
+import {
+  assertOk, createSubscriberWithControl, deleteSubscriberWithControl, isRefusal, issueWithControl, summariseInventory,
+} from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
 const PORT = Number.parseInt(process.env.MQTT_CREDENTIAL_SERVICE_PORT || '9010', 10);
@@ -263,7 +269,7 @@ function readBody(req, limit = 8192) {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      // Bounded: this endpoint takes two short strings and a short list of gateway ids.
+      // Bounded: a request is a few short strings and a short list of gateway ids.
       if (data.length > limit) {
         reject(new CredentialError('request body too large', 'body_too_large'));
         req.destroy();
@@ -306,7 +312,7 @@ const server = createServer(async (req, res) => {
     return send(res, 200, { status: 'ok' });
   }
 
-  const routes = new Set(['/credentials', '/revocations', '/clients', '/ca']);
+  const routes = new Set(['/credentials', '/revocations', '/subscribers', '/subscriber-deletions', '/clients', '/ca']);
   if (!routes.has(pathname)) return send(res, 404, { error: 'not found' });
 
   // No detail about why: distinguishing "no header" from "wrong token" is a hint.
@@ -337,6 +343,23 @@ const server = createServer(async (req, res) => {
 
     if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
     const parsed = await parseJson(req);
+
+    // The caller names what the account is for and nothing else: the username, the password and
+    // the one role are decided here. Returned once, as an issue's password is.
+    if (pathname === '/subscribers') {
+      const password = generatePassword();
+      const made = createSubscriberWithControl(control, { name: parsed.name, description: parsed.description }, password);
+      log(`created read-only account ${made.username}`);
+      return send(res, 200, { ...made, password });
+    }
+
+    // Refuses any username outside the subscriber scheme before the broker is asked anything.
+    if (pathname === '/subscriber-deletions') {
+      const result = deleteSubscriberWithControl(control, parsed.username);
+      log(`deleted ${parsed.username}: ${result.existed ? 'deleted, its live sessions dropped' : 'no such client'}`);
+      return send(res, 200, { username: parsed.username, ...result });
+    }
+
     const sparkplugId = parsed.sparkplug_id;
 
     if (pathname === '/revocations') {
