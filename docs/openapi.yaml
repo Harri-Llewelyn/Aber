@@ -2402,9 +2402,9 @@ paths:
         `grafana/provisioning/alerting/`. This table is the landing record, and it is what the
         dashboard subscribes to over Realtime.
 
-        `sparkplug_id` is the immutable wire identity, never the device name. `device_id` is resolved
+        `sparkplug_id` is the immutable wire identity, never the device name. `entity_id` is resolved
         at write time and is nullable: an alert that fired is a thing that happened, and it is kept
-        even when no device row matches.
+        even when no device or gateway row matches.
 
         `anon` is revoked. An alert summary names a device and the condition it breached.
 
@@ -5059,9 +5059,10 @@ paths:
         **An unset secret answers 503, never 200.** The check fails closed, so a missing environment
         variable is a broken integration rather than an unauthenticated write endpoint.
 
-        **Not exempt from the gateway's API-key check.** The contact point carries the publishable key in the query
-        string (`?apikey=…`) because Grafana's webhook integration exposes only one header pair and
-        it is spent on `Authorization`. `hide_credentials` keeps the key from being forwarded on.
+        **Not exempt from the gateway's API-key check.** The contact point sends the publishable key
+        as an `apikey` header beside its `Authorization` bearer (`headers` in
+        `grafana/provisioning/alerting/contact-points.template.yaml`, which needs Grafana 11.6 or
+        newer). The gateway checks the key; this function checks the bearer.
 
         **Alerts with no `sparkplug_id` label are counted and skipped, not stored.** A
         `DatasourceError` notification — what `execErrState: Error` produces when a rule's query
@@ -6653,7 +6654,14 @@ components:
           type: string
           description: 'The immutable wire identity the alert was raised for. Never the device name.'
           example: dev220000000000400080000
-        device_id: { type: string, format: uuid, nullable: true, description: 'Resolved at write time; null when no device row matched.' }
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            The subject's row id, resolved at write time from `sparkplug_id` in `devices` or
+            `gateways` by `entity_type`; for `service_identity`, the machine identity's principal id.
+            Null for a `platform` alert, or when no row matched.
         alert_name: { type: string, example: Thermal Excursion }
         severity: { type: string, enum: [critical, warning, info] }
         status: { type: string, enum: [firing, resolved] }
