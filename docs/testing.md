@@ -348,7 +348,9 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # And the credential service as it ships, over HTTP, against a stand-in `mosquitto_rr`: a read-only
 # account is made holding the subscriber role alone under a username it generates, the caller
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
-# command.
+# command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
+# takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
+# repository's branch and tag, each with its own `.gitleaksignore`.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
@@ -1107,7 +1109,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
-| **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
+| **secret-scan** | gitleaks over the history of the commit under test and the working tree, on every push (*The secret scans*, below) |
 | **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
 **k8s-validation and static-analysis sit behind the `changes` gate**: most of the workflow's minutes are
@@ -1138,6 +1140,29 @@ The kubelet refreshes a running pod's projected Secrets on that period. So a cre
 to the playback worker reaches it in about 15 seconds rather than about a minute, and the playback
 replay and the two capture suites wait that much less for each one. Their timeouts stay sized for a
 site's minute. Check 154 holds the job, the script and this paragraph to one period.
+
+### The secret scans
+
+Two jobs run `scripts/scan-secrets.mjs`, over different history:
+
+| Job | When | What it scans | What it accepts |
+| :--- | :--- | :--- | :--- |
+| **secret-scan** in `ci.yml` | Every pull request and push | `--history=head`: the history of the commit under test, and the working tree | That commit's own `.gitleaksignore` |
+| **scan-every-ref** in [`secret-scan.yml`](../.github/workflows/secret-scan.yml) | Every push to main, daily, and by hand | `--ignore-union`: every branch, tag and pull request head | main's `.gitleaksignore` together with every ref's own |
+
+**A pull request fails only on what it would add to main.** On a pull request, the commit under
+test is the merge commit: main's history plus the branch's commits. Each branch reviews its own
+findings in its own `.gitleaksignore`. Scanning every ref there would fail every open pull request
+on another branch's reviewed finding, until that branch merged.
+
+**Every ref is still watched, because the repository is public.** A secret pushed on any branch
+can be fetched by anyone, even after the branch is deleted. scan-every-ref fails on a finding that
+no list accepts, wherever it was pushed, and names the refs that reach it. Rotate a real secret
+first. Then add the finding's fingerprint, with its reason, to the branch's `.gitleaksignore`, or
+to main's when the branch is gone.
+
+Run by hand, `npm run scan:secrets` scans every ref against the checkout's own list, which is the
+strictest of the three. Add `--ignore-union` when another local branch's reviewed finding fails it.
 
 ## The install and upgrade rehearsals
 
@@ -1272,9 +1297,10 @@ the runner's AppArmor denials, so another profile that attaches the same way sho
 
 ## Keeping the pinned versions current
 
-Three scheduled workflows, and they answer different questions. None runs on a pull request:
-version drift, published advisories and the slow rot of a restore path all move on the world's
-schedule, not on this repository's.
+Three scheduled workflows watch what the stack runs, and they answer different questions. None runs
+on a pull request: version drift, published advisories and the slow rot of a restore path all move
+on the world's schedule, not on this repository's. A fourth, `secret-scan.yml`, watches every ref
+for secrets (*The secret scans*, above).
 
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
