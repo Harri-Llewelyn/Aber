@@ -1492,7 +1492,7 @@ dashboard. The dashboard called it `access_url`, which is also a real gateway co
 form asked for it as **Dashboard / UI URL**. Attached Links (`links`) already holds any number of
 named addresses per cell, so a dashboard is one more. The column is in the documented API, so it
 goes in two steps (*Deprecation* in [`docs/releases.md`](../docs/releases.md#deprecation)):
-deprecated in 1.7.0 by this file, and dropped no sooner than 1.8.0 by a file of its own.
+deprecated in 1.7.0 by this file, and dropped in 1.8.0 by `0219` (below).
 
 - **Each web address moves.** A value starting `http://` or `https://`, after trimming, becomes a
   `links` row in the shape the Cells page writes: `entity_type` `'cell'`, `entity_id` the cell's id
@@ -1507,29 +1507,31 @@ deprecated in 1.7.0 by this file, and dropped no sooner than 1.8.0 by a file of 
   reads NULL through 1.7, where the policy asks that both work for a minor. Keeping the value
   would need a one-time marker, and this chain keeps no ledger by design.
 - **NULL and blank are skipped. Anything else is named and kept.** A value that is not a web
-  address is named in a NOTICE in db-init's log on every boot, and stays in the column. The drop
-  will name it again before it goes.
+  address is named in a NOTICE in db-init's log on every boot, and stays in the column. `0219`
+  names it again as it removes it.
 - **One statement moves and clears**, with the rows locked, so a link and its cleared value commit
   together. `links` has no author column and no audit trigger, so a moved link names nobody. The
   `cells` UPDATE leaves one audit row per cell, as `actor_source` `'migration'`.
 - **`proposable_columns()` drops `grafana_url`.** `approve_proposal()` re-checks every key against
   it, so an open proposal naming the column is refused and the key named; none was open on the one
-  install. `approve_proposal()` still sets the column from the merged row, which leaves it as it
-  was. The redeclaration restates `0176`'s `search_path` pin.
+  install. The redeclaration restates `0176`'s `search_path` pin.
 
 The dashboard stops showing and writing the column: the cell form's field, the drawer's
 **Dashboard URL** row and **Open Dashboard** on the Cells page and the Site Map are gone, and
 `api.js` no longer maps it onto `access_url`. The Audit Trail still counts a change to it as a
-governance change, because past rows carry it. `docs/openapi.yaml` marks it `deprecated: true`.
+governance change, because past rows carry it. `docs/openapi.yaml` marked it `deprecated: true`
+through 1.7.
 
-The 1.8 drop follows `0175`: guarded by the column's existence, it moves anything written in the
-window with the same statement, drops the column, replaces `approve_proposal()` without it, and
-edits `0001` and `0165` so a replay never brings it back.
+Since `0219` drops the column, the move and the check on it run only while the column exists. On a
+fresh install, and on every boot after the drop, this file only declares `proposable_columns()`,
+which `0001` now declares in the same final form. The column comment it set in 1.7 went with the
+column.
 
-The file's self-check asserts that no cell still holds a web address, that the cell lane admits
-every other column and not this one, that the pin holds, and that the column carries this file's
-comment. `test_a_cell_s_dashboard_address_is_one_of_its_links.py` holds the move, what is skipped,
-the duplicate, the audit row, a second boot, a deleted link staying deleted, and the refusals.
+The file's self-check asserts that no cell still holds a web address while the column exists, that
+the cell lane admits every other column and not this one, and that the pin holds.
+`test_a_cell_s_dashboard_address_is_one_of_its_links.py` rebuilds 1.7.0's column in each test's
+transaction and holds the move, what is skipped, the duplicate, the audit row, a second boot, a
+deleted link staying deleted, and the refusals.
 
 ### A person can have a display name (0203)
 
@@ -2306,6 +2308,45 @@ a request with no identity is refused by both, and the lane. Check 156 (`scripts
 holds the username scheme and the two limits to the credential library, the function and the page.
 `test_an_administrator_s_read_only_broker_account_is_recorded.py` holds the rows, the shared id, the
 refusals and who may read them.
+
+### A cell has no grafana_url column (0219)
+
+1.7.0 deprecated `cells.grafana_url` (`0202`, above), so 1.8.0 removes it, as `0175` removed
+`devices.schema_id`. Everything that touches the column is guarded by its existence, in one `DO`
+block: only the first boot of an upgrade does anything, and a fresh install and every later boot
+take no lock on `cells`.
+
+- **A web address written since `0202` moves first, with `0202`'s statement.** An API client could
+  still write the column through 1.7. Its address becomes a link named **Dashboard**, unless the
+  cell already links to it, and the value is cleared. On a real boot `0202` replays first and has
+  usually moved it already; the statement is here so the drop does not depend on that.
+- **What `0202` kept is named, then recorded, then dropped.** A value that is not a web address is
+  named in a NOTICE in db-init's log, with the cell's name and id and the value's first 200
+  characters. An `UPDATE` then clears it, so the cell's audit row (`actor_source` `'migration'`)
+  holds the whole value in `old_data`. The audit trigger records `to_jsonb(OLD)` in full, and
+  nothing subtracts this column. A blank value goes without a NOTICE or a row.
+- **The boot is never refused for a value.** Refusing would fail db-init on a site's rows, which
+  makes a release major (*Deprecation* in [`docs/releases.md`](../docs/releases.md#deprecation)).
+  The value is kept where an operator can find it instead: the db-init log, and the Audit Trail.
+- **Then the column goes.** Only the audit trigger fires on an `UPDATE` of it, and no view, index
+  or constraint names it. The column comment `0202` set goes with it.
+- **`approve_proposal()` sets no `grafana_url`.** Its cells branch set the column from the merged
+  row. `0001` and `0165` now declare it without that line, so no replay names a column that is not
+  there, and this file declares the same final form.
+
+The earlier files are in their final form, as `0175` left the files before it. `0001` no longer
+creates the column, adds it, drops its default or admits it in `proposable_columns()`. `0202`
+moves and checks only while the column exists, and no longer comments on it. An API client that
+still writes or reads the column gets PostgREST's unknown-column error.
+
+The file's self-check asserts that the column is gone, that the cell lane does not admit it, and
+that `approve_proposal()` neither names it nor loses its `SECURITY DEFINER` or pin. Check 162
+(`scripts/check-docs-drift.mjs`) holds that no other migration names the column, that `0202` keeps
+its guard, that the API spec documents it on neither `Cell` nor `CellWrite`, and that no code reads
+it but the Audit Trail's list of governance fields, which past rows carry.
+`test_a_cell_has_no_grafana_url_column.py` rebuilds 1.7.0's column in each test's transaction and
+holds the move, the NOTICE, the audit row, the blank, a boot of `0202` then `0219`, a second boot,
+and an approved cell proposal applying with the column gone.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

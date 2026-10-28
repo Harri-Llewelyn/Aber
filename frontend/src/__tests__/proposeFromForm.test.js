@@ -49,9 +49,9 @@ describe('what a form would change', () => {
     expect(Object.keys(patch)).toEqual(['name'])
   })
 
-  it('never proposes a cell’s deprecated dashboard address', () => {
-    // `cells.grafana_url` is not proposable: a cell's dashboard is one of its Attached Links. A
-    // stale form key, or the column's own name, is dropped rather than refused at the insert.
+  it('never proposes a cell’s removed dashboard address', () => {
+    // `cells.grafana_url` is gone: a cell's dashboard is one of its Attached Links. A stale form
+    // key, or the column's old name, is dropped rather than refused at the insert.
     expect(Object.values(PROPOSAL_FORMS.cell.fields)).not.toContain('grafana_url')
     const patch = patchFromForm('cell',
       { cell_name: 'Cell 1', access_url: 'https://old', grafana_url: 'https://old' },

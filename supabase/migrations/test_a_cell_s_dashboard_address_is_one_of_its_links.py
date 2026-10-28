@@ -5,8 +5,9 @@ A cell's dashboard address is one of its links (0202).
 
 Requires the Supabase database (54322 by default) and the schema the chain declares.
 
-`cells.grafana_url` is deprecated. 0202 moves each cell's http:// or https:// address into
-Attached Links (`links`) as a link named Dashboard, tagged other, and clears the column:
+`cells.grafana_url` was deprecated in 1.7.0, and 0219 drops it. While it exists, 0202 moves each
+cell's http:// or https:// address into Attached Links (`links`) as a link named Dashboard, tagged
+other, and clears the column:
 
   * an address moves, trimmed, archived cells included, and the column reads NULL after;
   * NULL and blank are skipped, and a value that is not a web address is named in a NOTICE and
@@ -17,8 +18,9 @@ Attached Links (`links`) as a link named Dashboard, tagged other, and clears the
     written after the move reaches Attached Links at the next boot;
   * grafana_url is not proposable, and approve_proposal() refuses an open proposal naming it.
 
-Each test replays the file inside its own transaction, as db-init does on every boot, and rolls
-back. Writes to `cells` fire the audit-trail trigger.
+Each test rebuilds the column as 1.7.0 left it, inside its own transaction, replays the file as
+db-init does on every boot, and rolls back. Writes to `cells` fire the audit-trail trigger.
+test_a_cell_has_no_grafana_url_column.py holds the drop.
 """
 import glob
 import json
@@ -62,12 +64,8 @@ class Base(unittest.TestCase):
         conn = get_connection()
         try:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT col_description('public.cells'::regclass, a.attnum) FROM pg_attribute a "
-                "WHERE a.attrelid = 'public.cells'::regclass AND a.attname = 'grafana_url';"
-            )
-            row = cur.fetchone()
-            if not row or not row[0] or "(0202)" not in row[0]:
+            cur.execute("SELECT 'grafana_url' = ANY (public.proposable_columns('cells'));")
+            if cur.fetchone()[0]:
                 raise unittest.SkipTest(f"{os.path.basename(MIGRATION)} has not been applied")
         finally:
             conn.rollback()
@@ -79,6 +77,8 @@ class Base(unittest.TestCase):
         self.addCleanup(self.conn.close)
         self.addCleanup(self.conn.rollback)
         self.cur = self.conn.cursor()
+        # 1.7.0's column, which 0219 drops; the rollback drops it again.
+        self.cur.execute("ALTER TABLE public.cells ADD COLUMN IF NOT EXISTS grafana_url text;")
 
     # -- fixtures ---------------------------------------------------------------------------
 
@@ -323,15 +323,6 @@ class GrafanaUrlIsNotProposable(Base):
         with self.assertRaisesRegex(pg_errors.InvalidParameterValue,
                                     rf"proposal {proposal} names grafana_url , which is not proposable on cells"):
             self.cur.execute("SELECT public.approve_proposal(%s);", (proposal,))
-
-    def test_the_column_says_it_is_deprecated_and_where_its_values_went(self):
-        self.cur.execute(
-            "SELECT col_description('public.cells'::regclass, a.attnum) FROM pg_attribute a "
-            "WHERE a.attrelid = 'public.cells'::regclass AND a.attname = 'grafana_url';"
-        )
-        comment = self.cur.fetchone()[0]
-        for phrase in ("Deprecated in 1.7.0", "no sooner than 1.8.0", "Attached Links", "'Dashboard'"):
-            self.assertIn(phrase, comment)
 
 
 if __name__ == "__main__":

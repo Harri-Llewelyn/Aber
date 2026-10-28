@@ -184,7 +184,6 @@ BEGIN
         -- the approval rather than being stored.
         UPDATE public.cells
            SET name        = v_cell_new.name,
-               grafana_url = v_cell_new.grafana_url,
                icon        = v_cell_new.icon,
                area_id     = v_cell_new.area_id,
                plan_x      = v_cell_new.plan_x,

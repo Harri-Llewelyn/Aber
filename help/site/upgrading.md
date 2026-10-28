@@ -84,7 +84,7 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
 - **Sessions that should last until someone signs out?** Set the timeout first: see
   [*a session nobody uses for 7 days ends*](#from-170-a-session-nobody-uses-for-7-days-ends).
 - **A script that reads or writes a cell's `grafana_url`?** Change it first: see
-  [*a cell's dashboard address is one of its Attached Links*](#from-170-a-cells-dashboard-address-is-one-of-its-attached-links).
+  [*`cells.grafana_url` is removed*](#from-180-cellsgrafana_url-is-removed).
 - **A storage policy of your own, another database server image, or a broker account named `sub`
   and 21 hex characters?** Check them first: see
   [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
@@ -1492,6 +1492,28 @@ Every workload rolls once, as at every release. Beyond that:
   **The forge restarts** with its email fallback off. **Grafana** gains one alert rule, **Service
   Token Expiring**, which warns a week before a machine identity's token expires.
 
+### From 1.8.0, `cells.grafana_url` is removed
+
+1.7.0 deprecated a cell's `grafana_url` (see
+[*a cell's dashboard address is one of its Attached Links*](#from-170-a-cells-dashboard-address-is-one-of-its-attached-links)).
+From 1.8.0 the column is gone (#1090).
+
+- **Stop any API client that writes or reads it before upgrading.** After the upgrade, a request
+  that names it gets HTTP 400. Read a cell's links from `/rest/v1/links` instead (`entity_type`
+  `cell`, `entity_id` the cell's id). The cell's dashboard is the link named **Dashboard**.
+- **What the upgrade does.** Migration `0219` moves any web address written since 1.7.0 to the
+  cell's **Attached Links**, as 1.7.0 did. Then it drops the column. There is nothing to run.
+- **A value that is not a web address is not lost.** 1.7.0 left such a value on the cell. The
+  upgrade names each one in db-init's log, with its cell. Then it clears it, so the cell's
+  **View Audit Trail** shows the old value. To see before upgrading whether any cell has one, run
+  this. No rows means none:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT id, name, grafana_url FROM public.cells
+       WHERE btrim(grafana_url) <> '' AND NOT btrim(grafana_url) ~ '^https?://' ORDER BY name;"
+  ```
+
 ---
 
 ## Backups
@@ -1546,6 +1568,7 @@ is fresh.
 | The broker kept its 1.3.x document for a rollback (upgrading to 1.4.0) | `kubectl -n aber exec deploy/mosquitto -c mosquitto -- ls -l /mosquitto/data/` — `dynamic-security.json.pre-2.1` is there |
 | Which self-registered OAuth clients were deleted (upgrading to 1.6.0) | `kubectl -n aber logs job/aber-db-init \| grep 'dynamically registered'` — no line means there were none |
 | Which cells kept a `grafana_url` that is not a web address (upgrading to 1.7.0) | `kubectl -n aber logs job/aber-db-init \| grep 'keeps grafana_url'` — no line means every address moved to Attached Links |
+| Which cells lost a `grafana_url` that was not a web address (upgrading to 1.8.0) | `kubectl -n aber logs job/aber-db-init \| grep '0219: cell'` — no line means none; each old value is in its cell's Audit Trail |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |

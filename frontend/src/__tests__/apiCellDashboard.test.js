@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * `cells.grafana_url` is deprecated: a cell's dashboard is one of its Attached Links. The API layer
- * neither writes the column nor maps it onto `access_url`, the name of a real gateway column.
+ * `cells.grafana_url` is gone: a cell's dashboard is one of its Attached Links. The API layer never
+ * writes the column, which PostgREST would refuse, nor maps a stale form key onto `access_url`, the
+ * name of a real gateway column.
  */
 
 const calls = vi.hoisted(() => ({ insert: [], update: [], rows: [] }));
@@ -34,7 +35,7 @@ beforeEach(() => {
   calls.rows = [];
 });
 
-describe("a cell's deprecated dashboard address through the API layer", () => {
+describe("a cell's removed dashboard address through the API layer", () => {
   it('is not written when a cell is created, whatever the body carries', async () => {
     await api.post('/api/v1/cells', {
       cell_name: 'Bay 4', access_url: 'https://grafana.test/d/1', grafana_url: 'https://grafana.test/d/1'
