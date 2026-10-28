@@ -717,14 +717,15 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-/* 36px rows, so an Administrator's whole rail fits under the bar on a 1080p screen. */
+/* 32px rows, so an Administrator's whole rail fits under the bar on a 1080p screen while no page's
+   tabs are open. 32px clears WCAG 2.5.8's 24px target with room to spare. */
 .sidebar-item {
   position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 6px 9px;
+  padding: 4px 9px;
   /* The transparent border is part of the row's height and of the icon's 18px inset (the panel's
      8px, this 1px, the 9px padding), which centres the icon on the 52px rail. */
   border: 1px solid transparent;
@@ -6208,7 +6209,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 6px 9px;
+  padding: 4px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
