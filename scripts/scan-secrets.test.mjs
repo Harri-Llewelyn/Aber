@@ -1,8 +1,8 @@
 // =================================================================================================
 // scripts/scan-secrets.mjs: the history scope it takes, and the accepted list --ignore-union builds
 //
-// The parts that need no Docker. The union is read from a throwaway repository with a branch, a tag
-// and a ref without a list, the way the scheduled scan reads a clone with every branch fetched.
+// The parts that need no Docker. The union is read from a throwaway repository with branches, a ref
+// without a list, and a pull request head, a tag and a stash whose own lists must not be read.
 // =================================================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describeFindings, parseArgs, parseCatFileBatch, refLists, unionIgnore } from './scan-secrets.mjs';
+import { describeFindings, listTrusted, parseArgs, parseCatFileBatch, refLists, unionIgnore } from './scan-secrets.mjs';
 
 test('the default scope is every ref, against the checkout\'s own list', () => {
   assert.deepEqual(parseArgs([]), { history: 'all', union: false, gitDir: undefined });
@@ -88,7 +88,18 @@ test('an uncommitted finding is named by the file whose header is above its line
     '   :r:5  (in x.js, not committed)\n   :r:8  (in new.txt, not committed)\n   :r:1');
 });
 
-test('every ref of a clone is read for its own list, and a ref without one is skipped', (t) => {
+test('only HEAD and the branches are trusted for a list, never a pull request head, a tag or the stash', () => {
+  for (const ref of ['HEAD', 'refs/heads/main', 'refs/remotes/origin/main', 'refs/remotes/origin/HEAD',
+    'refs/remotes/origin/a-branch/with-a-slash']) {
+    assert.equal(listTrusted(ref), true, ref);
+  }
+  for (const ref of ['refs/remotes/origin/pr/7', 'refs/pull/7/head', 'refs/pull/7/merge', 'refs/tags/v1.7.0',
+    'refs/stash', 'refs/remotes/fork/main', 'refs/remotes/originals/main', '']) {
+    assert.equal(listTrusted(ref), false, ref);
+  }
+});
+
+test('each branch of a clone is read for its own list; a pull request head\'s list is not', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'scan-secrets-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const git = (...args) => {
@@ -108,15 +119,24 @@ test('every ref of a clone is read for its own list, and a ref without one is sk
   commit('.gitleaksignore', 'aaa:f:jwt:1\n');
   git('checkout', '-q', '-b', 'feature');
   commit('.gitleaksignore', 'aaa:f:jwt:1\nbbb:g:jwt:2\n');
+  git('update-ref', 'refs/remotes/origin/feature', 'HEAD');
+  // A pull request head, a tag and a stash whose lists each accept a finding of their own.
+  git('checkout', '-q', '-b', 'pr-head');
+  commit('.gitleaksignore', 'aaa:f:jwt:1\nccc:pr.yaml:jwt:1\n');
+  git('update-ref', 'refs/remotes/origin/pr/7', 'HEAD');
   git('tag', '-a', '-m', 'v', 'v1');
+  git('update-ref', 'refs/stash', 'HEAD');
   git('checkout', '-q', 'main');
+  git('branch', '-q', '-D', 'pr-head');
 
   const lists = refLists(join(dir, '.git'));
   assert.deepEqual(lists, [
     ['HEAD', 'aaa:f:jwt:1\n'],
     ['refs/heads/feature', 'aaa:f:jwt:1\nbbb:g:jwt:2\n'],
     ['refs/heads/main', 'aaa:f:jwt:1\n'],
-    ['refs/tags/v1', 'aaa:f:jwt:1\nbbb:g:jwt:2\n'],
+    ['refs/remotes/origin/feature', 'aaa:f:jwt:1\nbbb:g:jwt:2\n'],
   ]);
-  assert.deepEqual(unionIgnore('aaa:f:jwt:1\n', lists).added, [['refs/heads/feature', 1]]);
+  const { text, added } = unionIgnore('aaa:f:jwt:1\n', lists);
+  assert.deepEqual(added, [['refs/heads/feature', 1]]);
+  assert.doesNotMatch(text, /ccc:pr\.yaml/, 'the pull request head accepted its own finding');
 });

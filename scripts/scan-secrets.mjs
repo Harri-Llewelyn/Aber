@@ -7,7 +7,7 @@
  *
  *   node scripts/scan-secrets.mjs                   # every ref's history, and uncommitted changes
  *   node scripts/scan-secrets.mjs --history=head    # only the history of the checked-out commit
- *   node scripts/scan-secrets.mjs --ignore-union    # every ref, accepting what ANY ref's list accepts
+ *   node scripts/scan-secrets.mjs --ignore-union    # every ref, accepting what any branch's list accepts
  *   node scripts/scan-secrets.mjs --git-dir=PATH    # history of another clone, e.g. a mirror
  *
  * WHICH SCOPE, AND WHY. Each branch reviews its own findings in its own .gitleaksignore, so one
@@ -18,8 +18,10 @@
  *     HEAD is the merge commit, main's history plus the branch's commits, so a pull request fails
  *     only on what it would add to main, never on another open branch's finding.
  *   --ignore-union is secret-scan.yml (each push to main, and daily): every ref, pull request
- *     heads included, against this checkout's list joined with every scanned ref's own. A finding
- *     no list accepts fails there, wherever it was pushed.
+ *     heads included, against this checkout's list joined with the lists of HEAD and the branches
+ *     (refs/heads/*, refs/remotes/origin/*). A finding no such list accepts fails there, wherever
+ *     it was pushed. A pull request head's list (refs/remotes/origin/pr/*, refs/pull/*), a tag's
+ *     and the stash's are never read: an unmerged or fork pull request could accept its own finding.
  *
  * A MIRROR CLONE holds every ref GitHub serves, pull request heads (refs/pull/N/head) included,
  * which a normal clone does not fetch. Scan one to check everything a visitor can fetch.
@@ -51,7 +53,7 @@ export function parseArgs (argv) {
     else return { error: `unknown argument ${arg}\n${USAGE}` }
   }
   if (!HISTORY.includes(opts.history)) return { error: `--history takes ${HISTORY.join(' or ')}, not "${opts.history}"\n${USAGE}` }
-  if (opts.union && opts.history !== 'all') return { error: '--ignore-union reads every ref\'s list, so it scans every ref: drop --history=head' }
+  if (opts.union && opts.history !== 'all') return { error: '--ignore-union reads every branch\'s list, so it scans every ref: drop --history=head' }
   return opts
 }
 
@@ -96,14 +98,18 @@ export function parseCatFileBatch (out, refs) {
   return lists
 }
 
-/** Every ref in `gitDir`, and HEAD, with the .gitleaksignore each one carries. */
+/** A ref whose own list the union trusts: HEAD and the repository's branches, never a pull request head. */
+export const listTrusted = (ref) => ref === 'HEAD' || ref.startsWith('refs/heads/') ||
+  (ref.startsWith('refs/remotes/origin/') && !ref.startsWith('refs/remotes/origin/pr/'))
+
+/** HEAD and every branch in `gitDir` that listTrusted() takes, with the .gitleaksignore each carries. */
 export function refLists (gitDir) {
   const run = (args, input) => {
     const r = spawnSync('git', ['--git-dir', gitDir, ...args], { input, maxBuffer: 1 << 28 })
     if (r.status !== 0) throw new Error(`git ${args[0]} failed in ${gitDir}: ${String(r.stderr || r.error).trim()}`)
     return r.stdout
   }
-  const refs = ['HEAD', ...run(['for-each-ref', '--format=%(refname)']).toString('utf8').split('\n').filter(Boolean)]
+  const refs = ['HEAD', ...run(['for-each-ref', '--format=%(refname)']).toString('utf8').split('\n')].filter(listTrusted)
   return parseCatFileBatch(run(['cat-file', '--batch'], refs.map((r) => `${r}:.gitleaksignore\n`).join('')), refs)
 }
 
@@ -156,7 +162,7 @@ function main () {
     process.on('exit', () => rmSync(scratch, { recursive: true, force: true }))
     ignore = join(scratch, 'gitleaksignore')
     writeFileSync(ignore, text)
-    console.log(`\n== accepted findings: this checkout's .gitleaksignore, and ${added.length} ref(s) that accept more`)
+    console.log(`\n== accepted findings: this checkout's .gitleaksignore, and ${added.length} branch(es) that accept more`)
     for (const [ref, n] of added) console.log(`   ${ref}: ${n} more`)
   }
 
@@ -206,7 +212,7 @@ function main () {
   }
 
   if (!history || !pending) {
-    const lists = opts.union ? 'no .gitleaksignore, of this checkout or of any ref,' : '.gitleaksignore does not'
+    const lists = opts.union ? 'no .gitleaksignore, of this checkout or of any branch,' : '.gitleaksignore does not'
     console.error(`\nA secret was found that ${lists} accept${opts.union ? 's' : ''}. Rotate it first; then decide whether`)
     console.error('history needs rewriting. A committed finding is added to .gitleaksignore only with its reason.')
     if (!history && !opts.union && opts.history === 'all') {
@@ -214,7 +220,7 @@ function main () {
     }
     process.exit(1)
   }
-  console.log(`\nNo secret outside the reviewed list in ${opts.union ? 'the .gitleaksignore of this checkout or any ref' : '.gitleaksignore'}.`)
+  console.log(`\nNo secret outside the reviewed list in ${opts.union ? 'the .gitleaksignore of this checkout or any branch' : '.gitleaksignore'}.`)
 }
 
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)

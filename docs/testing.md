@@ -350,7 +350,7 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
 # command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
-# repository's branch and tag, each with its own `.gitleaksignore`.
+# repository's branches, never from its pull request head, tag or stash.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
@@ -1148,7 +1148,7 @@ Two jobs run `scripts/scan-secrets.mjs`, over different history:
 | Job | When | What it scans | What it accepts |
 | :--- | :--- | :--- | :--- |
 | **secret-scan** in `ci.yml` | Every pull request and push | `--history=head`: the history of the commit under test, and the working tree | That commit's own `.gitleaksignore` |
-| **scan-every-ref** in [`secret-scan.yml`](../.github/workflows/secret-scan.yml) | Every push to main, daily, and by hand | `--ignore-union`: every branch, tag and pull request head | main's `.gitleaksignore` together with every ref's own |
+| **scan-every-ref** in [`secret-scan.yml`](../.github/workflows/secret-scan.yml) | Every push to main, daily, and by hand | `--ignore-union`: every branch, tag and pull request head | main's `.gitleaksignore` together with every branch's own, never a pull request head's |
 
 **A pull request fails only on what it would add to main.** On a pull request, the commit under
 test is the merge commit: main's history plus the branch's commits. Each branch reviews its own
@@ -1159,7 +1159,13 @@ on another branch's reviewed finding, until that branch merged.
 can be fetched by anyone, even after the branch is deleted. scan-every-ref fails on a finding that
 no list accepts, wherever it was pushed, and names the refs that reach it. Rotate a real secret
 first. Then add the finding's fingerprint, with its reason, to the branch's `.gitleaksignore`, or
-to main's when the branch is gone.
+to main's when the branch is gone. A failure files no issue, because a public issue would announce
+the leak.
+
+**A pull request head's own list is not read.** Its commits are scanned, but only the lists of main
+and the repository's branches (`refs/heads/*` and `refs/remotes/origin/*`) are trusted. A pull
+request that is never merged, or one from a fork, could otherwise accept its own finding. Tags and
+the stash are not read either. A pull request from a branch here passes through that branch's list.
 
 Run by hand, `npm run scan:secrets` scans every ref against the checkout's own list, which is the
 strictest of the three. Add `--ignore-union` when another local branch's reviewed finding fails it.
