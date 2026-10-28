@@ -78,7 +78,7 @@ the design in `docs/remote-gateways.md`.
 
 ```json
 {
-  "outcome": "converged", "tag": "v1.6.0", "detail": "ansible-pull succeeded",
+  "outcome": "converged", "tag": "v1.7.0", "detail": "ansible-pull succeeded",
   "converged_at": "2026-09-14T11:00:07Z",
   "custom": { "outcome": "failed", "revision": "…", "detail": "custom.yml exited 2", "ran_at": "…" },
   "trust": { "outcome": "installed", "spki_sha256": "…", "not_after": "…", "changed": false, "detail": "…", "checked_at": "…" }

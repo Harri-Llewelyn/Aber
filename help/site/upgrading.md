@@ -76,6 +76,20 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*the Directory gives the id a device publishes under*](#from-160-the-directory-gives-the-id-a-device-publishes-under).
 - **Aber's images built on site?** Change the dashboard's build command first: see
   [*the dashboard's image is built with the help pages*](#from-160-the-dashboards-image-is-built-with-the-help-pages).
+- **The Unified Namespace bridge on, under a root of several levels such as `plant/uns`?** It
+  starts publishing: see [*a root of several levels publishes*](#from-170-a-unified-namespace-root-of-several-levels-publishes).
+- **A tool of your own that reads the Unified Namespace or the Directory as the ingestion
+  account?** Plan its own access first: see
+  [*the ingestion account cannot read them*](#from-170-the-ingestion-account-cannot-read-the-unified-namespace-or-the-directory).
+- **Sessions that should last until someone signs out?** Set the timeout first: see
+  [*a session nobody uses for 7 days ends*](#from-170-a-session-nobody-uses-for-7-days-ends).
+- **A script that reads or writes a cell's `grafana_url`?** Change it first: see
+  [*a cell's dashboard address is one of its Attached Links*](#from-170-a-cells-dashboard-address-is-one-of-its-attached-links).
+- **A storage policy of your own, another database server image, or a broker account named `sub`
+  and 21 hex characters?** Check them first: see
+  [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
+- **Tokens still signed HS256?** Plan to turn ES256 on before 1.8.0: see
+  [*sign tokens with ES256*](#from-170-sign-tokens-with-es256).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -1303,6 +1317,67 @@ address for someone else. So the chart now sets `GITEA__service__ENABLE_REVERSE_
 
 There is nothing to set. It is not a chart value.
 
+### From 1.7.0, a Unified Namespace root of several levels publishes
+
+The Unified Namespace bridge republishes each reading on a plain topic,
+`<root>/<enterprise>/<site>/<area>/<cell>/<device>/<metric>`, for consumers without a Sparkplug
+decoder. It is off by default (`ingestion.unsMqttEnabled`).
+
+Up to 1.6.x, a root of several levels published nothing. With `ingestion.unsMqttTopicRoot` set to
+`plant/uns`, for example, the bridge checked the root as one level and skipped every device (#885).
+The metric `aber_ingestion_uns_skipped_total{reason="unsafe_name"}` counted each one.
+
+From 1.7.0, such a root publishes. With the bridge on, each device that has a place in the
+Unified Namespace is published under the root, retained, from its first reading after the upgrade.
+A consumer subscribed to `plant/uns/#` starts receiving it. A root of one level, the default `uns`
+among them, publishes the same topics as before.
+
+To keep the bridge quiet, set `ingestion.unsMqttEnabled: false` before upgrading. Each device's
+details panel now shows its topic, or says why it is left out.
+
+### From 1.7.0, the ingestion account cannot read the Unified Namespace or the Directory
+
+The ingestion daemon writes the Unified Namespace and the Directory's broker topics, and never
+reads them. Up to 1.6.x, its broker account, `aber_ingestion`, could read both as well (#845). Each
+holds the whole plant: every reading, or every device.
+
+From 1.7.0, the account can only write them. The broker drops the two reads when it first starts on
+1.7.0. Both trees are empty unless their switches are on: `ingestion.unsMqttEnabled` and
+`ingestion.directoryMqttEnabled`, both off by default.
+
+A tool of your own that reads either tree with the `aber_ingestion` credential receives nothing
+after the upgrade. Plan its own access before upgrading:
+
+- **For the Unified Namespace**, give the tool a read-only broker account. An Administrator makes
+  one after the upgrade, on **Access Control** → **Broker accounts** → **New Read-Only Account**. It
+  reads Sparkplug and the Unified Namespace, and publishes nothing.
+- **For the Directory**, read it over HTTP from the
+  [Factory+ Directory](../../supabase/README.md#the-factory-directory-adapter), which shows each
+  caller what their own access allows. No broker account Aber makes reads the Directory's topics.
+  [*The Directory on MQTT*](../../ingestion/README.md#the-directory-on-mqtt) says why, and how a site
+  grants that read itself.
+
+### From 1.7.0, a person can add a second factor
+
+A person can now add a second factor on their Profile page's **Security** tab. It is a code from an
+authenticator app on their phone. Signing in then asks for the code after the password. Nothing on
+the site requires one yet, so where nobody adds one, nothing changes.
+
+Three things to know:
+
+- **Entering a code ends the person's other sessions that never gave one.** Their Grafana,
+  Node-RED, Studio and forge sign-ins are among them, in every browser. Each asks the person to sign
+  in again. The sign-in service does this every time a code is entered.
+- **A person who loses their phone needs an Administrator.** **Reset MFA**, in the person's drawer
+  on **Access Control** → **People**, removes their second factors. It does not sign them out:
+  **End Sessions** does that.
+- **Nobody on People can reset the only Administrator's.** Keep two Administrators. Otherwise
+  whoever runs the server deletes the factor with the secret key:
+  [*Resetting the only Administrator's second factor*](../../docs/security-model.md#resetting-the-only-administrators-second-factor).
+
+There is nothing to set. The chart turns on codes from an authenticator app (TOTP), and leaves text
+messages, security keys and recovery codes off. It is not a chart value.
+
 ### From 1.7.0, sign tokens with ES256
 
 Aber 1.7.0 can sign every token with an ES256 key pair instead of the shared HS256 secret. With
@@ -1336,7 +1411,8 @@ Run these three steps on a machine whose kube context reaches the release:
      es256Signing: true
    ```
 
-   Every service restarts once, the platform database too. People stay signed in.
+   Each service that signs or checks a token restarts once, the platform database too. Ingestion,
+   i3X and playback keep running. People stay signed in.
 
 3. Re-sign the keys the gateway and the workers hold:
 
@@ -1367,6 +1443,54 @@ What else changes when ES256 is on:
 
 The reasons, and how to rotate the key pair later, are in
 [supabase/README.md](../../supabase/README.md#signing-with-es256).
+
+### The upgrade to 1.7.0 checks storage policies and the database's grants
+
+Every workload rolls once, as at every release. Beyond that:
+
+- **Storage gets a private bucket for pictures, `avatars`, and every storage policy is checked.**
+  Each permissive policy on `storage.objects` must test its own bucket first, as
+  `bucket_id = '<its bucket>'`, ANDed with the rest. Permissive policies are combined with OR, so
+  one that is not confined this way could let somebody read another person's picture. Aber's own
+  policies pass.
+  - A policy of your own that fails makes the storage-policies Job fail, and the error names it.
+    `helm upgrade` then fails too. Rewrite the policy, then upgrade again.
+  - To see before upgrading whether any would fail, run this. No rows means none:
+
+    ```bash
+    kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+      "SELECT policyname, cmd FROM pg_policies
+         WHERE schemaname = 'storage' AND tablename = 'objects' AND permissive = 'PERMISSIVE'
+           AND ((cmd <> 'INSERT' AND NOT coalesce(qual ~ '^(\(bucket_id = ''[^'']+''::text\)|\(\(bucket_id = ''[^'']+''::text\) AND .*\))$', false))
+             OR (with_check IS NOT NULL AND NOT with_check ~ '^(\(bucket_id = ''[^'']+''::text\)|\(\(bucket_id = ''[^'']+''::text\) AND .*\))$')
+             OR (cmd = 'INSERT' AND with_check IS NULL))
+         ORDER BY 1;"
+    ```
+
+- **The sign-in service's app tables get audit triggers** (migration `0217`), so the Audit Trail
+  records each app registered or removed, and each approval given or revoked. The database role
+  `postgres` needs the TRIGGER privilege on `auth.oauth_clients` and `auth.oauth_consents`. Aber's
+  `supabase-db` image grants it. Without it, db-init stops with
+  `0217: postgres may not create a trigger on auth.oauth_clients and auth.oauth_consents`.
+  - Check it only if you run another database server image (`supabaseDb.serverImage`), or changed
+    the grants on those tables. This should answer `t`:
+
+    ```bash
+    kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -tc \
+      "SELECT has_table_privilege('postgres', 'auth.oauth_clients', 'TRIGGER')
+          AND has_table_privilege('postgres', 'auth.oauth_consents', 'TRIGGER');"
+    ```
+
+- **The broker holds every account named `sub` and 21 lowercase hex characters to one role.** That
+  is the name a read-only account gets on **Access Control** → **Broker accounts**. At each start,
+  the broker gives such an account the `subscriber` role alone, and takes it out of any group. An
+  account of your own with such a name loses its other roles. **Broker accounts** lists every
+  account the broker holds, so check the names there first.
+- **The ingestion account loses its reads** of the Unified Namespace and the Directory: see
+  [*the ingestion account cannot read them*](#from-170-the-ingestion-account-cannot-read-the-unified-namespace-or-the-directory).
+- **The sign-in service restarts** with the 7-day session timeout and its second-factor settings.
+  **The forge restarts** with its email fallback off. **Grafana** gains one alert rule, **Service
+  Token Expiring**, which warns a week before a machine identity's token expires.
 
 ---
 
@@ -1421,6 +1545,7 @@ is fresh.
 | The databases' link, the API, the broker, ingestion and the dashboard answer | `helm test aber -n aber` — every test Pod Succeeded; none of them writes anything |
 | The broker kept its 1.3.x document for a rollback (upgrading to 1.4.0) | `kubectl -n aber exec deploy/mosquitto -c mosquitto -- ls -l /mosquitto/data/` — `dynamic-security.json.pre-2.1` is there |
 | Which self-registered OAuth clients were deleted (upgrading to 1.6.0) | `kubectl -n aber logs job/aber-db-init \| grep 'dynamically registered'` — no line means there were none |
+| Which cells kept a `grafana_url` that is not a web address (upgrading to 1.7.0) | `kubectl -n aber logs job/aber-db-init \| grep 'keeps grafana_url'` — no line means every address moved to Attached Links |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
