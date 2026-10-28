@@ -2,17 +2,22 @@ import React, { useState } from 'react'
 import { IconPencil } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { PermittedValuesField } from '../common/PermittedValuesField'
 import { datatypeLabel } from '../../utils/sparkplugDatatype'
 import { storedSemanticIdPair } from '../../utils/standards'
+import {
+  parsePermittedValues, permittedValuesApply, permittedValuesText, samePermittedValues
+} from '../../utils/schemaProperty'
 import { Modal } from '../common/Modal'
 import { usePendingAction } from '../../hooks/usePendingAction'
 
 /**
- * Correct a catalog metric's semantic id and reference type, the only columns it changes. The name
- * and datatype are shown and not offered: devices publish them. It is also the confirmation, so it
- * says how many schemas model the metric, as DeprecateMetricModal does, because every shell
- * exported from one of them carries the new id. `suggestion` is the pair Add Metric would suggest
- * for the metric's standard and type, which Use suggested restores; `candidates` feed the field's
+ * Correct a catalog metric's semantic id and reference type, and the values it may report: the
+ * only columns it changes. The name and datatype are shown and not offered: devices publish them.
+ * It is also the confirmation, so it says how many schemas model the metric, as
+ * DeprecateMetricModal does. `onConfirm` receives only what changed: the pair, `permitted_values`
+ * (a list, or null to clear it), or both. `suggestion` is the pair Add Metric would suggest for the
+ * metric's standard and type, which Use suggested restores; `candidates` feed the field's
  * vocabulary search (both from utils/semanticIdSources.js).
  */
 export function EditMetricSemanticIdModal({
@@ -26,7 +31,19 @@ export function EditMetricSemanticIdModal({
   const stored = storedSemanticIdPair(metric.semantic_id, metric.semantic_id_type)
   const [pair, setPair] = useState(stored)
   const next = storedSemanticIdPair(pair.semanticId, pair.semanticIdType)
-  const changed = next.semanticId !== stored.semanticId || next.semanticIdType !== stored.semanticIdType
+  const pairChanged = next.semanticId !== stored.semanticId || next.semanticIdType !== stored.semanticIdType
+
+  // Compared as parsed lists once typed into: a stored value holding a comma reads back as two,
+  // so an untouched field must never count as an edit.
+  const takesValues = permittedValuesApply(metric.datatype)
+  const storedText = permittedValuesText(metric.permitted_values)
+  const [valuesText, setValuesText] = useState(storedText)
+  const parsed = parsePermittedValues(valuesText, metric.datatype)
+  const valuesChanged = takesValues && valuesText !== storedText &&
+    !parsed.error && !samePermittedValues(parsed.values, metric.permitted_values)
+
+  const changed = pairChanged || valuesChanged
+  const blocked = takesValues && !!parsed.error
 
   return (
     <Modal
@@ -39,16 +56,16 @@ export function EditMetricSemanticIdModal({
           <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
           <ActionButton
             className="btn btn-primary"
-            disabled={!changed}
+            disabled={!changed || blocked}
             pending={saving}
             pendingLabel="Saving…"
             onClick={() => runSave(() => onConfirm({
-              semantic_id: next.semanticId,
-              semantic_id_type: next.semanticIdType
+              ...(pairChanged && { semantic_id: next.semanticId, semantic_id_type: next.semanticIdType }),
+              ...(valuesChanged && { permitted_values: parsed.values })
             }))}
-            title={changed ? undefined : 'No changes to save'}
+            title={blocked ? parsed.error : changed ? undefined : 'No changes to save'}
           >
-            Save Semantic ID
+            Save Metric
           </ActionButton>
         </>
       }
@@ -75,6 +92,16 @@ export function EditMetricSemanticIdModal({
         onChange={setPair}
       />
 
+      {takesValues && (
+        <PermittedValuesField
+          idPrefix="metric-edit"
+          datatype={metric.datatype}
+          value={valuesText}
+          onChange={setValuesText}
+          error={parsed.error}
+        />
+      )}
+
       <p className="form-hint">
         {usageCount > 0 ? (
           <>
@@ -85,6 +112,10 @@ export function EditMetricSemanticIdModal({
         ) : (
           <>No schema models this metric yet, so no exported shell carries its id.</>
         )} The name and datatype stay as they are: devices publish them.
+        {takesValues && (
+          <> A published schema keeps the permitted values it was built with. The next version saved
+            takes these.</>
+        )}
       </p>
     </Modal>
   )
