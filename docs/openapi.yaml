@@ -5100,6 +5100,7 @@ paths:
                         nullable: true
                         additionalProperties: { type: number }
                         description: 'What the rule evaluated, by refId. Stored as `values`, as are the labels.'
+                      labels:
                         type: object
                         properties:
                           alertname: { type: string }
