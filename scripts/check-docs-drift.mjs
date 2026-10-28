@@ -3744,7 +3744,10 @@ const OPERATOR_PAIRS = [
 // `entity_type` is `gateway` or `device` (the webhook's default) needs a `sparkplug_id` label, and
 // a `service_identity` one a `principal_id`: without it the webhook skips the alert, which fires in
 // Grafana and never reaches the dashboard. The label is set on the rule, as a literal or a template
-// such as `{{ $labels.edge_node }}`, or is a column a SQL query selects.
+// such as `{{ .Labels.edge_node }}`, or is a column a SQL query selects. And no label value holds a
+// `$`: Grafana's file provisioning expands each label value as environment variables (`$$` is its
+// escape), and not the annotations, so `{{ $labels.x }}` reaches the rule as `{{ .x }}`, which fails
+// to expand and is sent as written.
 // -------------------------------------------------------------------------------------------------
 {
   const RULES = 'grafana/provisioning/alerting/alert-rules.yaml';
@@ -3785,9 +3788,13 @@ const OPERATOR_PAIRS = [
   });
 
   const missing = [];
+  const expanded = [];
   let byLabel = 0;
   let byColumn = 0;
   for (const { uid, labels, columns } of rules) {
+    for (const [name, value] of Object.entries(labels)) {
+      if (value.split('$$').some((part) => part.includes('$'))) expanded.push(`${uid}: ${name}: ${value}`);
+    }
     const type = labels.entity_type ?? 'device';
     const needs = SUBJECT_LABEL[type];
     if (!accepted.has(type)) {
@@ -3810,10 +3817,18 @@ const OPERATOR_PAIRS = [
     fail(`${missing.length} alert rule(s) fire in Grafana and never reach the dashboard, because the `
       + `webhook cannot tell what they are about:\n      ${missing.join('\n      ')}\n`
       + '      A Prometheus series names a gateway by its edge_node label: add\n'
-      + "      `sparkplug_id: '{{ $labels.edge_node }}'` to the rule's labels.");
+      + "      `sparkplug_id: '{{ .Labels.edge_node }}'` to the rule's labels.");
   } else {
     pass(`all ${byLabel + byColumn} alert rule(s) about an asset or a machine identity name it as the webhook reads it `
       + `(${byLabel} by a label, ${byColumn} by a query column)`);
+  }
+  if (expanded.length) {
+    fail(`${expanded.length} alert rule label(s) hold a \`$\`:\n      ${expanded.join('\n      ')}\n`
+      + '      Grafana expands a provisioned label as environment variables, and not an annotation, so\n'
+      + '      `{{ $labels.x }}` arrives as `{{ .x }}`, fails to expand and is sent as written. Write\n'
+      + '      `{{ .Labels.x }}` (and `$$` for a literal dollar).');
+  } else if (rules.length >= 30) {
+    pass(`no alert rule label holds a \`$\`, which Grafana's provisioning would expand as an environment variable`);
   }
 }
 

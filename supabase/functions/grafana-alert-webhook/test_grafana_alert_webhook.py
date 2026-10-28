@@ -301,23 +301,43 @@ class TestPrometheusGatewayRules(unittest.TestCase):
         return title, {k: v.strip().strip("'\"") for k, v in re.findall(r"^ {10}(\w+): (.*)$", labels, re.M)}
 
     @staticmethod
+    def provision(value):
+        """
+        Grafana's file provisioning of a LABEL value (not an annotation): os.ExpandEnv on each part
+        between `$$`, here with no variable set, and `$$` kept as one `$`.
+        """
+        unset = re.compile(r"\$(\{[^}]*\}|[A-Za-z0-9_]+|[*#$@!?-])")
+        return "$".join(unset.sub("", part) for part in value.split("$$"))
+
+    @staticmethod
     def expand(value, series):
-        """Grafana's expansion of a `{{ $labels.x }}` label; a missing label reads `[no value]`."""
-        out = re.sub(r"\{\{\s*\$labels\.(\w+)\s*\}\}", lambda m: series.get(m.group(1), NO_VALUE), value)
-        assert "{{" not in out, f"a template this test does not expand: {value}"
-        return out
+        """
+        Grafana's expansion of a label at evaluation, over data whose `.Labels` is the series' labels
+        (`$labels` is bound to it). A missing label reads `[no value]`; any other action fails, and
+        Grafana then keeps the value as written.
+        """
+        def action(m):
+            ref = re.fullmatch(r"\s*(?:\.Labels|\$labels)\.(\w+)\s*", m.group(1))
+            if not ref:
+                raise ValueError(m.group(0))
+            return series.get(ref.group(1), NO_VALUE)
+        try:
+            return re.sub(r"\{\{(.*?)\}\}", action, value)
+        except ValueError:
+            return value
 
     def payload(self, uid, rule_labels=None, series=None, error=False):
         """
-        One webhook alert for an instance of `uid`: the series' labels, the rule's labels expanded
-        over them, alertname and grafana_folder; Grafana strips its `__x__` labels before sending.
+        One webhook alert for an instance of `uid`: the series' labels, the rule's labels as
+        provisioning left them and expanded over the series, alertname and grafana_folder; Grafana
+        strips its `__x__` labels before sending.
         An evaluation error's instance has no series, gains ref_id and datasource_uid, and is renamed
         DatasourceError with the title in `rulename`.
         """
         title, labels = self.rule(uid)
         labels = labels if rule_labels is None else rule_labels
         series = {} if error else (self.SERIES if series is None else series)
-        sent = {**series, **{k: self.expand(v, series) for k, v in labels.items()},
+        sent = {**series, **{k: self.expand(self.provision(v), series) for k, v in labels.items()},
                 "alertname": title, "grafana_folder": "Aber - Platform Infrastructure"}
         if error:
             sent.update(alertname="DatasourceError", rulename=title, ref_id="A", datasource_uid="prometheus")
@@ -346,6 +366,23 @@ class TestPrometheusGatewayRules(unittest.TestCase):
         self.assertEqual(row["labels"]["sparkplug_id"], NO_VALUE)
         self.assertIsNone(normalize_alert(row))
         self.assertIsNone(normalize_alert(alert(labels={**alert()["labels"], "sparkplug_id": NO_VALUE})))
+
+    def test_provisioning_leaves_the_label_naming_the_gateway(self):
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                _, labels = self.rule(uid)
+                self.assertEqual(self.provision(labels["sparkplug_id"]), labels["sparkplug_id"])
+
+    def test_a_dollar_form_would_name_a_gateway_after_its_own_template(self):
+        # `$labels` is an unset environment variable to provisioning. What is left fails to expand,
+        # Grafana keeps it as written, and the webhook would file the alert under that text.
+        provisioned = self.provision("{{ $labels.edge_node }}")
+        self.assertEqual(provisioned, "{{ .edge_node }}")
+        self.assertEqual(self.expand(provisioned, self.SERIES), "{{ .edge_node }}")
+        row = normalize_alert(self.payload("aber-gateway-clock-skew",
+                                           rule_labels={"entity_type": "gateway", "sparkplug_id": "{{ $labels.edge_node }}"}))
+        self.assertEqual(row["sparkplug_id"], "{{ .edge_node }}")
+        self.assertEqual(self.provision("costs $$5"), "costs $5")
 
     def test_the_typescript_refuses_the_same_marker(self):
         src = INDEX_TS.read_text(encoding="utf-8")

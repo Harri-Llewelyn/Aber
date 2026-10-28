@@ -31,7 +31,7 @@ const ENTITY_TYPES = new Set(["device", "gateway", "platform", "service_identity
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * What Grafana writes for a templated label (`{{ $labels.edge_node }}`) whose source label the
+ * What Grafana writes for a templated label (`{{ .Labels.edge_node }}`) whose source label the
  * instance lacks, as an evaluation error's instance does. It names no asset.
  */
 const NO_VALUE = "[no value]";
