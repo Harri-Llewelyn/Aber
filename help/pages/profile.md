@@ -20,6 +20,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
 - **End**, on a row of the **Security** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
 - **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
+- **Apps you have allowed**, on the **Security** tab, lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
 - **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
@@ -91,6 +92,31 @@ What ending a session does:
 - **The Audit Trail records it**, in your lane, with you as the person who did it. Administrators and Auditors can read it. **End** records the session it ended, named as this list names it. **Sign Out of All Other Sessions** records how many sessions it ended. **Sign Out** records nothing.
 
 **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
+
+## Apps you have allowed
+
+Some apps sign you in with your Aber account: Grafana, Node-RED, Studio and the forge. The first time one does, it asks you to allow it. You answer once, and it remembers.
+
+The **Security** tab lists the apps you have allowed, and nobody else's. The newest comes first.
+
+- **App** names the app, such as "Grafana". Aber's own apps are marked **Aber**.
+- **Allowed** is when you allowed it. Point at it for the date and time.
+- **Can read** is what the app may read about you. `openid` is who you are, `email` is your email address and `profile` is your name and picture.
+
+To take an approval back:
+
+1. Select **Revoke** on the app's row. A dialog says what happens.
+2. Select **Revoke Approval**.
+
+What revoking does:
+
+- **The app's sessions for you end at once.** It cannot renew its access, and the API refuses it.
+- **The app notices on its own schedule.** Studio and the forge refuse your next request. Node-RED signs you out within a minute, and Grafana within an hour on a standard install.
+- **The app asks you again** the next time it signs you in. Allow it again, and it works as before.
+- **Your role does not change,** and your other sessions stay signed in.
+- **The Audit Trail records it**, in your lane, with you as the person who did it. Allowing an app is recorded too.
+
+An Administrator can also revoke your approval, on **Access Control › Apps**.
 
 ## What is not here
 

@@ -393,6 +393,13 @@ ends when:
 - an Administrator ends it from the person's drawer on People: **End** on one row of their list of
   sessions (`end_person_session()`, `0212`), or **End Sessions** for all of them (`0207`). Each
   writes one `SESSIONS_ENDED` row in the person's lane, with the Administrator as the actor.
+- the person, or an Administrator, revokes their approval of the app that holds it: an app's
+  sessions are the person's sessions with that OAuth client. The person revokes on Profile's
+  Security tab through GoTrue's own `DELETE /user/oauth/grants`; an Administrator on Access
+  Control's Apps tab through `revoke_app_approval()` (`0217`), which runs the same two statements.
+  Removing an app (`remove_app()`) ends every session it holds. The app asks again at the next
+  sign-in. Triggers on GoTrue's tables write `APP_APPROVED` and `APP_APPROVAL_REVOKED` in the
+  person's lane, naming who acted.
 - the person changes their password, which ends their other sessions.
 - an Administrator sets a new password (`0167`), which ends all of them.
 - nothing refreshes it for `supabaseAuth.sessionInactivityTimeout`, 7 days by default. An open

@@ -1467,6 +1467,163 @@ paths:
                     not_after:      { type: string, format: date-time, nullable: true, description: 'When GoTrue ends it regardless, if ever.' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /rest/v1/rpc/list_apps:
+    post:
+      tags: [Auth]
+      summary: List the apps that sign people in
+      description: |
+        For Access Control's Apps tab (`0217`). Every GoTrue OAuth client not removed, Aber's own
+        four first: Grafana, Node-RED and the Studio and forge doors, which `0002` seeds on every
+        boot (`part_of_stack`). Never the client's secret. `people_allowing` counts the approvals in
+        force. Administrator only.
+      responses:
+        '200':
+          description: The apps.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:                { type: string, format: uuid, description: 'The client id the app signs in with.' }
+                    client_name:       { type: string, nullable: true }
+                    registration_type: { type: string, enum: [manual, dynamic] }
+                    part_of_stack:     { type: boolean, description: 'One of the four `0002` seeds; `remove_app` refuses it.' }
+                    client_type:       { type: string, enum: [confidential, public] }
+                    redirect_uris:     { type: array, items: { type: string } }
+                    client_uri:        { type: string, nullable: true }
+                    created_at:        { type: string, format: date-time }
+                    people_allowing:   { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/app_approvals:
+    post:
+      tags: [Auth]
+      summary: List who allows one app
+      description: |
+        For an app's drawer on Access Control's Apps tab (`0217`). Each approval in force, newest
+        first: the person, the scopes they approved and when. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_client_id]
+              properties:
+                p_client_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The approvals.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:      { type: string, format: uuid }
+                    email:        { type: string, nullable: true }
+                    display_name: { type: string, nullable: true }
+                    scopes:       { type: array, items: { type: string } }
+                    granted_at:   { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'The app was removed, or was never registered (`P0002`).' }
+
+  /rest/v1/rpc/list_my_app_approvals:
+    post:
+      tags: [Auth]
+      summary: List the apps you have allowed
+      description: |
+        For Apps you have allowed on the Profile page's Security tab (`0217`). Your own approvals in
+        force, newest first. A removed app is left out, as GoTrue's own `GET /auth/v1/user/oauth/grants`
+        leaves it out. To take one back, call GoTrue's `DELETE /auth/v1/user/oauth/grants?client_id=`,
+        which also ends that app's sessions for you. Any person role; an account with no role is
+        refused.
+      responses:
+        '200':
+          description: Your approvals.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    client_id:     { type: string, format: uuid }
+                    client_name:   { type: string, nullable: true }
+                    client_uri:    { type: string, nullable: true }
+                    part_of_stack: { type: boolean }
+                    scopes:        { type: array, items: { type: string } }
+                    granted_at:    { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/revoke_app_approval:
+    post:
+      tags: [Auth]
+      summary: Take back a person's approval of an app
+      description: |
+        Revoke in an app's drawer on Access Control's Apps tab (`0217`). Does what GoTrue's
+        `DELETE /auth/v1/user/oauth/grants` does for the person: the approval's `revoked_at` is set,
+        and every session that app holds for them is deleted with its refresh tokens. The app
+        cannot refresh its tokens, the API refuses its access token (401 `session_not_found`), and
+        it asks the person to allow it again at their next sign-in. Their other sessions are
+        untouched. One `APP_APPROVAL_REVOKED` row in the person's lane names you. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_client_id]
+              properties:
+                p_user_id:   { type: string, format: uuid }
+                p_client_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: How many of the app's sessions for the person ended.
+          content:
+            application/json:
+              schema: { type: integer }
+        '400': { description: 'A machine identity (`22023`).' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'No such person, or no approval of that app by them in force (`P0002`).' }
+
+  /rest/v1/rpc/remove_app:
+    post:
+      tags: [Auth]
+      summary: Remove an app that signs people in
+      description: |
+        Remove App in an app's drawer on Access Control's Apps tab (`0217`). Sets the client's
+        `deleted_at`, as GoTrue's admin `DELETE /auth/v1/admin/oauth/clients/{id}` does, and in the
+        same transaction revokes every approval of it and deletes every session it holds, so no
+        refresh token it was issued works. An `APP_REMOVED` row in the app's lane, and an
+        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own four apps are refused:
+        `0002` registers them again on every boot. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_client_id]
+              properties:
+                p_client_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: What ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:            { type: string, nullable: true }
+                  approvals_ended: { type: integer }
+                  sessions_ended:  { type: integer }
+        '403': { description: 'Not an Administrator, or one of Aber''s own apps (`42501`).' }
+        '404': { description: 'The app was removed, or was never registered (`P0002`).' }
+
   /rest/v1/rpc/check_person_email_change:
     post:
       tags: [Auth]
@@ -5478,7 +5635,7 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups,
-                 capture_jobs, captures, playback_jobs]
+                 capture_jobs, captures, playback_jobs, oauth_clients]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -5492,7 +5649,8 @@ components:
                  PASSWORD_SET, DISPLAY_NAME_CHANGED, EMAIL_CHANGED, SESSIONS_ENDED, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
-                 CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
+                 CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
+                 APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -5506,7 +5664,9 @@ components:
             writes `SESSIONS_ENDED` too, through `end_my_session()` and `end_my_other_sessions()`
             (0211), with themselves in `changed_by`. An Administrator ending one of a person's
             sessions writes it through `end_person_session()` (0212), in the shape
-            `end_my_session()` writes.
+            `end_my_session()` writes. The `APP_` actions (0217) are written by triggers on GoTrue's
+            `auth.oauth_clients`, in the app's `oauth_clients` lane, and `auth.oauth_consents`, in
+            the person's `user_roles` lane, so an act inside GoTrue is recorded too.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
