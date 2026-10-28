@@ -5,8 +5,9 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
-The three exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
-[the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) and
+The four exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
+[the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11),
+[the icon glyphs it copies](#the-dashboards-icons--lucide-isc-and-feather-mit) and
 [the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20), which keep their own
 licences. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
 belong to.
@@ -45,7 +46,7 @@ one.
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.7` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own |
+| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) notices are not in the bundle yet |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
@@ -85,6 +86,24 @@ both the repository and the image redistribute them.
 They are Fontsource's variable-weight builds of the latin and latin-ext subsets, copied byte for
 byte. Each file carries its copyright and the licence's URL in its own metadata. The fonts' folder has a
 README naming where each file came from.
+
+## The dashboard's icons — Lucide (ISC) and Feather (MIT)
+
+[`frontend/src/components/common/Icons.jsx`](frontend/src/components/common/Icons.jsx) draws the
+dashboard's icons as inline SVG. Most of its glyphs are copied from two icon sets, element for
+element. A few are drawn after one of them, and a few are Aber's own. This was checked by comparing
+each glyph with Feather 4.29.2 and with Lucide releases from 0.117.0 to 1.63.0. The MIT licence
+above does not cover the copied glyphs.
+
+| Icon set | Copyright | Licence |
+| :--- | :--- | :--- |
+| Lucide ([`github.com/lucide-icons/lucide`](https://github.com/lucide-icons/lucide)) | 2026 Lucide Icons and Contributors | ISC. The Lucide icons derived from Feather stay under Feather's MIT licence |
+| Feather ([`github.com/feathericons/feather`](https://github.com/feathericons/feather), `v4.29.2`) | 2013-2023 Cole Bemis | MIT |
+
+Both licences ask for their notice in every copy. `Icons.jsx` carries both notices in its header,
+as a `/*!` legal comment. **The built dashboard does not carry them yet.** The build's minifier
+drops legal comments unless it is told to keep them, so the frontend image serves the glyphs
+without the notices.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 
