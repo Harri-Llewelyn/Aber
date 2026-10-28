@@ -1355,7 +1355,7 @@ export const SUITES = {
       "A person's picture through the real Storage API (0213), which the db lane has none of: the " +
       'owner uploads, replaces, downloads and deletes their own <id>/avatar; every seeded role ' +
       'reads, lists, signs, overwrites and deletes none of it and the public URL serves nothing; ' +
-      'the bucket refuses SVG, GIF and HTML and a file over 512 KiB; and Remove Access deletes the ' +
+      'the bucket refuses SVG, GIF and HTML and holds its 512 KiB limit; and Remove Access deletes the ' +
       'object and clears the column. Adds and deletes its own throwaway person.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {

@@ -2079,7 +2079,7 @@ boolean and no id, who may execute each function, `SECURITY DEFINER` and the pin
 audit rows, what others read, and the avatars policies run verbatim on a stand-in table with their
 self-check. `supabase/functions/manage-people/test_account_pictures_stack.py` holds what only
 storage-api decides, in the stack lane: the owner's upload, download and delete through the Storage
-API, everyone else refused, a wrong type and an oversize file refused, and Remove Access deleting
+API, everyone else refused, a wrong type refused and the size limit set, and Remove Access deleting
 the object. Mirror check 26 (`scripts/check-mirror-drift.mjs`) holds the bucket's name, types,
 limit and object name in the dashboard, `manage-people` and `storage-init.mjs` together.
 

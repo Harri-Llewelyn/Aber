@@ -91,8 +91,10 @@ python supabase/test_sign_out_ends_one_session.py
 # Operator through manage-people, who uploads, replaces, downloads and deletes their own
 # <id>/avatar. The seeded people read, list, sign, overwrite and delete none of it, the public URL
 # serves nothing, and a machine identity sees no row of the bucket. The bucket refuses SVG, GIF and
-# HTML, and a file over 512 KiB. Remove Access deletes the object and clears avatar_path, and
-# Restore Access brings the person back with no picture. The account is deleted afterwards.
+# HTML, and holds its 512 KiB limit; it is read from the bucket, because an oversize upload resets
+# the connection and ends the shared gateway port-forward. Remove Access deletes the object and
+# clears avatar_path, and Restore Access brings the person back with no picture. The account is
+# deleted afterwards.
 python supabase/functions/manage-people/test_account_pictures_stack.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
