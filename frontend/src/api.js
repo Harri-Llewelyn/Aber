@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { inServiceDevices } from './utils/inService';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES, planRotation, nextRotation } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
@@ -3688,13 +3688,14 @@ const apiMethods = {
   /**
    * Detach an area's plan. The row is cleared before the object is deleted: the worst case is a
    * stranded object, never an area pointing at a drawing that is gone. Cell places in the area are
-   * kept, since the default outline shares the plan's coordinate space.
+   * kept, since the default outline shares the plan's coordinate space. The turn goes back to 0 in
+   * the same write: the database refuses a turn on an area with no plan.
    */
   removeAreaPlan: async (area) => {
     const areaId = area.area_id ?? area.id;
     const { data, error } = await supabase
       .from('areas')
-      .update({ plan_path: null, plan_aspect: null })
+      .update({ plan_path: null, plan_aspect: null, plan_rotation: 0 })
       .eq('id', areaId)
       .select();
     if (error) throw new Error(error.message || 'Could not detach the plan');
@@ -3702,6 +3703,28 @@ const apiMethods = {
     if (area.plan_path) {
       await supabase.storage.from(AREA_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
     }
+    return { ...data[0], area_id: data[0].id };
+  },
+
+  /**
+   * Turn an area's plan a quarter turn right (clockwise, `direction` 1) or left (-1), from the turn
+   * `area` was read with. One write of `plan_rotation`: the file and every cell's place stay as they
+   * are, since a place is a fraction of the drawing as uploaded. RLS refuses with zero rows, not an
+   * error, so `.select()` is what tells a refused turn from a done one.
+   */
+  turnAreaPlan: async (area, direction) => {
+    const areaId = area.area_id ?? area.id;
+    const { data, error } = await supabase
+      .from('areas')
+      .update({ plan_rotation: nextRotation(planRotation(area), direction) })
+      .eq('id', areaId)
+      .select();
+    if (error) {
+      // areas_plan_rotation_needs_a_plan: the plan was removed since the page read it.
+      if (error.code === '23514') throw new Error('The area has no plan to turn.');
+      throw new Error(error.message || 'Could not turn the plan');
+    }
+    if (!data?.length) throw new Error('You do not have permission to change this area.');
     return { ...data[0], area_id: data[0].id };
   },
 

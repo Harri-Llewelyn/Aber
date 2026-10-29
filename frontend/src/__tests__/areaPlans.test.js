@@ -10,7 +10,14 @@ import {
   isSvgFile,
   readSvgPlan,
   decodeSvgBytes,
-  areaPlanPath
+  areaPlanPath,
+  PLAN_ROTATIONS,
+  planRotation,
+  nextRotation,
+  planFrameAspect,
+  placeInFrame,
+  placeOnDrawing,
+  drawingBoxInFrame
 } from '../utils/areaPlans';
 
 /**
@@ -24,6 +31,114 @@ describe('plans', () => {
     expect(planAspect({ plan_aspect: null })).toBe(DEFAULT_PLAN_ASPECT);
     expect(planAspect({ plan_aspect: '1.5' })).toBe(1.5);
     expect(planAspect(undefined)).toBe(DEFAULT_PLAN_ASPECT);
+  });
+});
+
+/**
+ * A plan turned in quarter turns. The drawing is laid out at its own shape and turned about the
+ * frame's centre, as the browser applies `rotate()` (AreaPlan.jsx). `drawnAt` models that with a
+ * rotation matrix, so the frame arithmetic is checked against the picture, not against itself.
+ */
+describe('turned plans', () => {
+  const turned = (rotation) => ({ plan_path: 'a/plan-1.svg', plan_aspect: 2, plan_rotation: rotation });
+
+  /** Where the browser draws the drawing's (x, y): the image box turned about its centre, as fractions of the frame. */
+  const drawnAt = (area, { x, y }) => {
+    const fw = 300;
+    const fh = fw / planFrameAspect(area);
+    const box = drawingBoxInFrame(area);
+    const bw = (box.width / 100) * fw;
+    const bh = (box.height / 100) * fh;
+    const ox = (x - 0.5) * bw;
+    const oy = (y - 0.5) * bh;
+    const t = (box.rotation * Math.PI) / 180;
+    return {
+      x: (fw / 2 + ox * Math.cos(t) - oy * Math.sin(t)) / fw,
+      y: (fh / 2 + ox * Math.sin(t) + oy * Math.cos(t)) / fh
+    };
+  };
+  const expectPlace = (got, want) => {
+    expect(got.x).toBeCloseTo(want.x, 9);
+    expect(got.y).toBeCloseTo(want.y, 9);
+  };
+
+  // A door near the drawing's top left, a press low on the right, and two corners.
+  const FEATURES = [{ x: 0.25, y: 0.1 }, { x: 0.8, y: 0.7 }, { x: 0, y: 0 }, { x: 1, y: 1 }];
+
+  it('reads the turn, and takes a quarter turn either way', () => {
+    expect(PLAN_ROTATIONS).toEqual([0, 90, 180, 270]);
+    expect(planRotation(turned(90))).toBe(90);
+    expect(planRotation({ plan_rotation: '180' })).toBe(180);
+    // Anything the CHECK would refuse is drawn unturned.
+    expect(planRotation({ plan_rotation: 45 })).toBe(0);
+    expect(planRotation({ plan_rotation: null })).toBe(0);
+    expect(planRotation(undefined)).toBe(0);
+
+    expect(nextRotation(0, 1)).toBe(90);
+    expect(nextRotation(270, 1)).toBe(0);
+    expect(nextRotation(0, -1)).toBe(270);
+    expect(nextRotation(90, -1)).toBe(0);
+    expect(PLAN_ROTATIONS.map(r => nextRotation(nextRotation(r, 1), -1))).toEqual(PLAN_ROTATIONS);
+  });
+
+  it('draws the frame on its side at 90 and 270, and measures with the drawing\'s own aspect', () => {
+    expect([0, 90, 180, 270].map(r => planFrameAspect(turned(r)))).toEqual([2, 0.5, 2, 0.5]);
+    expect([0, 90, 180, 270].map(r => planAspect(turned(r)))).toEqual([2, 2, 2, 2]);
+    expect(planFrameAspect({ plan_aspect: null, plan_rotation: 0 })).toBe(DEFAULT_PLAN_ASPECT);
+  });
+
+  it('lays the drawing out at its own shape, so it covers the frame once turned', () => {
+    for (const r of PLAN_ROTATIONS) {
+      const area = turned(r);
+      const fw = 300;
+      const fh = fw / planFrameAspect(area);
+      const box = drawingBoxInFrame(area);
+      const bw = (box.width / 100) * fw;
+      const bh = (box.height / 100) * fh;
+      expect(box.rotation).toBe(r);
+      expect(bw / bh).toBeCloseTo(2, 9);
+      // Turned on its side, the box's height spans the frame's width and its width the height.
+      expect(r % 180 ? [bh, bw] : [bw, bh]).toEqual([fw, fh]);
+    }
+  });
+
+  it('keeps a cell on the same feature of the drawing at 0, 90, 180 and 270', () => {
+    for (const r of PLAN_ROTATIONS) {
+      for (const feature of FEATURES) expectPlace(placeInFrame(feature, r), drawnAt(turned(r), feature));
+    }
+    // A clockwise turn: the drawing's top left goes to the top right, then the bottom right, then the bottom left.
+    expect(placeInFrame({ x: 0, y: 0 }, 90)).toEqual({ x: 1, y: 0 });
+    expect(placeInFrame({ x: 0, y: 0 }, 180)).toEqual({ x: 1, y: 1 });
+    expect(placeInFrame({ x: 0, y: 0 }, 270)).toEqual({ x: 0, y: 1 });
+    // Row values arrive as numbers or strings.
+    expect(placeInFrame({ x: '0.25', y: '0.1' }, 0)).toEqual({ x: 0.25, y: 0.1 });
+  });
+
+  it('turns a click back into the place on the drawing it was made over', () => {
+    for (const r of PLAN_ROTATIONS) {
+      for (const feature of FEATURES) {
+        expectPlace(placeOnDrawing(drawnAt(turned(r), feature), r), feature);
+        expectPlace(placeOnDrawing(placeInFrame(feature, r), r), feature);
+      }
+    }
+  });
+
+  it('gives the spacing check the same answer at every turn', () => {
+    const door = { x: 0.25, y: 0.1 };
+    const others = [{ cell_id: 'door', cell_name: 'Door', plan_x: door.x, plan_y: door.y }];
+    // 0.03 across a 2:1 drawing is 0.06 of its shorter side, inside 0.08; 0.05 across is 0.1.
+    const near = { x: 0.28, y: 0.1 };
+    const far = { x: 0.3, y: 0.1 };
+    for (const r of PLAN_ROTATIONS) {
+      const area = turned(r);
+      // As the picker sees it: a click over the place, turned back, then checked with planAspect.
+      const clicked = (p) => placeOnDrawing(drawnAt(area, p), r);
+      expect(nearestConflict(clicked(near), others, planAspect(area), 0.08)?.cell_id).toBe('door');
+      expect(nearestConflict(clicked(far), others, planAspect(area), 0.08)).toBeNull();
+      // And the distance on screen, in the turned frame, is the distance the database measures.
+      expect(planDistance(placeInFrame(near, r), placeInFrame(door, r), planFrameAspect(area)))
+        .toBeCloseTo(planDistance(near, door, 2), 9);
+    }
   });
 });
 

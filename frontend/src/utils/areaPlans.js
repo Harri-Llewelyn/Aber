@@ -7,6 +7,10 @@
  * `public.plan_distance()` and `place_cell_in_its_area()` in
  * supabase/migrations/0001_baseline_schema.sql; the trigger is the authority and the checks here
  * only refuse earlier.
+ *
+ * A plan is drawn turned by `plan_rotation`, clockwise in quarter turns (0221), and a place stays a
+ * fraction of the drawing as uploaded. The frame on screen is the turned drawing: a place is turned
+ * into it to be drawn (`placeInFrame`) and a click on it is turned back (`placeOnDrawing`).
  */
 
 /** The outline drawn for an area with no plan: 4:3, as the default box in the database. */
@@ -19,10 +23,73 @@ export const MIN_PIN_SPACING_SETTING = 'site_map.min_pin_spacing'
 /** The bucket's limit, mirrored so an oversized file is refused before the upload. */
 export const AREA_PLAN_MAX_BYTES = 5 * 1024 * 1024
 
-/** Width over height of an area's plan, falling back to the default outline. */
+/**
+ * Width over height of an area's drawing as uploaded, falling back to the default outline. What a
+ * distance between places is measured with, whatever the turn; the frame is `planFrameAspect`.
+ */
 export function planAspect(area) {
   const aspect = Number(area?.plan_aspect)
   return Number.isFinite(aspect) && aspect > 0 ? aspect : DEFAULT_PLAN_ASPECT
+}
+
+/** The turns `areas_plan_rotation_quarter_turn` admits, in degrees clockwise. */
+export const PLAN_ROTATIONS = [0, 90, 180, 270]
+
+/** An area's turn in degrees clockwise: one of PLAN_ROTATIONS, 0 for anything else. */
+export function planRotation(area) {
+  const turn = Number(area?.plan_rotation)
+  return PLAN_ROTATIONS.includes(turn) ? turn : 0
+}
+
+/** The turn a quarter turn right (clockwise, `+1`) or left (`-1`) from `rotation` reaches. */
+export function nextRotation(rotation, direction) {
+  return (((Number(rotation) || 0) + 90 * Math.sign(direction)) % 360 + 360) % 360
+}
+
+/** Width over height of the frame the plan is drawn in: the drawing's, or its inverse turned on its side. */
+export function planFrameAspect(area) {
+  const aspect = planAspect(area)
+  return planRotation(area) % 180 === 0 ? aspect : 1 / aspect
+}
+
+/**
+ * Where a place on the drawing, `{ x, y }` as uploaded, lands in the frame of the drawing turned
+ * clockwise by `rotation`. Turned 90, the drawing's top edge is the frame's right edge.
+ */
+export function placeInFrame({ x, y }, rotation) {
+  const px = Number(x)
+  const py = Number(y)
+  switch (rotation) {
+    case 90: return { x: 1 - py, y: px }
+    case 180: return { x: 1 - px, y: 1 - py }
+    case 270: return { x: py, y: 1 - px }
+    default: return { x: px, y: py }
+  }
+}
+
+/** The inverse of placeInFrame: a point in the turned frame, as a place on the drawing as uploaded. */
+export function placeOnDrawing({ x, y }, rotation) {
+  const fx = Number(x)
+  const fy = Number(y)
+  switch (rotation) {
+    case 90: return { x: fy, y: 1 - fx }
+    case 180: return { x: 1 - fx, y: 1 - fy }
+    case 270: return { x: 1 - fy, y: fx }
+    default: return { x: fx, y: fy }
+  }
+}
+
+/**
+ * The drawing's box inside the frame, before it is turned about the frame's centre, as
+ * percentages of the frame's width and height. Turned on its side the drawing is laid out at its
+ * own aspect, the frame's height wide and its width high, so it covers the frame once turned.
+ */
+export function drawingBoxInFrame(area) {
+  const aspect = planAspect(area)
+  const rotation = planRotation(area)
+  return rotation % 180 === 0
+    ? { width: 100, height: 100, rotation }
+    : { width: 100 * aspect, height: 100 / aspect, rotation }
 }
 
 /** True when both fractions are numbers: the cell has a place on its area's plan. */

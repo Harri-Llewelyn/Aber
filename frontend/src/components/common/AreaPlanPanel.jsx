@@ -5,17 +5,18 @@ import { HelpTip } from './HelpTip'
 import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { ExpandablePlanPreview } from './AreaPlanPreview'
-import { IconUpload, IconTrash } from './Icons'
+import { IconUpload, IconTrash, IconRotateCcw, IconRotateCw } from './Icons'
 import { areaUrl, siteMapAreaUrl } from '../../routes'
 import { Tooltip } from './Tooltip'
 
 /**
- * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
- * remove it. A plan is drawn as a preview with every cell on it, Replace and Remove beside its
- * heading, and Expand on the preview's card, which opens it window-sized (PlanViewer). An area
- * with no plan shows the drop zone rather than a button, the same gesture a device's 3D model
- * takes; a reader who may not upload sees the default outline instead. The write is one call and
- * the panel asks the page to reload rather than patching its own copy. `onOpen` is handed to the
+ * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
+ * or remove it. A plan is drawn as a preview with every cell on it, Turn left, Turn right, Replace
+ * and Remove beside its heading, and Expand on the preview's card, which opens it window-sized
+ * (PlanViewer). An area with no plan shows the drop zone rather than a button, the same gesture a
+ * device's 3D model takes; a reader who may not upload sees the default outline instead. Each write
+ * is one call and the panel asks the page to reload rather than patching its own copy; a turn
+ * waits for that reload, so the next turn starts from the one just made. `onOpen` is handed to the
  * preview: it opens the Site Map on the area.
  */
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, onOpen }) {
@@ -52,6 +53,16 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
       setConfirm(false)
       showToast?.(`Plan removed from ${area.area_name}`, 'success', { to: areaUrl(area.area_id) })
       onChanged?.()
+    } catch (e) { showToast?.(e.message, 'error') }
+    finally { setBusy(false) }
+  }
+
+  // `direction` is 1 for a quarter turn right (clockwise), -1 for left.
+  const turnPlan = async (direction) => {
+    setBusy(true)
+    try {
+      await api.turnAreaPlan(area, direction)
+      await onChanged?.()
     } catch (e) { showToast?.(e.message, 'error') }
     finally { setBusy(false) }
   }
@@ -111,6 +122,16 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
         {area.plan_path && canManage && (
           <span className="area-plan-panel-actions">
             {picker}
+            <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
+              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(-1)}>
+                <IconRotateCcw size={12} /> Turn left
+              </button>
+            </Tooltip>
+            <Tooltip text="A quarter turn clockwise. The cells turn with the plan, and the file is left as it is.">
+              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(1)}>
+                <IconRotateCw size={12} /> Turn right
+              </button>
+            </Tooltip>
             <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker}>
               <IconUpload size={12} /> Replace plan
             </button>
