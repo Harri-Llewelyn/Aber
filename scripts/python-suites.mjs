@@ -1067,6 +1067,15 @@ export const SUITES = {
       'reads them under the table\'s RLS and writes none; and that platform_alerts_active returns ' +
       "them, 0001's replay replacing the view 1.7.0 left once and then dropping nothing.",
   },
+  'supabase/migrations/test_an_area_plan_can_be_turned.py': {
+    lanes: ['db'],
+    why:
+      '0221 -- that areas.plan_rotation holds a quarter turn and nothing else, and 0 whenever the ' +
+      'area has no plan, so removing a plan resets it for any client; that a turn moves no cell ' +
+      'and the spacing is refused alike at every rotation; that replacing the plan keeps the turn; ' +
+      "that a Shopfloor Manager's turn is audited and an Operator's changes nothing; and that the " +
+      'file replays, putting back a drifted CHECK and leaving a 1.7.0 database unturned.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

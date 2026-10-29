@@ -808,6 +808,14 @@ python supabase/migrations/test_a_cell_has_no_grafana_url_column.py
 # reads them under the table's RLS and writes none; anon reads none. platform_alerts_active returns
 # them: 0001's replay replaces the view 1.7.0 left once, then drops nothing. Every test rolls back.
 python supabase/migrations/test_an_alert_keeps_its_rule_labels_and_values.py
+# An area's plan can be turned (0221). areas.plan_rotation is a smallint, NOT NULL, defaulting to 0;
+# it holds 0, 90, 180 or 270 and nothing else, and 0 whenever the area has no plan, so a client that
+# removes a plan and leaves the turn is refused. A turn moves no cell, and a place too close to
+# another is refused alike at every rotation. Replacing the plan keeps the turn. A Shopfloor
+# Manager's turn writes one audit row naming them; an Operator's changes nothing; anon reads none.
+# A second boot drops nothing, a drifted CHECK is put back, and a database from before 0221 gets
+# the column with every area unturned and no audit row. Every test rolls back.
+python supabase/migrations/test_an_area_plan_can_be_turned.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

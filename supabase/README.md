@@ -2397,6 +2397,53 @@ reads none. `test_an_alert_keeps_its_rule_labels_and_values.py` holds the column
 before, the upsert that resolves an occurrence, who reads them, and `0001`'s replay over the older
 view. The webhook's own suite holds the parse.
 
+### An area's plan can be turned (0221)
+
+Plans arrive the wrong way round for the people using them: a sheet exported in portrait for an
+area that runs left to right, or north at the top when everyone reads the floor from the entrance.
+Turning the SVG in an editor and using **Replace plan** moved every pin, because a place is two
+fractions of the drawing and nothing moved them. So the turn is state on the `areas` row, and the
+file in the `area-plans` bucket stays as uploaded, as an image or CAD viewer turns a view in quarter
+turns and leaves the file alone.
+
+- **`areas.plan_rotation smallint NOT NULL DEFAULT 0`**: how far the dashboard turns the plan,
+  clockwise, in degrees. A constant default, so the column goes onto a table with rows without
+  rewriting them, and every area on an upgraded site is drawn as before.
+- **`areas_plan_rotation_quarter_turn`**: 0, 90, 180 or 270. Any other angle leaves empty corners
+  in a rectangular tile or cuts them off. Mirroring is left out too: a mirrored plan is a bad
+  export, fixed at the source.
+- **`areas_plan_rotation_needs_a_plan`**: `plan_path IS NOT NULL OR plan_rotation = 0`, as
+  `areas_plan_has_aspect` ties `plan_aspect` to `plan_path`. Removing a plan resets the turn for any
+  client that writes the row, not only the dashboard, and the default outline is never drawn turned.
+  **Replace plan** writes only `plan_path` and `plan_aspect`, so it keeps the turn: the usual
+  replacement is a newer revision of the same drawing, in the same orientation.
+
+**A turn moves no place.** `cells.plan_x` and `plan_y` stay fractions of the drawing as uploaded.
+The dashboard turns the drawing and its pins together, and turns a click back into the drawing's
+fractions before it saves it, so a turn writes one `areas` row and no `cells` row.
+`place_cell_in_its_area()` and `plan_distance()` are unchanged: the spacing is measured in units of
+the plan's shorter side, which a quarter turn does not change, and `plan_aspect` stays the drawing's
+own. At 90 and 270 degrees the frame on screen is `1 / plan_aspect`; the dashboard keeps the two
+apart (`planFrameAspect()` and `planAspect()` in `frontend/src/utils/areaPlans.js`). A client that
+draws a plan itself turns it by `plan_rotation`, as the API reference says.
+
+**No audit code.** `trg_areas_audit_trail` records every `UPDATE` of `areas` that changes a column,
+so a turn is an ordinary `UPDATE` row in the asset lane, with the old and new `plan_rotation`. The
+column takes the table's grants and policies: every signed-in reader reads it, and an Administrator
+or Shopfloor Manager writes it. Nothing returns an area's columns but the table itself: the
+dashboard reads `areas` with `select('*')`, and no view or function names the plan's columns, so
+nothing is redeclared.
+
+The constraints are added in guarded `DO` blocks, dropped and added again when the live definition
+differs, as `0001` adds `areas_plan_has_aspect`. The file's self-check asserts the column's type,
+`NOT NULL` and default, both definitions and that they are validated, who reads and writes the
+column, and that `trg_areas_audit_trail` still fires on an `UPDATE`. Check 168
+(`scripts/check-docs-drift.mjs`) holds the API reference's `plan_rotation` and the help page's
+buttons to the code, and mirror check 34 (`scripts/check-mirror-drift.mjs`) holds the dashboard's
+turns to the CHECK. `test_an_area_plan_can_be_turned.py` holds the checks, a turn that moves no
+cell, the spacing at every rotation, who may turn a plan and its audit row, and the file's replay
+over a drifted CHECK and over a database from before `0221`.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
