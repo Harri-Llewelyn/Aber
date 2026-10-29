@@ -2,7 +2,7 @@
 
 Use this page to take a backup of the whole of Aber without a shell. It also shows every backup run: what it stored, or why it failed.
 
-A backup holds both databases and the key their Vault secrets are encrypted under. (The Vault is where Aber keeps its secrets.) It also holds the stored files: 3D models, area plans, broker captures and export bundles. Then come the forge, the broker's accounts and, where Aber issues its own certificates, the internal CA. The backup service writes all of it onto its own volume.
+A backup holds both databases and the key their Vault secrets are encrypted under. (The Vault is where Aber keeps its secrets.) It also holds the stored files: 3D models, area plans, broker captures and export bundles. Then come the forge, the broker's accounts, Grafana's saved dashboards and, where Aber issues its own certificates, the internal CA. The backup service writes all of it onto its own volume.
 
 This page does not make backups itself. **Take a backup** queues a request, and the backup service does the work. So a backup shows as queued, then running, then as a run in the list that either completed or failed.
 
@@ -104,7 +104,7 @@ With this backup the platform database can be restored to any moment, not just t
 The list shows every run the service has finished, newest first. Runs are never deleted, so the list is the full history.
 
 - A **completed** run shows its backup. That is when it was taken, the stamp its files carry, its **Origin** (on request or scheduled), its size, what it holds and its retention.
-- **Holds** names each component: the platform database, the historian, the Vault root key, the stored files, the forge, the broker accounts and the internal CA. The run's panel lists each file and its size.
+- **Holds** names each component: the platform database, the historian, the Vault root key, the stored files, the forge, the broker accounts, Grafana and the internal CA. The run's panel lists each file and its size.
 - Once the retention window has pruned a backup, its run stays and says **Pruned by the retention window** under its status. Its files are gone.
 - A **failed** run shows the reason the service gave under its status, cut to one line. Its panel has the whole reason. A failed backup leaves no files behind.
 - A **cancelled** run was withdrawn before the service picked it up, and says so under its status.

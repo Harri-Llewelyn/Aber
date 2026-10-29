@@ -787,7 +787,7 @@ What a node loss costs is *not uniform*. Know the difference before choosing a c
 | `supabase-db` | Recoverable from the nightly `pg_dump`, to the last run and no finer. Its `audit_trail` rows are append-only audit, so they are **unreconstructable**, not merely inconvenient. The dump is the whole safety net |
 | `timescaledb` | The same, but the dump is large and slow. A replicated class is what keeps the restore window sane |
 | `supabase-storage` | **Not in any dump** unless `backup.includeStorage` is on. It holds every bucket's objects (3D models, area plans, broker captures, export bundles). Rows in the *backed-up* database point at them, `devices.model_3d_path` among them. Restoring the database alone leaves those rows pointing at objects that no longer exist. An AAS shell then exports a `File` element with a dead URL, **silently**: the exporter builds that URL from the key without fetching it, so nothing notices the break until a viewer opens the shell |
-| `grafana` | SSO-created users, their org roles, and any dashboard saved through the UI. Provisioned dashboards come back from the repository; these do not |
+| `grafana` | SSO-created users, their org roles, and any dashboard saved through the UI. Provisioned dashboards come back from the repository. These come back only from a backup with `backup.includeGrafana` on |
 | `node-red` | The encrypted credentials, editor sessions and the editor-users map |
 
 Options, in rough order of how often they suit Aber:

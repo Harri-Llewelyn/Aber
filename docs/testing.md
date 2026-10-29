@@ -301,7 +301,8 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
-# service's gates; a requested backup is taken -- both dumps, the storage objects and the forge,
+# service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
+# while the service mounts it, Grafana's volume,
 # digests matching the row, a manifest restore-databases.sh reads -- and the trail names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once; a job that fails is followed by a prune that leaves the newest three
@@ -1363,7 +1364,7 @@ It runs a full cycle against a disposable k3d cluster — seed → back up throu
 → **destroy the namespace and its volumes** → reinstall → restore → assert → back up again — driven
 by `scripts/rehearse-restore.sh`, which an operator can also run by hand against any cluster. The
 backup is the service's, asked for the way the Backups page asks, and it carries the two dumps,
-the storage objects, the forge's volume and the broker's document. Destroying the volumes is what makes it
+the storage objects, the forge's volume, the broker's document and Grafana's volume. Destroying the volumes is what makes it
 meaningful; a restore over surviving data proves nothing, so the workflow fails if a
 `PersistentVolume` outlives the namespace or if the reinstalled stack is not empty before the
 restore.

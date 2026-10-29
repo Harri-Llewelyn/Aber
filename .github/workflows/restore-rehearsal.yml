@@ -24,8 +24,8 @@
 # THE BACKUP IS THE SERVICE'S. The rehearsal asks for it the way the Backups page does, as the
 # seeded Administrator through PostgREST, waits for the `backups` row, copies the directory it
 # names off the backup volume, and restores from that: both dumps in the chart's default format,
-# the storage objects, the forge's volume and the broker's document. A second backup after the
-# restore proves the restored stack can back itself up.
+# the storage objects, the forge's volume, the broker's document and Grafana's volume. A second
+# backup after the restore proves the restored stack can back itself up.
 #
 # =================================================================================================
 # THE RESTORE STARTS FROM THE BUCKET. Before the backup, the destination is set the way the Backups
@@ -40,9 +40,9 @@
 # WHAT THIS INSTALLS, AND WHAT IT THEREFORE DOES NOT REHEARSE
 #
 # Most of the stack is switched off: frontend, Node-RED, i3X, ingestion, playback, the cold
-# archive, edge functions, Grafana, Studio, Swagger, Prometheus, Loki, Alloy and the
-# gateway-credential sidecar. None of them holds state a tier 1 backup carries, and building their
-# images would roughly triple the runtime for no assertion.
+# archive, edge functions, Studio, Swagger, Prometheus, Loki, Alloy and the gateway-credential
+# sidecar. None of them holds state a tier 1 backup carries, and building their images would
+# roughly triple the runtime for no assertion.
 #
 # WHAT IS DELIBERATELY KEPT, because the backup carries it or the restore depends on it:
 #
@@ -52,6 +52,8 @@
 #   mosquitto                  the broker's volume: the Dynamic Security document, every issued
 #                              gateway account; its initContainer runs the gateway-credential
 #                              image, the third build
+#   grafana                    its volume's SQLite: every dashboard saved in the UI; an upstream
+#                              image, with its datasources pointed at placeholder addresses
 #   supabase-realtime          creates `supabase_realtime_admin` ON FIRST START -- no migration
 #                              does, and restore-databases.sh refuses without it. Switching this
 #                              off would make the rehearsal fail in a way that says nothing about
@@ -266,7 +268,7 @@ jobs:
           DIR="$BACKUP_DIR/$STAMP"
           grep -q '^format=custom$' "$DIR/manifest-$STAMP.txt" \
             || { echo "::error::the backup is not in the chart's default format (custom)"; exit 1; }
-          for name in supabase-db timescaledb vault-key storage-objects forge broker; do
+          for name in supabase-db timescaledb vault-key storage-objects forge broker grafana; do
             FILE=$(jq -r --arg n "$name" '.components[] | select(.name == $n) | .file' "$DIR/manifest.json")
             [ -n "$FILE" ] || { echo "::error::the backup has no $name component"; exit 1; }
             SZ=$(wc -c < "$DIR/$FILE")
@@ -402,7 +404,7 @@ jobs:
             | xargs -r -n1 kubectl -n "$NS" describe pod || true
           kubectl -n rehearsal-offsite logs deploy/minio --tail 40 || true
           # --all-containers includes the init containers; --previous is a crash-looping one's last run.
-          for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime backup-service gitea mosquitto; do
+          for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime backup-service gitea mosquitto grafana; do
             echo "--- logs: $c"
             kubectl -n "$NS" logs "deploy/$c" --all-containers --prefix --tail 60 2>/dev/null \
               || kubectl -n "$NS" logs "statefulset/$c" --all-containers --prefix --tail 60 2>/dev/null || true
@@ -449,7 +451,7 @@ jobs:
               '',
               '| Step | What it means |',
               '| :--- | :--- |',
-              '| Seed Known Data | the forge or the broker refused the seed — the request_backup() path was never reached |',
+              '| Seed Known Data | the forge, the broker or Grafana refused the seed — the request_backup() path was never reached |',
               '| Start The Off-site Store | the MinIO image did not pull or start — test-harness/restore-rehearsal/minio.yaml pins it by digest |',
               '| Set The Off-site Destination | the bucket could not be made, or a destination RPC refused a value — the error is in the log |',
               '| Take The Backup | the service failed or never claimed the job, or a digest did not match — the service logs are under Cluster State On Failure |',
@@ -459,8 +461,8 @@ jobs:
               '| Assert The Fresh Stack Is Empty | the same, caught one step later |',
               '| Fetch The Backup From The Bucket | the copy is incomplete, did not decrypt with the identity, or differs from the copy taken off the volume |',
               '| Restore The Backup | `restore-databases.sh` refused or failed, or a volume did not take its archive — the log names which |',
-              '| Compare The Counts | rows, repositories or accounts did not come back, or the forge\'s host key changed — the diff names which |',
-              '| Assert What A Count Cannot Catch | data came back without a trigger, a policy, a grant, the partitioning, the pgsodium key, the branch protection or the broker account; or the restored stack could not take a backup or copy it off site |',
+              '| Compare The Counts | rows, repositories, accounts or the saved Grafana dashboard did not come back, or the forge\'s host key changed — the diff names which |',
+              '| Assert What A Count Cannot Catch | data came back without a trigger, a policy, a grant, the partitioning, the pgsodium key, the branch protection, the broker account or the saved Grafana dashboard; or the restored stack could not take a backup or copy it off site |',
               '| Helm Test — postgres_fdw Cross-Database Check | the two databases were restored to inconsistent points |',
             ].join('\n');
 

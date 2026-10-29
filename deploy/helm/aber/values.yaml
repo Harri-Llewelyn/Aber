@@ -1824,6 +1824,12 @@ backup:
   # account and the only copy of it. The same ReadWriteOnce caveat. Read by the backup service
   # only.
   includeBroker: false
+  # Also archive Grafana's PVC (grafana.persistence): its SQLite database, which is every dashboard
+  # saved in the UI, every alert rule, silence and contact point made there, and the users SSO
+  # created. Provisioned dashboards and rules come back from the chart without it. The same
+  # ReadWriteOnce caveat: the backup pod must run on Grafana's node. Read by the backup service
+  # only.
+  includeGrafana: false
   # Also archive the CA behind mosquitto.tls and postgresTls: every appliance pins it, so losing
   # it is a fleet-wide re-enrolment. The Secret lives in the ClusterIssuer's namespace
   # (deploy/k8s/internal-ca.yaml puts aber-ca-key-pair in cert-manager's); the chart gives

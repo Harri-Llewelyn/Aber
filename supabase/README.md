@@ -7187,8 +7187,8 @@ and the rollups beyond it. Raw readings older than the window are only on cold s
 backup includes; see *Raw telemetry is kept for a stated window*.
 
 **What the service takes.** Both databases as their superusers (`supabase_admin`, for the reason
-above), the storage objects, the forge, the broker's volume and the internal CA, into one
-directory per backup on its own volume (the backup PVC), named by the UTC stamp:
+above), the storage objects, the forge, the broker's volume, Grafana's volume and the internal CA,
+into one directory per backup on its own volume (the backup PVC), named by the UTC stamp:
 
 ```
 /backups/20260911T143000Z/
@@ -7198,6 +7198,7 @@ directory per backup on its own volume (the backup PVC), named by the UTC stamp:
   storage-objects-20260911T143000Z.tar.gz   # absent when no storage volume is mounted
   forge-20260911T143000Z.tar.gz             # absent when no forge volume is mounted
   broker-20260911T143000Z.tar.gz            # absent when no broker volume is mounted
+  grafana-20260911T143000Z.tar.gz           # absent when no Grafana volume is mounted
   ca-20260911T143000Z.tar.gz                # absent when backup.ca names no Secret
   manifest-20260911T143000Z.txt             # what restore-databases.sh reads
   manifest.json                             # sizes and SHA-256 digests, as the row records them
@@ -7208,6 +7209,17 @@ through sqlite3's online backup (consistent while Gitea writes), or, when the re
 refuses that, a raw copy of the database with its WAL folded in and an integrity check passed.
 `manifest.json` says which. The SSH host keys are in it: a forge recreated without them is a
 fleet-wide re-enrolment, because every appliance pins them.
+
+The Grafana archive is Grafana's data volume (`backup.includeGrafana`, off by default), with
+`grafana.db` copied as the forge's `gitea.db` is. That database is the one copy of every dashboard
+saved in Grafana rather than provisioned from a file, every alert rule, silence and contact point
+made there, and the users SSO created; the chart's own dashboards and rules come back without it.
+Grafana 13 keeps a saved dashboard in `grafana.db`'s `resource` table, not the older `dashboard`
+table. Its search index, `unified-search/`, is left out: Grafana rebuilds it from that table when it
+starts, and a copy taken while Grafana writes could be torn. Neither archive carries a database's
+journal files: a rollback journal beside the consistent copy would be rolled back onto it at the
+first open. The PVC is ReadWriteOnce, so including it pins the
+backup pod to Grafana's node, which is why it is opt-in as the other volumes are.
 
 The Vault key is pgsodium's root key, read through the same superuser session as the dump
 (`pg_read_file` against the data directory, where the chart's getkey script keeps it). Every
@@ -7407,7 +7419,7 @@ BACKUP_DIR=./backups/<stamp> BACKUP_STAMP=<stamp> scripts/restore-databases.sh
 POD=$(kubectl -n aber get pod -l app.kubernetes.io/component=supabase-storage -o jsonpath='{.items[0].metadata.name}')
 kubectl -n aber exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<stamp>/storage-objects-<stamp>.tar.gz
 
-# A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
+# A volume the workload holds open (the forge, the broker, Grafana): scale it to zero, replace the
 # volume's contents through a helper pod holding the same claim, scale it back. The forge archive
 # restores the host keys, so appliances keep cloning; the broker archive restores the document,
 # and the boot reconcile keeps every account it holds. A forge archive taken before 1.4.0 holds
@@ -7435,6 +7447,11 @@ EOF
 }
 restore_volume gitea     ./backups/<stamp>/forge-<stamp>.tar.gz
 restore_volume mosquitto ./backups/<stamp>/broker-<stamp>.tar.gz
+# Grafana's archive restores grafana.db. Its local admin keeps the password it had in the backup,
+# whatever the Secret says now: Grafana writes the Secret's GRAFANA_ADMIN_PASSWORD only into an empty
+# database.
+# kubectl -n aber exec deploy/grafana -- grafana cli admin reset-admin-password <password> sets it.
+restore_volume grafana   ./backups/<stamp>/grafana-<stamp>.tar.gz
 
 # The CA, on a NEW cluster, before deploy/k8s/internal-ca.yaml is applied: cert-manager then finds
 # a key pair matching the Certificate and issues nothing new, so every leaf certificate is issued
@@ -7457,7 +7474,7 @@ it has not been tested live, and the rehearsal does not assert it.
 
 **Rehearsed weekly, from a backup the service took.** `.github/workflows/restore-rehearsal.yml`
 asks for its backup the way the Backups page does, with an off-site destination set, and restores
-both databases and the three volumes into a fresh install from the copy it fetches out of the
+both databases and the four volumes into a fresh install from the copy it fetches out of the
 bucket and decrypts, once the namespace and the backup volume are gone. It asserts what a count
 cannot catch, and asks for a second backup, so a green run also says the restored stack can back
 itself up and copy that backup off site

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // The backup service: a queued backup_jobs row becomes a tier 1 backup on the backup volume. It is the
 // one process beside the volumes holding a superuser credential, so it can pg_dump both databases,
-// tar the storage objects and the broker's document, copy the forge consistently and archive the
-// keys. It serves nothing but /healthz and hands no bytes to anybody: restore is a runbook run from
-// a shell against the volume or the bucket. When the Backups page names an S3 destination it copies
-// every backup there, each file encrypted with age. Runs on an image built from the database's own,
+// tar the storage objects and the broker's document, copy the forge and Grafana consistently and
+// archive the keys. It serves nothing but /healthz and hands no bytes to anybody: restore is a
+// runbook run from a shell against the volume or the bucket. When the Backups page names an S3
+// destination it copies every backup there, each file encrypted with age. Runs on an image built from the database's own,
 // so pg_dump is at least the server's version. Reasoning: supabase/README.md, "Backup and Recovery",
 // "How the service takes a backup", "An encrypted copy off site".
 import { spawnSync, spawn } from 'node:child_process';
@@ -16,7 +16,7 @@ import {
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 const BACKUP_DIR = process.env.BACKUP_DIR || '/backups';
@@ -50,6 +50,8 @@ const TIMESCALE = {
 const STORAGE_PATH = process.env.STORAGE_PATH ?? '/storage';
 const FORGE_PATH = process.env.FORGE_PATH ?? '/forge';
 const BROKER_PATH = process.env.BROKER_PATH ?? '/broker';
+// Grafana's data path (/var/lib/grafana in its pod): grafana.db and the plugins it downloaded.
+const GRAFANA_PATH = process.env.GRAFANA_PATH ?? '/grafana';
 // The CA behind the broker's and the databases' certificates, read from its Secret through the API
 // with the pod's ServiceAccount. Either empty: no CA to keep (TLS is off).
 const CA_SECRET_NAME = process.env.CA_SECRET_NAME || '';
@@ -232,45 +234,51 @@ async function tarDirectory(name, sourceDir, dir, stamp, extraArgs = [], appende
   return { name, file, size_bytes: size, sha256: await sha256(out) };
 }
 
-// Everything under /data except the SQLite files and the logs, with a consistent copy of gitea.db
-// appended from a staging directory at gitea/gitea.db, where a restore expects it, with the live
-// file's owner: the copy is root's, a restore keeps an archive's owners, and Gitea writes the
-// database as git. sqlite3's online backup is consistent while Gitea writes; on a read-only volume
-// it falls back to a raw copy of db, -wal and -shm with a checkpoint and an integrity check on the
-// copy. The method used is in manifest.json.
-async function archiveForge(dir, stamp) {
-  const dbPath = join(FORGE_PATH, 'gitea', 'gitea.db');
-  const stage = join(dir, '.forge-stage');
-  mkdirSync(join(stage, 'gitea'), { recursive: true });
-  const staged = join(stage, 'gitea', 'gitea.db');
+// A database file and the journals beside it. A journal archived beside the consistent copy would
+// be rolled back onto it at the first open, so none is archived.
+const SQLITE_FILES = ['', '-wal', '-shm', '-journal'];
+
+// A consistent copy of the SQLite database at dbPath, written to staged, and the method used.
+// sqlite3's online backup is consistent while the owner writes, and waits up to 10 s for its lock;
+// on a read-only volume that refuses it, a raw copy of the files with a checkpoint (a copied
+// rollback journal is rolled back at that open). Either way the copy passes an integrity check.
+async function stageSqlite(label, dbPath, staged) {
+  if (!existsSync(dbPath)) return 'no-database';
   let method = 'sqlite-online-backup';
-  try {
-    if (existsSync(dbPath)) {
-      const r = await run('sqlite3', ['-readonly', dbPath, `.backup '${staged.replace(/'/g, "''")}'`]);
-      if (r.status !== 0) {
-        method = 'raw-copy-with-checkpoint';
-        log(`  forge: online backup unavailable (${r.stderr.split('\n').pop()}); copying raw files`);
-        rmSync(staged, { force: true });
-        for (const suffix of ['', '-wal', '-shm']) {
-          if (existsSync(dbPath + suffix)) copyFileSync(dbPath + suffix, staged + suffix);
-        }
-        const c = await run('sqlite3', [staged, 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;']);
-        if (c.status !== 0) throw new Error(`sqlite3 could not checkpoint the copied forge database: ${c.stderr}`);
-        rmSync(staged + '-wal', { force: true });
-        rmSync(staged + '-shm', { force: true });
-      }
-      const check = spawnSync('sqlite3', [staged, 'PRAGMA integrity_check;'], { encoding: 'utf8' });
-      if (check.status !== 0 || check.stdout.trim() !== 'ok') {
-        throw new Error(`the copied forge database failed its integrity check: ${(check.stdout || check.stderr).trim()}`);
-      }
-    } else {
-      method = 'no-database';
+  const r = await run('sqlite3', ['-readonly', '-cmd', '.timeout 10000', dbPath, `.backup '${staged.replace(/'/g, "''")}'`]);
+  if (r.status !== 0) {
+    method = 'raw-copy-with-checkpoint';
+    log(`  ${label}: online backup unavailable (${r.stderr.split('\n').pop()}); copying raw files`);
+    rmSync(staged, { force: true });
+    for (const suffix of SQLITE_FILES) {
+      if (existsSync(dbPath + suffix)) copyFileSync(dbPath + suffix, staged + suffix);
     }
-    const owner = existsSync(staged) ? statSync(dbPath) : null;
-    const component = await tarDirectory('forge', FORGE_PATH, dir, stamp, [
-      '--exclude=./gitea/gitea.db', '--exclude=./gitea/gitea.db-wal', '--exclude=./gitea/gitea.db-shm',
-      '--exclude=./gitea/log',
-    ], owner && { dir: stage, path: 'gitea/gitea.db', uid: owner.uid, gid: owner.gid });
+    const c = await run('sqlite3', [staged, 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;']);
+    if (c.status !== 0) throw new Error(`sqlite3 could not checkpoint the copied ${label} database: ${c.stderr}`);
+    for (const suffix of SQLITE_FILES.slice(1)) rmSync(staged + suffix, { force: true });
+  }
+  const check = spawnSync('sqlite3', [staged, 'PRAGMA integrity_check;'], { encoding: 'utf8' });
+  if (check.status !== 0 || check.stdout.trim() !== 'ok') {
+    throw new Error(`the copied ${label} database failed its integrity check: ${(check.stdout || check.stderr).trim()}`);
+  }
+  return method;
+}
+
+// A volume whose SQLite database (`database`, relative to `root`) is written while the backup runs:
+// everything under root except the database files and `excludes`, with the staged copy appended at
+// the same path and the live file's owner. The copy is root's, a restore keeps an archive's owners,
+// and the owner (Gitea as git, Grafana as 472) writes the database as itself. The method used is
+// in manifest.json.
+async function archiveSqliteVolume(name, root, database, dir, stamp, excludes = []) {
+  const stage = join(dir, `.${name}-stage`);
+  const staged = join(stage, database);
+  mkdirSync(dirname(staged), { recursive: true });
+  try {
+    const method = await stageSqlite(name, join(root, database), staged);
+    const owner = existsSync(staged) ? statSync(join(root, database)) : null;
+    const component = await tarDirectory(name, root, dir, stamp, [
+      ...SQLITE_FILES.map((suffix) => `--exclude=./${database}${suffix}`), ...excludes,
+    ], owner && { dir: stage, path: database, uid: owner.uid, gid: owner.gid });
     return { ...component, sqlite: method };
   } finally {
     rmSync(stage, { recursive: true, force: true });
@@ -374,7 +382,9 @@ async function takeBackup(job) {
 
   if (FORGE_PATH && existsSync(FORGE_PATH) && statSync(FORGE_PATH).isDirectory()) {
     log('archiving the forge');
-    components.push(await archiveForge(partialDir, stamp));
+    // Every repository and the SSH host keys; gitea.db at gitea/gitea.db, where a restore expects it.
+    components.push(await archiveSqliteVolume('forge', FORGE_PATH, 'gitea/gitea.db', partialDir, stamp,
+      ['--exclude=./gitea/log']));
   } else {
     log('forge: no volume mounted; component absent');
   }
@@ -384,6 +394,17 @@ async function takeBackup(job) {
     components.push(await tarDirectory('broker', BROKER_PATH, partialDir, stamp));
   } else {
     log('broker: no volume mounted; component absent');
+  }
+
+  if (GRAFANA_PATH && existsSync(GRAFANA_PATH) && statSync(GRAFANA_PATH).isDirectory()) {
+    log("archiving Grafana's volume");
+    // grafana.db holds every dashboard saved in the UI and every alert rule, silence and contact
+    // point made there; beside it, the plugins Grafana downloaded. The search index is rebuilt from
+    // grafana.db at start, so it is left out rather than copied while Grafana writes it.
+    components.push(await archiveSqliteVolume('grafana', GRAFANA_PATH, 'grafana.db', partialDir, stamp,
+      ['--exclude=./unified-search']));
+  } else {
+    log('grafana: no volume mounted; component absent');
   }
 
   if (CA_SECRET_NAME && CA_SECRET_NAMESPACE) {
@@ -405,6 +426,7 @@ async function takeBackup(job) {
     byName['storage-objects'] ? `storage=${byName['storage-objects'].file}` : null,
     byName['forge'] ? `forge=${byName['forge'].file}` : null,
     byName['broker'] ? `broker=${byName['broker'].file}` : null,
+    byName['grafana'] ? `grafana=${byName['grafana'].file}` : null,
     byName['ca'] ? `ca=${byName['ca'].file}` : null,
     'created_by=scripts/backup-service.mjs',
   ].filter(Boolean).join('\n') + '\n';

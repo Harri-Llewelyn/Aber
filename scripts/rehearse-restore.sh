@@ -5,9 +5,9 @@
 # The backup is the backup service's: `backup` asks for one the way the Backups page does, as the
 # seeded Administrator through PostgREST, waits for the `backups` row, and copies the directory it
 # names off the backup volume. `restore` replays it with scripts/restore-databases.sh and puts the
-# storage objects, the forge's volume and the broker's document back the way the runbook in
-# supabase/README.md ("Backup and Recovery") says to. `assert` then asks for a second backup, so a
-# green run also means the restored stack can back itself up.
+# storage objects, the forge's volume, the broker's document and Grafana's volume back the way the
+# runbook in supabase/README.md ("Backup and Recovery") says to. `assert` then asks for a second
+# backup, so a green run also means the restored stack can back itself up.
 #
 # One process per phase, because every phase needs a port-forward to one or more Services and a
 # tunnel started in one workflow step is not reliably reachable from the next. The same code runs
@@ -15,8 +15,8 @@
 #
 # Subcommands, in the order the rehearsal uses them:
 #
-#   seed                  write known data into both databases, the storage volume, the forge and
-#                         the broker's document
+#   seed                  write known data into both databases, the storage volume, the forge, the
+#                         broker's document and Grafana's database
 #   snapshot <file>       record the counts and digests that must not move
 #   backup <dir>          take a backup through the service and copy it into <dir>/<stamp>
 #   restore <dir> <stamp> restore that backup into a freshly installed stack
@@ -35,8 +35,8 @@
 #
 # Environment: NS (namespace, default aber), RELEASE (default aber), and the credentials
 # the chart was installed with. The defaults match values-dev.yaml, which is what CI installs;
-# the broker credentials are read from the release Secret and the forge's token from its own
-# Secret when not set.
+# the broker's and Grafana's credentials are read from the release Secret and the forge's token
+# from its own Secret when not set.
 #
 set -euo pipefail
 
@@ -52,6 +52,7 @@ TS_PORT="${TS_PORT:-54398}"
 AUTH_PORT="${AUTH_PORT:-9399}"
 REST_PORT="${REST_PORT:-3399}"
 FORGE_PORT="${FORGE_PORT:-3398}"
+GRAFANA_PORT="${GRAFANA_PORT:-3397}"
 
 SB_USER="${SB_USER:-supabase_admin}"
 SB_DB="${SB_DB:-postgres}"
@@ -72,6 +73,10 @@ REHEARSAL_REPOSITORY="${REHEARSAL_REPOSITORY:-rehearsal-gateway}"
 # A broker account shaped like a gateway's, so the boot reconcile keeps it as one.
 REHEARSAL_BROKER_CLIENT="${REHEARSAL_BROKER_CLIENT:-gwy0e0000000000400080000}"
 REHEARSAL_BROKER_PASSWORD="${REHEARSAL_BROKER_PASSWORD:-rehearsal-broker-Passw0rd}"
+# A dashboard saved in Grafana rather than provisioned, as an operator's Save a copy is: it lives in
+# grafana.db on Grafana's volume and nowhere else.
+REHEARSAL_DASHBOARD_UID="${REHEARSAL_DASHBOARD_UID:-rehearsal-saved-dashboard}"
+REHEARSAL_DASHBOARD_TITLE="${REHEARSAL_DASHBOARD_TITLE:-Restore rehearsal canary}"
 # How long a backup may take before the rehearsal gives up on it.
 BACKUP_TIMEOUT_SECONDS="${BACKUP_TIMEOUT_SECONDS:-600}"
 # The off-site store (test-harness/restore-rehearsal/minio.yaml): its namespace, the address the
@@ -209,6 +214,32 @@ broker_document() {
   kubectl -n "$NS" exec deploy/mosquitto -c mosquitto -- cat /mosquitto/data/dynamic-security.json
 }
 
+# -------------------------------------------------------------------------------------------------
+# Grafana, as its local admin through the HTTP API, which reads and writes grafana.db.
+# -------------------------------------------------------------------------------------------------
+grafana_credentials() {
+  GRAFANA_USER="${GRAFANA_ADMIN_USER:-$(secret_value GRAFANA_ADMIN_USER)}"
+  GRAFANA_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-$(secret_value GRAFANA_ADMIN_PASSWORD)}"
+}
+
+# grafana_api <method> <path> [json body]; prints the status code, leaves the body in /tmp/grafana.json.
+grafana_api() {
+  local method="$1" path="$2" body="${3:-}"
+  curl -s -o /tmp/grafana.json -w '%{http_code}' -X "$method" "http://127.0.0.1:$GRAFANA_PORT/api$path" \
+    -u "$GRAFANA_USER:$GRAFANA_PASSWORD" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    ${body:+-d "$body"} || true
+}
+
+# The saved dashboard's title, or "absent": absent on a fresh stack, the title either side of a
+# restore.
+grafana_saved_dashboard() {
+  case "$(grafana_api GET "/dashboards/uid/$REHEARSAL_DASHBOARD_UID")" in
+    200) jq -r '.dashboard.title' /tmp/grafana.json ;;
+    404) echo absent ;;
+    *)   cat /tmp/grafana.json >&2; die "could not read dashboard '$REHEARSAL_DASHBOARD_UID' from Grafana" ;;
+  esac
+}
+
 # =================================================================================================
 cmd_seed() {
   forward_databases
@@ -310,6 +341,24 @@ SQL
   else
     log "no broker in this stack; not seeded"
   fi
+
+  # A dashboard saved through Grafana's API, which writes it into grafana.db as Save a copy does.
+  # Not provisioned, so after the restore only Grafana's volume can have brought it back.
+  if has_deployment grafana; then
+    log "saving a dashboard in Grafana"
+    grafana_credentials
+    forward grafana "$GRAFANA_PORT" 3000
+    [ "$(grafana_api POST /dashboards/db "$(jq -n --arg uid "$REHEARSAL_DASHBOARD_UID" --arg title "$REHEARSAL_DASHBOARD_TITLE" \
+      '{dashboard: {uid: $uid, title: $title, schemaVersion: 39,
+                    panels: [{id: 1, type: "text", title: "Seeded by the restore rehearsal",
+                              gridPos: {x: 0, y: 0, w: 12, h: 4},
+                              options: {mode: "markdown", content: "Saved in Grafana, not provisioned."}}]},
+        overwrite: true, message: "restore rehearsal"}')")" = "200" ] \
+      || { cat /tmp/grafana.json >&2; die "Grafana refused the rehearsal dashboard"; }
+    log "  saved '$REHEARSAL_DASHBOARD_TITLE' ($REHEARSAL_DASHBOARD_UID)"
+  else
+    log "no Grafana in this stack; not seeded"
+  fi
   log "seed complete"
 }
 
@@ -345,6 +394,14 @@ cmd_snapshot() {
   # The broker: how many accounts the document holds.
   if has_deployment mosquitto; then
     printf 'broker:clients=%s\n' "$(broker_document | jq '.clients | length')" >> "$out"
+  fi
+  # Grafana: the saved dashboard's title, or absent.
+  if has_deployment grafana; then
+    grafana_credentials
+    forward grafana "$GRAFANA_PORT" 3000
+    local dashboard
+    dashboard="$(grafana_saved_dashboard)"
+    printf 'grafana:saved_dashboard=%s\n' "$dashboard" >> "$out"
   fi
   log "snapshot written to $out"
   cat "$out"
@@ -543,6 +600,15 @@ cmd_restore() {
   else
     log "no broker archive in this backup"
   fi
+
+  # Grafana's volume: grafana.db, with every dashboard, alert rule and contact point saved there.
+  archive="$backup/$(sed -n 's/^grafana=//p' "$manifest")"
+  if grep -q '^grafana=' "$manifest"; then
+    has_deployment grafana || die "the backup holds a Grafana archive and this stack has no Grafana"
+    restore_volume grafana "$archive"
+  else
+    log "no Grafana archive in this backup"
+  fi
   log "restore complete"
 }
 
@@ -587,6 +653,21 @@ cmd_assert() {
     broker_credentials
     dynsec getClient "$REHEARSAL_BROKER_CLIENT" >/dev/null \
       || die "the broker account '$REHEARSAL_BROKER_CLIENT' did not survive the restore -- every gateway would be re-issued"
+    log "  ok"
+  fi
+
+  # Grafana: the dashboard saved before the backup is back under its title, and is not a
+  # provisioned one, so the volume is what brought it.
+  if has_deployment grafana; then
+    log "asserting Grafana's saved dashboard"
+    grafana_credentials
+    forward grafana "$GRAFANA_PORT" 3000
+    [ "$(grafana_api GET "/dashboards/uid/$REHEARSAL_DASHBOARD_UID")" = "200" ] \
+      || die "the dashboard saved in Grafana before the backup did not survive the restore -- Grafana's volume did not come back"
+    [ "$(jq -r '.dashboard.title' /tmp/grafana.json)" = "$REHEARSAL_DASHBOARD_TITLE" ] \
+      || die "the restored Grafana holds '$REHEARSAL_DASHBOARD_UID' under another title: $(jq -r '.dashboard.title' /tmp/grafana.json)"
+    [ "$(jq -r '.meta.provisioned' /tmp/grafana.json)" = "false" ] \
+      || die "'$REHEARSAL_DASHBOARD_UID' came back provisioned, so it is not the dashboard saved before the backup"
     log "  ok"
   fi
 
@@ -765,7 +846,7 @@ cmd_compare() {
 DROPPED is data the restore did not bring back. A count that ROSE is the rehearsal's own writes
 landing twice, which means the namespace was not actually destroyed between the two installs. A
 CHANGED host key digest means the forge's volume did not come back: every appliance would refuse
-to clone."
+to clone. A saved dashboard gone absent means Grafana's volume did not come back."
 }
 
 # =================================================================================================

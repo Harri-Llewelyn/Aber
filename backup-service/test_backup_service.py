@@ -3,17 +3,18 @@ The backup service (0101), against the live stack.
 
 WHAT IS UNDER TEST, in order of what would be worst to get wrong: nobody but an Administrator can
 queue a backup, and no PostgREST role can call the service's gates; a backup an Administrator asks
-for is taken -- both dumps, the storage objects, the forge, the broker's document and, with TLS
-on, the internal CA, each with the digest the row records, and a manifest restore-databases.sh
-can read; the trail records who asked and that the service wrote it; a request nobody has
-claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
-RUNNING job no service is running is failed, so a restored database does not refuse backups; a
-failed job is followed by a prune that leaves the newest three backups alone; with a MinIO of
-the test's own as the destination, a backup is copied off site encrypted to a key the stack never
-holds, and a pruned backup takes its copy with it; a service started after a missed scheduled
-slot queues that backup once, and does not retry it before the next slot when it fails; and after a
-backup the service reports df's figures for its volume and its schedule, which the Backups page's
-summary returns to an Administrator and refuses to an Operator.
+for is taken -- both dumps, the storage objects, the forge, the broker's document, Grafana's
+volume while the service mounts it and, with TLS on, the internal CA, each with the digest the
+row records, and a manifest restore-databases.sh can read; the trail records who asked and that
+the service wrote it; a request nobody has claimed is refused a twin, can be cancelled, and says
+why; a pinned backup is released once; a RUNNING job no service is running is failed, so a
+restored database does not refuse backups; a failed job is followed by a prune that leaves the
+newest three backups alone; with a MinIO of the test's own as the destination, a backup is
+copied off site encrypted to a key the stack never holds, and a pruned backup takes its copy with
+it; a service started after a missed scheduled slot queues that backup once, and does not retry
+it before the next slot when it fails; and after a backup the service reports df's figures for
+its volume and its schedule, which the Backups page's summary returns to an Administrator and
+refuses to an Operator.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel and catch-up tests stop the service container for a few seconds. The off-site test applies
@@ -183,11 +184,15 @@ class BackupServiceTests(unittest.TestCase):
         names = {c["name"] for c in backup["components"]}
         # The CA is present when the stack was installed with TLS (backup.ca.secretName), absent
         # otherwise; the historian's dump is absent while pgBackRest backs it up
-        # (timescaledb.physicalBackup); everything else the dev cluster mounts.
+        # (timescaledb.physicalBackup); Grafana's volume is present while the service mounts it
+        # (backup.includeGrafana); everything else the dev cluster mounts.
         dumps_historian = service("printenv", "DUMP_TIMESCALE", check=False).strip() != "false"
+        archives_grafana = service("printenv", "GRAFANA_PATH", check=False).strip() != ""
         expected = {"supabase-db", "vault-key", "storage-objects", "forge", "broker"}
         if dumps_historian:
             expected.add("timescaledb")
+        if archives_grafana:
+            expected.add("grafana")
         self.assertLessEqual(expected, names, names)
         self.assertLessEqual(names, expected | {"ca"}, names)
         self.assertEqual(backup["size_bytes"], sum(c["size_bytes"] for c in backup["components"]))
@@ -234,6 +239,22 @@ class BackupServiceTests(unittest.TestCase):
         broker = next(c for c in backup["components"] if c["name"] == "broker")
         members = service("tar", "-tzf", f"{backup['location']}/{broker['file']}")
         self.assertIn("./dynamic-security.json", members)
+
+        # Grafana's archive: a copy of grafana.db that passed its integrity check, with the live
+        # file's owner, and no journal beside it to roll back onto that copy at its first open. The
+        # search index Grafana rebuilds at start is not in it.
+        if archives_grafana:
+            self.assertIn("grafana=grafana-", manifest)
+            grafana = next(c for c in backup["components"] if c["name"] == "grafana")
+            self.assertIn(grafana.get("sqlite"), ("sqlite-online-backup", "raw-copy-with-checkpoint"))
+            verbose = service("tar", "--numeric-owner", "-tvzf", f"{backup['location']}/{grafana['file']}")
+            listed = [line.split()[-1] for line in verbose.splitlines()]
+            self.assertIn("grafana.db", listed)
+            self.assertFalse([n for n in listed if n.startswith("./grafana.db")], listed)
+            self.assertFalse([n for n in listed if n.startswith("./unified-search")], listed)
+            live_owner = service("sh", "-c", 'stat -c %u/%g "$GRAFANA_PATH/grafana.db"').strip()
+            database = next(line for line in verbose.splitlines() if line.endswith(" grafana.db"))
+            self.assertEqual(database.split()[1], live_owner, database)
 
         # The CA, when the stack names one: the key pair under ca/, read from the Secret the row names.
         ca = next((c for c in backup["components"] if c["name"] == "ca"), None)

@@ -10339,7 +10339,7 @@ COMMENT ON COLUMN public.backups.location IS 'The directory holding this backup'
 --
 
 -- COLUMN backups.components :: COMMENT
-COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array of {name, file, size_bytes, sha256}. Names are supabase-db, timescaledb, vault-key, storage-objects, forge, broker and ca; a component the service was not given a volume, a file or a Secret for is absent, not empty.';
+COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array of {name, file, size_bytes, sha256}. Names are supabase-db, timescaledb, vault-key, storage-objects, forge, broker, grafana and ca; a component the service was not given a volume, a file or a Secret for is absent, not empty.';
 
 --
 
