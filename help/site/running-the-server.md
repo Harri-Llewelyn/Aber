@@ -16,8 +16,9 @@ hardening. A section this page names but does not hold, such as *The development
 
 **On one Ubuntu machine, the installer does path *A* for you.** [`deploy/install.sh`](../../deploy/install.sh)
 installs k3s, Helm and Node.js where they are missing, applies Traefik's change, cert-manager and the
-internal CA, and writes the credentials and `site.yaml` to `/etc/aber`. It then installs the
-published chart at the installer's own version, waits for each workload and runs `helm test`.
+internal CA, and writes the credentials and `site.yaml` to `/etc/aber`. It then downloads every
+image the chart will run, installs the published chart at the installer's own version, waits for
+each workload and runs `helm test`.
 [*Run it on a site*](install.md#run-it-on-a-site) gives the command. What follows is
 every step by hand, with the reason for each.
 
