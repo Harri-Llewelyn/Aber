@@ -2046,6 +2046,8 @@ to remove one.
   nothing when the name did not change, so a row made or deleted for a picture alone is not a
   rename. `display_names_for()` is redeclared to leave out a row with no name: before this file
   there was no such row, and now one would tell an Approvals reader that the person has a picture.
+  It also names the person who started a capture or playback job (`requested_by`), for the roles
+  whose SELECT policy on those jobs admits them, so the Capture page's History shows a name.
   `list_people()` and `list_user_accounts()` read `display_name` alone, and the table's one policy
   still returns the caller's own row.
 - **Remove Access deletes the picture.** It bans the account and never deletes it (`0166`), so the

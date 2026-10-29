@@ -10,7 +10,8 @@ CHECKs refuse a name that is too long or holds a control character, with a sente
 whitespace-only name clears it; each change writes exactly one audit row in the person's lane, and
 setting the same name writes none; nobody writes the table but set_display_name(); a person reads
 only their own row; display_names_for() answers only for people the caller can already see on
-Approvals and Archived Entities; list_people() and list_user_accounts() carry the name, and a
+Approvals, Archived Entities and the Capture page's History (the person who started a capture or
+playback job, for the roles that read those jobs, 0213); list_people() and list_user_accounts() carry the name, and a
 database holding their older shapes is brought forward by replaying 0001 and 0166.
 
 EVERY TEST ROLLS BACK. The acts write Audit Trail rows, and the audit table cannot be pruned.
@@ -378,6 +379,63 @@ class WhoReadsAName(DisplayNameBase):
                 self.assertIn((MANAGER_ID, f"{MANAGER_ID}@names.test", "Morgan Manager"), rows)
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
             self.call(MANAGER_ID, "SELECT * FROM public.list_user_accounts();")
+
+
+class WhoStartedAJob(DisplayNameBase):
+    """
+    The Capture page's History names the person who started each job, keyed by requested_by. The
+    roles capture_jobs' and playback_jobs' SELECT policies admit are answered; nobody else is, and a
+    person who started no job and proposed and retired nothing is answered to nobody.
+    """
+
+    def setUp(self):
+        super().setUp()
+        for user_id, name in ((ADMIN_ID, "Ada Admin"), (MANAGER_ID, "Morgan Manager"),
+                              (OPERATOR_ID, "Owain Operator"), (SECOND_OPERATOR_ID, "Olwen Operator"),
+                              (AUDITOR_ID, "Aled Auditor")):
+            self.set_name(ADMIN_ID, user_id, name)
+        gateway = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.gateways (id, name, location_scope, deployment, is_simulated, is_shadow)"
+            " VALUES (%s, %s, 'cell', 'host', true, true) RETURNING sparkplug_id;",
+            (gateway, f"Names_GW_{gateway[:8]}"),
+        )
+        wire = self.cur.fetchone()[0]
+        # Olwen recorded the gateway; Morgan played a capture back. Both have finished.
+        job = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.capture_jobs (id, subject_kind, gateway_id, sparkplug_group, edge_node_id,"
+            " subject_sparkplug_id, storage_path, status, requested_by, finished_at)"
+            " VALUES (%s, 'gateway', %s, 'Aber', %s, %s, %s, 'COMPLETED', %s, now());",
+            (job, gateway, wire, wire, f"{wire}/{job}.json", SECOND_OPERATOR_ID),
+        )
+        self.cur.execute(
+            "INSERT INTO public.playback_jobs (capture_storage_path, target_gateway_id, target_edge_node_id,"
+            " sparkplug_group, status, requested_by, finished_at)"
+            " VALUES (%s, %s, %s, 'Aber', 'CANCELLED', %s, now());",
+            (f"{wire}/{job}.json", gateway, wire, MANAGER_ID),
+        )
+
+    def names_for(self, actor, ids):
+        rows = self.call(actor, "SELECT user_id::text, display_name FROM public.display_names_for(%s::uuid[]);",
+                         (ids,))
+        return dict(rows)
+
+    def test_an_auditor_is_answered_a_job_requesters_name(self):
+        for actor in (AUDITOR_ID, ADMIN_ID, MANAGER_ID):
+            with self.subTest(actor=actor):
+                self.assertEqual(self.names_for(actor, [SECOND_OPERATOR_ID, MANAGER_ID]),
+                                 {SECOND_OPERATOR_ID: "Olwen Operator", MANAGER_ID: "Morgan Manager"})
+
+    def test_an_operator_is_not(self):
+        # Owain reads no capture or playback job, so he learns neither name; only his own.
+        self.assertEqual(self.names_for(OPERATOR_ID, [SECOND_OPERATOR_ID, MANAGER_ID, OPERATOR_ID]),
+                         {OPERATOR_ID: "Owain Operator"})
+
+    def test_a_person_with_no_job_and_no_proposal_is_answered_to_nobody(self):
+        for actor in (AUDITOR_ID, MANAGER_ID):
+            with self.subTest(actor=actor):
+                self.assertEqual(self.names_for(actor, [OPERATOR_ID]), {})
 
 
 class AnOlderDatabaseIsBroughtForward(DisplayNameBase):

@@ -1092,7 +1092,7 @@ function edgeFunctionNames() {
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Security tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
     'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
-    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture; 0203 had no such row',
+    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

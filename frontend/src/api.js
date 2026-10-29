@@ -975,9 +975,9 @@ const apiMethods = {
   },
 
   /**
-   * Person id -> display name, for the people the caller can already see on Approvals and Archived
-   * Entities (`display_names_for()`, 0203). An id it may not answer, or a person with no name, is
-   * absent: show the email alone.
+   * Person id -> display name, for the people the caller can already see on Approvals, Archived
+   * Entities and the Capture page's History (`display_names_for()`, 0203, 0213). An id it may not
+   * answer, or a person with no name, is absent: show the email alone, or the id with no email.
    */
   displayNamesFor: async (ids) => {
     const unique = [...new Set((ids || []).filter(Boolean))];
