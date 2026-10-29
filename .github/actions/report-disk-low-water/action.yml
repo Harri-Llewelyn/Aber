@@ -1,0 +1,21 @@
+# The least free space a k3d job's disk reached, kept by reclaim-runner-disk's sampler: what the
+# reclaim's threshold is set against. Each k3d job runs it last before its teardown.
+name: Report Disk Low Water
+description: >-
+  Print the free space after the reclaim, the least the job reached, and the difference, which is
+  the most disk the job used; and put the line in the job's summary.
+runs:
+  using: composite
+  steps:
+    - name: Report Disk Low Water
+      shell: bash
+      run: |
+        start=$(cat "$RUNNER_TEMP/disk-free-at-start" 2>/dev/null || true)
+        least=$(cat "$RUNNER_TEMP/disk-free-least" 2>/dev/null || true)
+        if [ -z "$start" ] || [ -z "$least" ]; then
+          echo "No disk sample: reclaim-runner-disk did not run in this job."
+          exit 0
+        fi
+        line=$(awk -v s="$start" -v l="$least" 'BEGIN { printf "Disk: %.1f GiB free after the reclaim, %.1f GiB at the least; the job used at most %.1f GiB.", s/1024, l/1024, (s-l)/1024 }')
+        echo "$line"
+        echo "$line" >> "$GITHUB_STEP_SUMMARY"
