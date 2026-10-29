@@ -16,6 +16,7 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
+import { CaptureHistory } from './CaptureHistory'
 import {
   IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload,
   IconX
@@ -268,6 +269,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       capture: captureBySubject.get(`device:${d.id}`) || null
     }))
   ]), [gateways, devices, captureBySubject])
+
+  // A played-back capture's subject, named from its Sparkplug ID, for the History.
+  const subjectNameById = useMemo(() => new Map(allSubjects.map(s => [s.sparkplugId, s.name])), [allSubjects])
+  const subjectName = useCallback(id => subjectNameById.get(id), [subjectNameById])
+  // Each changes when a job of its kind finishes, which re-reads that list of the History.
+  const finishedKey = jobs => (jobs[0] ? `${jobs[0].id}:${jobs[0].finished_at}` : '')
 
   // Resolved from the current rows rather than captured on click: this page refreshes on a timer
   // and over Realtime, so a held object would freeze.
@@ -598,6 +605,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             </table>
           </div>
           )}
+
+          <CaptureHistory
+            captureKey={finishedKey(recentJobs)}
+            playbackKey={finishedKey(recentPlaybacks)}
+            subjectName={subjectName}
+          />
 
           {draggingPlay && (
             <div className="capture-drop-overlay">

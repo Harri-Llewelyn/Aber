@@ -4467,6 +4467,28 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 167. The Capture page's History loads as many rows at a time as its help says: the first page of
+// each table and each Show more are HISTORY_PAGE in CaptureHistory.jsx, and the help page's History
+// section states that number twice.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const size = Number(history.match(/^export const HISTORY_PAGE = (\d+)$/m)?.[1]);
+  const section = read('help/pages/capture.md').match(/^## History\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+  const problems167 = [];
+  if (!size) problems167.push('CaptureHistory.jsx declares no HISTORY_PAGE');
+  if (!section) problems167.push('help/pages/capture.md has no "## History" section');
+  for (const piece of [`the newest ${size}`, `the next ${size}`]) {
+    if (size && section && !section.includes(piece)) problems167.push(`help/pages/capture.md's History section does not say "${piece}"`);
+  }
+  if (problems167.length) {
+    for (const p of problems167) fail(`capture history: ${p}`);
+  } else {
+    pass(`the Capture page's History loads ${size} rows at a time, as its help says`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 115. GoTrue registers no OAuth client itself. auth.yaml sets
 // GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
 // every client a migration writes into auth.oauth_clients is 'manual'. A token issued to any client

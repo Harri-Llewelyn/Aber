@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { captureSubjectUrl } from '../routes'
 import { CaptureTab } from '../components/tabs/CaptureTab'
@@ -36,7 +36,9 @@ vi.mock('../api', async () => {
       playbackStaleCredentials: vi.fn(),
       ensureShadowLanes: vi.fn(),
       startPlayback: vi.fn(),
-      stopPlayback: vi.fn()
+      stopPlayback: vi.fn(),
+      jobHistory: vi.fn(),
+      displayNamesFor: vi.fn()
     }
   }
 })
@@ -44,6 +46,7 @@ vi.mock('../api', async () => {
 vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 
 import { api } from '../api'
+import { useRealtimeTable } from '../hooks/useRealtimeTable'
 import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 
 const GATEWAY = {
@@ -121,6 +124,8 @@ beforeEach(() => {
   // Nothing stale by default: a re-issue the worker has not picked up is its own case (#217),
   // asserted below, and every other test here is about something else.
   api.playbackStaleCredentials.mockResolvedValue([])
+  api.jobHistory.mockResolvedValue({ rows: [], remaining: 0, more: false })
+  api.displayNamesFor.mockResolvedValue(new Map())
 })
 
 const TARGET = {
@@ -1786,5 +1791,162 @@ describe('Capture: sorting by a column (#801)', () => {
     expect(names()).toEqual(['Spindle 1', 'Spindle 4', 'Spindle 3', 'Spindle 2'])
     expect(screen.getByRole('columnheader', { name: 'Gateway' })).toHaveAttribute('aria-sort', 'descending')
     expect(address()).toBe('/capture/device?sort=-gateway')
+  })
+})
+
+// =============================================================================================
+describe('the History', () => {
+  /**
+   * Every finished job, below the subject table, a page at a time. The strips show a failure for
+   * fifteen minutes; this is where it stays, with who started the job, by name, keyed by their id.
+   */
+  const PERSON = '7d1b6a52-3c4e-4f10-9a2b-0c5d6e7f8a91'
+  const OTHER = '91a8f7e6-d5c0-4b2a-901f-4e3c25a6b1d7'
+
+  /** A finished capture job, `n` minutes older than the newest, its stamp as PostgREST writes it. */
+  const captureJob = (n, over = {}) => ({
+    id: `00000000-0000-4000-8000-${String(1000 + n).padStart(12, '0')}`,
+    status: 'COMPLETED',
+    subject_kind: 'gateway',
+    gateway_id: 'gw-1',
+    gateways: { name: 'Line 1 Gateway', sparkplug_id: 'gwy120000000000400080000' },
+    devices: null,
+    subject_sparkplug_id: 'gwy120000000000400080000',
+    created_at: `2026-10-29T${String(10 + Math.floor(n / 60)).padStart(2, '0')}:${String(59 - (n % 60)).padStart(2, '0')}:07.123456+00:00`,
+    finished_at: '2026-10-29T11:00:00+00:00',
+    elapsed_seconds: 125,
+    bytes: 2 * 1048576,
+    messages: 900,
+    requested_by: PERSON,
+    error: null,
+    ...over
+  })
+
+  const playbackJob = (over = {}) => ({
+    id: '00000000-0000-4000-8000-00000000b001',
+    status: 'CANCELLED',
+    capture_storage_path: 'gwy120000000000400080000/cap.json',
+    captures: { note: null, subject_sparkplug_id: 'gwy120000000000400080000' },
+    gateways: { name: 'Playback Target', sparkplug_id: 'gwy130000000000400080000' },
+    created_at: '2026-10-29T09:15:00.5+00:00',
+    elapsed_seconds: 40,
+    messages_sent: 4,
+    messages_total: 5,
+    requested_by: OTHER,
+    error: null,
+    ...over
+  })
+
+  const page = (rows, { remaining = rows.length, more = false } = {}) => ({ rows, remaining, more })
+
+  function history(byKind) {
+    api.jobHistory.mockImplementation((kind, opts) => Promise.resolve(byKind(kind, opts)))
+  }
+
+  const section = name => screen.findByRole('region', { name })
+
+  it('lists finished captures and playbacks in two tables, below the subject table', async () => {
+    history(kind => kind === 'capture'
+      ? page([captureJob(0), captureJob(1, { status: 'CANCELLED' })])
+      : page([playbackJob()]))
+    renderTab()
+
+    const captures = await section('Captures history')
+    const playbacks = await section('Playbacks history')
+    await waitFor(() => expect(within(captures).getAllByRole('row')).toHaveLength(3))
+    const [, first, second] = within(captures).getAllByRole('row')
+    expect(within(first).getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(within(first).getByText('Stored')).toBeInTheDocument()
+    expect(within(first).getByText('2m · 2.0 MiB')).toBeInTheDocument()
+    expect(within(second).getByText('Cancelled')).toBeInTheDocument()
+
+    const played = (await within(playbacks).findAllByRole('row'))[1]
+    // Named from the subject table, and a stopped playback is not a fault.
+    expect(within(played).getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(within(played).getByText('Stopped')).toBeInTheDocument()
+    expect(within(played).getByText('40s · 4 of 5 messages')).toBeInTheDocument()
+
+    // Newest first, one page of each, with no cursor.
+    expect(api.jobHistory).toHaveBeenCalledWith('capture', { limit: 20 })
+    expect(api.jobHistory).toHaveBeenCalledWith('playback', { limit: 20 })
+    // Below the subject table, which stays the first table on the page.
+    expect(document.querySelector('table')).not.toBe(within(captures).getByRole('table'))
+  })
+
+  it('Show more asks for the next 20 from the last row it holds, by its start time and id', async () => {
+    const first = Array.from({ length: 20 }, (_, n) => captureJob(n))
+    const rest = [captureJob(20), captureJob(21), captureJob(22)]
+    history((kind, { before }) => kind !== 'capture'
+      ? page([])
+      : before ? page(rest) : page(first, { remaining: 23, more: true }))
+    renderTab()
+
+    const captures = await section('Captures history')
+    const more = await within(captures).findByRole('button', { name: 'Show 3 more' })
+    expect(within(captures).getByText('20 of 23')).toBeInTheDocument()
+    fireEvent.click(more)
+
+    await waitFor(() => expect(within(captures).getAllByRole('row')).toHaveLength(24))
+    expect(api.jobHistory).toHaveBeenLastCalledWith('capture', {
+      // The stamp as it was read, microseconds and all: a Date would lose them.
+      before: { created_at: first[19].created_at, id: first[19].id },
+      limit: 20
+    })
+    expect(first[19].created_at).toMatch(/\.123456\+00:00$/)
+    expect(within(captures).getByText('All 23 shown.')).toBeInTheDocument()
+  })
+
+  it('shows a failed row with its message, and no message on the others', async () => {
+    history(kind => kind === 'capture'
+      ? page([
+        captureJob(0, {
+          status: 'FAILED',
+          error: 'the ingestion service restarted before the recording was stored, and its shutdown had no time left to upload it.'
+        }),
+        captureJob(1)
+      ])
+      : page([playbackJob({ status: 'FAILED', error: 'publishing stopped after 7 of 9 messages' })]))
+    renderTab()
+
+    const captures = await section('Captures history')
+    await waitFor(() => expect(within(captures).getAllByRole('row')).toHaveLength(3))
+    const [, failed, stored] = within(captures).getAllByRole('row')
+    expect(within(failed).getByText('Failed')).toBeInTheDocument()
+    expect(within(failed).getByText(/its shutdown had no time left to upload it/)).toHaveClass('capture-history-failure')
+    expect(stored.querySelector('.capture-history-failure')).toBeEmptyDOMElement()
+    expect(within(await section('Playbacks history')).getByText('publishing stopped after 7 of 9 messages'))
+      .toBeInTheDocument()
+  })
+
+  it('shows who started a job by name, read by their id and never by email', async () => {
+    history(kind => kind === 'capture' ? page([captureJob(0), captureJob(1, { requested_by: OTHER })]) : page([]))
+    api.displayNamesFor.mockResolvedValue(new Map([[PERSON, 'Harri Williams']]))
+    renderTab()
+
+    const captures = await section('Captures history')
+    expect(await within(captures).findByText('Harri Williams')).toBeInTheDocument()
+    expect(api.displayNamesFor).toHaveBeenCalledWith([PERSON, OTHER])
+    // A person whose name this caller may not read shows by the start of their id.
+    expect(within(captures).getByText(OTHER.slice(0, 8))).toHaveClass('mono')
+    expect(within(captures).queryByText(/@/)).toBeNull()
+  })
+
+  it('reads a list again when a job of its kind finishes, and only that list', async () => {
+    const reads = kind => api.jobHistory.mock.calls.filter(([k]) => k === kind).length
+    history(() => page([]))
+    renderTab()
+    expect(await within(await section('Captures history')).findByText('No recording has finished yet.')).toBeInTheDocument()
+    expect(reads('capture')).toBe(1)
+
+    // A recording finishes, and the page hears it over Realtime.
+    const done = captureJob(0, { status: 'FAILED', error: 'upload to x failed: refused' })
+    api.recentCaptureJobs.mockResolvedValue([done])
+    history(kind => (kind === 'capture' ? page([done]) : page([])))
+    const refresh = useRealtimeTable.mock.calls.at(-1)[1]
+    await act(() => refresh())
+
+    await waitFor(() => expect(reads('capture')).toBe(2))
+    expect(await within(await section('Captures history')).findByText('Failed')).toBeInTheDocument()
+    expect(reads('playback')).toBe(1)
   })
 })

@@ -46,6 +46,10 @@ const TABLES = {
     sortable: 0,
     fixed: ['Paged from the server, 30 runs at a time, newest first: a sort in the browser would sort only the runs on screen.']
   },
+  'components/tabs/CaptureHistory.jsx': {
+    sortable: 0,
+    fixed: ['Paged from the server, 20 finished jobs at a time, newest first: a sort in the browser would sort only the jobs on screen.']
+  },
   'components/tabs/CaptureTab.jsx': { sortable: 1 },
   'components/tabs/CellsTab.jsx': { sortable: 1 },
   'components/tabs/ColdStorageTab.jsx': { sortable: 1 },

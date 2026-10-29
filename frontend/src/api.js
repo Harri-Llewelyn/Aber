@@ -373,6 +373,10 @@ const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
  */
 const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
 
+/** A job's created_at as PostgREST writes it, and a job's id: all the History's cursor may hold. */
+const JOB_HISTORY_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const JOB_HISTORY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Area plans. Private, and the name is fixed: scripts/storage-init.mjs and
  * supabase/storage-policies.sql name it too. Objects live under `<area_id>/`, which the write
@@ -2210,6 +2214,39 @@ const apiMethods = {
       .limit(limit);
     if (error) throw new Error(error.message || 'Could not read playback jobs');
     return data || [];
+  },
+
+  /**
+   * One page of the finished capture or playback jobs (`kind` 'capture' or 'playback'), newest
+   * first, for the Capture page's History. Keyset on (created_at, id), not OFFSET, so a job that
+   * finishes meanwhile does not shift a page. `before` is the last row of the page before, its
+   * created_at exactly as read: a Date would drop the microseconds and skip or repeat a row.
+   * Resolves to `{ rows, remaining, more }`: `remaining` counts this page and every older row, and
+   * `more` says a row follows it. Read under the tables' own SELECT policies.
+   */
+  jobHistory: async (kind, { before = null, limit = 20 } = {}) => {
+    const playback = kind === 'playback';
+    let query = supabase
+      .from(playback ? 'playback_jobs' : 'capture_jobs')
+      .select(playback
+        ? '*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)'
+        : '*, gateways(name, sparkplug_id), devices(name, sparkplug_id)', { count: 'exact' })
+      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED']);
+    if (before) {
+      // Both halves go into the filter's text, so each must be what the database wrote.
+      if (!JOB_HISTORY_STAMP.test(before.created_at || '') || !JOB_HISTORY_ID.test(before.id || '')) {
+        throw new Error('The history can only page on from a row it read');
+      }
+      const at = `"${before.created_at}"`;
+      query = query.or(`created_at.lt.${at},and(created_at.eq.${at},id.lt.${before.id})`);
+    }
+    const { data, error, count } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit + 1);
+    if (error) throw new Error(error.message || `Could not read the ${playback ? 'playback' : 'capture'} history`);
+    const rows = data || [];
+    return { rows: rows.slice(0, limit), remaining: count ?? rows.length, more: rows.length > limit };
   },
 
   /**
