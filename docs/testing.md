@@ -353,6 +353,12 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # repository's branches, never from its pull request head, tag or stash.
 npm run test:lib
 
+# NOTICE.md names every third-party image values.yaml pins, a chart template names or a Dockerfile is
+# built FROM. Each licence text in licenses/ is the file licenses/SHA256SUMS pins, and every build
+# of an image that copies them through the `licenses` named context passes it. Static; its parsing
+# is tested in test:lib (scripts/check-image-licences.test.mjs).
+node scripts/check-image-licences.mjs
+
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
 # time against it. There is no migrations ledger, so "a second run must match no rows" is what
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a

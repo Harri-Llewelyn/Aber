@@ -92,11 +92,12 @@ export const IMAGES = [
   // Both carry their scripts from scripts/, so a script edit needs this rebuild.
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: '.' },
   { name: 'backup-service', file: 'backup-service/Dockerfile', context: '.' },
-  // The historian: timescale/timescaledb with pgBackRest, for timescaledb.physicalBackup.
-  { name: 'timescaledb', file: 'timescaledb/Dockerfile', context: 'timescaledb' },
+  // The historian: timescale/timescaledb with pgBackRest, for timescaledb.physicalBackup. It and the
+  // next two copy the licence texts they carry from licenses/, which their contexts do not hold.
+  { name: 'timescaledb', file: 'timescaledb/Dockerfile', context: 'timescaledb', contexts: ['licenses=./licenses'] },
   // The platform database: supabase/postgres with pgBackRest and tini, for supabaseDb.physicalBackup.
-  { name: 'supabase-db', file: 'supabase/db/Dockerfile', context: 'supabase/db' },
-  { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase' },
+  { name: 'supabase-db', file: 'supabase/db/Dockerfile', context: 'supabase/db', contexts: ['licenses=./licenses'] },
+  { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase', contexts: ['licenses=./licenses'] },
   // Carries docs/openapi.yaml and docs/i3x-openapi.yaml, so a spec edit needs this rebuild.
   { name: 'swagger-ui', file: 'swagger-ui/Dockerfile', context: '.' },
   // Extends the ingestion image, so it starts once that one has built, and is told which one.

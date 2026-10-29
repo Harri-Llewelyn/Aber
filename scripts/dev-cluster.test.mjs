@@ -142,6 +142,7 @@ test('the build is given the version in a value and never in a name, and the nam
     '--build-context', 'help=./help', 'frontend',
   ]);
   assert.deepEqual(dockerBuildArgs(byName.timescaledb, '1.7.0', ''), [
-    'build', '-f', 'timescaledb/Dockerfile', '-t', `${IMG_NS}/timescaledb:1.7.0`, 'timescaledb',
+    'build', '-f', 'timescaledb/Dockerfile', '-t', `${IMG_NS}/timescaledb:1.7.0`,
+    '--build-context', 'licenses=./licenses', 'timescaledb',
   ]);
 });

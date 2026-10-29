@@ -21,6 +21,12 @@ RUN apk upgrade --no-cache \
  && apk add --no-cache pgbackrest tini gosu \
  && rm /usr/local/bin/gosu
 
+# THE LICENCES, which the base does not carry and a published image must: Supabase's, PostgreSQL's,
+# and the GPL the base's PostGIS and pgRouting binaries are under, to /usr/share/licenses/. They
+# come from licenses/supabase-postgres/ through the named context `licenses`
+# (`--build-context licenses=./licenses`), since this context is supabase/db/.
+COPY --from=licenses supabase-postgres/ /usr/share/licenses/
+
 # TINI IS PID 1, NOT THE POSTMASTER. Asynchronous archive-push forks a process that outlives the
 # archive_command that started it; orphaned, it is adopted by PID 1. When the postmaster is PID 1 it
 # reaps it, and an exit code other than 0 or 1 (every archive failure) reads to it as a crashed

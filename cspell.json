@@ -69,6 +69,8 @@
     // Third-party specifications carried verbatim. AAS_V3_0_JSON_Schema.json is IDTA's, and its
     // property names are not ours to spell differently.
     "test-harness/schemas/**",
+    // Upstream licence texts the published images carry, byte for byte, and their SHA-256 pins.
+    "licenses/*/**", "licenses/SHA256SUMS",
     // Binary and near-binary. The .gz entry matters most: the chart carries the migration chain as
     // one gzip per file, and reading those as text produces noise proportional to the schema.
     "**/*.gz", "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.svg", "**/*.ico",

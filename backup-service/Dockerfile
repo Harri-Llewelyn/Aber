@@ -24,6 +24,10 @@ RUN rm /usr/local/bin/gosu
 RUN apk upgrade --no-cache \
  && apk add --no-cache nodejs sqlite tar age aws-cli
 
+# THE LICENCES the base does not carry, as supabase/db/Dockerfile copies them, from the repository
+# root's licenses/ (NOTICE.md).
+COPY licenses/supabase-postgres/ /usr/share/licenses/
+
 # The base's postgres user (100:101), the owner group the backup volume is given (fsGroup 101). The
 # forge's and the broker's volumes hold files other uids own at 0600, so the chart runs the service
 # as root, with DAC_OVERRIDE, only when it archives either of those.

@@ -7,12 +7,16 @@ database*. This page holds the reasoning and the evidence behind the image and t
 
 | File | What it is |
 | :--- | :--- |
-| [`Dockerfile`](Dockerfile) | `FROM supabase/postgres:17.6.1.175`, plus `pgbackrest`, `tini` and Alpine's `gosu` |
+| [`Dockerfile`](Dockerfile) | `FROM supabase/postgres:17.6.1.175`, plus `pgbackrest`, `tini` and Alpine's `gosu`, and the licence texts the base lacks (`licenses/supabase-postgres/`) |
 | [`pgbackrest/platform-backup.sh`](pgbackrest/platform-backup.sh) | The backup sidecar's schedule, mirrored into the chart by `scripts/sync-helm-chart-files.mjs` |
 
 ```bash
-docker build -t ghcr.io/harri-llewelyn/aber/supabase-db:$V -f supabase/db/Dockerfile supabase/db
+docker build -t ghcr.io/harri-llewelyn/aber/supabase-db:$V -f supabase/db/Dockerfile \
+  --build-context licenses=./licenses supabase/db
 ```
+
+The licence texts are outside this context, so the build takes `licenses/` as a named context. Without
+it the build stops with `pull access denied` for `licenses`.
 
 ## Why an image of our own
 

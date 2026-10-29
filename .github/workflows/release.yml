@@ -195,12 +195,16 @@ jobs:
             dockerfile: timescaledb/Dockerfile
             context: timescaledb
             build_args: ''
+            # The licence texts the image carries (licenses/README.md), which its context does not
+            # hold; supabase-db and db-init pass the same.
+            build_contexts: licenses=./licenses
           # The platform database: supabase/postgres with pgBackRest and tini, which physical backup
           # runs inside the server's own container.
           - name: supabase-db
             dockerfile: supabase/db/Dockerfile
             context: supabase/db
             build_args: ''
+            build_contexts: licenses=./licenses
           # The schema itself: supabase/postgres with supabase/migrations/*.sql copied in. This
           # image's tag is the database version, and the chain cannot travel in the chart (a
           # ConfigMap and Helm's release Secret are both capped at 1 MiB), so a chart published
@@ -209,6 +213,7 @@ jobs:
             dockerfile: supabase/db-init/Dockerfile
             context: supabase
             build_args: ''
+            build_contexts: licenses=./licenses
           # Swagger UI with docs/openapi.yaml and docs/i3x-openapi.yaml copied in. Repository root,
           # because both specs live there; .dockerignore negates each by name. The specs travel in
           # the image for the same reason the migrations do -- Helm's release Secret holds a
