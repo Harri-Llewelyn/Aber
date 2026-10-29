@@ -381,6 +381,25 @@ its drawer) each have an Expand button (`common/ExpandButton.jsx`). It opens `Mo
   auto-rotate, and the camera's start (`START_VIEW`, the element's defaults) set as attributes so
   Reset view can set them again. The element animates to a camera property set to its own value.
 
+### An area's plan turns in quarter turns
+
+`areas.plan_rotation` (`0221`) turns a plan on screen, clockwise, by 0, 90, 180 or 270 degrees. The
+SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `utils/areaPlans.js`.
+
+- **Two aspects.** `planFrameAspect()` is the shape of the frame, `1 / plan_aspect` on its side.
+  `AreaPlan` and `PlanViewer` draw with it, so the viewer fits and centres fractions of the turned
+  frame. `planAspect()` stays the drawing's own, and the spacing check measures places on the
+  drawing with it, so a quarter turn changes no distance.
+- **Only the image turns.** `AreaPlan` lays the `<img>` out at the drawing's own shape
+  (`drawingBoxInFrame()`), the frame's height wide when it is on its side, and turns it about the
+  frame's centre with a CSS `rotate()`. A pin is not inside the turned box: it turns its place into
+  the frame (`placeInFrame()`, with the turn `AreaPlan` provides by context), so its label stays
+  upright and still slides inward at the frame's edges. A click is read as fractions of the frame
+  and turned back (`placeOnDrawing()`) before `onPlaceClick` sees it.
+- **A turn is one write.** `AreaPlanPanel`'s Turn left and Turn right call `turnAreaPlan()` with
+  the turn the page read, then reload. The buttons stay disabled until the reload lands, so a
+  second press starts from the first.
+
 ---
 
 ## Migrated design notes
