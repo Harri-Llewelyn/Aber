@@ -22,8 +22,9 @@ RUN apk upgrade --no-cache \
  && rm /usr/local/bin/gosu
 
 # THE LICENCES, which the base does not carry and a published image must: Supabase's, PostgreSQL's,
-# and the GPL the base's PostGIS and pgRouting binaries are under, to /usr/share/licenses/. They
-# come from licenses/supabase-postgres/ through the named context `licenses`
+# and the GPL the base's PostGIS and pgRouting binaries are under, with the written offer of their
+# source (SOURCE) and the licences of the copyleft libraries only PostGIS loads, to
+# /usr/share/licenses/. They come from licenses/supabase-postgres/ through the named context `licenses`
 # (`--build-context licenses=./licenses`), since this context is supabase/db/.
 COPY --from=licenses supabase-postgres/ /usr/share/licenses/
 

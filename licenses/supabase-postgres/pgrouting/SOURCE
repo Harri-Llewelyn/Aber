@@ -1,0 +1,56 @@
+pgRouting 3.4.1: where its source is, and a written offer of it
+================================================================
+
+This image carries the binaries of pgRouting 3.4.1: the extension pgrouting. pgRouting is
+licensed under the GNU General Public License, version 2 or later, with some parts under the
+Boost Software License or the MIT licence. Its licence is in this folder (LICENSE).
+
+The binaries come unmodified from the base image supabase/postgres:17.6.1.175. Aber does not
+modify or rebuild them, and Aber's migrations do not create this extension. This applies to the
+three images built on that base: ghcr.io/harri-llewelyn/aber/supabase-db,
+ghcr.io/harri-llewelyn/aber/db-init and ghcr.io/harri-llewelyn/aber/backup-service.
+
+
+Download the source
+-------------------
+
+Aber mirrors the complete corresponding source of pgRouting 3.4.1, its patch and the scripts
+that built it, one archive each, with a SHA256SUMS file, in a GitHub release of its own:
+https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175-postgis
+It covers every Aber image built on supabase/postgres:17.6.1.175.
+
+
+Where the source is upstream
+----------------------------
+
+- pgRouting v3.4.1:
+  https://github.com/pgRouting/pgrouting/tree/v3.4.1
+- The one patch the base image's build applies to it, for PostgreSQL 17:
+  https://github.com/supabase/postgres/blob/17.6.1.175/nix/ext/pgrouting/pgrouting-3.4.1-pg17.patch
+- The scripts that built it, in supabase/postgres at 17.6.1.175 (nix/ext/pgrouting/):
+  https://github.com/supabase/postgres/tree/17.6.1.175
+  and the nixpkgs its flake.lock pins, which supplies Boost 1.87.0, whose graph headers are
+  compiled in (Boost Software License 1.0):
+  https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108
+
+pgRouting's library loads nothing the PostgreSQL server does not load already.
+
+
+The written offer
+-----------------
+
+For three years from the date of each Aber release that ships this image, Aber's maintainer will
+give anyone who asks a complete machine-readable copy of the corresponding source code of
+pgRouting 3.4.1 as built in this image, with the patch and the scripts that built it. The charge
+is no more than the cost of making the copy.
+
+To ask, use GitHub's private vulnerability reporting for Aber:
+https://github.com/Harri-Llewelyn/Aber/security/advisories/new
+(the Security tab, then Report a vulnerability). The form is built for vulnerability reports.
+Use it for a source request too. Say in it:
+
+- which image you have and its tag, the Aber release (for example
+  ghcr.io/harri-llewelyn/aber/supabase-db);
+- that this is a request for the GPL source of pgRouting.
+
+The request opens a draft advisory that only Aber's maintainers can see.

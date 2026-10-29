@@ -131,6 +131,24 @@ jobs:
         with:
           node-version: '24'
 
+      # The database images' written offers link the release that mirrors their GPL and LGPL source
+      # (gpl-sources.yml). Read only: the release must be published and hold every archive
+      # licenses/supabase-postgres/sources.json pins, at its SHA-256. A dry run publishes no image,
+      # so it only warns.
+      - name: Verify The GPL Sources Release Holds Every Archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUSH: ${{ steps.resolve.outputs.push }}
+        run: |
+          set -eu
+          if node scripts/mirror-gpl-sources.mjs --verify; then exit 0; fi
+          msg="The GPL sources release for the database images' base is missing or incomplete. Run Actions → GPL Sources (.github/workflows/gpl-sources.yml), then this release again."
+          if [ "$PUSH" = "true" ]; then
+            echo "::error::$msg"
+            exit 1
+          fi
+          echo "::warning::$msg"
+
       # Helm cannot read files outside its chart directory, so repository-owned configuration is
       # mirrored into deploy/helm/aber/files/. A chart whose mirror is stale is the one failure
       # here that reaches a user's cluster.

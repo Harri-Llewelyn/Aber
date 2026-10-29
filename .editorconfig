@@ -52,6 +52,11 @@ indent_size = 2
 [Makefile]
 indent_style = tab
 
+# The licence texts are upstream's bytes, pinned by SHA-256 in licenses/SHA256SUMS. Several carry
+# trailing spaces, and trimming one breaks its pin.
+[licenses/**]
+trim_trailing_whitespace = false
+
 # TWO TRAILING SPACES ARE A LINE BREAK IN MARKDOWN. Trimming them silently reflows a rendered
 # document, so the general rule above is switched off here rather than quietly changing prose.
 [*.md]

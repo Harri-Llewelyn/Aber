@@ -10,7 +10,7 @@ The four exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-
 [the icon glyphs it copies](#the-dashboards-icons--lucide-isc-and-feather-mit) and
 [the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20), which keep their own
 licences. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
-belong to.
+belong to. The two written offers of source there (`SOURCE`) are Aber's own.
 
 It does **not** cover the third-party software Aber runs, which is under its own licences. What
 happens to that software differs between the repository and a release:
@@ -41,7 +41,7 @@ one.
 | Published image | Built on | Licence of the base | The licence text in the published image |
 | :--- | :--- | :--- | :--- |
 | `aber/timescaledb` | `timescale/timescaledb:2.29.2-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
-| `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, and the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` |
+| `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
 | `aber/edge-runtime` | `supabase/edge-runtime:v1.77.0`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.7` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
@@ -218,8 +218,82 @@ extension control files. Aber's migrations and seed create six of them: `postgre
 `pg_net`, `supabase_vault`, `pgjwt` and `pgcrypto`.
 
 **Two are copyleft: PostGIS and pgRouting, both GPL-2.0-or-later.** Aber creates neither, but their
-binaries are in all three images. Their GPL text travels with them (`/usr/share/licenses/postgis/`,
-`/usr/share/licenses/pgrouting/`), and their source is the repository at the tag below.
+binaries are in all three images, unmodified from `supabase/postgres:17.6.1.175`. Their GPL text
+travels with them (`/usr/share/licenses/postgis/`, `/usr/share/licenses/pgrouting/`). So does a
+written offer of their source, `SOURCE` in each of those folders
+([`licenses/supabase-postgres/postgis/SOURCE`](licenses/supabase-postgres/postgis/SOURCE),
+[`licenses/supabase-postgres/pgrouting/SOURCE`](licenses/supabase-postgres/pgrouting/SOURCE)). Each
+names where the exact source is:
+
+- the project at the tag below: PostGIS `3.3.7`, with no patches, and pgRouting `v3.4.1`;
+- for pgRouting, the one patch the base's build applies for PostgreSQL 17,
+  [`nix/ext/pgrouting/pgrouting-3.4.1-pg17.patch`](https://github.com/supabase/postgres/blob/17.6.1.175/nix/ext/pgrouting/pgrouting-3.4.1-pg17.patch);
+- the scripts that built them, in [`supabase/postgres`](https://github.com/supabase/postgres/tree/17.6.1.175)
+  at `17.6.1.175`, and the [nixpkgs](https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108)
+  its `flake.lock` pins.
+
+**The source, mirrored.** Aber keeps a copy of the complete corresponding source of PostGIS,
+pgRouting and the copyleft libraries below, with the scripts that built them, in a GitHub release of
+its own:
+[`gpl-sources-supabase-postgres-17.6.1.175-postgis`](https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175-postgis).
+It holds one archive per component and a `SHA256SUMS` file, and covers every Aber image built on
+`supabase/postgres:17.6.1.175`. [`licenses/supabase-postgres/sources.json`](licenses/supabase-postgres/sources.json)
+pins every archive by SHA-256. `scripts/mirror-gpl-sources.mjs` publishes the release
+(`.github/workflows/gpl-sources.yml`), and `release.yml` refuses to publish images until it holds every
+archive the lock pins.
+
+**The written offer.** For three years from each Aber release that ships these images, Aber's
+maintainer will give anyone who asks a complete copy of the corresponding source. That covers
+PostGIS, pgRouting and the copyleft libraries below. The charge is no more than the cost of making
+the copy. To ask, use GitHub's
+[private vulnerability reporting](https://github.com/Harri-Llewelyn/Aber/security/advisories/new),
+the **Security** tab, then **Report a vulnerability**. The form is built for vulnerability reports;
+use it for a source request too. Say which image you have and its tag, the Aber release (for
+example `ghcr.io/harri-llewelyn/aber/supabase-db`), and that you are asking for the GPL source of
+PostGIS or pgRouting. `scripts/check-image-licences.mjs` fails CI when an offer is missing or
+unpinned, when an image built on `supabase/postgres` does not copy it, or when it names another base
+tag or extension version than the images ship.
+
+**The libraries only PostGIS loads.** PostGIS's modules load the libraries below from the image's
+Nix store, and the PostgreSQL server does not. They were read with the image's own glibc loader
+(`ld-linux-x86-64.so.2 --list`) on each PostGIS and pgRouting module and on `postgres`, then
+subtracting what `postgres` loads. All but five are loaded by `postgis` itself: GDAL, libgeotiff,
+Expat and libpq only by `postgis_raster`, and PCRE2 only by `address_standardizer`. pgRouting's
+library loads nothing the server does not; it compiles in Boost 1.87.0's graph headers (BSL-1.0).
+Each copyleft library's licence is under `/usr/share/licenses/<name>/`, and the offer above covers it.
+
+| Library | Version | Licence | Source |
+| :--- | :--- | :--- | :--- |
+| GEOS | 3.14.1 | **LGPL-2.1** | [`libgeos/geos`](https://github.com/libgeos/geos) `3.14.1` |
+| SFCGAL | 2.2.0 | **LGPL-2.0-or-later**; as built here **GPL-3.0-or-later**, because it compiles in CGAL's GPL packages | [`sfcgal/SFCGAL`](https://gitlab.com/sfcgal/SFCGAL) `v2.2.0` |
+| CGAL, compiled into SFCGAL | 6.1 | **GPL-3.0-or-later** for the packages SFCGAL carries (`Nef_3`, `Straight_skeleton_2`, `Minkowski_sum_2`, `Minkowski_sum_3`, `Polygon_mesh_processing`, `Triangulation_2`, `Triangulation_3`, `Alpha_shapes_2`, `Convex_hull_3`, `Polyhedron`, `Surface_mesh`, `Arrangement_on_surface_2`, `Boolean_set_operations_2`, `Polyline_simplification_2`, `Box_intersection_d`, `AABB_tree`); **LGPL-3.0-or-later** for its kernel and support packages (`Kernel_23`, `Polygon`, `Number_types` and others) | [`CGAL/cgal`](https://github.com/CGAL/cgal) `v6.1` |
+| GMP | 6.3.0 | **LGPL-3.0-or-later or GPL-2.0-or-later** | [`gmp-6.3.0.tar.xz`](https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz) |
+| MPFR | 4.2.2 | **LGPL-3.0-or-later** | [`mpfr/mpfr`](https://gitlab.inria.fr/mpfr/mpfr) `4.2.2` |
+| libidn2, through libcurl | 2.3.8 | **GPL-2.0-or-later or LGPL-3.0-or-later** | [`libidn/libidn2`](https://gitlab.com/libidn/libidn2) `v2.3.8` |
+| libunistring, through libidn2 | 1.4.1 | **LGPL-3.0-or-later or GPL-2.0-or-later** | [`libunistring-1.4.1.tar.gz`](https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.1.tar.gz) |
+| PROJ | 9.7.1 | MIT | [`OSGeo/PROJ`](https://github.com/OSGeo/PROJ) `9.7.1` |
+| GDAL | 3.8.5 | MIT | [`OSGeo/gdal`](https://github.com/OSGeo/gdal) `v3.8.5` |
+| libgeotiff | 1.7.4 | MIT | [`OSGeo/libgeotiff`](https://github.com/OSGeo/libgeotiff) `1.7.4` |
+| libtiff | 4.7.1 | libtiff (BSD-style) | [`libtiff/libtiff`](https://gitlab.com/libtiff/libtiff) `v4.7.1` |
+| libjpeg-turbo | 3.1.3 | IJG and BSD-3-Clause | [`libjpeg-turbo/libjpeg-turbo`](https://github.com/libjpeg-turbo/libjpeg-turbo) `3.1.3` |
+| libwebp | 1.6.0 | BSD-3-Clause | [`webmproject/libwebp`](https://github.com/webmproject/libwebp) `v1.6.0` |
+| libdeflate | 1.25 | MIT | [`ebiggers/libdeflate`](https://github.com/ebiggers/libdeflate) `v1.25` |
+| LERC | 4.0.0 | Apache 2.0 | [`Esri/lerc`](https://github.com/Esri/lerc) `v4.0.0` |
+| liblzma (XZ Utils) | 5.8.1 | 0BSD | [`tukaani-project/xz`](https://github.com/tukaani-project/xz) `v5.8.1` |
+| json-c | 0.18 | MIT | [`json-c/json-c`](https://github.com/json-c/json-c) `json-c-0.18-20240915` |
+| protobuf-c | 1.5.2 | BSD-2-Clause | [`protobuf-c/protobuf-c`](https://github.com/protobuf-c/protobuf-c) `v1.5.2` |
+| SQLite | 3.51.1 | Public domain | [`sqlite/sqlite`](https://github.com/sqlite/sqlite) `version-3.51.1` |
+| curl (libcurl) | 8.17.0 | curl (MIT-style) | [`curl/curl`](https://github.com/curl/curl) `curl-8_17_0` |
+| nghttp2 | 1.67.1 | MIT | [`nghttp2/nghttp2`](https://github.com/nghttp2/nghttp2) `v1.67.1` |
+| nghttp3 | 1.13.1 | MIT | [`ngtcp2/nghttp3`](https://github.com/ngtcp2/nghttp3) `v1.13.1` |
+| ngtcp2 | 1.18.0 | MIT | [`ngtcp2/ngtcp2`](https://github.com/ngtcp2/ngtcp2) `v1.18.0` |
+| libssh2 | 1.11.1 | BSD-3-Clause | [`libssh2/libssh2`](https://github.com/libssh2/libssh2) `libssh2-1.11.1` |
+| libpsl | 0.21.5 | MIT | [`rockdaboot/libpsl`](https://github.com/rockdaboot/libpsl) `0.21.5` |
+| Brotli | 1.2.0 | MIT | [`google/brotli`](https://github.com/google/brotli) `v1.2.0` |
+| Boost (`serialization`, `system`, `thread`) | 1.87.0 | BSL-1.0 | [`boostorg/boost`](https://github.com/boostorg/boost) `boost-1.87.0` |
+| Expat | 2.7.3 | MIT | [`libexpat/libexpat`](https://github.com/libexpat/libexpat) `R_2_7_3` |
+| PCRE2 | 10.46 | BSD-3-Clause with the PCRE2 exception | [`PCRE2Project/pcre2`](https://github.com/PCRE2Project/pcre2) `pcre2-10.46` |
+| libpq | 17.6 | PostgreSQL License | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6` |
 
 Each licence is from the project's repository at the version the image ships. Three were read at
 a release of the version shipped: `rum` at 1.3.14, `plpgsql_check` at 2.8.0 and `pg_stat_monitor`
@@ -261,9 +335,9 @@ The image also carries server libraries that are not extensions: PostgreSQL's ow
 `auth_delay` and `passwordcheck`; `supautils` (Apache 2.0, [`supabase/supautils`](https://github.com/supabase/supautils));
 `safeupdate` 1.4 (ISC, [`eradman/pg-safeupdate`](https://github.com/eradman/pg-safeupdate)); and
 `plan_filter` 0.1 (PostgreSQL License, [`pgexperts/pg_plan_filter`](https://github.com/pgexperts/pg_plan_filter)).
-The libraries the extensions link, such as GEOS, PROJ, GDAL, Groonga, libsodium and ICU, come from
-the image's Nix store under their own licences, GEOS's and Groonga's the LGPL. This list stops at the
-extensions.
+The libraries the other extensions link, such as Groonga, libsodium and ICU, come from the image's
+Nix store under their own licences, Groonga's the LGPL. This list stops at the extensions and
+[the libraries only PostGIS loads](#the-extensions-in-supabasepostgres), above.
 
 ## Other components
 

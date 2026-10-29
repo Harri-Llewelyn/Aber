@@ -1,0 +1,86 @@
+PostGIS 3.3.7: where its source is, and a written offer of it
+==============================================================
+
+This image carries the binaries of PostGIS 3.3.7: the extensions postgis, postgis_raster,
+postgis_sfcgal, postgis_tiger_geocoder and postgis_topology. PostGIS is licensed under the GNU
+General Public License, version 2 or later. Its licence is in this folder (COPYING, LICENSE.TXT).
+
+The binaries come unmodified from the base image supabase/postgres:17.6.1.175. Aber does not
+modify or rebuild them, and Aber's migrations do not create these extensions. This applies to the
+three images built on that base: ghcr.io/harri-llewelyn/aber/supabase-db,
+ghcr.io/harri-llewelyn/aber/db-init and ghcr.io/harri-llewelyn/aber/backup-service.
+
+
+Download the source
+-------------------
+
+Aber mirrors the complete corresponding source of every component this file lists, one archive
+each, with a SHA256SUMS file, in a GitHub release of its own:
+https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175-postgis
+It covers every Aber image built on supabase/postgres:17.6.1.175.
+
+
+Where the source is upstream
+----------------------------
+
+- PostGIS 3.3.7, with no patches:
+  https://github.com/postgis/postgis/tree/3.3.7
+  The base image was built from its release archive,
+  https://download.osgeo.org/postgis/source/postgis-3.3.7.tar.gz
+- The scripts that built it, in supabase/postgres at 17.6.1.175 (nix/ext/postgis.nix and
+  nix/ext/gdal.nix):
+  https://github.com/supabase/postgres/tree/17.6.1.175
+  and the nixpkgs its flake.lock pins, which builds the libraries below:
+  https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108
+
+
+The copyleft libraries only PostGIS loads
+-----------------------------------------
+
+PostGIS's modules load these libraries, which the PostgreSQL server does not. Each is in the
+image's Nix store, unmodified, and its licence is under /usr/share/licenses/<name>/.
+
+- GEOS 3.14.1, GNU Lesser General Public License 2.1 (geos/):
+  https://github.com/libgeos/geos/tree/3.14.1
+- SFCGAL 2.2.0, GNU Library General Public License 2 or later (sfcgal/):
+  https://gitlab.com/sfcgal/SFCGAL/-/tree/v2.2.0
+- CGAL 6.1, compiled into SFCGAL (cgal/):
+  https://github.com/CGAL/cgal/tree/v6.1
+  The SFCGAL library carries CGAL packages under the GNU General Public License 3 or later
+  (Nef_3, Straight_skeleton_2, Minkowski_sum_2, Minkowski_sum_3, Polygon_mesh_processing,
+  Triangulation_2, Triangulation_3, Alpha_shapes_2, Convex_hull_3, Polyhedron, Surface_mesh,
+  Arrangement_on_surface_2, Boolean_set_operations_2, Polyline_simplification_2,
+  Box_intersection_d and AABB_tree), and its kernel and support packages under the GNU Lesser
+  General Public License 3 or later. The SFCGAL library in this image is therefore under the GNU
+  General Public License 3 or later.
+- GMP 6.3.0, GNU Lesser General Public License 3 or later, or GNU General Public License 2 or
+  later (gmp/):
+  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
+- MPFR 4.2.2, GNU Lesser General Public License 3 or later (mpfr/):
+  https://gitlab.inria.fr/mpfr/mpfr/-/tree/4.2.2
+- libidn2 2.3.8, GNU General Public License 2 or later, or GNU Lesser General Public License 3
+  or later (libidn2/):
+  https://gitlab.com/libidn/libidn2/-/tree/v2.3.8
+- libunistring 1.4.1, GNU Lesser General Public License 3 or later, or GNU General Public
+  License 2 or later (libunistring/):
+  https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.1.tar.gz
+
+
+The written offer
+-----------------
+
+For three years from the date of each Aber release that ships this image, Aber's maintainer will
+give anyone who asks a complete machine-readable copy of the corresponding source code of the
+binaries above: PostGIS 3.3.7 and the libraries listed here, with the scripts that built them.
+The charge is no more than the cost of making the copy.
+
+To ask, use GitHub's private vulnerability reporting for Aber:
+https://github.com/Harri-Llewelyn/Aber/security/advisories/new
+(the Security tab, then Report a vulnerability). The form is built for vulnerability reports.
+Use it for a source request too. Say in it:
+
+- which image you have and its tag, the Aber release (for example
+  ghcr.io/harri-llewelyn/aber/supabase-db);
+- that this is a request for the GPL source of PostGIS.
+
+The request opens a draft advisory that only Aber's maintainers can see.

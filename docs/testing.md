@@ -1452,3 +1452,15 @@ deliberately does *not* do (no `latest`, no arm64) are in
 **What the release promises a site** — the supported window, what makes a version major, the
 deprecation path and the release-note headings — is [`releases.md`](releases.md). This section is
 what the workflow builds; that one is what a site is signing up for.
+
+### The GPL sources release
+
+[`.github/workflows/gpl-sources.yml`](../.github/workflows/gpl-sources.yml) has one job,
+**mirror-sources**, run by hand once per `supabase/postgres` base tag. It publishes the release
+`gpl-sources-supabase-postgres-<tag>-postgis`, which holds the complete corresponding source of the GPL and
+LGPL components the database images carry, one archive each, every one pinned in
+[`licenses/supabase-postgres/sources.json`](../licenses/supabase-postgres/sources.json)
+([`licenses/README.md`](../licenses/README.md), *The mirror*). **prepare-release** refuses to publish
+images until that release holds every archive the lock pins; a dry run only warns.
+`node scripts/mirror-gpl-sources.mjs --check` downloads every archive from upstream and checks it
+against the lock, and writes nothing to GitHub.

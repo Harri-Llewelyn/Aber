@@ -8,6 +8,7 @@
  * ghcr.io/harri-llewelyn/aber/, or a values tag left empty for Chart.AppVersion) is not third-party.
  * A Dockerfile that copies from the named context `licenses` must be handed it by every build that
  * names it: a workflow's matrix entry, the dev loop's IMAGES and every documented `docker build`.
+ * Every image built on supabase/postgres carries the written offers of its GPL extensions' source.
  *
  * Static: reads the tree and starts nothing. Usage: node scripts/check-image-licences.mjs
  */
@@ -15,6 +16,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { BASE_IMAGE, LOCK, parseLock, releaseUrl } from './lib/gpl-sources.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const OWN = 'ghcr.io/harri-llewelyn/aber/';
@@ -177,6 +180,188 @@ export function licenceCopies(text) {
   return out;
 }
 
+/**
+ * The written offers of source for the GPL extensions the base ships, under licenses/. Every image
+ * built on OFFER_BASE copies them, and each names that base and the version and tag of its row in
+ * NOTICE.md's extension table, which was read from the image.
+ */
+export const OFFER_BASE = 'supabase/postgres';
+export const OFFERS = [
+  { file: 'supabase-postgres/postgis/SOURCE', extension: 'postgis' },
+  { file: 'supabase-postgres/pgrouting/SOURCE', extension: 'pgrouting' },
+];
+
+/** Each token that follows `prefix` in `text`, up to whitespace, `/`, or a closing `.`/`,`/`)`. */
+export function tokensAfter(text, prefix) {
+  const out = [];
+  for (let at = text.indexOf(prefix); at !== -1; at = text.indexOf(prefix, at + prefix.length)) {
+    out.push(/^[^\s/]*/.exec(text.slice(at + prefix.length))[0].replace(/[.,;:)]+$/, ''));
+  }
+  return out;
+}
+
+/** Whether `text` names `word` whole: not inside a longer word or version (`3.3.7` is not in `3.3.70`). */
+export function namesWhole(text, word) {
+  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
+    const before = text[at - 1] ?? '';
+    const after = text.slice(at + word.length, at + word.length + 2);
+    if (!/[\w.]/.test(before) && !/^(?:\w|\.\d)/.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * The NOTICE.md extension-table row whose first named extension is `name`: its version, and the
+ * project's repository and tag (`[`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7``).
+ */
+export function noticeExtension(notice, name) {
+  for (const line of notice.split(/\r?\n/)) {
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length < 4 || /`([^`]+)`/.exec(cells[0])?.[1] !== name) continue;
+    const repo = /\]\((https:\/\/github\.com\/[^)\s]+)\)/.exec(cells[3])?.[1];
+    const tag = [...cells[3].matchAll(/`([^`]+)`/g)].pop()?.[1];
+    return repo && tag ? { version: cells[1], repo, tag } : null;
+  }
+  return null;
+}
+
+/**
+ * Where the written offers fall short: an offer missing or unpinned, an image built on OFFER_BASE
+ * whose Dockerfile does not copy it, or an offer naming another base tag, or another version of
+ * its extension, than the images and NOTICE.md do. `dockerfiles` is every Dockerfile, as
+ * { path, text }.
+ */
+export function offerProblems(dir, pinned, notice, dockerfiles) {
+  const problems = [];
+  const built = dockerfiles
+    .map(({ path, text }) => ({ path, text, bases: dockerfileBases(text).map(withoutDigest).filter((b) => b.startsWith(`${OFFER_BASE}:`)) }))
+    .filter((d) => d.bases.length);
+  if (!built.length) return [`no Dockerfile builds on ${OFFER_BASE}, so the check of its written offers reads nothing`];
+  const bases = new Set(built.flatMap((d) => d.bases));
+
+  for (const { file, extension } of OFFERS) {
+    const full = join(dir, file);
+    if (!existsSync(full)) {
+      problems.push(`licenses/${file} does not exist, so the images built on ${OFFER_BASE} carry no written offer of ${extension}'s source`);
+      continue;
+    }
+    if (!pinned.has(file)) problems.push(`licenses/${file}, the written offer of ${extension}'s source, is not pinned in licenses/SHA256SUMS`);
+    const set = file.split('/')[0];
+    for (const { path, text } of built) {
+      if (!licenceCopies(text).some((c) => c.set === set)) problems.push(`${path} builds on ${OFFER_BASE} and does not copy licenses/${set}/, so its image carries no ${file}`);
+    }
+
+    const text = readFileSync(full, 'utf8');
+    for (const base of bases) if (!text.includes(base)) problems.push(`licenses/${file} does not name ${base}, the base its images are built on`);
+    for (const tag of tokensAfter(text, `${OFFER_BASE}:`)) {
+      if (!bases.has(`${OFFER_BASE}:${tag}`)) problems.push(`licenses/${file} names ${OFFER_BASE}:${tag}, which no image builds on`);
+    }
+    const row = noticeExtension(notice, extension);
+    if (!row) {
+      problems.push(`NOTICE.md's extension table has no row for ${extension} naming its version and repository tag`);
+      continue;
+    }
+    const link = `${row.repo}/tree/${row.tag}`;
+    if (!text.includes(link)) problems.push(`licenses/${file} does not link ${link}, the ${extension} NOTICE.md says the image ships`);
+    for (const tag of tokensAfter(text, `${row.repo}/tree/`)) {
+      if (tag !== row.tag) problems.push(`licenses/${file} links ${extension} at ${tag}, not ${row.tag}`);
+    }
+    if (!namesWhole(text, row.version)) problems.push(`licenses/${file} does not name ${extension} ${row.version}`);
+  }
+  return problems;
+}
+
+/** The NOTICE.md paragraph that opens the table of the libraries only PostGIS loads. */
+export const LIBRARIES_HEADING = '**The libraries only PostGIS loads.**';
+
+/** That table's rows as { name, version, licence }; `name` is the library cell's first word. */
+export function noticeLibraries(notice) {
+  const start = notice.indexOf(LIBRARIES_HEADING);
+  if (start === -1) return [];
+  const rows = [];
+  let inTable = false;
+  for (const line of notice.slice(start).split(/\r?\n/)) {
+    if (!line.startsWith('|')) {
+      if (inTable) break;
+      continue;
+    }
+    inTable = true;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.length < 3 || cells[0] === 'Library' || /^:?-+/.test(cells[0])) continue;
+    rows.push({ name: cells[0].split(/[\s,]/)[0], version: cells[1], licence: cells[2] });
+  }
+  return rows;
+}
+
+/**
+ * Where the copyleft libraries NOTICE.md lists and the PostGIS offer disagree: a library the
+ * offer does not name at the listed version, one with no licence folder in `set` (its name in
+ * lower case), or a folder in `set` beside `own` that is no listed library.
+ */
+export function libraryProblems(notice, offer, folders, own) {
+  const copyleft = noticeLibraries(notice).filter((l) => /GPL/.test(l.licence));
+  if (!copyleft.length) return [`NOTICE.md has no copyleft row under "${LIBRARIES_HEADING}"; the parse has stopped matching it`];
+  const problems = [];
+  for (const { name, version } of copyleft) {
+    if (!namesWhole(offer, `${name} ${version}`)) {
+      problems.push(`licenses/${OFFERS[0].file} does not name ${name} ${version}, which NOTICE.md lists`);
+    }
+    if (!folders.includes(name.toLowerCase())) problems.push(`NOTICE.md lists ${name}, and licenses/supabase-postgres/${name.toLowerCase()}/ holds no licence text for it`);
+  }
+  const listed = new Set(copyleft.map((l) => l.name.toLowerCase()));
+  for (const f of folders) {
+    if (!own.includes(f) && !listed.has(f)) problems.push(`licenses/supabase-postgres/${f}/ is no copyleft library NOTICE.md lists`);
+  }
+  return problems;
+}
+
+/** Where NOTICE.md names the nixpkgs revision the base's flake.lock pins. */
+export const NIXPKGS_TREE = 'https://github.com/NixOS/nixpkgs/tree/';
+
+/**
+ * Where the mirror of the source and its lock disagree with the images: a lock for another base;
+ * a `texts` entry (a written offer, or NOTICE.md) that does not link the sources release for the
+ * Dockerfiles' base tag and the lock's scope, or links another; or a lock that does not hold
+ * PostGIS, pgRouting, the copyleft libraries NOTICE.md lists, supabase/postgres and nixpkgs at the
+ * versions NOTICE.md and the Dockerfiles give, or holds a component they do not name.
+ */
+export function mirrorProblems(lockText, notice, texts, baseTags) {
+  const problems = [];
+  if (baseTags.length !== 1) return [`the Dockerfiles build on ${baseTags.length} ${BASE_IMAGE} tags; the sources release needs one`];
+  const [tag] = baseTags;
+  let lock;
+  try {
+    lock = parseLock(lockText);
+  } catch (e) {
+    return [e.message];
+  }
+  const url = releaseUrl(tag, lock.scope);
+  const prefix = url.slice(0, url.length - `${tag}-${lock.scope}`.length);
+  for (const { path, text } of texts) {
+    if (!text.includes(url)) problems.push(`${path} does not link ${url}, the source mirrored for the images' base`);
+    for (const other of tokensAfter(text, prefix)) {
+      if (other !== `${tag}-${lock.scope}`) problems.push(`${path} links ${prefix}${other}, not the release for ${BASE_IMAGE}:${tag} and the scope ${lock.scope}`);
+    }
+  }
+  if (lock.base !== tag) problems.push(`${LOCK} is for the base ${BASE_IMAGE}:${lock.base}, and the images build on ${tag}`);
+  const nixpkgs = [...new Set(tokensAfter(notice, NIXPKGS_TREE))];
+  const want = new Map([
+    ['PostGIS', noticeExtension(notice, 'postgis')?.version],
+    ['pgRouting', noticeExtension(notice, 'pgrouting')?.version],
+    ...noticeLibraries(notice).filter((l) => /GPL/.test(l.licence)).map((l) => [l.name, l.version]),
+    ['supabase/postgres', tag],
+    ['nixpkgs', nixpkgs.length === 1 ? nixpkgs[0] : undefined],
+  ]);
+  for (const [component, version] of want) {
+    const held = lock.assets.filter((a) => a.component === component);
+    if (!version) problems.push(`NOTICE.md gives no single version of ${component} for ${LOCK} to match`);
+    else if (!held.length) problems.push(`${LOCK} holds no archive of ${component} ${version}`);
+    for (const a of held) if (version && a.version !== version) problems.push(`${LOCK} holds ${component} ${a.version} (${a.asset}), and the images ship ${version}`);
+  }
+  for (const a of lock.assets) if (!want.has(a.component)) problems.push(`${LOCK} holds ${a.component} (${a.asset}), which is no component NOTICE.md names`);
+  return problems;
+}
+
 /** `docker build` commands in a text, continuation lines joined and a continued comment's `#` dropped. */
 export function buildCommands(text) {
   const lines = text.split(/\r?\n/);
@@ -289,6 +474,42 @@ function main() {
   }
   for (const w of wrong) fail(w);
   if (!wrong.length) pass(`${copying} Dockerfiles copy pinned licence sets, and every build of one through the named context passes it`);
+
+  // 4. The written offers of the GPL extensions' source travel with every image built on their base.
+  const onBase = dockerfiles.map((path) => ({ path, text: read(path) }));
+  const offers = offerProblems(join(REPO, 'licenses'), texts, read('NOTICE.md'), onBase);
+  for (const o of offers) fail(o);
+  if (!offers.length) {
+    const count = onBase.filter((d) => dockerfileBases(d.text).some((b) => b.startsWith(`${OFFER_BASE}:`))).length;
+    pass(`the ${count} images built on ${OFFER_BASE} copy the pinned written offers of ${OFFERS.map((o) => o.extension).join(' and ')}'s source, `
+      + 'each naming the base and the version NOTICE.md says the image ships');
+  }
+
+  // 5. The copyleft libraries only PostGIS loads: NOTICE.md, the offer and the vendored texts agree.
+  const setDir = join(REPO, 'licenses', 'supabase-postgres');
+  const folders = readdirSync(setDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  const offer = existsSync(join(REPO, 'licenses', OFFERS[0].file)) ? read(`licenses/${OFFERS[0].file}`) : '';
+  const libraries = libraryProblems(read('NOTICE.md'), offer, folders, ['supabase-postgres', 'postgresql', 'postgis', 'pgrouting']);
+  for (const l of libraries) fail(l);
+  if (!libraries.length) {
+    const named = noticeLibraries(read('NOTICE.md')).filter((l) => /GPL/.test(l.licence)).map((l) => l.name);
+    pass(`the ${named.length} copyleft libraries only PostGIS loads (${named.join(', ')}) are in NOTICE.md, the offer and licenses/ alike`);
+  }
+
+  // 6. The mirrored source: the offers and NOTICE.md link its release for the base, and the lock
+  // holds every component at the version the images ship.
+  const tags = [...new Set(onBase.flatMap((d) => dockerfileBases(d.text).map(withoutDigest))
+    .filter((b) => b.startsWith(`${BASE_IMAGE}:`)).map((b) => b.slice(BASE_IMAGE.length + 1)))];
+  const linking = [...OFFERS.map((o) => `licenses/${o.file}`), 'NOTICE.md']
+    .map((path) => ({ path, text: existsSync(join(REPO, path)) ? read(path) : '' }));
+  const lockText = existsSync(join(REPO, LOCK)) ? read(LOCK) : '';
+  const mirror = lockText ? mirrorProblems(lockText, read('NOTICE.md'), linking, tags) : [`${LOCK} does not exist`];
+  for (const m of mirror) fail(m);
+  if (!mirror.length) {
+    const lock = parseLock(lockText);
+    pass(`${LOCK} pins ${lock.assets.length} archives for ${BASE_IMAGE}:${tags[0]}, every component at the version the images ship, `
+      + `and both offers and NOTICE.md link ${releaseUrl(tags[0], lock.scope)}`);
+  }
 
   process.exit(failed ? 1 : 0);
 }
