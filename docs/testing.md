@@ -584,7 +584,8 @@ python supabase/migrations/test_a_cell_is_archived_only_when_nothing_is_in_it.py
 # are skipped, and any other value is named in a NOTICE and kept; a cell already linked to the
 # address gets no second link; the clear is audited as the migration; a second boot moves nothing,
 # and a deleted Dashboard link stays deleted; grafana_url is not proposable, and an open proposal
-# naming it is not approved. Each test replays the file and rolls back.
+# naming it is not approved. Each test rebuilds 1.7.0's column, which 0219 drops, replays the file
+# and rolls back.
 python supabase/migrations/test_a_cell_s_dashboard_address_is_one_of_its_links.py
 # A service token warns before it expires (0204). Runs the Service Token Expiring rule's own query,
 # read from the rules file: a 7-, 30- and 90-day token fires an hour after its warn point and not an
@@ -792,6 +793,15 @@ python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.
 # refused with no row. An Auditor reads the rows and a Shopfloor Manager does not. Every test
 # rolls back.
 python supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py
+# A cell has no grafana_url column (0219). The column is gone, no function body or view names it,
+# the cell lane does not admit it, and an approved cell proposal still applies. Over 1.7.0's column,
+# rebuilt in the test's transaction: a web address written since 0202 becomes a Dashboard link
+# unless the cell already links to it, archived cells included; a value that is not a web address
+# is named in a NOTICE, its first 200 characters quoted, and cleared before the drop, so the cell's
+# audit row holds it whole, as the migration; NULL and blank go without a word or a row. 0202 then
+# 0219, as a boot runs them, leave each value where it belongs; a second boot moves nothing and a
+# deleted Dashboard link stays deleted. Every test rolls back.
+python supabase/migrations/test_a_cell_has_no_grafana_url_column.py
 # An alert keeps its rule's uid, labels and values (0220). platform_alerts carries rule_uid, labels
 # and values, nullable, so a row written before reads on with NULLs. The webhook's upsert on
 # (fingerprint, starts_at) writes them and a resolve updates the same occurrence. A signed-in reader

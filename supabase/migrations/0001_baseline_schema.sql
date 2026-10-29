@@ -659,7 +659,6 @@ BEGIN
         -- the approval rather than being stored.
         UPDATE public.cells
            SET name        = v_cell_new.name,
-               grafana_url = v_cell_new.grafana_url,
                icon        = v_cell_new.icon,
                area_id     = v_cell_new.area_id,
                plan_x      = v_cell_new.plan_x,
@@ -6265,10 +6264,9 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     -- the eight names `areas_icon_valid` admits.
     WHEN 'areas' THEN ARRAY['name', 'description', 'icon']
 
-    -- `grafana_url` is a dashboard address and `icon` is one of eight names the CHECK on the table
-    -- admits. `area_id` and the place are where the cell is; the cells trigger decides whether the
-    -- three agree.
-    WHEN 'cells' THEN ARRAY['name', 'grafana_url', 'icon', 'area_id', 'plan_x', 'plan_y', 'description']
+    -- `icon` is one of eight names the CHECK on the table admits. `area_id` and the place are where
+    -- the cell is; the cells trigger decides whether the three agree.
+    WHEN 'cells' THEN ARRAY['name', 'icon', 'area_id', 'plan_x', 'plan_y', 'description']
 
     WHEN 'gateways' THEN ARRAY['name', 'description', 'cell_id', 'area_id', 'location_scope', 'access_url']
 
@@ -10692,7 +10690,6 @@ COMMENT ON COLUMN public.captures.manifest IS 'What is in the file, so the list 
 CREATE TABLE IF NOT EXISTS public.cells (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name text NOT NULL,
-    grafana_url text,
     created_at timestamp with time zone DEFAULT now(),
     is_archived boolean DEFAULT false,
     archived_at timestamp with time zone,
@@ -10716,7 +10713,6 @@ ALTER TABLE public.cells OWNER TO postgres;
 ALTER TABLE public.cells
     ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid() NOT NULL,
     ADD COLUMN IF NOT EXISTS name text NOT NULL,
-    ADD COLUMN IF NOT EXISTS grafana_url text,
     ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now(),
     ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
     ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
@@ -10730,7 +10726,6 @@ ALTER TABLE public.cells
 ALTER TABLE public.cells
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN name DROP DEFAULT,
-    ALTER COLUMN grafana_url DROP DEFAULT,
     ALTER COLUMN created_at SET DEFAULT now(),
     ALTER COLUMN is_archived SET DEFAULT false,
     ALTER COLUMN archived_at DROP DEFAULT,
