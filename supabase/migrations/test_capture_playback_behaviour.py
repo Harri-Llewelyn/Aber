@@ -653,23 +653,27 @@ class ReconcileCaptureJobs(Base):
         still be storing its recording in the 30 s grace period. A job that reported, or was queued,
         within the last 45 s is left for it; one quiet longer is failed.
         """
+        # One job at a time (capture_jobs_single_flight), so the recording first, then the queued one.
         recording = self._capture_job(self.gw, self.wire, "RECORDING")
-        other_gw, other_wire = self._gateway()
-        queued = self._capture_job(other_gw, other_wire, "PENDING")
         self.cur.execute("UPDATE public.capture_jobs SET elapsed_seconds = 50 WHERE id = %s;",
                          (recording,))
+        self.assertEqual(self._sweep(), 0)
+        self.assertEqual(self._job(recording)[0], "RECORDING")
+        # Quiet for 46 s: past the spare, so the second sweep fails it.
+        self.cur.execute("UPDATE public.capture_jobs SET elapsed_seconds = 14 WHERE id = %s;",
+                         (recording,))
+        self.assertEqual(self._sweep(), 1)
+        self.assertEqual(self._job(recording)[0], "FAILED")
+
+        queued = self._capture_job(self.gw, self.wire, "PENDING")
         self.cur.execute("UPDATE public.capture_jobs SET created_at = now() - interval '10 seconds' "
                          "WHERE id = %s;", (queued,))
         self.assertEqual(self._sweep(), 0)
-        self.assertEqual((self._job(recording)[0], self._job(queued)[0]), ("RECORDING", "PENDING"))
-
-        # Quiet for 46 s and queued 46 s ago: past the spare, so the second sweep fails both.
-        self.cur.execute("UPDATE public.capture_jobs SET elapsed_seconds = 14 WHERE id = %s;",
-                         (recording,))
+        self.assertEqual(self._job(queued)[0], "PENDING")
         self.cur.execute("UPDATE public.capture_jobs SET created_at = now() - interval '46 seconds' "
                          "WHERE id = %s;", (queued,))
-        self.assertEqual(self._sweep(), 2)
-        self.assertEqual((self._job(recording)[0], self._job(queued)[0]), ("FAILED", "FAILED"))
+        self.assertEqual(self._sweep(), 1)
+        self.assertEqual(self._job(queued)[0], "FAILED")
 
     def test_a_second_sweep_finds_nothing_and_a_new_capture_may_start(self):
         self._capture_job(self.gw, self.wire, "RECORDING")
