@@ -33,6 +33,7 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
 import stack_exec  # noqa: E402  -- kubectl exec against the workload that holds the container
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -48,15 +49,10 @@ DEADLINE_S = 20
 
 
 def sign_in(email):
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        method="POST",
-        data=json.dumps({"email": email, "password": PASSWORD}).encode(),
-        headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=15) as response:
-        body = json.loads(response.read().decode())
-        return body["access_token"], body["user"]["id"]
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, PASSWORD)
+    if status != 200:
+        raise AssertionError(stack_sign_in.describe(email, status, body))
+    return body["access_token"], body["user"]["id"]
 
 
 def request(path, bearer, method="GET", body=None):
@@ -146,6 +142,8 @@ class ReadOnlyBrokerAccount(unittest.TestCase):
         try:
             cls.admin, cls.admin_id = sign_in(ADMIN)
             cls.manager, _ = sign_in(MANAGER)
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in the seeded accounts at {SUPABASE_URL}: {err}")
         status, inventory = request("/functions/v1/broker-inventory", cls.admin)

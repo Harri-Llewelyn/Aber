@@ -68,6 +68,8 @@ COPY test-harness/schemas /app/test-harness/schemas
 # The suites' SUBJECT, provisioned at runtime rather than seeded. Both import it, so
 # it travels with them or every live check skips itself for want of a device.
 COPY test-harness/aas_fixture.py /app/test-harness/aas_fixture.py
+# Their sign-in, which waits out the sign-in rate limit.
+COPY test-harness/stack_sign_in.py /app/test-harness/stack_sign_in.py
 # test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
 # fixture of the suite rather than only a deliverable.
 COPY docs/openapi.yaml /app/docs/openapi.yaml

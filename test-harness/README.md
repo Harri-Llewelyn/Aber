@@ -16,6 +16,8 @@ Fixtures and suites that need the assembled stack rather than a module.
 | [`aas_fixture.py`](aas_fixture.py) | The device both AAS suites provision and assert against |
 | [`stack_exec.py`](stack_exec.py) | Reaching into the stack's own processes — `kubectl exec`, a Service taken off the network |
 | [`test_stack_exec.py`](test_stack_exec.py) | The broker's verdict on a publish: a timeout is retried, and is never read as a refusal |
+| [`stack_sign_in.py`](stack_sign_in.py) | Every stack suite's password sign-in: a 429 is waited out, then fails naming the status |
+| [`test_stack_sign_in.py`](test_stack_sign_in.py) | That sign-in, with no stack: one wait then success, a 429 that outlasts the waits, a 400 handed back |
 | [`csp-walk.mjs`](csp-walk.mjs) | The dashboard in a headless Chrome under its Content-Security-Policy: every page, an area plan and two 3D models, and each refusal the browser reports |
 | [`restore-rehearsal/`](restore-rehearsal) | The SQL a restore rehearsal seeds, snapshots and asserts |
 | [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages; `sparkplug-json-values.json`, how a JSON-encoded Sparkplug metric reads in ingestion and i3X; `payload-conformance.json`, what ingestion finds wrong with one DDATA payload, which the dashboard's Validate Payload answers the same way; `schema-builder-output.json`, what the dashboard's schema builders write (`enum`, `minimum`, `maximum`) and what ingestion finds in readings against it |

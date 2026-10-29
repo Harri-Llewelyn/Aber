@@ -22,10 +22,14 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -72,15 +76,14 @@ def request(path, method="GET", token=None, body=None, form=None, basic=None):
 
 
 def sign_in(email):
-    status, _, text = request(
-        "/auth/v1/token?grant_type=password", method="POST", body={"email": email, "password": PASSWORD},
-    )
-    if status != 200:
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, PASSWORD)
+    if status == stack_sign_in.NO_SUCH_ACCOUNT:
         reason = f"could not sign in as {email} ({status}); the seed personas are absent"
         if STRICT:
             raise AssertionError(f"{reason}, and REQUIRE_SEEDED_ACCOUNTS is set")
         raise unittest.SkipTest(reason)
-    body = json.loads(text)
+    if status != 200:
+        raise AssertionError(stack_sign_in.describe(email, status, body))
     return body["access_token"], body["user"]["id"]
 
 

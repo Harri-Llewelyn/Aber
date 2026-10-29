@@ -107,17 +107,16 @@ def get(path: str, token: str | None, send_apikey: bool = True):
 
 def sign_in() -> str | None:
     """A *user* JWT, not the service key: every /v1/ route calls auth.getUser() on the caller."""
-    status, data = request(
-        "POST",
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        None,
-        {"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
-    )
-    return data.get("access_token") if status == 200 else None
+    try:
+        status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, DEMO_EMAIL, DEMO_PASSWORD)
+    except OSError:
+        return None
+    return data.get("access_token") if status == 200 and isinstance(data, dict) else None
 
 
 sys.path.insert(0, str(REPO_ROOT / "test-harness"))
 import aas_fixture  # noqa: E402  -- after sys.path, by necessity
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 
 def rest(method: str, path: str, token: str, payload=None, headers=None):

@@ -145,15 +145,16 @@ def post_json(url: str, payload: dict | None, headers: dict) -> tuple[int, dict,
 
 def sign_in() -> str | None:
     """A *user* JWT, not the service key: the function calls auth.getUser() on the caller."""
+    return sign_in_as(DEMO_EMAIL, DEMO_PASSWORD)
+
+
+def sign_in_as(email: str, password: str) -> str | None:
+    """None where there is no stack or no such account; a 429 that outlasts the waits fails."""
     try:
-        status, data, _ = post_json(
-            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            {"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
-            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
-        )
-        return data.get("access_token") if status == 200 else None
-    except Exception:
+        status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, password)
+    except OSError:
         return None
+    return data.get("access_token") if status == 200 and isinstance(data, dict) else None
 
 
 def find_device_id(token: str) -> str | None:
@@ -173,6 +174,7 @@ def find_device_id(token: str) -> str | None:
 
 sys.path.insert(0, str(REPO_ROOT / "test-harness"))
 import aas_fixture  # noqa: E402  -- after sys.path, by necessity
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 
 def provision(token):
@@ -1786,18 +1788,6 @@ class TestAssetBundle(unittest.TestCase):
 DEMO_PASSWORD_FOR_ROLES = os.getenv("ABER_DEMO_PASSWORD", DEMO_PASSWORD)
 
 
-def sign_in_as(email: str) -> str | None:
-    try:
-        status, data, _ = post_json(
-            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            {"email": email, "password": DEMO_PASSWORD_FOR_ROLES},
-            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
-        )
-        return data.get("access_token") if status == 200 else None
-    except Exception:
-        return None
-
-
 def take_bundle(token: str) -> tuple[int, bytes, dict]:
     req = urllib.request.Request(
         f"{SUPABASE_URL}/functions/v1/aas-export?format=bundle",
@@ -1823,8 +1813,8 @@ class TestAssetBundleByRole(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.manager = sign_in_as("manager@aber.local")
-        cls.operator = sign_in_as("operator@aber.local")
+        cls.manager = sign_in_as("manager@aber.local", DEMO_PASSWORD_FOR_ROLES)
+        cls.operator = sign_in_as("operator@aber.local", DEMO_PASSWORD_FOR_ROLES)
         if not (cls.manager and cls.operator):
             raise unittest.SkipTest("the seeded manager and operator accounts could not sign in")
         cls.status, cls.payload, cls.headers = take_bundle(cls.manager)
