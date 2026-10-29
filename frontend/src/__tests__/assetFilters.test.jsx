@@ -5,7 +5,8 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
-import { devicesForSchemaUrl, devicesInCellUrl } from '../routes'
+import { devicesForSchemaUrl, devicesInCellUrl, schemaRejectionsUrl } from '../routes'
+import { PERMISSION_UUIDS } from '../constants'
 import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
@@ -205,6 +206,55 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(rowOf('Press_04')?.textContent).toContain('Out of vocabulary'))
     expect(rowOf('CNC_01').textContent).not.toContain('Out of vocabulary')
+  })
+
+  /* Where ingestion recorded a schema rejection for the device, the tag opens the Audit Trail on
+     that device's rejections; with none recorded there is nothing to open. */
+  describe('the Out of vocabulary tag', () => {
+    const catalog = [...CATALOG, {
+      metric_uuid: 'm4', name: 'Controller/EXECUTION', datatype: 12, deprecated: false,
+      permitted_values: ['READY', 'ACTIVE', 'STOPPED']
+    }]
+    const telemetry = [
+      { asset_id: healthyDevice.sparkplug_id, metric_name: 'Controller/EXECUTION', val_string: 'RUNNING' }
+    ]
+    const trailCalls = () => api.get.mock.calls.map(([p]) => p).filter(p => p.startsWith('/api/v1/audit-trail'))
+    const withTrail = (rowsFor) => (path) => (path.startsWith('/api/v1/audit-trail')
+      ? Promise.resolve(rowsFor(path))
+      : routeGet({ devices: [healthyDevice, offlineDevice], catalog, telemetry })(path))
+
+    it('links to the device’s schema rejections when the Audit Trail holds one', async () => {
+      api.get.mockImplementation(withTrail(path => (path.includes(healthyDevice.asset_id) ? [{ id: 7 }] : [])))
+      renderDevices()
+
+      const link = await waitFor(() => within(rowOf('CNC_01')).getByRole('link', { name: 'Out of vocabulary' }))
+      expect(link.getAttribute('href')).toBe(schemaRejectionsUrl(healthyDevice.asset_id))
+      expect(link.getAttribute('href')).toBe(`/audit-trail?search=${healthyDevice.asset_id}&action=SCHEMA_REJECTION`)
+      // Asked about the device carrying the tag only, one row at most.
+      expect(trailCalls()).toEqual([
+        `/api/v1/audit-trail?limit=1&action=SCHEMA_REJECTION&entity_ids=${healthyDevice.asset_id}`
+      ])
+    })
+
+    it('stays a plain tag, naming the value, when no rejection is recorded', async () => {
+      api.get.mockImplementation(withTrail(() => []))
+      renderDevices()
+
+      await waitFor(() => expect(trailCalls()).toHaveLength(1))
+      await waitFor(() => expect(rowOf('CNC_01')?.textContent).toContain('Out of vocabulary'))
+      expect(within(rowOf('CNC_01')).queryByRole('link', { name: 'Out of vocabulary' })).toBeNull()
+      expect(within(rowOf('CNC_01')).getByText('Out of vocabulary').closest('span'))
+        .toHaveAccessibleDescription(/Controller\/EXECUTION = RUNNING/)
+    })
+
+    it('asks the Audit Trail nothing for a role that may not read it', async () => {
+      api.get.mockImplementation(withTrail(() => [{ id: 7 }]))
+      renderDevices({ hasPermission: (p) => p !== PERMISSION_UUIDS.AUDIT_TRAIL_READ })
+
+      await waitFor(() => expect(rowOf('CNC_01')?.textContent).toContain('Out of vocabulary'))
+      expect(trailCalls()).toEqual([])
+      expect(within(rowOf('CNC_01')).queryByRole('link', { name: 'Out of vocabulary' })).toBeNull()
+    })
   })
 
   it('filters by operational status', async () => {

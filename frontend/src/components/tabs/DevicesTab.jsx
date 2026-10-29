@@ -1,7 +1,7 @@
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { approvalsForUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl, trailUrl } from '../../routes'
+import { approvalsForUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -55,7 +55,8 @@ import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
-  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG,
+  outOfVocabularyMetrics, OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
 import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
@@ -480,6 +481,45 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [editingProposal, setEditingProposal] = useState(null)
   const withheldFields = nonProposableFields('device')
   const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+
+  // The devices whose Out of vocabulary tag has a SCHEMA_REJECTION row to link to. Asked once per
+  // device that carries the tag, and only of a role that may read the Audit Trail.
+  const outOfVocabularyIds = useMemo(() => (canReadTrail
+    ? assets.filter(a => outOfVocabularyMetrics(latestBySparkplugId.get(deviceIds(a).issued), catalog).length > 0)
+      .map(a => a.asset_id).sort().join(',')
+    : ''), [canReadTrail, assets, latestBySparkplugId, catalog])
+  const [rejectedIds, setRejectedIds] = useState(() => new Set())
+  useEffect(() => {
+    const ids = outOfVocabularyIds ? outOfVocabularyIds.split(',') : []
+    if (ids.length === 0) { setRejectedIds(new Set()); return undefined }
+    let cancelled = false
+    // One question per device, limit 1: a shared page of the newest rows could be filled by one
+    // device and hide another's.
+    Promise.all(ids.map(id =>
+      api.get(`/api/v1/audit-trail?limit=1&action=SCHEMA_REJECTION&entity_ids=${encodeURIComponent(id)}`)
+        .then(rows => (rows?.length ? id : null))
+        .catch(() => null)))
+      .then(found => { if (!cancelled) setRejectedIds(new Set(found.filter(Boolean))) })
+    return () => { cancelled = true }
+  }, [outOfVocabularyIds])
+
+  /**
+   * The Out of vocabulary tag's TagList entry: which last values are outside their permitted values,
+   * and, where the Audit Trail holds a schema rejection for the device, a link to its rejections.
+   */
+  const outOfVocabularyTag = (a) => {
+    const listed = outOfVocabularyMetrics(latestFor(a), catalog).map(f => `${f.name} = ${f.value}`).join(', ')
+    const linked = rejectedIds.has(a.asset_id)
+    return {
+      key: OUT_OF_VOCABULARY_TAG,
+      className: 'badge badge-sm badge-neutral',
+      title: `Last value outside the permitted values: ${listed}.` +
+        (linked ? " Opens this device's schema rejections in the Audit Trail." : ''),
+      content: linked
+        ? <RouteLink className="count-link" to={schemaRejectionsUrl(a.asset_id)}>{OUT_OF_VOCABULARY_TAG}</RouteLink>
+        : OUT_OF_VOCABULARY_TAG
+    }
+  }
 
   // Metrics declared at the last birth that the schema does not model. Derived, so adding the
   // metric to the schema clears it on the next poll. See utils/deviceTags.js.
@@ -1004,7 +1044,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               className: 'badge badge-sm badge-warning',
                               title: `Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`,
                               content: <><IconAlertTriangle size={10} /> {tag} ({extra.length})</>
-                            } : {
+                            } : tag === OUT_OF_VOCABULARY_TAG ? outOfVocabularyTag(a) : {
                               key: tag,
                               className: 'badge badge-sm badge-neutral',
                               content: tag

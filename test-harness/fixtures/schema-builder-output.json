@@ -1,0 +1,69 @@
+{
+  "_comment": [
+    "WHAT THE SCHEMA BUILDERS WRITE, AND WHAT INGESTION READS FROM IT.",
+    "",
+    "The dashboard's two schema builders (Build Schema from Catalog, and a draft's Save Draft) write",
+    "each metric's `properties` entry from its catalog row: `type`, the row's `description`, its",
+    "`permitted_values` as `enum` in the property's own JSON type, and the range typed beside a",
+    "numeric metric as `minimum` and `maximum` (frontend/src/utils/schemaProperty.js). Ingestion",
+    "judges a reading against those keys (ingestion/conformance.py), and a device set to Enforce",
+    "drops a reading that breaks one.",
+    "",
+    "frontend/src/__tests__/schemaBuilderContract.test.jsx builds `schema_definition` from `catalog`",
+    "and `ranges` through both builders and asserts it equals the one below. ingestion/",
+    "test_schema_builder_contract.py feeds that same definition to conformance.py and asserts each",
+    "reading's codes. Change what a builder writes and the first fails; change what ingestion reads and",
+    "the second does.",
+    "",
+    "`catalog` rows are as the dashboard reads them (api.js, /api/v1/metric-catalog): permitted values",
+    "are text, as the column stores them. `ranges` are as typed: text. A reading is [metric, value_kind,",
+    "value, codes]: value_kind is double, string or bool as ingestion's DDATA loop names it, a double",
+    "reaches the check as a float, and `codes` are the findings payload_violations() reports, in order."
+  ],
+  "catalog": [
+    {"metric_uuid": "c1", "name": "Controller/EXECUTION", "datatype": 12, "standard": "MTConnect", "deprecated": false,
+     "description": "Controller execution state", "permitted_values": ["READY", "ACTIVE", "INTERRUPTED", "FEED_HOLD", "STOPPED"]},
+    {"metric_uuid": "c2", "name": "Axes/S/LOAD", "datatype": 10, "standard": "MTConnect", "deprecated": false,
+     "description": "Spindle load as a percentage of rated load", "permitted_values": null},
+    {"metric_uuid": "c3", "name": "Controller/MODE_CODE", "datatype": 10, "standard": null, "deprecated": false,
+     "description": "Operating mode as a code", "permitted_values": ["0", "1", "2"]},
+    {"metric_uuid": "c4", "name": "MotionDevice/OnPath", "datatype": 11, "standard": "OPC UA", "deprecated": false,
+     "description": "Whether the device is on its planned path", "permitted_values": ["true"]},
+    {"metric_uuid": "c5", "name": "Systems/TEMPERATURE", "datatype": 10, "standard": "MTConnect", "deprecated": false,
+     "description": null, "permitted_values": null},
+    {"metric_uuid": "c6", "name": "Controller/FIRMWARE", "datatype": 12, "standard": "MTConnect", "deprecated": false,
+     "description": "", "permitted_values": null}
+  ],
+  "ranges": {
+    "Axes/S/LOAD": {"minimum": "0", "maximum": "150"},
+    "Systems/TEMPERATURE": {"minimum": "-40", "maximum": ""}
+  },
+  "schema_definition": {
+    "type": "object",
+    "properties": {
+      "Controller/EXECUTION": {"type": "string", "description": "Controller execution state", "enum": ["READY", "ACTIVE", "INTERRUPTED", "FEED_HOLD", "STOPPED"]},
+      "Axes/S/LOAD": {"type": "number", "description": "Spindle load as a percentage of rated load", "minimum": 0, "maximum": 150},
+      "Controller/MODE_CODE": {"type": "number", "description": "Operating mode as a code", "enum": [0, 1, 2]},
+      "MotionDevice/OnPath": {"type": "boolean", "description": "Whether the device is on its planned path", "enum": [true]},
+      "Systems/TEMPERATURE": {"type": "number", "minimum": -40},
+      "Controller/FIRMWARE": {"type": "string"}
+    }
+  },
+  "readings": [
+    ["Controller/EXECUTION", "string", "ACTIVE", []],
+    ["Controller/EXECUTION", "string", "RUNNING", ["enum_mismatch"]],
+    ["Controller/EXECUTION", "double", 1, ["type_mismatch"]],
+    ["Axes/S/LOAD", "double", 0, []],
+    ["Axes/S/LOAD", "double", 150, []],
+    ["Axes/S/LOAD", "double", -0.5, ["below_minimum"]],
+    ["Axes/S/LOAD", "double", 150.5, ["above_maximum"]],
+    ["Controller/MODE_CODE", "double", 2, []],
+    ["Controller/MODE_CODE", "double", 3, ["enum_mismatch"]],
+    ["Controller/MODE_CODE", "double", 1.5, ["enum_mismatch"]],
+    ["MotionDevice/OnPath", "bool", true, []],
+    ["MotionDevice/OnPath", "bool", false, ["enum_mismatch"]],
+    ["Systems/TEMPERATURE", "double", -41, ["below_minimum"]],
+    ["Systems/TEMPERATURE", "double", 1000, []],
+    ["Controller/FIRMWARE", "string", "4.2.1", []]
+  ]
+}

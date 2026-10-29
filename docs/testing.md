@@ -62,6 +62,9 @@ python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
+# What the dashboard's schema builders write (enum, minimum, maximum), read by conformance.py:
+# test-harness/fixtures/schema-builder-output.json, whose other half is schemaBuilderContract.test.jsx.
+python ingestion/test_schema_builder_contract.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py
 # The JSON log formatter, and the drop pair. Every drop is a counter AND a warning, and the two
@@ -1101,8 +1104,9 @@ in one afternoon and each move made both documents wrong until somebody noticed.
 becomes conservative, which is the failure worth having — `npm test` prints the exact number, and it
 is the only place that can be right on every branch at once.
 
-Four suites have a second half elsewhere, and both halves must move together:
-`test_modelled_metrics_contract.py`, `test_payload_conformance.py` and `test_rbe_telemetry.py` each
+Five suites have a second half elsewhere, and both halves must move together:
+`test_modelled_metrics_contract.py`, `test_payload_conformance.py`, `test_schema_builder_contract.py`
+and `test_rbe_telemetry.py` each
 pair with a JavaScript suite in the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s

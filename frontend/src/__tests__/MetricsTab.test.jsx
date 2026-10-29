@@ -536,8 +536,9 @@ describe('Edit Metric — correcting a semantic id', () => {
 
     expect(modal.getAllByText('Controller/EXECUTION').length).toBeGreaterThan(0)
     expect(modal.getByText('String')).toBeTruthy()
-    // The semantic id is the only thing typed into: name and datatype have no control.
-    expect(modal.getAllByRole('textbox')).toHaveLength(1)
+    // The semantic id and the permitted values are all that is typed into: name and datatype have
+    // no control.
+    expect(modal.getAllByRole('textbox')).toHaveLength(2)
     expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe(EXECUTION_ID)
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
   })
@@ -560,7 +561,7 @@ describe('Edit Metric — correcting a semantic id', () => {
   it('has nothing to save until the pair changes', async () => {
     await setup()
     const modal = openEdit('Controller/EXECUTION')
-    expect(modal.getByRole('button', { name: 'Save Semantic ID' }).disabled).toBe(true)
+    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
   })
 
   it('sends only the semantic id and its type, and reloads the catalog', async () => {
@@ -571,7 +572,7 @@ describe('Edit Metric — correcting a semantic id', () => {
 
     fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRDI')
-    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
       '/api/v1/metric-catalog/m2', { semantic_id: IEC_CDD, semantic_id_type: 'IRDI' }
@@ -590,7 +591,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     const type = modal.getByRole('combobox', { name: 'Reference Type' })
     expect(type.value).toBe('')
     expect(type.disabled).toBe(true)
-    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
       '/api/v1/metric-catalog/m2', { semantic_id: '', semantic_id_type: '' }
@@ -599,14 +600,14 @@ describe('Edit Metric — correcting a semantic id', () => {
   })
 
   it('reports a refused edit and leaves the dialog open', async () => {
-    api.put.mockRejectedValueOnce(new Error('Semantic id not changed — the metric may no longer exist, or you may not have permission to change the catalog.'))
+    api.put.mockRejectedValueOnce(new Error('Metric not changed — it may no longer exist, or you may not have permission to change the catalog.'))
     const showToast = await setup()
     const modal = openEdit('Controller/EXECUTION')
 
     fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
-    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Semantic id not changed/), 'error'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Metric not changed/), 'error'))
     expect(document.querySelector('.modal')).toBeTruthy()
   })
 
@@ -637,7 +638,7 @@ describe('Edit Metric — correcting a semantic id', () => {
 
     fireEvent.click(modal.getByRole('button', { name: 'Use suggested' }))
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
-    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m3', {
       semantic_id: 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE',
@@ -663,7 +664,7 @@ describe('Edit Metric — correcting a semantic id', () => {
 
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRDI')
     expect(modal.getByRole('note').textContent).toMatch(/SerialNumber comes from IDTA Digital Nameplate 3\.0/)
-    fireEvent.click(modal.getByRole('button', { name: 'Save Semantic ID' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m3', {
       semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI'
@@ -1608,6 +1609,161 @@ describe('Metric builder — semantic id', () => {
 
     expect(semanticIdInput().value).toBe('')
     expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
+  })
+})
+
+/**
+ * The values a discrete metric may report. The schema builders copy them into `enum`, which a device
+ * set to Enforce is held to, so the field refuses what the datatype cannot carry rather than storing
+ * a list no reading could ever match.
+ */
+describe('Metric builder — permitted values', () => {
+  const valuesInput = () => screen.getByRole('textbox', { name: 'Permitted Values' })
+
+  const fillAngle = async (datatype) => {
+    await openForm()
+    api.post.mockResolvedValue({ metric_uuid: 'new' })
+    fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
+    fireEvent.change(datatypeSelect(), { target: { value: String(datatype) } })
+  }
+
+  it('sends the typed values as a list, repeats removed', async () => {
+    await fillAngle(12)
+    fireEvent.change(valuesInput(), { target: { value: 'READY, ACTIVE, , READY' } })
+    fireEvent.click(addMetricButton())
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog', expect.objectContaining({ name: 'ANGLE', permitted_values: ['READY', 'ACTIVE'] })
+    ))
+  })
+
+  it('sends none for a blank field, which allows any value', async () => {
+    await fillAngle(12)
+    fireEvent.click(addMetricButton())
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog', expect.objectContaining({ permitted_values: null })
+    ))
+  })
+
+  it('takes whole numbers for a Double, in one spelling, and refuses a fraction', async () => {
+    await fillAngle(10)
+    fireEvent.change(valuesInput(), { target: { value: '1.5' } })
+    expect(screen.getByRole('alert').textContent).toMatch(/whole numbers\. "1\.5" is not one/)
+    expect(addMetricButton().disabled).toBe(true)
+
+    fireEvent.change(valuesInput(), { target: { value: '0, 2.0, 02' } })
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.click(addMetricButton())
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog', expect.objectContaining({ permitted_values: ['0', '2'] })
+    ))
+  })
+
+  it('takes true and false for a Boolean, and nothing else', async () => {
+    await fillAngle(11)
+    fireEvent.change(valuesInput(), { target: { value: 'yes' } })
+    expect(screen.getByRole('alert').textContent).toMatch(/true and false\. "yes" is neither/)
+
+    fireEvent.change(valuesInput(), { target: { value: 'TRUE' } })
+    fireEvent.click(addMetricButton())
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog', expect.objectContaining({ permitted_values: ['true'] })
+    ))
+  })
+
+  it('waits for a datatype, since that decides what a value may be', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
+    fireEvent.change(conceptSelect(), { target: { value: 'TemperatureSensor' } })
+    expect(screen.queryByRole('textbox', { name: 'Permitted Values' })).toBeNull()
+
+    fireEvent.change(datatypeSelect(), { target: { value: '12' } })
+    expect(valuesInput()).toBeTruthy()
+  })
+})
+
+describe('Edit Metric — permitted values', () => {
+  const withValues = (values) => CATALOG.map(m => (m.metric_uuid === 'm2' ? { ...m, permitted_values: values } : m))
+
+  const setup = async (catalog) => {
+    api.get.mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/metric-catalog') ? catalog
+        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    const showToast = vi.fn()
+    render(<MetricsTab showToast={showToast} hasPermission={() => true} />)
+    await waitForCatalog()
+    return showToast
+  }
+
+  const openEdit = (name) => {
+    selectMetric(catalogTable(), name)
+    fireEvent.click(drawerButton('Edit'))
+    return within(document.querySelector('.modal'))
+  }
+
+  it('shows them in the drawer', async () => {
+    await setup(withValues(['READY', 'ACTIVE']))
+    const inDrawer = selectMetric(catalogTable(), 'Controller/EXECUTION')
+    expect(inDrawer.getByText('READY, ACTIVE')).toBeTruthy()
+  })
+
+  it('sends only the values when only they change, and says so', async () => {
+    api.put.mockResolvedValue({ id: 'm2' })
+    const showToast = await setup(withValues(['READY', 'ACTIVE']))
+    const modal = openEdit('Controller/EXECUTION')
+    const field = modal.getByRole('textbox', { name: 'Permitted Values' })
+    expect(field.value).toBe('READY, ACTIVE')
+    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+
+    fireEvent.change(field, { target: { value: 'READY, ACTIVE, STOPPED' } })
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(
+      '/api/v1/metric-catalog/m2', { permitted_values: ['READY', 'ACTIVE', 'STOPPED'] }
+    ))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      "Permitted values of 'Controller/EXECUTION' saved", 'success', { to: metricUrl('m2') }
+    ))
+  })
+
+  it('clears them to none, which allows any value', async () => {
+    api.put.mockResolvedValue({ id: 'm2' })
+    const showToast = await setup(withValues(['READY']))
+    const modal = openEdit('Controller/EXECUTION')
+    fireEvent.change(modal.getByRole('textbox', { name: 'Permitted Values' }), { target: { value: '' } })
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m2', { permitted_values: null }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cleared; it may report any value/), 'success', expect.anything()))
+  })
+
+  it('sends the pair and the values together when both change', async () => {
+    api.put.mockResolvedValue({ id: 'm2' })
+    const showToast = await setup(withValues(null))
+    const modal = openEdit('Controller/EXECUTION')
+    fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: 'urn:example:execution' } })
+    fireEvent.change(modal.getByRole('textbox', { name: 'Permitted Values' }), { target: { value: 'READY' } })
+    fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/api/v1/metric-catalog/m2', {
+      semantic_id: 'urn:example:execution', semantic_id_type: 'IRI', permitted_values: ['READY']
+    }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Metric 'Controller/EXECUTION' saved", 'success', expect.anything()))
+  })
+
+  it('never counts an untouched field as an edit, even when a stored value holds a comma', async () => {
+    await setup(withValues(['A,B']))
+    const modal = openEdit('Controller/EXECUTION')
+    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+  })
+
+  it('refuses a value the datatype cannot carry', async () => {
+    await setup(CATALOG)
+    const modal = openEdit('safety_interlock')
+    fireEvent.change(modal.getByRole('textbox', { name: 'Permitted Values' }), { target: { value: 'maybe' } })
+
+    expect(modal.getByRole('alert').textContent).toMatch(/"maybe" is neither/)
+    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
   })
 })
 

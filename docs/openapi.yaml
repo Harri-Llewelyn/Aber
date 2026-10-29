@@ -6147,6 +6147,16 @@ components:
         superseded_by: { type: string, format: uuid, nullable: true, description: 'Changing a metric is deprecate-and-supersede, never a rename.' }
         semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://aber.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
+        permitted_values:
+          type: array
+          nullable: true
+          items: { type: string, minLength: 1 }
+          minItems: 1
+          example: [READY, ACTIVE, STOPPED]
+          description: >-
+            The values a discrete metric may report, as text; NULL is no closed set. Never an empty
+            list (`metric_catalog_permitted_values_shape`). Not frozen. A schema built from the
+            metric copies them into the property's `enum`, in its JSON type.
         created_at: { type: string, format: date-time, readOnly: true }
 
     MetricCatalogWrite:
@@ -6162,6 +6172,7 @@ components:
         description: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
+        permitted_values: { type: array, nullable: true, items: { type: string, minLength: 1 }, minItems: 1 }
 
     UncataloguedMetric:
       type: object
