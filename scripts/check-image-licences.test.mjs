@@ -263,11 +263,11 @@ test('each copyleft library NOTICE.md lists is in the PostGIS offer at its versi
 });
 
 test('the offers link the sources release for the base, and the lock holds every component at its version', () => {
-  const RELEASE = 'https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175';
+  const RELEASE = 'https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175-postgis';
   const notice = [
     NOTICE_ROWS,
     'the [nixpkgs](https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108) its `flake.lock` pins.',
-    `[\`gpl-sources-supabase-postgres-17.6.1.175\`](${RELEASE}).`,
+    `[\`gpl-sources-supabase-postgres-17.6.1.175-postgis\`](${RELEASE}).`,
     '',
     '**The libraries only PostGIS loads.** Read from the image.',
     '',
@@ -287,7 +287,7 @@ test('the offers link the sources release for the base, and the lock holds every
     entry('supabase/postgres', '17.6.1.175', 'supabase-postgres-17.6.1.175.tar.gz'),
     entry('nixpkgs', 'fb7944c166a3b630f177938e478f0378e64ce108', 'nixpkgs.tar.xz'),
   ];
-  const lock = (over = {}) => JSON.stringify({ base: 'supabase/postgres:17.6.1.175', assets: ASSETS, ...over });
+  const lock = (over = {}) => JSON.stringify({ base: 'supabase/postgres:17.6.1.175', scope: 'postgis', assets: ASSETS, ...over });
   const offers = [
     { path: 'licenses/supabase-postgres/postgis/SOURCE', text: `Download it from\n${RELEASE}\n` },
     { path: 'NOTICE.md', text: notice },
@@ -301,7 +301,7 @@ test('the offers link the sources release for the base, and the lock holds every
   ], ['17.6.1.175']), [
     `licenses/supabase-postgres/postgis/SOURCE does not link ${RELEASE}, the source mirrored for the images' base`,
     `licenses/supabase-postgres/pgrouting/SOURCE does not link ${RELEASE}, the source mirrored for the images' base`,
-    'licenses/supabase-postgres/pgrouting/SOURCE links the sources release for supabase/postgres:17.6.1.174, and the images build on 17.6.1.175',
+    'licenses/supabase-postgres/pgrouting/SOURCE links https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.174-postgis, not the release for supabase/postgres:17.6.1.175 and the scope postgis',
     'licenses/supabase-postgres/sources.json is for the base supabase/postgres:17.6.1.174, and the images build on 17.6.1.175',
   ]);
 

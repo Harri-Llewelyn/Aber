@@ -1445,7 +1445,7 @@ what the workflow builds; that one is what a site is signing up for.
 
 [`.github/workflows/gpl-sources.yml`](../.github/workflows/gpl-sources.yml) has one job,
 **mirror-sources**, run by hand once per `supabase/postgres` base tag. It publishes the release
-`gpl-sources-supabase-postgres-<tag>`, which holds the complete corresponding source of the GPL and
+`gpl-sources-supabase-postgres-<tag>-postgis`, which holds the complete corresponding source of the GPL and
 LGPL components the database images carry, one archive each, every one pinned in
 [`licenses/supabase-postgres/sources.json`](../licenses/supabase-postgres/sources.json)
 ([`licenses/README.md`](../licenses/README.md), *The mirror*). **prepare-release** refuses to publish

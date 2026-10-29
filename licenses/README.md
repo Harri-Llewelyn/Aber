@@ -75,9 +75,11 @@ Dockerfile built on `supabase/postgres`, and naming that base's tag and the exte
 GPL-3.0 §6(d), which the CGAL packages inside SFCGAL and the LGPL-3.0 libraries carry, asks that the
 source be offered from a place the distributor answers for, with clear directions beside the object
 code. A link to upstream alone is not that. So Aber mirrors the complete corresponding source to a
-GitHub release of its own, one per `supabase/postgres` tag:
-`gpl-sources-supabase-postgres-<tag>`, never a `v*` tag and never the latest release. Both `SOURCE`
-files and `NOTICE.md` link it, above their written offer, which stands unchanged.
+GitHub release of its own, one per `supabase/postgres` tag and scope:
+`gpl-sources-supabase-postgres-<tag>-postgis`, never a `v*` tag and never the latest release. The
+`postgis` scope covers PostGIS, pgRouting and the libraries only PostGIS loads; another set of
+sources for the same base takes a scope and a tag of its own. Both `SOURCE` files and `NOTICE.md`
+link it, above their written offer, which stands unchanged.
 
 The release holds one archive per component and a `SHA256SUMS` file:
 
@@ -87,10 +89,18 @@ The release holds one archive per component and a `SHA256SUMS` file:
   them.
 
 [`sources.json`](supabase-postgres/sources.json) pins each archive: its component, version, upstream
-URL, asset name, SHA-256 and size. Upstream release archives are preferred, because GitHub's
-generated archives are not promised byte for byte. Two have no other form (SFCGAL and
-`supabase/postgres`), and are pinned as downloaded. Seven of the archives are the very files the
-base image's build fetched: their SHA-256 matches the fixed-output hash in its Nix store.
+URL, asset name, SHA-256 and size, with the lock's `scope`. Each archive is the source the binaries
+were built from, so it is what the base image's build fetched:
+
+- Seven are the very files: their SHA-256 matches the fixed-output hash in the image's Nix store.
+- GEOS, pgRouting and SFCGAL were fetched as the forge's archive of the tag, and nixpkgs as the
+  channel archive `flake.lock` names. The Nix hash of those is over the unpacked tree, so the
+  archive's own bytes are pinned here. Each one's unpacked tree has the derivation's NAR hash,
+  computed from the archive without Nix.
+- `supabase/postgres`, the build scripts, is GitHub's archive of the tag, pinned as downloaded.
+
+GitHub's generated archives are not promised byte for byte. If one changes upstream, `--check`
+fails, and the release keeps the copy the lock pins.
 
 [`scripts/mirror-gpl-sources.mjs`](../scripts/mirror-gpl-sources.mjs) does the work, and
 [`gpl-sources.yml`](../.github/workflows/gpl-sources.yml) runs it with `--publish`. The

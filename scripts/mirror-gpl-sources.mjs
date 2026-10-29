@@ -2,8 +2,8 @@
 /**
  * The GitHub release that mirrors the complete corresponding source of the GPL and LGPL components
  * in the images built on supabase/postgres: PostGIS, pgRouting, the copyleft libraries only PostGIS
- * loads, and the scripts that built them. One release per base tag, named by releaseTag(); every
- * archive is pinned in licenses/supabase-postgres/sources.json.
+ * loads, and the scripts that built them. One release per base tag and scope (the lock's `scope`),
+ * named by releaseTag(); every archive is pinned in licenses/supabase-postgres/sources.json.
  *
  *   node scripts/mirror-gpl-sources.mjs --check     download each archive from upstream, verify it against the lock
  *   node scripts/mirror-gpl-sources.mjs --verify    read only: the release is published and holds every archive at its SHA-256
@@ -18,9 +18,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { get } from 'node:https';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { Readable, Transform } from 'node:stream';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -70,7 +71,7 @@ export function compare(lock, release) {
  */
 export function plan(lock, release) {
   const { missing, wrong, unknown } = compare(lock, release);
-  const tag = releaseTag(lock.base);
+  const tag = releaseTag(lock.base, lock.scope);
   const problems = [];
   if (release && !release.draft && (missing.length || wrong.length)) {
     problems.push(`${tag} is published and immutable, and ${[...missing.map((m) => `lacks ${m}`), ...wrong.map((w) => `holds ${w} at another digest`)].join(', ')}. `
@@ -109,17 +110,34 @@ export function releaseNotes(lock) {
   ].join('\n');
 }
 
+/** The response to a GET of `url`, following up to `hops` redirects. */
+function getFollowing(url, hops = 10) {
+  return new Promise((ok, fail) => {
+    get(url, { headers: { 'User-Agent': 'aber-mirror-gpl-sources', Accept: '*/*' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops > 0) {
+        res.resume();
+        getFollowing(new URL(res.headers.location, url).href, hops - 1).then(ok, fail);
+      } else if (res.statusCode !== 200) {
+        res.resume();
+        fail(new Error(`${url} answered ${res.statusCode}`));
+      } else {
+        ok(res);
+      }
+    }).on('error', fail);
+  });
+}
+
 /**
- * Download `url` to `dest`, hashing as it streams. `identity`, so no transfer encoding is decoded
- * into other bytes than the archive's (GitLab also refuses its archives to fetch's default, 406).
+ * Download `url` to `dest`, hashing as it streams. node:https rather than fetch: it asks for no
+ * content encoding and decodes none, so the bytes hashed are the archive's, and GitLab refuses its
+ * archives to fetch's default headers now and then (406).
  */
 export async function download(url, dest) {
-  const res = await fetch(url, { redirect: 'follow', headers: { 'Accept-Encoding': 'identity', 'User-Agent': 'aber-mirror-gpl-sources' } });
-  if (!res.ok || !res.body) throw new Error(`${url} answered ${res.status}`);
+  const res = await getFollowing(url);
   const hash = createHash('sha256');
   let size = 0;
   const tap = new Transform({ transform(chunk, _enc, done) { hash.update(chunk); size += chunk.length; done(null, chunk); } });
-  await pipeline(Readable.fromWeb(res.body), tap, createWriteStream(dest));
+  await pipeline(res, tap, createWriteStream(dest));
   return { sha256: hash.digest('hex'), size };
 }
 
@@ -153,9 +171,9 @@ async function hashFromRelease(run, tag, names, dir) {
 
 /** Problems with the release as it stands: absent, a draft, or an archive missing or at another digest. */
 export async function verify(lock, { run = gh, dir } = {}) {
-  const tag = releaseTag(lock.base);
+  const tag = releaseTag(lock.base, lock.scope);
   const release = fetchRelease(run, tag);
-  if (!release) return [`there is no release ${tag} (${releaseUrl(lock.base)})`];
+  if (!release) return [`there is no release ${tag} (${releaseUrl(lock.base, lock.scope)})`];
   const hashed = await hashFromRelease(run, tag, compare(lock, release).unknown, dir);
   const filled = { ...release, assets: release.assets.map((a) => ({ ...a, digest: a.digest ?? hashed[a.name] ?? null })) };
   const { missing, wrong } = compare(lock, filled);
@@ -171,14 +189,14 @@ export async function verify(lock, { run = gh, dir } = {}) {
  * verify every digest, then publish. Returns what it did, as lines.
  */
 export async function publish(lock, { run = gh, fetchTo = download, dir }) {
-  const tag = releaseTag(lock.base);
+  const tag = releaseTag(lock.base, lock.scope);
   const done = [];
   const steps = plan(lock, fetchRelease(run, tag));
   if (steps.problems.length) throw new Error(steps.problems.join('\n'));
   if (steps.create) {
     const notes = join(dir, 'notes.md');
     writeFileSync(notes, releaseNotes(lock));
-    run(['release', 'create', tag, '--repo', RELEASE_REPO, '--draft', '--latest=false', '--title', releaseTitle(lock.base), '--notes-file', notes]);
+    run(['release', 'create', tag, '--repo', RELEASE_REPO, '--draft', '--latest=false', '--title', releaseTitle(lock.base, lock.scope), '--notes-file', notes]);
     done.push(`created the draft ${tag}`);
   }
   for (const name of steps.upload) {
@@ -250,7 +268,7 @@ async function main(mode) {
     if (mode === '--verify') {
       const problems = await verify(lock, { dir });
       for (const p of problems) console.log(`  FAIL  ${p}`);
-      if (!problems.length) console.log(`  ok    ${releaseUrl(lock.base)} holds all ${lock.assets.length} archives and ${SUMS}, each at its pinned SHA-256`);
+      if (!problems.length) console.log(`  ok    ${releaseUrl(lock.base, lock.scope)} holds all ${lock.assets.length} archives and ${SUMS}, each at its pinned SHA-256`);
       return problems.length ? 1 : 0;
     }
     if (mode === '--publish') {

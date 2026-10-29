@@ -319,30 +319,29 @@ export function libraryProblems(notice, offer, folders, own) {
 export const NIXPKGS_TREE = 'https://github.com/NixOS/nixpkgs/tree/';
 
 /**
- * Where the mirror of the source and its lock disagree with the images: a `texts` entry (a written
- * offer, or NOTICE.md) that does not link the sources release for the Dockerfiles' base tag, or
- * links another; a lock pinned to another base; or a lock that does not hold PostGIS, pgRouting,
- * the copyleft libraries NOTICE.md lists, supabase/postgres and nixpkgs at the versions NOTICE.md
- * and the Dockerfiles give, or holds a component they do not name.
+ * Where the mirror of the source and its lock disagree with the images: a lock for another base;
+ * a `texts` entry (a written offer, or NOTICE.md) that does not link the sources release for the
+ * Dockerfiles' base tag and the lock's scope, or links another; or a lock that does not hold
+ * PostGIS, pgRouting, the copyleft libraries NOTICE.md lists, supabase/postgres and nixpkgs at the
+ * versions NOTICE.md and the Dockerfiles give, or holds a component they do not name.
  */
 export function mirrorProblems(lockText, notice, texts, baseTags) {
   const problems = [];
   if (baseTags.length !== 1) return [`the Dockerfiles build on ${baseTags.length} ${BASE_IMAGE} tags; the sources release needs one`];
   const [tag] = baseTags;
-  const url = releaseUrl(tag);
-  const prefix = url.slice(0, url.length - tag.length);
-  for (const { path, text } of texts) {
-    if (!text.includes(url)) problems.push(`${path} does not link ${url}, the source mirrored for the images' base`);
-    for (const other of tokensAfter(text, prefix)) {
-      if (other !== tag) problems.push(`${path} links the sources release for ${BASE_IMAGE}:${other}, and the images build on ${tag}`);
-    }
-  }
-
   let lock;
   try {
     lock = parseLock(lockText);
   } catch (e) {
-    return [...problems, e.message];
+    return [e.message];
+  }
+  const url = releaseUrl(tag, lock.scope);
+  const prefix = url.slice(0, url.length - `${tag}-${lock.scope}`.length);
+  for (const { path, text } of texts) {
+    if (!text.includes(url)) problems.push(`${path} does not link ${url}, the source mirrored for the images' base`);
+    for (const other of tokensAfter(text, prefix)) {
+      if (other !== `${tag}-${lock.scope}`) problems.push(`${path} links ${prefix}${other}, not the release for ${BASE_IMAGE}:${tag} and the scope ${lock.scope}`);
+    }
   }
   if (lock.base !== tag) problems.push(`${LOCK} is for the base ${BASE_IMAGE}:${lock.base}, and the images build on ${tag}`);
   const nixpkgs = [...new Set(tokensAfter(notice, NIXPKGS_TREE))];
@@ -507,8 +506,9 @@ function main() {
   const mirror = lockText ? mirrorProblems(lockText, read('NOTICE.md'), linking, tags) : [`${LOCK} does not exist`];
   for (const m of mirror) fail(m);
   if (!mirror.length) {
-    pass(`${LOCK} pins ${parseLock(lockText).assets.length} archives for ${BASE_IMAGE}:${tags[0]}, every component at the version the images ship, `
-      + `and both offers and NOTICE.md link ${releaseUrl(tags[0])}`);
+    const lock = parseLock(lockText);
+    pass(`${LOCK} pins ${lock.assets.length} archives for ${BASE_IMAGE}:${tags[0]}, every component at the version the images ship, `
+      + `and both offers and NOTICE.md link ${releaseUrl(tags[0], lock.scope)}`);
   }
 
   process.exit(failed ? 1 : 0);

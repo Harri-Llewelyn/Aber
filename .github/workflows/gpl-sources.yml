@@ -1,9 +1,9 @@
 # GPL Sources: mirror the complete corresponding source of the GPL and LGPL components in the
 # images built on supabase/postgres (PostGIS, pgRouting, the copyleft libraries only PostGIS loads,
-# and the scripts that built them) to a GitHub release of its own, one per base tag:
-# `gpl-sources-supabase-postgres-<tag>`, never a `v*` tag, never the latest release. The written
-# offers in the images and NOTICE.md link it, and GPL-3.0 section 6(d) wants the source offered from
-# a place Aber answers for, not only upstream.
+# and the scripts that built them) to a GitHub release of its own, one per base tag and scope:
+# `gpl-sources-supabase-postgres-<tag>-postgis`, never a `v*` tag, never the latest release. The
+# written offers in the images and NOTICE.md link it, and GPL-3.0 section 6(d) wants the source
+# offered from a place Aber answers for, not only upstream.
 #
 # By hand, once per base tag, before the first release on it: release.yml's pre-flight refuses to
 # publish images while this release lacks an archive licenses/supabase-postgres/sources.json pins.
