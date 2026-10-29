@@ -78,10 +78,11 @@ COMMENT ON COLUMN public.captures.manifest IS
   'machine''s metrics, leaving out bdSeq, Node Control/*, Device Control/* and the identity metrics; '
   'capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz, birth_captured, '
   'uses_aliases, the edge_node_ids / device_ids the recording publishes under, and for a recording '
-  'stop_reason (duration, operator, message_cap, size_cap), duration_ms and requested_seconds. '
-  'birth_captured=false means no NBIRTH was recorded, so a playback refuses the capture: a replay '
-  'opens with the edge node''s birth certificate. A capture stored before 0190 set it for a DBIRTH '
-  'too. device_ids is what the playback dialog and ensure_shadow_devices() build the device map from.';
+  'stop_reason (duration, operator, message_cap, size_cap, restart), duration_ms and '
+  'requested_seconds. birth_captured=false means no NBIRTH was recorded, so a playback refuses the '
+  'capture: a replay opens with the edge node''s birth certificate. A capture stored before 0190 set '
+  'it for a DBIRTH too. device_ids is what the playback dialog and ensure_shadow_devices() build the '
+  'device map from.';
 COMMENT ON COLUMN public.capture_jobs.stop_requested IS
   'Set by request_capture_stop(); the daemon reads it on its next one-second progress tick and stores '
   'what it has recorded. A RECORDING job the daemon has not reported on for two minutes is instead '
@@ -822,19 +823,24 @@ COMMENT ON FUNCTION public.request_capture_stop(p_job_id uuid) IS
   'Shopfloor_Manager.';
 
 -- -------------------------------------------------------------------------------------------------
--- 9. A swept job says whether it ever started
+-- 9. A swept job says whether it ever started, and one still being stored is spared
 -- -------------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.ingest_reconcile_capture_jobs() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
+    -- Longer than the pod's 30 s termination grace period: a daemon replaced while it shuts down
+    -- (a deleted or evicted pod) may still be storing a recording that reported this recently.
+    c_spare_seconds CONSTANT integer := 45;
     v_n integer;
 BEGIN
     PERFORM public.require_ingestion_caller('ingest_reconcile_capture_jobs');
 
     -- PENDING too: a job queued while the daemon was down would otherwise record from an arbitrary
-    -- later moment.
+    -- later moment. Only what has gone quiet: a RECORDING job whose last report (started_at plus
+    -- elapsed_seconds, as request_capture_stop() reads it) is older than c_spare_seconds, and a
+    -- PENDING one queued before that. The daemon sweeps again once the spared ones are past it.
     WITH swept AS (
         UPDATE public.capture_jobs
            SET status = 'FAILED', finished_at = now(),
@@ -844,7 +850,10 @@ BEGIN
                             ELSE 'the ingestion daemon restarted while this job was recording; the '
                                  'recording did not survive'
                        END
-         WHERE status IN ('PENDING', 'RECORDING')
+         WHERE (status = 'PENDING' AND created_at < now() - make_interval(secs => c_spare_seconds))
+            OR (status = 'RECORDING'
+                AND coalesce(started_at, created_at) + make_interval(secs => elapsed_seconds)
+                    < now() - make_interval(secs => c_spare_seconds))
         RETURNING 1
     )
     SELECT count(*) INTO v_n FROM swept;

@@ -16,8 +16,9 @@ edge node publishes from this process:
   4. Stop during a replay ends the job CANCELLED within seconds, with only what went out counted;
   5. the playback worker restarted during a replay: the job fails and the Playback gateway's Will
      marks it OFFLINE;
-  6. the ingestion daemon restarted during a recording: the job fails, the stored capture of the
-     subject is kept, and the next capture records.
+  6. the ingestion pod deleted during a recording, its replacement started at once: the old daemon
+     stores the recording on SIGTERM, cut short by the restart, the replacement's startup sweep
+     leaves the job alone, the capture replaces the subject's stored one, and the next records.
 
 ADeviceIsRecordedAndReplayedUnderTheIdItPublishes has a second fixture Host gateway publish two
 devices under ids other than their issued ones: one under its own id (`reported_identity`), one
@@ -30,9 +31,11 @@ a device's folder. The db lane runs the same policy text on a stand-in table.
 
 Stages 5 and 6 use `kubectl --context $ABER_KUBE_CONTEXT -n $KUBE_NAMESPACE` (k3d-aber and aber by
 default). Stage 5 deletes the playback pod with a one-second grace, an abrupt end, as a crash would
-be; stage 6 runs `rollout restart` on ingestion, which shuts down cleanly on SIGTERM. Each waits for
-its pod to come back. They skip, saying why, when kubectl or that context is absent. Restarting
-ingestion stops ingestion for the whole stack for the length of the rollout.
+be. Stage 6 deletes the ingestion pod with its own 30-second grace, as an eviction does, so the
+daemon shuts down on SIGTERM while the ReplicaSet starts its replacement at once. A rollout, under
+the Deployment's Recreate strategy, would not overlap the two. Each waits for its pod to come back.
+They skip, saying why, when kubectl or that context is absent. Stage 6 stops ingestion for the whole
+stack until the replacement is consuming.
 
 Needs the stack up and `playback.enabled` (values-dev.yaml sets it), and the environment
 test_playback_replay.py reads, whose helpers this reuses with test_recorded_capture_replay.py's.
@@ -107,7 +110,7 @@ LONG_BASE = 100000.0
 
 STAGES = ("the fixture", "the gateway capture", "its replay", "the duration cap",
           "the unanswered rebirth", "the stop mid-replay", "the playback worker restart",
-          "the ingestion daemon restart")
+          "the ingestion pod eviction")
 
 
 def replayed(messages):
@@ -176,28 +179,23 @@ def why_no_restart():
     return None
 
 
-def restart(deployment):
-    result = kubectl("rollout", "restart", f"deployment/{deployment}", timeout=60)
-    if result.returncode != 0:
-        raise AssertionError(f"kubectl rollout restart deployment/{deployment} failed: "
-                             f"{result.stderr.strip()}")
-
-
-def end_pod_at_once(deployment):
+def delete_pod(deployment, grace=None):
     """
-    Delete the Deployment's pod with a one-second grace: SIGTERM, then SIGKILL a second later. The
-    same abrupt end a rollout restart gives a worker that ignores SIGTERM, without waiting out the
-    pod's 30-second grace. The ReplicaSet starts the replacement; await_rollout() waits for it.
+    Delete the Deployment's pod, as an eviction does, and return once it has gone. With `grace=1`:
+    SIGTERM, then SIGKILL a second later, the abrupt end a worker that ignores SIGTERM gets. With
+    none: the pod's own 30-second grace, inside which a daemon shuts down on SIGTERM. Either way the
+    ReplicaSet starts the replacement at once; await_rollout() waits for it.
     """
     found = kubectl("get", "deployment", deployment, "-o", "json", timeout=30)
     if found.returncode != 0:
         raise AssertionError(f"cannot read deployment/{deployment}: {found.stderr.strip()}")
     labels = json.loads(found.stdout)["spec"]["selector"]["matchLabels"]
     selector = ",".join(f"{key}={value}" for key, value in sorted(labels.items()))
-    result = kubectl("delete", "pod", "-l", selector, "--grace-period=1", "--timeout=60s",
-                     "-o", "name", timeout=90)
+    how = [f"--grace-period={grace}"] if grace is not None else []
+    result = kubectl("delete", "pod", "-l", selector, *how, "--timeout=120s", "-o", "name",
+                     timeout=150)
     if result.returncode != 0 or "pod/" not in result.stdout:
-        raise AssertionError(f"kubectl delete pod -l {selector} --grace-period=1 deleted nothing: "
+        raise AssertionError(f"kubectl delete pod -l {selector} {' '.join(how)} deleted nothing: "
                              f"{result.stderr.strip() or result.stdout.strip()}")
 
 
@@ -422,7 +420,7 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
         cls.addClassCleanup(cls._clean_up)
         steps = (cls._fixture, cls._gateway_capture, cls._gateway_replay, cls._duration_cap,
                  cls._unanswered_rebirth, cls._stop_mid_replay, cls._playback_restart,
-                 cls._ingestion_restart)
+                 cls._ingestion_eviction)
         for stage, step in zip(STAGES, steps):
             try:
                 step()
@@ -645,7 +643,7 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
         cls.stop_rows = [v for a, v in cls._historian() if a == cls.lane_b and v >= LONG_BASE]
 
     # ------------------------------------------------------------------------------------------
-    # Stage 7 and 8: each worker restarted mid-job
+    # Stage 7 and 8: the playback worker killed, and the ingestion pod deleted, mid-job
     # ------------------------------------------------------------------------------------------
     @classmethod
     def _playback_restart(cls):
@@ -654,7 +652,7 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
             raise unittest.SkipTest(reason)
         job_id = cls._start_playback(cls.long_capture_id, cls.long_map)
         cls.restart_seen_online = cls._run_long_until(job_id, CUT_AFTER)
-        end_pod_at_once("playback")
+        delete_pod("playback", grace=1)
         # FAILED is written by the replacement worker's startup sweep, so it is running by then.
         cls.restarted_replay = cls._playback_job(job_id, lambda j: j.get("status") in TERMINAL,
                                                  RESTART_TIMEOUT, 2)
@@ -667,24 +665,29 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
                                  "Playback gateway's credential")
 
     @classmethod
-    def _ingestion_restart(cls):
+    def _ingestion_eviction(cls):
         reason = why_no_restart()
         if reason:
             raise unittest.SkipTest(reason)
-        cls.kept_before = cls._stored_of(DEVICE_A_ID)
-        if not cls.kept_before:
-            raise AssertionError("device A has no stored capture to keep")
-        cls.kept_bytes = download(cls.session, cls.kept_before[0]["storage_path"])[1]
-        job_id = cls._start_capture("device", DEVICE_A_ID, 120, "ingestion restart")
+        cls.earlier = cls._stored_of(DEVICE_A_ID)
+        if not cls.earlier:
+            raise AssertionError("device A has no stored capture for the recording to replace")
+        job_id = cls._start_capture("device", DEVICE_A_ID, 120, "ingestion pod eviction")
         cls._capture_job(job_id, lambda j: (j.get("messages") or 0) >= 2, 30)
-        restart("ingestion")
-        cls.cut_recording = cls._capture_job(job_id, lambda j: j.get("status") in TERMINAL,
-                                             RESTART_TIMEOUT)
+        delete_pod("ingestion")
+        cls._capture_job(job_id, lambda j: j.get("status") in TERMINAL, RESTART_TIMEOUT)
         await_rollout("ingestion")
-        cls.kept_after = cls._stored_of(DEVICE_A_ID)
-        cls.kept_bytes_after = download(cls.session, cls.kept_before[0]["storage_path"])[1]
+        # A sweep that ran first would have failed it, and the old daemon's finalise been refused;
+        # once COMPLETED no sweep touches it.
+        cls.cut_recording = cls._rest_one(f"/capture_jobs?select=*&id=eq.{job_id}&limit=1")
+        cls.cut_row = cls.cut_doc = None
+        if cls.cut_recording.get("capture_id"):
+            cls.cut_row = cls._capture_row(cls.cut_recording["capture_id"])
+            _, cls.cut_doc = cls._download_json(cls.cut_row["storage_path"])
+        cls.stored_after = cls._stored_of(DEVICE_A_ID)
+        cls.earlier_download = download(cls.session, cls.earlier[0]["storage_path"])[0]
         # The daemon is consuming again: a capture records.
-        job_id = cls._start_capture("device", DEVICE_A_ID, DURATION_CAP, "after the restart")
+        job_id = cls._start_capture("device", DEVICE_A_ID, DURATION_CAP, "after the eviction")
         cls.next_recording = cls._capture_job(job_id, lambda j: j.get("status") in TERMINAL,
                                               DURATION_CAP + FINISH_TIMEOUT)
         if cls.next_recording.get("capture_id"):
@@ -890,19 +893,30 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
                          f"the Playback gateway reads {self.after_restart} after its worker died")
 
     # ==========================================================================================
-    # 6. The ingestion daemon restarted mid-recording
+    # 6. The ingestion pod deleted mid-recording, its replacement started at once
     # ==========================================================================================
-    def test_a_recording_cut_by_a_daemon_restart_fails_and_keeps_the_stored_capture(self):
-        self._needs("the ingestion daemon restart")
+    def test_an_evicted_daemon_stores_its_recording_cut_short_by_the_restart(self):
+        self._needs("the ingestion pod eviction")
         job = self.cut_recording
-        self.assertEqual(job.get("status"), "FAILED", f"{job.get('status')}: {job.get('error')}")
-        self.assertIn("ingestion daemon", job.get("error") or "")
-        self.assertIsNone(job.get("capture_id"))
-        self.assertEqual(self.kept_after, self.kept_before, "the stored capture was replaced")
-        self.assertEqual(self.kept_bytes_after, self.kept_bytes, "the stored file changed")
+        # The replacement's startup sweep would have failed it, saying it did not survive.
+        self.assertEqual(job.get("status"), "COMPLETED", f"{job.get('status')}: {job.get('error')}")
+        self.assertIsNone(job.get("error"))
+        self.assertIsNotNone(self.cut_row, "the completed job names no capture")
+        self.assertEqual(self.cut_row["manifest"].get("stop_reason"), "restart", self.cut_row["manifest"])
+        # The object downloads, and holds what was recorded.
+        self.assertTrue(self.cut_doc.get("messages"), "the stored file holds no messages")
+        self.assertEqual(len(self.cut_doc["messages"]), self.cut_row["message_count"])
+
+    def test_it_replaces_the_subjects_stored_capture_as_a_finished_recording_does(self):
+        self._needs("the ingestion pod eviction")
+        self.assertIsNotNone(self.cut_row, f"nothing was stored: {self.cut_recording.get('status')} "
+                                           f"{self.cut_recording.get('error')}")
+        self.assertEqual(self.stored_after, [{"id": self.cut_row["id"],
+                                              "storage_path": self.cut_row["storage_path"]}])
+        self.assertNotEqual(self.earlier_download, 200, "the replaced capture can still be downloaded")
 
     def test_the_restarted_daemon_records_the_next_capture(self):
-        self._needs("the ingestion daemon restart")
+        self._needs("the ingestion pod eviction")
         job = self.next_recording
         self.assertEqual(job.get("status"), "COMPLETED", f"{job.get('status')}: {job.get('error')}")
         self.assertGreater(job.get("messages") or 0, 0)

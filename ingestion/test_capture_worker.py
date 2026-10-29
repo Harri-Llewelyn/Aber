@@ -26,7 +26,9 @@ file is wrong in a way nobody finds until a playback ingests nothing.
   5. THE FINISH PATH. A recording goes to its job's own path, the row is repointed by finalise, and
      only then is the replaced file deleted; finalise and the failure write are retried, and a job
      whose failure cannot be written stays in the worker's view. A device that published nothing,
-     or a job that ended elsewhere, stores nothing and keeps the stored capture.
+     or a job that ended elsewhere, stores nothing and keeps the stored capture. An upload is
+     retried only for what another attempt can cure, and a shutdown stores the recording in flight
+     with one attempt, or fails it saying the restart stopped it.
 
 Like its sibling this suite needs the REAL generated protobuf and has to undo the other suites'
 stub; see test_capture_playback.py's header for why that is, at length.
@@ -36,12 +38,16 @@ import json
 import os
 import sys
 import threading
+import time
 import tracemalloc
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import httpx
+from storage3.exceptions import StorageApiError
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, INGESTION_DIR)
@@ -809,6 +815,10 @@ class FinishBase(unittest.TestCase):
             (capture_worker, "TERMINAL_RETRY_DELAYS", (0, 0, 0)),
             (capture_worker, "_unsettled", None),
             (capture_worker, "_active", None),
+            (capture_worker, "_stopping", threading.Event()),
+            (capture_worker, "_shutdown_deadline", None),
+            (capture_worker, "_finishing", threading.Lock()),
+            (capture_worker, "_finishing_state", None),
         ):
             patcher = patch.object(target, name, value)
             patcher.start()
@@ -917,6 +927,347 @@ class AFailureThatCannotBeWritten(FinishBase):
             with self.assertRaises(StopIteration):
                 capture_worker._loop()
         self.assertEqual(claims, [])
+
+
+UPLOAD_URL = "http://supabase-envoy:8000/storage/v1/object/broker-captures/" + JOB_PATH
+
+
+def answered(status, body_status=None, message="refused"):
+    """What storage3 raises for an answer it can read: its own error, from httpx's."""
+    request = httpx.Request("POST", UPLOAD_URL)
+    err = StorageApiError(message, "Error", body_status or str(status))
+    err.__cause__ = httpx.HTTPStatusError(
+        "status %d" % status, request=request, response=httpx.Response(status, request=request))
+    return err
+
+
+def unreadable(status):
+    """What storage3 raises for an answer that is not JSON, as Envoy's own 503 is not."""
+    request = httpx.Request("POST", UPLOAD_URL)
+    err = json.JSONDecodeError("Expecting value", "upstream connect error", 0)
+    err.__context__ = httpx.HTTPStatusError(
+        "status %d" % status, request=request, response=httpx.Response(status, request=request))
+    return err
+
+
+def unanswered(kind, message):
+    """A transport failure: httpx raises it before any answer."""
+    return kind(message, request=httpx.Request("POST", UPLOAD_URL))
+
+
+REFUSED = unanswered(httpx.ConnectError, "[Errno 111] Connection refused")
+
+
+class ScriptedStorage(FakeStorage):
+    """Each upload takes the next outcome: an exception to raise, or None to store the file."""
+
+    def __init__(self, log, outcomes):
+        super().__init__(log)
+        self.outcomes, self.bodies = list(outcomes), []
+
+    def upload(self, path, file, file_options):
+        self.log.append(("upload", path))
+        self.bodies.append(file.read())
+        outcome = self.outcomes.pop(0) if self.outcomes else None
+        if outcome is not None:
+            raise outcome
+
+
+class TheUploadIsRetried(FinishBase):
+    """
+    A recording is held only in memory, so one refused connection lost it. What another attempt can
+    cure (no answer, a 5xx, a 429) is tried four times, 2, 4 and 8 s apart; any other 4xx at once.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.waits = []
+        patcher = patch.object(capture_worker, "_pause", lambda s: self.waits.append(s) or False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def upload(self, outcomes):
+        storage = ScriptedStorage(self.log, outcomes)
+        self.finish({"ingest_finalise_capture": ["cap-new"]}, storage=storage)
+        return storage
+
+    def uploads(self):
+        return [e for e in self.log if e[0] == "upload"]
+
+    def test_fail_fail_succeed_waits_two_then_four_seconds_and_stores_it(self):
+        storage = self.upload([REFUSED, answered(503), None])
+        self.assertEqual(len(self.uploads()), 3)
+        self.assertEqual(self.waits, [2, 4])
+        self.assertEqual(len(self.rpcs("ingest_finalise_capture")), 1)
+        self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+        # Every attempt sends the whole file, not what the last one left unread.
+        self.assertEqual(len(set(storage.bodies)), 1)
+        self.assertTrue(json.loads(storage.bodies[0])["messages"])
+
+    def test_each_failure_another_attempt_can_cure_is_retried(self):
+        for err in (REFUSED,
+                    unanswered(httpx.ReadTimeout, "timed out"),
+                    unanswered(httpx.WriteError, "[Errno 104] Connection reset by peer"),
+                    unanswered(httpx.RemoteProtocolError, "Server disconnected without a response"),
+                    answered(500), answered(502), answered(504), answered(429), unreadable(503),
+                    # No HTTP answer to read, only the status Storage put in its body.
+                    StorageApiError("internal error", "InternalError", "500")):
+            with self.subTest(err=repr(err)):
+                self.log.clear()
+                self.waits.clear()
+                self.upload([err, None])
+                self.assertEqual(len(self.uploads()), 2)
+                self.assertEqual(self.waits, [2])
+                self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+
+    def test_four_failures_fail_the_job_with_the_last_error(self):
+        self.upload([answered(503), REFUSED, unanswered(httpx.ReadTimeout, "timed out"),
+                     answered(502, message="the last refusal")])
+        self.assertEqual(len(self.uploads()), 4)
+        self.assertEqual(self.waits, [2, 4, 8])
+        self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+        error = self.rpcs("ingest_fail_capture")[0][2]["p_error"]
+        self.assertIn("upload to %s failed after 4 attempts" % JOB_PATH, error)
+        self.assertIn("the last refusal", error)
+        self.assertNotIn("Connection refused", error)
+
+    def test_a_403_is_not_retried(self):
+        # Storage answers a refused policy with HTTP 400 and 403 in its body.
+        for err in (answered(400, "403", "new row violates row-level security policy"),
+                    answered(403, message="new row violates row-level security policy")):
+            with self.subTest(err=repr(err)):
+                self.log.clear()
+                self.upload([err, None])
+                self.assertEqual(len(self.uploads()), 1)
+                self.assertEqual(self.waits, [])
+                error = self.rpcs("ingest_fail_capture")[0][2]["p_error"]
+                self.assertEqual(error, "upload to %s failed: %s" % (JOB_PATH, err))
+
+    def test_any_other_4xx_is_not_retried_either(self):
+        for status in (401, 404, 409, 413):
+            with self.subTest(status=status):
+                self.log.clear()
+                self.upload([answered(status), None])
+                self.assertEqual(len(self.uploads()), 1)
+                self.assertEqual(self.waits, [])
+
+    def test_a_shutdown_during_the_wait_makes_one_last_attempt_inside_its_deadline(self):
+        def shutdown_begins(seconds):
+            self.waits.append(seconds)
+            capture_worker.begin_shutdown(time.monotonic() + 30)
+            return True
+
+        for last, stored in ((None, True), (answered(503, message="still down"), False)):
+            with self.subTest(stored=stored), \
+                    patch.object(capture_worker, "_pause", shutdown_begins), \
+                    patch.object(capture_worker, "_stopping", threading.Event()):
+                self.log.clear()
+                self.waits.clear()
+                self.upload([answered(503), last])
+                self.assertEqual(len(self.uploads()), 2)
+                self.assertEqual(self.waits, [2])
+                self.assertEqual(len(self.rpcs("ingest_finalise_capture")), int(stored))
+                if not stored:
+                    error = self.rpcs("ingest_fail_capture")[0][2]["p_error"]
+                    self.assertIn("the ingestion service restarted before the recording was stored",
+                                  error)
+                    self.assertIn("still down", error)
+
+
+class AShutdownStoresTheRecordingInFlight(FinishBase):
+    """
+    SIGTERM ends a recording as Stop does and makes one upload attempt in the time the shutdown has
+    left. A job it cannot store says the restart stopped it, rather than reconcile on the next start
+    saying only that the recording did not survive.
+    """
+
+    TOPIC = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+
+    def setUp(self):
+        super().setUp()
+        self.waits = []
+        patcher = patch.object(capture_worker, "_pause", lambda s: self.waits.append(s) or False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def arm(self, messages=1, **over):
+        j = job(storage_path=JOB_PATH, **over)
+        for _ in range(messages):
+            j.append(self.TOPIC, wire(), "NDATA")
+        capture_worker._active = j
+        return j
+
+    def shut(self, answers=None, storage=None, seconds=30):
+        with patch.object(capture_worker, "_supabase", FakeSupabase(self.log, answers)), \
+                patch.object(capture_worker, "_storage", storage or FakeStorage(self.log)):
+            capture_worker.begin_shutdown(time.monotonic() + seconds)
+            return capture_worker.finish_on_shutdown()
+
+    def failure(self):
+        fail = self.rpcs("ingest_fail_capture")
+        self.assertEqual(len(fail), 1, self.log)
+        return fail[0][2]["p_error"]
+
+    def test_it_uploads_once_and_stores_the_job(self):
+        self.arm()
+        self.assertTrue(self.shut({"ingest_finalise_capture": ["cap-new"],
+                                   "ingest_unclaimed_capture_objects": [[OLD_PATH]]}))
+        self.assertEqual([(e[0], e[1]) for e in self.log], [
+            ("upload", JOB_PATH),
+            ("rpc", "ingest_finalise_capture"),
+            ("rpc", "ingest_unclaimed_capture_objects"),
+            ("remove", [OLD_PATH]),
+        ])
+        finalise = self.rpcs("ingest_finalise_capture")[0][2]
+        self.assertEqual(finalise["p_job_id"], row()["id"])
+        self.assertEqual(finalise["p_message_count"], 1)
+        self.assertEqual(finalise["p_manifest"]["stop_reason"], capture_worker.STOP_RESTART)
+        self.assertIsNone(capture_worker._active)
+
+    def test_a_failing_upload_is_tried_once_and_fails_the_job_naming_the_restart(self):
+        self.arm()
+        self.shut({"ingest_unclaimed_capture_objects": [[JOB_PATH]]},
+                  storage=ScriptedStorage(self.log, [REFUSED, None]))
+        self.assertEqual([e for e in self.log if e[0] == "upload"], [("upload", JOB_PATH)])
+        self.assertEqual(self.waits, [])
+        self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+        error = self.failure()
+        self.assertTrue(error.startswith(
+            "the ingestion service restarted before the recording was stored, and the upload to "
+            "%s it tried as it shut down failed: " % JOB_PATH), error)
+        self.assertIn("Connection refused", error)
+        self.assertNotIn("did not survive", error)
+
+    def test_with_no_recording_nothing_changes(self):
+        self.assertFalse(self.shut())
+        self.assertEqual(self.log, [])
+        self.assertIsNone(capture_worker._active)
+
+    def test_an_upload_that_cannot_fit_is_not_started(self):
+        self.arm()
+        self.shut(seconds=2 * capture_worker.SHUTDOWN_WRITE_SECONDS + 0.5)
+        self.assertEqual([e for e in self.log if e[0] == "upload"], [])
+        self.assertIn("its shutdown had no time left to upload it", self.failure())
+
+    def test_an_upload_that_runs_out_of_time_fails_the_job(self):
+        released = threading.Event()
+        self.addCleanup(released.set)
+        storage = FakeStorage(self.log)
+        storage.upload = lambda path, file, file_options: released.wait(5)
+        self.arm()
+        with patch.object(capture_worker, "SHUTDOWN_WRITE_SECONDS", 0.05), \
+                patch.object(capture_worker, "SHUTDOWN_MIN_UPLOAD_SECONDS", 0.05):
+            started = time.monotonic()
+            self.shut(storage=storage, seconds=0.4)
+            self.assertLess(time.monotonic() - started, 0.4)
+        self.assertIn("did not finish in the 0.3s it had", self.failure())
+
+    def test_a_cap_already_met_keeps_its_stop_reason(self):
+        j = self.arm()
+        j.cap_code = capture_worker.STOP_SIZE
+        self.shut({"ingest_finalise_capture": ["cap-new"]})
+        self.assertEqual(self.rpcs("ingest_finalise_capture")[0][2]["p_manifest"]["stop_reason"],
+                         capture_worker.STOP_SIZE)
+
+    def test_a_recording_that_heard_nothing_says_the_restart_stopped_it(self):
+        self.arm(messages=0)
+        self.shut()
+        self.assertEqual([e for e in self.log if e[0] == "upload"], [])
+        self.assertTrue(self.failure().startswith(
+            "the ingestion service restarted during the recording, which recorded no messages "
+            "from edge node %s" % GWY))
+
+    def test_the_worker_leaves_the_job_to_the_shutdown(self):
+        j = self.arm()
+        capture_worker.begin_shutdown(time.monotonic() + 30)
+        with patch.object(capture_worker, "_storage", FakeStorage(self.log)):
+            capture_worker._end(j, ("finish", "stopped by the operator", capture_worker.STOP_OPERATOR))
+        self.assertEqual(self.log, [])
+        self.assertIs(capture_worker._active, j)
+        self.shut({"ingest_finalise_capture": ["cap-new"]})
+        self.assertEqual(len([e for e in self.log if e[0] == "upload"]), 1)
+
+    def test_the_worker_claims_nothing_once_the_shutdown_has_begun(self):
+        claims = []
+        capture_worker.begin_shutdown(time.monotonic() + 30)
+        with patch.object(capture_worker, "_claim", lambda: claims.append(1)):
+            capture_worker._loop()
+        self.assertEqual(claims, [])
+
+    def test_a_job_claimed_as_the_shutdown_begins_is_failed_not_armed(self):
+        capture_worker.begin_shutdown(time.monotonic() + 30)
+        with patch.object(capture_worker, "_supabase", FakeSupabase(self.log)), \
+                patch.object(capture_worker, "_rebirth", lambda group, node: self.fail("rebirth")):
+            self.assertIsNone(capture_worker._begin(row()))
+        self.assertIsNone(capture_worker._active)
+        self.assertIn("restarted as the recording began", self.failure())
+
+    def test_a_worker_still_storing_its_own_is_failed_when_time_runs_out(self):
+        j = job(storage_path=JOB_PATH)
+        capture_worker._finishing.acquire()
+        self.addCleanup(capture_worker._finishing.release)
+        capture_worker._finishing_state = j
+        with patch.object(capture_worker, "SHUTDOWN_WRITE_SECONDS", 0.2):
+            self.assertFalse(self.shut(seconds=0.5))
+        self.assertIn("its upload was still running when the shutdown's time ran out",
+                      self.failure())
+
+
+class TheWorkerSweepsAgain(unittest.TestCase):
+    """
+    A deleted or evicted pod is replaced at once, and the new daemon's startup sweep spares a job
+    the old one may still be storing (ingest_reconcile_capture_jobs()). The idle loop sweeps once
+    more after RESWEEP_AFTER_SECONDS, which fails what nothing stored.
+    """
+
+    def one_pass(self, due, reconciled=True):
+        calls = []
+
+        def reconcile(client):
+            calls.append(client)
+            return reconciled
+
+        def claim():
+            raise StopIteration  # one pass of the idle loop is enough
+
+        with patch.object(capture_worker, "_resweep_at", due), \
+                patch.object(capture_worker, "_stopping", threading.Event()), \
+                patch.object(capture_worker, "_unsettled", None), \
+                patch.object(capture_worker, "_active", None), \
+                patch.object(capture_worker, "_next_sweep", float("inf")), \
+                patch.object(capture_worker, "_supabase", "the client"), \
+                patch.object(capture_worker, "reconcile", reconcile), \
+                patch.object(capture_worker, "_claim", claim), \
+                patch.object(capture_worker.time, "monotonic", return_value=1000.0):
+            with self.assertRaises(StopIteration):
+                capture_worker._loop()
+            return calls, capture_worker._resweep_at
+
+    def test_start_schedules_the_second_sweep(self):
+        with patch.object(capture_worker, "_resweep_at", None), \
+                patch.object(capture_worker, "_supabase", None), \
+                patch.object(capture_worker, "_storage", None), \
+                patch.object(capture_worker, "_rebirth", None), \
+                patch.object(capture_worker, "_storage_client", MagicMock()), \
+                patch.object(capture_worker, "reconcile", lambda client: True), \
+                patch.object(capture_worker.threading, "Thread", MagicMock()), \
+                patch.object(capture_worker.time, "monotonic", return_value=500.0):
+            capture_worker.start("the client")
+            self.assertEqual(capture_worker._resweep_at, 500.0 + capture_worker.RESWEEP_AFTER_SECONDS)
+
+    def test_the_idle_loop_sweeps_again_once_it_is_due_and_then_never(self):
+        calls, after = self.one_pass(due=999.0)
+        self.assertEqual((calls, after), (["the client"], None))
+        calls, after = self.one_pass(due=None)
+        self.assertEqual((calls, after), ([], None))
+
+    def test_it_waits_until_it_is_due(self):
+        self.assertEqual(self.one_pass(due=1001.0), ([], 1001.0))
+
+    def test_a_sweep_that_failed_is_tried_again_later(self):
+        calls, after = self.one_pass(due=999.0, reconciled=False)
+        self.assertEqual(calls, ["the client"])
+        self.assertEqual(after, 1000.0 + capture_worker.UNSETTLED_RETRY_SECONDS)
 
 
 class ADeviceThatPublishedNothing(FinishBase):

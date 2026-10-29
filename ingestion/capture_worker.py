@@ -16,6 +16,10 @@ Prometheus `/metrics`, and a flag survives a page reload. While idle the thread 
 `ingest_claim_capture_job()` for work every few seconds; while recording it reports progress once a
 second and is told, in the same round trip, whether to stop.
 
+A RESTART STORES THE RECORDING. ingestion.py's shutdown calls begin_shutdown() first and
+finish_on_shutdown() last, once the historian's queue has drained. The recording takes what arrives
+in between, then has one upload attempt in what the pod's grace period leaves.
+
 Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables and every gate
          called here), 0190 (a path per recording, and deleting what nothing claims), capture.py
          (the file format, and the encoding preservation this reuses), README.md -> "Recording
@@ -64,6 +68,22 @@ REBIRTH_GRACE_SECONDS = float(os.getenv("CAPTURE_REBIRTH_GRACE_SECONDS", "10"))
 TERMINAL_RETRY_DELAYS = (1, 2, 4, 8, 16)
 UNSETTLED_RETRY_SECONDS = float(os.getenv("CAPTURE_UNSETTLED_RETRY_SECONDS", "30"))
 
+# A recording's upload is tried again this far apart, four attempts in all. Only a failure another
+# attempt can cure is retried: no answer, or a 5xx or 429. Any other 4xx would be refused again.
+UPLOAD_RETRY_DELAYS = (2, 4, 8)
+
+# On a shutdown, the longest one write of a job's outcome may take. The upload leaves time for two:
+# finalise, and the failure if finalise is refused.
+SHUTDOWN_WRITE_SECONDS = 1.0
+# A shutdown with less than this left for the upload does not start one.
+SHUTDOWN_MIN_UPLOAD_SECONDS = 1.0
+
+# The startup sweep spares a job another daemon may still be storing as it shuts down: a recording
+# that reported, or a job queued, in the last 45 s (ingest_reconcile_capture_jobs()). The worker
+# sweeps again this long after it starts, when any such job is past that, and fails what nothing
+# stored.
+RESWEEP_AFTER_SECONDS = 60
+
 # How often an idle worker deletes the stored files nothing refers to, and how long one must have
 # gone untouched first. A failed sweep is tried again after SWEEP_RETRY_SECONDS.
 SWEEP_INTERVAL_SECONDS = float(os.getenv("CAPTURE_SWEEP_INTERVAL_SECONDS", "3600"))
@@ -81,6 +101,7 @@ STOP_DURATION = "duration"
 STOP_OPERATOR = "operator"
 STOP_MESSAGES = "message_cap"
 STOP_SIZE = "size_cap"
+STOP_RESTART = "restart"
 
 # Node-level message types, which carry no device segment. A DEVICE capture records these too --
 # see the matching rule in `_JobState.matches()`.
@@ -363,6 +384,18 @@ _unsettled = None
 # When the idle loop next deletes the stored files nothing refers to (time.monotonic()).
 _next_sweep = 0.0
 
+# Set by begin_shutdown(). From then the worker claims and finishes nothing itself, and a wait
+# between attempts ends at once; the shutdown stores the recording in flight.
+_stopping = threading.Event()
+# When the shutdown's capture work must be done (time.monotonic()), set with _stopping.
+_shutdown_deadline = None
+# Held by whoever arms or finishes the active job, the worker or the shutdown, so one finishes it.
+_finishing = threading.Lock()
+# The job the worker is finishing, for a shutdown that cannot wait for it to end.
+_finishing_state = None
+# When the idle loop sweeps abandoned jobs a second time (time.monotonic()), or None once it has.
+_resweep_at = None
+
 
 def _storage_client():
     """
@@ -460,8 +493,14 @@ def _begin(job_row):
     # arrives on the wire and is recorded as ordinary traffic.
     #
     # ARMED BEFORE THE REQUEST, necessarily: the NBIRTH can come back before the publish call
-    # returns, and a buffer armed afterwards would miss the very message it asked for.
-    _active = state
+    # returns, and a buffer armed afterwards would miss the very message it asked for. Under the
+    # lock the shutdown takes the active job with, so a job claimed as it begins is not left behind.
+    with _finishing:
+        if _stopping.is_set():
+            _settle_failure(state, "the ingestion service restarted as the recording began, so "
+                                   "nothing was recorded. Record it again.")
+            return None
+        _active = state
 
     if _rebirth is not None:
         try:
@@ -482,7 +521,7 @@ def _begin(job_row):
     return state
 
 
-def _finish(state, reason, stop=None):
+def _finish(state, reason, stop=None, deadline=None):
     """
     Upload the recording to the job's own path, and hand the capture to the database.
 
@@ -490,6 +529,9 @@ def _finish(state, reason, stop=None):
     message boundary. The file streams from the recorded lines, which are its bytes. The previous
     capture of the subject is untouched until finalise repoints the row, and its file is deleted
     only after that.
+
+    With a `deadline` (time.monotonic()) this is the shutdown's finish: one upload attempt, every
+    step inside the deadline, and a failure that says the restart stopped it.
     """
     global _active
     _active = None
@@ -498,7 +540,9 @@ def _finish(state, reason, stop=None):
 
     refusal = _nothing_recorded(state)
     if refusal:
-        _settle_failure(state, refusal)
+        if deadline is not None:
+            refusal = "the ingestion service restarted during the recording, which " + refusal
+        _settle_failure(state, refusal, deadline=deadline)
         return
 
     # A device capture's subject, by the id it was heard under.
@@ -517,28 +561,17 @@ def _finish(state, reason, stop=None):
         "duration_ms": state.last_offset_ms,
         "identities": {"edge_nodes": list(state.edge_nodes), "devices": list(state.devices)},
     })
-    body = _CaptureFile([head] + lines + [capture.FILE_TAIL])
-    size = body.size
+    parts = [head] + lines + [capture.FILE_TAIL]
+    size = sum(len(part) for part in parts)
     del lines
 
-    failed = None
-    try:
-        # The job's own path, so this never writes over the capture it may replace. Upsert, so a
-        # retried upload of the same path succeeds.
-        _storage.from_(BUCKET).upload(
-            path=state.storage_path,
-            file=io.BufferedReader(body, buffer_size=1 << 16),
-            file_options={"content-type": "application/json", "upsert": "true"},
-        )
-    except Exception as err:
-        failed = err
+    failure = _upload(state, parts, deadline)
     # The buffer goes before the job is settled, which may retry for half a minute.
-    del body
-    if failed is not None:
+    del parts
+    if failure is not None:
         # Written to the job: a capture that recorded and never appeared must say why.
-        logger.error("Capture %s: upload to %s failed: %s", state.id, state.storage_path, failed)
-        _settle_failure(state, "upload to %s failed: %s" % (state.storage_path, failed),
-                        uploaded=True)
+        logger.error("Capture %s: %s", state.id, failure)
+        _settle_failure(state, failure, uploaded=True, deadline=deadline)
         return
 
     manifest = _manifest(state, stop)
@@ -548,26 +581,200 @@ def _finish(state, reason, stop=None):
             "p_size_bytes": size,
             "p_message_count": state.count,
             "p_manifest": manifest,
-        })
+        }, deadline)
     except Exception as err:
         if _code(err) in _ENDED_ELSEWHERE:
             logger.warning(
                 "Capture %s was ended outside the recorder before it could be stored (%s). Its file "
                 "is discarded; any earlier capture of the subject is unchanged.", state.id, err)
-            _remove_unclaimed(state.subject)
+            _tidy(state.subject, deadline)
         else:
             logger.error("Capture %s: could not record the finished capture: %s", state.id, err)
-            _settle_failure(state, (
-                "the capture uploaded but could not be recorded: %s. Any earlier capture of the "
-                "subject is unchanged." % err), uploaded=True)
+            if _within(deadline) is not None:
+                message = _restart_failure("it uploaded but could not be recorded: %s" % err)
+            else:
+                message = ("the capture uploaded but could not be recorded: %s. Any earlier "
+                           "capture of the subject is unchanged." % err)
+            _settle_failure(state, message, uploaded=True, deadline=deadline)
         return
 
     # The row now names this capture's file; the one it replaced is unclaimed and goes now.
-    _remove_unclaimed(state.subject)
+    _tidy(state.subject, deadline)
     logger.info(
         "Capture %s complete (%s): %d messages, %d bytes over %.1fs, birth_captured=%s",
         state.id, reason, state.count, size, state.stopped_after, state.birth_captured,
     )
+
+
+def _upload_once(state, parts):
+    """One upload of the file to the job's own path, so it never writes over the capture it may
+    replace. Upsert, so a retried upload of the same path succeeds. A fresh reader each time: the
+    client closes the one it was given."""
+    _storage.from_(BUCKET).upload(
+        path=state.storage_path,
+        file=io.BufferedReader(_CaptureFile(parts), buffer_size=1 << 16),
+        file_options={"content-type": "application/json", "upsert": "true"},
+    )
+
+
+def _upload(state, parts, deadline=None):
+    """
+    Upload the file. Returns None once it is stored, or what the job's failure should say.
+
+    A failure another attempt can cure is tried again after each of UPLOAD_RETRY_DELAYS, and the
+    last error is the one reported. A shutdown that begins meanwhile ends the wait for one last
+    attempt inside its deadline; with a deadline given, that one attempt is all there is.
+    """
+    deadline = _within(deadline)
+    if deadline is not None:
+        return _upload_before(state, parts, deadline)
+    attempt, last = 0, None
+    for delay in UPLOAD_RETRY_DELAYS + (None,):
+        attempt += 1
+        try:
+            _upload_once(state, parts)
+            return None
+        except Exception as err:
+            last = err
+        if delay is None or not _retryable(last):
+            break
+        logger.warning("Capture %s: upload attempt %d of %d failed, trying again in %ss: %s",
+                       state.id, attempt, len(UPLOAD_RETRY_DELAYS) + 1, delay, _said(last))
+        if _pause(delay):
+            return _upload_before(state, parts, _shutdown_deadline)
+    return "upload to %s failed%s: %s" % (
+        state.storage_path, " after %d attempts" % attempt if attempt > 1 else "", _said(last))
+
+
+def _upload_before(state, parts, deadline):
+    """The shutdown's one upload attempt, in what is left before `deadline`. None, or the failure."""
+    seconds = deadline - time.monotonic() - 2 * SHUTDOWN_WRITE_SECONDS
+    if seconds < SHUTDOWN_MIN_UPLOAD_SECONDS:
+        return _restart_failure("its shutdown had no time left to upload it")
+    logger.info("Capture %s: uploading to %s before the daemon exits, with %.1fs to do it in.",
+                state.id, state.storage_path, seconds)
+    try:
+        _bounded(seconds, lambda: _upload_once(state, parts))
+    except _OutOfTime:
+        return _restart_failure("the upload to %s it tried as it shut down did not finish in the "
+                                "%.1fs it had" % (state.storage_path, seconds))
+    except Exception as err:
+        return _restart_failure("the upload to %s it tried as it shut down failed: %s"
+                                % (state.storage_path, _said(err)))
+    return None
+
+
+def _restart_failure(what):
+    """A failure written during a shutdown. It names the restart, where reconcile on the next start
+    could say only that the recording did not survive."""
+    return ("the ingestion service restarted before the recording was stored, and %s. Nothing was "
+            "stored; any earlier capture of the subject is unchanged." % what)
+
+
+def _retryable(err):
+    """
+    Whether another attempt could cure an upload's failure: no answer (refused, reset, timed out),
+    or an answer of 5xx or 429. storage3 raises its own error from httpx's, so the cause chain is
+    read, and the HTTP status wins over the one Storage put in its body.
+    """
+    try:
+        import httpx
+        transport = (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)
+    except ImportError:
+        transport = ()
+    transport += (ConnectionError, TimeoutError)
+    chain = _chain(err)
+    statuses = [s for s in map(_http_status, chain) if s is not None] \
+        or [s for s in map(_body_status, chain) if s is not None]
+    if statuses:
+        return statuses[0] == 429 or statuses[0] >= 500
+    return any(isinstance(e, transport) for e in chain)
+
+
+def _chain(err):
+    """An error and the ones it was raised from or during, outermost first."""
+    chain, seen = [], set()
+    while err is not None and id(err) not in seen:
+        seen.add(id(err))
+        chain.append(err)
+        err = err.__cause__ or err.__context__
+    return chain
+
+
+def _said(err):
+    """An upload's error as the job's failure says it. An answer storage3 could not read, such as
+    the gateway's own 503, is named by its HTTP status rather than by the parse error alone."""
+    status = next((s for s in map(_http_status, _chain(err)) if s is not None), None)
+    if status is None or _body_status(err) is not None:
+        return str(err)
+    return "HTTP %d (%s)" % (status, err)
+
+
+def _http_status(err):
+    """The status of the HTTP response an error carries (httpx.HTTPStatusError), or None."""
+    code = getattr(getattr(err, "response", None), "status_code", None)
+    return code if isinstance(code, int) else None
+
+
+def _body_status(err):
+    """The status Storage wrote in its answer's body (storage3's StorageApiError.status), or None."""
+    try:
+        return int(getattr(err, "status", None))
+    except (TypeError, ValueError):
+        return None
+
+
+def _pause(seconds):
+    """Wait between attempts. True when a shutdown has begun, which ends the wait at once."""
+    return _stopping.wait(seconds)
+
+
+class _OutOfTime(Exception):
+    """A shutdown's step that did not return in the time it had."""
+
+
+def _bounded(seconds, fn):
+    """
+    fn() on a thread of its own, waited for at most `seconds`: its result, its exception, or
+    _OutOfTime. A step left running is abandoned to the process exit, which is moments away.
+    """
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as err:  # noqa: BLE001 -- handed to the caller below
+            box["error"] = err
+
+    thread = threading.Thread(target=run, name="capture-shutdown", daemon=True)
+    thread.start()
+    thread.join(max(seconds, 0.0))
+    if thread.is_alive():
+        raise _OutOfTime("did not finish in %.1fs" % max(seconds, 0.0))
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _within(deadline):
+    """The deadline a step must meet: the one given, or a shutdown's once one has begun, or None."""
+    if deadline is not None:
+        return deadline
+    return _shutdown_deadline if _stopping.is_set() else None
+
+
+def _tidy(subject, deadline=None):
+    """_remove_unclaimed() under one subject. A shutdown gives it only the time left, and the hourly
+    sweep deletes what it leaves."""
+    deadline = _within(deadline)
+    if deadline is None:
+        _remove_unclaimed(subject)
+        return
+    try:
+        _bounded(deadline - time.monotonic(), lambda: _remove_unclaimed(subject))
+    except _OutOfTime:
+        logger.info("Capture: no time before the exit to delete the files under %s/ that nothing "
+                    "refers to; the hourly sweep does.", subject)
 
 
 def _nothing_recorded(state):
@@ -625,30 +832,42 @@ def _code(err):
     return str(getattr(err, "code", "") or "")
 
 
-def _call(name, args):
-    """One gate call, retried with backoff. A refusal saying the job ended elsewhere is not."""
+def _call(name, args, deadline=None):
+    """
+    One gate call, retried with backoff. A refusal saying the job ended elsewhere is not. Inside a
+    shutdown it is tried once, for at most SHUTDOWN_WRITE_SECONDS and never past the deadline.
+    """
     for delay in TERMINAL_RETRY_DELAYS + (None,):
+        within = _within(deadline)
+        if within is not None:
+            seconds = min(SHUTDOWN_WRITE_SECONDS, within - time.monotonic())
+            return _bounded(seconds, lambda: _supabase.rpc(name, args).execute())
         try:
             return _supabase.rpc(name, args).execute()
         except Exception as err:
             if delay is None or _code(err) in _ENDED_ELSEWHERE:
                 raise
             logger.warning("Capture: %s failed, trying again in %ss: %s", name, delay, err)
-            time.sleep(delay)
+            _pause(delay)
     return None
 
 
-def _settle_failure(state, message, uploaded=False):
+def _settle_failure(state, message, uploaded=False, deadline=None):
     """
     Record the job as failed. Returns True once written.
 
     When even the retries fail the job is kept in `_unsettled`, and the loop retries it before
-    claiming anything else; Stop on the page ends it meanwhile once its progress is stale.
+    claiming anything else; Stop on the page ends it meanwhile once its progress is stale. Inside a
+    shutdown there is one attempt, and a job it cannot write is failed by the next start's reconcile.
     """
     global _unsettled
     try:
-        _call("ingest_fail_capture", {"p_job_id": state.id, "p_error": message})
+        _call("ingest_fail_capture", {"p_job_id": state.id, "p_error": message}, deadline)
     except Exception as err:
+        if _within(deadline) is not None:
+            logger.error("Capture %s: could not record its failure before the daemon exits (%s); "
+                         "the next start fails it as abandoned. It was: %s", state.id, err, message)
+            return False
         logger.error(
             "Capture %s: could not record its failure (%s); trying again every %.0fs. Until then "
             "the job reads as recording and no other capture can start.",
@@ -659,7 +878,7 @@ def _settle_failure(state, message, uploaded=False):
     logger.warning("Capture %s failed: %s", state.id, message)
     if uploaded:
         # Its file is unclaimed now the job is not RECORDING.
-        _remove_unclaimed(state.subject)
+        _tidy(state.subject, deadline)
     return True
 
 
@@ -768,8 +987,9 @@ def _discard(state, answer):
 
 
 def _loop():
-    global _active, _next_sweep
-    while True:
+    """The worker thread. It ends once a shutdown has begun, which then owns the job in flight."""
+    global _next_sweep, _resweep_at
+    while not _stopping.is_set():
         if _unsettled is not None:
             time.sleep(UNSETTLED_RETRY_SECONDS)
             settle_unsettled()
@@ -777,6 +997,9 @@ def _loop():
 
         state = _active
         if state is None:
+            if _resweep_at is not None and time.monotonic() >= _resweep_at:
+                ran = reconcile(_supabase)
+                _resweep_at = None if ran else time.monotonic() + UNSETTLED_RETRY_SECONDS
             if time.monotonic() >= _next_sweep:
                 _next_sweep = sweep()
             row = _claim()
@@ -790,23 +1013,88 @@ def _loop():
         try:
             outcome = _tick(state)
         except Exception as err:
-            # A bug in the tick must not take ingestion down, nor leave a job counting for ever.
-            logger.error("Capture %s: progress loop error: %s", state.id, err, exc_info=True)
-            _active = None
-            _settle_failure(state, "progress loop error: %s" % err)
-            continue
+            outcome = ("error", err)
+        if outcome is not None:
+            _end(state, outcome)
 
-        if outcome is None:
-            continue
-        if outcome[0] == "discard":
-            _discard(state, outcome[1])
-            continue
+
+def _end(state, outcome):
+    """Act on a tick's outcome, unless a shutdown has begun: then the shutdown finishes the job."""
+    global _active, _finishing_state
+    with _finishing:
+        if _stopping.is_set() or _active is not state:
+            return
+        _finishing_state = state
         try:
-            _finish(state, outcome[1], outcome[2])
+            if outcome[0] == "discard":
+                _discard(state, outcome[1])
+            elif outcome[0] == "error":
+                # A bug in the tick must not take ingestion down, nor leave a job counting for ever.
+                logger.error("Capture %s: progress loop error: %s", state.id, outcome[1],
+                             exc_info=outcome[1])
+                _active = None
+                _settle_failure(state, "progress loop error: %s" % outcome[1])
+            else:
+                try:
+                    _finish(state, outcome[1], outcome[2])
+                except Exception as err:
+                    logger.error("Capture %s: finalise error: %s", state.id, err, exc_info=True)
+                    _active = None
+                    _settle_failure(state, "finalise error: %s" % err, uploaded=True)
+        finally:
+            _finishing_state = None
+
+
+def begin_shutdown(deadline):
+    """
+    The daemon is shutting down and must be done by `deadline` (time.monotonic()). From now the
+    worker claims and finishes nothing itself. A recording in flight goes on recording what still
+    arrives until finish_on_shutdown(); an upload waiting to be retried makes its last attempt now.
+    """
+    global _shutdown_deadline
+    _shutdown_deadline = deadline
+    _stopping.set()
+
+
+def finish_on_shutdown():
+    """
+    Store the recording in flight as Stop would, with one upload attempt in the time the shutdown
+    has left. Returns True when a job was finished here. With nothing recording, nothing changes.
+
+    A job this cannot store is FAILED with a message that names the restart.
+    """
+    global _active
+    if _shutdown_deadline is None:
+        begin_shutdown(time.monotonic())
+    deadline = _shutdown_deadline
+    # The worker may be storing a recording of its own: wait for it, leaving time to fail it.
+    if not _finishing.acquire(timeout=max(deadline - time.monotonic() - SHUTDOWN_WRITE_SECONDS, 0)):
+        state = _finishing_state
+        if state is not None:
+            _settle_failure(state, _restart_failure(
+                "its upload was still running when the shutdown's time ran out"),
+                uploaded=True, deadline=deadline)
+        return False
+    try:
+        state = _active
+        if state is None:
+            if _unsettled is not None:
+                settle_unsettled()
+            return False
+        stop = state.cap_code or (STOP_DURATION if state.elapsed >= state.max_seconds
+                                  else STOP_RESTART)
+        logger.info("Capture %s: the daemon is shutting down, so the recording stops here.",
+                    state.id)
+        try:
+            _finish(state, "stopped by a restart", stop, deadline)
         except Exception as err:
             logger.error("Capture %s: finalise error: %s", state.id, err, exc_info=True)
             _active = None
-            _settle_failure(state, "finalise error: %s" % err, uploaded=True)
+            _settle_failure(state, _restart_failure("its finish failed: %s" % err),
+                            uploaded=True, deadline=deadline)
+        return True
+    finally:
+        _finishing.release()
 
 
 def reconcile(supabase):
@@ -826,7 +1114,9 @@ def reconcile(supabase):
     has no say over, and this lost that race. ingestion.py's startup healer retries until this
     returns True, and the boolean is how it knows.
 
-    IDEMPOTENT, so retrying costs nothing: sweeping an empty set of abandoned jobs is a no-op.
+    IDEMPOTENT, so retrying costs nothing: sweeping an empty set of abandoned jobs is a no-op. It
+    spares a job another daemon may still be storing, so the idle loop sweeps once more after
+    RESWEEP_AFTER_SECONDS.
     """
     try:
         res = supabase.rpc("ingest_reconcile_capture_jobs", {}).execute()
@@ -856,11 +1146,12 @@ def start(supabase, rebirth=None):
     `request_node_rebirth` would be a cycle -- and the callable keeps this module testable without
     a broker, a database or the daemon's module-level clients.
     """
-    global _supabase, _storage, _rebirth
+    global _supabase, _storage, _rebirth, _resweep_at
     _supabase = supabase
     _storage = _storage_client()
     _rebirth = rebirth
     reconciled = reconcile(supabase)
+    _resweep_at = time.monotonic() + RESWEEP_AFTER_SECONDS
     threading.Thread(target=_loop, name="capture-worker", daemon=True).start()
     logger.info(
         "Capture worker running: polling for queued jobs every %.0fs, reporting progress every "

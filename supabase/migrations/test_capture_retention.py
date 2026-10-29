@@ -735,13 +735,16 @@ class ASweptJobSaysWhetherItStarted(Base):
 
     def test_a_queued_job_never_started(self):
         job_id, _ = self._job(status="PENDING")
+        # Queued before the sweep's 45 s spare, as a job left by a daemon that has gone is.
+        self.cur.execute("UPDATE public.capture_jobs SET created_at = now() - interval '1 minute' "
+                         "WHERE id = %s;", (job_id,))
         self.assertEqual(self.reconcile(), 1)
         error = self._row("SELECT error FROM public.capture_jobs WHERE id = %s;", (job_id,))[0]
         self.assertIn("never started", error)
         self.assertNotIn("did not survive", error)
 
     def test_a_recording_job_did_not_survive(self):
-        job_id, _ = self._job(status="RECORDING")
+        job_id, _ = self._job(status="RECORDING", started_ago=600, elapsed=40)
         self.assertEqual(self.reconcile(), 1)
         error = self._row("SELECT error FROM public.capture_jobs WHERE id = %s;", (job_id,))[0]
         self.assertIn("did not survive", error)

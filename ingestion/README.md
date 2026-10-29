@@ -767,8 +767,8 @@ violations), `birth_captured`, `uses_aliases`, the topic count, the observed rat
 captured device without pulling up to 100 MiB into a browser to populate a select. The metric names
 leave out Sparkplug plumbing (`bdSeq`, `Node Control/*`, `Device Control/*`) and the identity
 metrics, which are not the machine's. `stop_reason` (`duration`, `operator`, `message_cap`,
-`size_cap`), `duration_ms` and `requested_seconds` say whether the recording ran the window it was
-asked for or a cap cut it short, which the panel shows. A capture
+`size_cap`, `restart`), `duration_ms` and `requested_seconds` say whether the recording ran the
+window it was asked for or a cap or a restart cut it short, which the panel shows. A capture
 recorded before them falls back to reading the file, which is slower and correct. The browser fills
 a manifest for uploads on the pass that already validates the file, so an uploaded capture does not
 read as broken beside a recorded one.
@@ -795,9 +795,28 @@ recording or an upload, issuing a download link, deleting a capture, and startin
 playback. `CAPTURE_RECORDED` is the daemon's own row, naming the person who asked for the
 recording. Deleting a gateway or device writes a `CAPTURE_DELETED` row for each capture it takes.
 
-**Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a restart
+**A failed upload is tried again.** An upload that got no answer (refused, reset or timed out), or
+an answer of 5xx or 429, is tried four times in all, 2, 4 and 8 seconds apart, and the job fails
+with the last error. Any other refusal fails it at once, since it would be refused again. Every
+attempt presents the same key: the daemon reads `SUPABASE_INGESTION_KEY` once, at start, and has no
+way to mint a fresh one.
+
+**A planned restart stores the recording.** On SIGTERM the recording stops as **Stop** stops it,
+goes on taking what arrives while the daemon receives until quiet, and makes one upload attempt with
+what the shutdown has left ([the shutdown's order](#the-primary-host-and-the-state-every-gateway-watches)).
+Its `stop_reason` is `restart`, unless a cap had already ended it. An upload waiting to be retried
+makes its last attempt then. A job the shutdown cannot store is `FAILED` with a message that says
+the ingestion service restarted. A rollout stops the old pod before the new one starts (`Recreate`).
+A pod deleted by hand, or evicted, is replaced at once, so the old daemon may still be storing the
+recording when the new one starts. The new one's sweep (below) leaves that job alone.
+
+**Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a daemon killed
 mid-capture leaves a row counting down forever and a card that never clears. A `PENDING` job swept
-the same way says it never started.
+the same way says it never started. The sweep (`ingest_reconcile_capture_jobs()`) takes only what
+has gone quiet: a recording that has not reported for 45 seconds, longer than the pod's 30 s grace
+period, and a job queued before that. Another daemon may still be storing a younger one as it shuts
+down. So the worker sweeps again a minute after it starts (`RESWEEP_AFTER_SECONDS`), and fails what
+nothing stored.
 
 **A job never drops out of the daemon's sight.** Finalise and the failure write are each retried with
 backoff (1, 2, 4, 8 and 16 seconds). A failure that still cannot be written is kept, and the worker
@@ -1926,7 +1945,14 @@ goes on reading. In order:
    none has arrived for `TELEMETRY_SHUTDOWN_QUIET_SECONDS` (0.5 s), at most
    `TELEMETRY_SHUTDOWN_RECEIVE_SECONDS` (5 s), and logs a warning if the stream never went quiet.
 3. **Stop the network loop**, then drain the historian writer for up to
-   `TELEMETRY_SHUTDOWN_DRAIN_SECONDS`, then exit.
+   `TELEMETRY_SHUTDOWN_DRAIN_SECONDS`.
+4. **Store a capture in flight**, last, in what is left of `TERMINATION_GRACE_SECONDS` (30), the
+   pod's termination grace period ([Recording from the dashboard](#recording-from-the-dashboard)).
+   Then exit. At every bound above the capture has at least 14 s: the 30 s less 1 s kept for the
+   exit, the 2 s acknowledgement, 5 s of receiving and 8 s of draining. Its one upload attempt has
+   12 s of it, and the job's two writes 1 s each. Usually the stream goes quiet and the queue
+   drains well inside their bounds, and the upload has the time they leave. The chart sets no
+   `terminationGracePeriodSeconds`, so the pod has Kubernetes' 30 s: change the two together.
 
 No `DISCONNECT` is sent. Sparkplug makes it optional after the death message
 (`tck-id-operational-behavior-host-application-disconnect-intentional`), and without one the broker
@@ -2150,6 +2176,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `TELEMETRY_SHUTDOWN_RECEIVE_SECONDS` | `5` | After the death certificate on a SIGTERM, how long the daemon may go on receiving what edge nodes sent before they heard it — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches) |
 | `TELEMETRY_SHUTDOWN_QUIET_SECONDS` | `0.5` | It stops receiving sooner once no message has arrived for this long |
 | `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM then waits for the writer's queue to drain. The three, with the 2 s death certificate, stay inside the pod's 30 s termination grace period |
+| `TERMINATION_GRACE_SECONDS` | `30` | The pod's termination grace period, which a shutdown's steps share; a capture in flight is stored in what they leave. It must match the pod's `terminationGracePeriodSeconds`, which the chart leaves at Kubernetes' 30 |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |

@@ -50,6 +50,10 @@ logger = get_logger("ingestion")
 # NO DEFAULT. See the header: an unset host id is refused, not guessed.
 PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
 
+# How long a shutdown waits for the broker to acknowledge the death certificate. The first step of
+# the shutdown, inside the pod's termination grace period.
+OFFLINE_ACK_SECONDS = 2
+
 # The subtree the broker's `gateway` role grants read on. A host id carrying `/`, `+` or `#` would
 # publish outside the single level the ACL grant and every subscriber assume.
 _FORBIDDEN = ("/", "+", "#")
@@ -158,7 +162,7 @@ def announce_offline(client, connected_at_ms, host_id=PRIMARY_HOST_ID, now_ms=No
         info = client.publish(topic, payload=state_payload(False, stamp), qos=1, retain=True)
         # The network thread delivers the PUBACK. Bounded: a broker that has already gone is why
         # this cannot raise, and the will covers a publish that never left.
-        info.wait_for_publish(timeout=2)
+        info.wait_for_publish(timeout=OFFLINE_ACK_SECONDS)
         acknowledged = bool(info.is_published())
         logger.info("Sparkplug primary host '%s' is OFFLINE (retained on %s%s).", host_id, topic,
                     "" if acknowledged else "; not yet acknowledged, the will follows on exit")

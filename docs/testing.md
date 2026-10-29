@@ -183,9 +183,11 @@ python ingestion/test_playback_session.py
 # devices publishes live from the suite. A gateway capture of both replays under both lanes; a
 # duration cap ends a job and the manifest says so; an edge node that ignores the rebirth request
 # is recorded with no birth, and its replay is refused having published nothing; Stop ends a replay
-# CANCELLED within seconds; and each worker is ended mid-job with kubectl (the playback pod deleted
-# with a one-second grace, ingestion by `rollout restart`): the job fails, the Playback gateway's
-# Will marks it OFFLINE, the stored capture is kept, and the next capture records. The restarts
+# CANCELLED within seconds; and each worker is ended mid-job with kubectl. The playback pod is
+# deleted with a one-second grace: its job fails and the Playback gateway's Will marks it OFFLINE.
+# The ingestion pod is deleted with its own grace, as an eviction does, its replacement starting at
+# once: the daemon stores the recording cut short by the restart, the replacement's startup sweep
+# leaves the job alone, and the next capture records. The restarts
 # skip, saying why, without kubectl and the k3d-aber context (ABER_KUBE_CONTEXT names another);
 # restarting ingestion pauses it for the whole stack. It also runs the broker-captures policies on
 # the real storage.objects, in a rolled-back transaction: the daemon reaches its recording and what

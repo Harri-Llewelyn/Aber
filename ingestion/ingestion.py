@@ -128,6 +128,12 @@ TELEMETRY_SHUTDOWN_DRAIN_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_DRAIN_SEC
 # death certificate's acknowledgement, inside the pod's 30 s termination grace period.
 TELEMETRY_SHUTDOWN_RECEIVE_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_RECEIVE_SECONDS", "5"))
 TELEMETRY_SHUTDOWN_QUIET_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_QUIET_SECONDS", "0.5"))
+# The pod's termination grace period, which every step of a shutdown shares; a capture in flight
+# is stored last, in what is left. The chart sets no terminationGracePeriodSeconds, so this is
+# Kubernetes' default: change the two together.
+TERMINATION_GRACE_SECONDS = float(os.getenv("TERMINATION_GRACE_SECONDS", "30"))
+# Kept back from the grace period for the kubelet's delay in signalling, and the exit itself.
+SHUTDOWN_EXIT_MARGIN_SECONDS = 1.0
 
 # Seconds between directory refresh passes (see refresh_directory_caches). 0 disables the thread
 # and every cache miss costs a round trip, as it did before the thread existed.
@@ -3062,8 +3068,13 @@ def _receive_until_quiet(max_seconds=None, quiet_seconds=None):
 def _drain_and_exit(client, signum):
     """
     The shutdown: say this host is going, take in what edge nodes sent before they heard it, write
-    what was accepted, then exit. On the main thread, with the network thread still running.
+    what was accepted, store a capture in flight, then exit. On the main thread, with the network
+    thread still running.
     """
+    # The grace period runs from the signal. A capture stops claiming and retrying now, and goes on
+    # recording what still arrives.
+    capture_worker.begin_shutdown(
+        time.monotonic() + TERMINATION_GRACE_SECONDS - SHUTDOWN_EXIT_MARGIN_SECONDS)
     # FIRST. A buffering edge node stops publishing and keeps its readings from the moment it hears
     # this, so everything it sent before then must still be received.
     if client is not None and _primary_host_timestamp_ms is not None:
@@ -3086,6 +3097,9 @@ def _drain_and_exit(client, signum):
             "Historian writer did not drain within %.0fs; %d message(s) lost.",
             TELEMETRY_SHUTDOWN_DRAIN_SECONDS, _writer.depth(),
         )
+    # Last, in what the grace period has left: the telemetry already accepted comes first. At the
+    # bounds above that is the grace less the death certificate's, receive and drain bounds.
+    capture_worker.finish_on_shutdown()
     logging.shutdown()
     os._exit(0)
 

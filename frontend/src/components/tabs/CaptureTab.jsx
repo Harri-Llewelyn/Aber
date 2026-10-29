@@ -1264,6 +1264,11 @@ const STOP_REASONS = {
     label: 'Cut short by the size cap',
     title: 'The recording reached its size cap before the length asked for was up, so the rest of that window is not in it.',
     cutShort: true
+  },
+  restart: {
+    label: 'Cut short by a restart',
+    title: 'The ingestion service restarted before the length asked for was up. It stored what it had recorded, so the rest of that window is not in it.',
+    cutShort: true
   }
 }
 

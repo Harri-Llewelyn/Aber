@@ -13,7 +13,8 @@ because what the broker acts on is the wire:
   * THE SUBSCRIPTION IS QoS 1, which the specification leaves open for a host application.
   * THE SHUTDOWN publishes the death certificate FIRST, keeps receiving until the stream goes quiet
     (what edge nodes sent before they heard it), then stops the network loop with no DISCONNECT,
-    then drains the writer. A shutdown that stopped reading first lost what was already on its way:
+    then drains the writer, then stores a capture in flight. A shutdown that stopped reading first
+    lost what was already on its way:
     96 messages at 50 msg/s on the dev cluster, the two seconds the old signal handler spent
     blocking the loop while it waited for an acknowledgement that loop had to deliver.
 """
@@ -182,14 +183,19 @@ class SubscriptionTest(unittest.TestCase):
 
 
 class ShutdownTest(unittest.TestCase):
-    def run_shutdown(self, client, events):
+    def run_shutdown(self, client, events, capture_events=None):
         writer = mock.MagicMock()
         writer.stop.side_effect = lambda *_: events.append(("drain",)) or True
         writer.depth.return_value = 0
+        capture_events = [] if capture_events is None else capture_events
         # announce_offline's host id is a default bound at import, empty in a test environment.
         with mock.patch.object(ingestion, "_primary_host_timestamp_ms", 1), \
                 mock.patch.object(primary_host.announce_offline, "__defaults__", (HOST_ID, None)), \
                 mock.patch.object(ingestion, "_writer", writer), \
+                mock.patch.object(ingestion.capture_worker, "begin_shutdown",
+                                  lambda deadline: capture_events.append(("capture_stops", deadline))), \
+                mock.patch.object(ingestion.capture_worker, "finish_on_shutdown",
+                                  lambda: capture_events.append(("capture_stored",))), \
                 mock.patch.object(ingestion, "TELEMETRY_SHUTDOWN_RECEIVE_SECONDS", 2.0), \
                 mock.patch.object(ingestion, "TELEMETRY_SHUTDOWN_QUIET_SECONDS", 0.2), \
                 mock.patch.object(ingestion.logging, "shutdown"), \
@@ -206,6 +212,35 @@ class ShutdownTest(unittest.TestCase):
             self.run_shutdown(client, events)
         self.assertEqual(events, [("publish", STATE_TOPIC), ("loop_stop",), ("drain",)])
         client.disconnect.assert_not_called()
+
+    def test_a_capture_stops_claiming_at_once_and_is_stored_last_inside_the_grace_period(self):
+        """
+        Telemetry first: the recording goes on through the receive window and is stored after the
+        drain, by a deadline the grace period sets from the signal.
+        """
+        events = []
+        client = mock.MagicMock()
+        client.publish.side_effect = lambda *a, **k: events.append(("publish", a[0])) or mock.MagicMock()
+        client.loop_stop.side_effect = lambda: events.append(("loop_stop",))
+        started = time.monotonic()
+        with mock.patch.object(ingestion, "_last_message_at", 0.0):
+            self.run_shutdown(client, events, capture_events=events)
+        self.assertEqual([e[0] for e in events],
+                         ["capture_stops", "publish", "loop_stop", "drain", "capture_stored"])
+        deadline = events[0][1]
+        grace = ingestion.TERMINATION_GRACE_SECONDS - ingestion.SHUTDOWN_EXIT_MARGIN_SECONDS
+        self.assertGreaterEqual(deadline, started + grace)
+        self.assertLess(deadline, time.monotonic() + grace)
+
+    def test_the_bounded_steps_leave_a_capture_its_upload(self):
+        """The grace period less the death certificate's, receive and drain bounds, and the exit:
+        what a capture in flight has at the least, for its upload and the job's two writes."""
+        import capture_worker
+        left = (ingestion.TERMINATION_GRACE_SECONDS - ingestion.SHUTDOWN_EXIT_MARGIN_SECONDS
+                - primary_host.OFFLINE_ACK_SECONDS - ingestion.TELEMETRY_SHUTDOWN_RECEIVE_SECONDS
+                - ingestion.TELEMETRY_SHUTDOWN_DRAIN_SECONDS)
+        upload = left - 2 * capture_worker.SHUTDOWN_WRITE_SECONDS
+        self.assertGreaterEqual(upload, capture_worker.SHUTDOWN_MIN_UPLOAD_SECONDS)
 
     def test_messages_still_arriving_after_the_death_certificate_are_received(self):
         """The loop keeps running until the stream has been quiet for the quiet window."""
