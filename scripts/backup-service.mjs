@@ -399,8 +399,10 @@ async function takeBackup(job) {
   if (GRAFANA_PATH && existsSync(GRAFANA_PATH) && statSync(GRAFANA_PATH).isDirectory()) {
     log("archiving Grafana's volume");
     // grafana.db holds every dashboard saved in the UI and every alert rule, silence and contact
-    // point made there; beside it, the plugins Grafana downloaded.
-    components.push(await archiveSqliteVolume('grafana', GRAFANA_PATH, 'grafana.db', partialDir, stamp));
+    // point made there; beside it, the plugins Grafana downloaded. The search index is rebuilt from
+    // grafana.db at start, so it is left out rather than copied while Grafana writes it.
+    components.push(await archiveSqliteVolume('grafana', GRAFANA_PATH, 'grafana.db', partialDir, stamp,
+      ['--exclude=./unified-search']));
   } else {
     log('grafana: no volume mounted; component absent');
   }

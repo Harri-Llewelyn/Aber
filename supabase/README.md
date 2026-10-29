@@ -7214,8 +7214,11 @@ The Grafana archive is Grafana's data volume (`backup.includeGrafana`, off by de
 `grafana.db` copied as the forge's `gitea.db` is. That database is the one copy of every dashboard
 saved in Grafana rather than provisioned from a file, every alert rule, silence and contact point
 made there, and the users SSO created; the chart's own dashboards and rules come back without it.
-Neither archive carries a database's journal files: a rollback journal beside the consistent copy
-would be rolled back onto it at the first open. The PVC is ReadWriteOnce, so including it pins the
+Grafana 13 keeps a saved dashboard in `grafana.db`'s `resource` table, not the older `dashboard`
+table. Its search index, `unified-search/`, is left out: Grafana rebuilds it from that table when it
+starts, and a copy taken while Grafana writes could be torn. Neither archive carries a database's
+journal files: a rollback journal beside the consistent copy would be rolled back onto it at the
+first open. The PVC is ReadWriteOnce, so including it pins the
 backup pod to Grafana's node, which is why it is opt-in as the other volumes are.
 
 The Vault key is pgsodium's root key, read through the same superuser session as the dump

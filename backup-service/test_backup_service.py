@@ -238,7 +238,8 @@ class BackupServiceTests(unittest.TestCase):
         self.assertIn("./dynamic-security.json", members)
 
         # Grafana's archive: a copy of grafana.db that passed its integrity check, with the live
-        # file's owner, and no journal beside it to roll back onto that copy at its first open.
+        # file's owner, and no journal beside it to roll back onto that copy at its first open. The
+        # search index Grafana rebuilds at start is not in it.
         if archives_grafana:
             self.assertIn("grafana=grafana-", manifest)
             grafana = next(c for c in backup["components"] if c["name"] == "grafana")
@@ -247,6 +248,7 @@ class BackupServiceTests(unittest.TestCase):
             listed = [line.split()[-1] for line in verbose.splitlines()]
             self.assertIn("grafana.db", listed)
             self.assertFalse([n for n in listed if n.startswith("./grafana.db")], listed)
+            self.assertFalse([n for n in listed if n.startswith("./unified-search")], listed)
             live_owner = service("sh", "-c", 'stat -c %u/%g "$GRAFANA_PATH/grafana.db"').strip()
             database = next(line for line in verbose.splitlines() if line.endswith(" grafana.db"))
             self.assertEqual(database.split()[1], live_owner, database)
