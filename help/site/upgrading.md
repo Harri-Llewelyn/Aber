@@ -1539,6 +1539,37 @@ From 1.8.0 the column is gone (#1090).
        WHERE btrim(grafana_url) <> '' AND NOT btrim(grafana_url) ~ '^https?://' ORDER BY name;"
   ```
 
+### From 1.8.0, a backup can include Grafana's saved dashboards
+
+A dashboard saved in Grafana is kept in Grafana's own database and nowhere else. That covers a copy
+of a platform dashboard, and any dashboard made there. Alert rules, silences and contact points made
+in Grafana are kept there too. From 1.8.0 a backup can include that database. It is off by default,
+so the upgrade changes nothing until you turn it on.
+
+To turn it on, set it in `site.yaml`, then run `helm upgrade` with the same values:
+
+```yaml
+backup:
+  includeGrafana: true
+```
+
+It needs the backup service (`backupService.enabled`) and Grafana's volume
+(`grafana.persistence.enabled`, on by default). Then take a backup on the **Backups** page. Its
+**Holds** column names **Grafana**.
+
+**On a cluster of more than one node, the backup service must then run on Grafana's node.** Grafana's
+volume can be attached to one node at a time, so the backup service is placed beside it. If it
+cannot be, it stays Pending and takes no backups. That is why the setting is off by default. Check
+that it started:
+
+```bash
+kubectl -n aber rollout status deploy/backup-service
+```
+
+If it stays Pending, turn the setting off again. Grafana's volume is then on another node than a
+volume the backup already includes. Restoring Grafana's volume is one step of the runbook in
+[`supabase/README.md`](../../supabase/README.md), *Backup and Recovery*.
+
 ---
 
 ## Backups

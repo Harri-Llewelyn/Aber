@@ -5,8 +5,10 @@
 {{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
 {{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
 {{- $includeBroker := and .Values.backup.includeBroker .Values.mosquitto.enabled -}}
-{{- /* The forge's and the broker's volumes hold files other uids own at 0600: root reads them. */ -}}
-{{- $asRoot := or $includeForge $includeBroker -}}
+{{- $includeGrafana := and .Values.backup.includeGrafana .Values.grafana.enabled .Values.grafana.persistence.enabled -}}
+{{- /* The forge's, the broker's and Grafana's volumes hold files other uids own, some at 0600:
+       root reads them. */ -}}
+{{- $asRoot := or $includeForge $includeBroker $includeGrafana -}}
 {{- $brokerClaim := .Values.mosquitto.persistence.existingClaim | default (printf "%s-mosquitto-data" $fullname) -}}
 {{- $ca := .Values.backup.ca -}}
 {{- $includeCa := and $ca.secretName $ca.namespace -}}
@@ -17,9 +19,9 @@ The backup service: a backup_jobs row (0101) becomes a tier 1 backup on the back
 Replaces the CronJob when enabled (backup-cronjob.yaml renders the PVC alone): the schedule moves
 into pg_cron, registered by the service on backup.schedule, and a backup an Administrator asks
 for on the Backups page runs the same way. Both dumps as their superusers, the storage objects,
-the forge, the broker's data volume (its Dynamic Security document) and the internal CA's key
-pair, one directory per backup, manifest included; retention from backup.retentionDays for
-scheduled backups, and a requested one is pinned until released.
+the forge, the broker's data volume (its Dynamic Security document), Grafana's data volume and
+the internal CA's key pair, one directory per backup, manifest included; retention from
+backup.retentionDays for scheduled backups, and a requested one is pinned until released.
 
 THE CA IS A SECRET IN ANOTHER NAMESPACE (the ClusterIssuer's; deploy/k8s/internal-ca.yaml keeps
 it in cert-manager's), so it is read through the API rather than mounted: a ServiceAccount, and a
@@ -34,10 +36,10 @@ NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the po
 the PVC unencrypted: the off-site copy, when the Backups page sets a destination, is each file
 encrypted with age to the operator's public key. Restore is the runbook in supabase/README.md.
 
-CO-LOCATION. The storage PVC and the forge's are ReadWriteOnce, so including either requires this
-pod on that pod's node -- the same podAffinity the CronJob carries, and required rather than
-preferred for the same reason. Including both on a cluster where those two pods are on different
-nodes leaves this one Pending, which is the honest outcome; the values file says so.
+CO-LOCATION. The storage, forge, broker and Grafana PVCs are ReadWriteOnce, so including any
+requires this pod on that pod's node -- the same podAffinity the CronJob carries, and required
+rather than preferred for the same reason. Including two on a cluster where those pods are on
+different nodes leaves this one Pending, which is the honest outcome; the values file says so.
 =================================================================================================
 */}}
 apiVersion: apps/v1
@@ -68,13 +70,13 @@ spec:
       serviceAccountName: {{ printf "%s-backup-service" $fullname }}
       automountServiceAccountToken: false
       {{- end }}
-      {{- if or $includeStorage $includeForge $includeBroker }}
+      {{- if or $includeStorage $includeForge $includeBroker $includeGrafana }}
       {{/*
-        The storage, forge and broker volumes are ReadWriteOnce, so this pod has to sit on their
-        node. ONE term naming every component it follows: two required terms, one per component,
-        leave the pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a single
-        node where both run, measured 2026-09-12. A node-bound volume (local-path) pins the pod as
-        well; this is what carries the intent where the storage class does not.
+        The storage, forge, broker and Grafana volumes are ReadWriteOnce, so this pod has to sit on
+        their node. ONE term naming every component it follows: two required terms, one per
+        component, leave the pod Pending on k3s v1.35 ("didn't match pod affinity rules") even on a
+        single node where both run, measured 2026-09-12. A node-bound volume (local-path) pins the
+        pod as well; this is what carries the intent where the storage class does not.
       */}}
       affinity:
         podAffinity:
@@ -97,12 +99,15 @@ spec:
                       {{- if $includeBroker }}
                       - mosquitto
                       {{- end }}
+                      {{- if $includeGrafana }}
+                      - grafana
+                      {{- end }}
       {{- end }}
       {{/*
-        The image's postgres user, unless the service archives the forge or the broker: then root,
-        with DAC_OVERRIDE below. As 100, fsGroup `Always`, not OnRootMismatch: a backup directory
-        written as root (by 1.2.0, or while either volume was included) is pruned as 100 only once
-        the kubelet has given group 101 write on everything in it, at every start.
+        The image's postgres user, unless the service archives the forge, the broker or Grafana:
+        then root, with DAC_OVERRIDE below. As 100, fsGroup `Always`, not OnRootMismatch: a backup
+        directory written as root (by 1.2.0, or while one of those volumes was included) is pruned
+        as 100 only once the kubelet has given group 101 write on everything in it, at every start.
       */}}
       securityContext:
         {{- if $asRoot }}
@@ -156,6 +161,11 @@ spec:
               value: {{ ternary "/forge" "" $includeForge | quote }}
             - name: BROKER_PATH
               value: {{ ternary "/broker" "" $includeBroker | quote }}
+            {{- /* Absent while off, as before the component existed: no /grafana is mounted then. */}}
+            {{- if $includeGrafana }}
+            - name: GRAFANA_PATH
+              value: /grafana
+            {{- end }}
             # Both empty disables the component; the manifest records its absence.
             - name: CA_SECRET_NAME
               value: {{ ternary $ca.secretName "" (not (not $includeCa)) | quote }}
@@ -177,8 +187,13 @@ spec:
             capabilities:
               drop: ["ALL"]
               {{- if $asRoot }}
+              {{- if or $includeForge $includeBroker }}
               # Archives the forge's and the broker's volumes, whose files belong to uids 1000 and
               # 1883, some at 0600.
+              {{- end }}
+              {{- if $includeGrafana }}
+              # Archives Grafana's volume, whose files belong to uid 472.
+              {{- end }}
               add: ["DAC_OVERRIDE"]
               {{- end }}
           resources:
@@ -203,6 +218,11 @@ spec:
             {{- if $includeBroker }}
             - name: broker
               mountPath: /broker
+              readOnly: true
+            {{- end }}
+            {{- if $includeGrafana }}
+            - name: grafana
+              mountPath: /grafana
               readOnly: true
             {{- end }}
             {{- if $includeCa }}
@@ -235,6 +255,12 @@ spec:
         - name: broker
           persistentVolumeClaim:
             claimName: {{ $brokerClaim }}
+            readOnly: true
+        {{- end }}
+        {{- if $includeGrafana }}
+        - name: grafana
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-grafana" $fullname }}
             readOnly: true
         {{- end }}
         {{- if $includeCa }}

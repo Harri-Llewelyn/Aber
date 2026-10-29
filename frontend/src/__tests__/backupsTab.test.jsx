@@ -41,7 +41,7 @@ vi.mock('../hooks/usePolling', () => ({ usePolling: vi.fn() }))
 
 import { api } from '../api'
 import { expectCardHeading, pageToolbar } from '../test/cardHeading'
-import { getByTooltip } from '../test/tooltips'
+import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
@@ -149,6 +149,18 @@ describe('the list of runs', () => {
     // Only a pinned backup can be released.
     expect(pinned.querySelector('button')).toHaveTextContent('Release')
     expect(scheduled.querySelector('button')).toBeNull()
+  })
+
+  it('names Grafana among what a backup holds, and on its file in the run\'s panel', async () => {
+    const grafana = { name: 'grafana', file: 'grafana-20260911T143000Z.tar.gz', size_bytes: 2048, sha256: 'd' }
+    serveRuns([{ ...PINNED, backup: { ...PINNED_BACKUP, components: [...PINNED_BACKUP.components, grafana] } }])
+    renderTab()
+    const row = await screen.findByTestId('run-j-1')
+    expect(row).toHaveTextContent('platform database, historian, forge, Grafana')
+    fireEvent.click(within(row).getByText('On request'))
+    const file = [...panel().querySelectorAll('.backup-files li')].find(li => li.textContent.startsWith('grafana-'))
+    expect(file).toHaveTextContent('grafana-20260911T143000Z.tar.gz2.0 KiB')
+    expect(tooltipOf(file)).toBe('Grafana')
   })
 
   it('lists a failed run with its status and the reason the service gave', async () => {
@@ -880,6 +892,8 @@ describe('asking', () => {
 
     const modal = openDialog()
     expect(modal).toHaveTextContent(/pinned/)
+    // Every component, Grafana by its name.
+    expect(modal).toHaveTextContent('the forge, the broker accounts, Grafana and the internal CA')
     fireEvent.change(within(modal).getByLabelText('Note (optional)'), { target: { value: '  pre-upgrade  ' } })
     fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
 

@@ -4779,6 +4779,36 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 169. Every component the backup service writes has a label on the Backups page and is named in
+// 0001's backups.components comment, and neither names one it does not write. Without a label the
+// page shows the bare name, and its Take a backup dialog leaves the component out.
+// -------------------------------------------------------------------------------------------------
+{
+  const service = read('scripts/backup-service.mjs');
+  const written = new Set([
+    ...[...service.matchAll(/\b(?:dumpDatabase|tarDirectory|archiveSqliteVolume)\('([a-z-]+)'/g)].map((m) => m[1]),
+    ...[...service.matchAll(/\bname: '([a-z-]+)'/g)].map((m) => m[1]),
+  ]);
+  const labels = /^const COMPONENT_LABELS = \{\n([\s\S]*?)\n\}/m.exec(read('frontend/src/components/tabs/BackupsTab.jsx'))?.[1] ?? '';
+  const labelled = new Set([...labels.matchAll(/^\s*'([a-z-]+)':/gm)].map((m) => m[1]));
+  const comment = /COMMENT ON COLUMN public\.backups\.components IS '[^']*?Names are ([a-z, -]+?);/
+    .exec(read('supabase/migrations/0001_baseline_schema.sql'))?.[1] ?? '';
+  const commented = new Set(comment.split(/, | and /).map((n) => n.trim()).filter(Boolean));
+  const wrong = [];
+  if (written.size < 8) wrong.push(`found ${written.size} component names in scripts/backup-service.mjs; the extraction no longer matches the file`);
+  for (const [where, names] of [['BackupsTab.jsx COMPONENT_LABELS', labelled], ["0001's backups.components comment", commented]]) {
+    if (!names.size) { wrong.push(`${where} could not be read`); continue; }
+    for (const n of written) if (!names.has(n)) wrong.push(`the backup service writes ${n}, and ${where} does not name it`);
+    for (const n of names) if (!written.has(n)) wrong.push(`${where} names ${n}, which the backup service does not write`);
+  }
+  if (wrong.length) {
+    fail(`the backup's components and the page and column comment that name them disagree:\n${wrong.map((w) => `        ${w}`).join('\n')}`);
+  } else {
+    pass(`the backup service's ${written.size} components are each labelled on the Backups page and named in backups.components' comment`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // Every humanize call in an alert summary is given a float
 //
 // `$values.B` is a struct (Labels, Value) with a String() method, so `{{ $values.B }}` prints and
@@ -5101,7 +5131,7 @@ const OPERATOR_PAIRS = [
 {
   const TEMPLATES = 'deploy/helm/aber/templates/';
   const RUNBOOK = 'deploy/k8s/README.md';
-  const ROOT_ALSO = new Map([['backup-service', 'backup.includeForge or backup.includeBroker']]);
+  const ROOT_ALSO = new Map([['backup-service', 'backup.includeForge, backup.includeBroker or backup.includeGrafana']]);
   const bad = [];
   const allow = JSON.parse(read('scripts/lint/config-allowlist.json'));
 

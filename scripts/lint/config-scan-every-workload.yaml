@@ -9,11 +9,12 @@
 # Any other value is a placeholder the chart refuses to render without.
 
 backup:
-  # Each mounts a PVC into the backup service; the forge and the broker run it as root. The backup
-  # CronJob gives way to the backup service: the third render has it, with the storage volume.
+  # Each mounts a PVC into the backup service; the forge, the broker and Grafana run it as root. The
+  # backup CronJob gives way to the backup service: the third render has it, with the storage volume.
   includeStorage: true
   includeForge: true
   includeBroker: true
+  includeGrafana: true
   ca:
     # Names the CA's Secret, which renders the Role that lets the backup service read it.
     secretName: scan-config

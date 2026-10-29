@@ -490,7 +490,7 @@ async function installChart ({ tls, e2e, holdE2e = false, networkPolicy = false 
     // everything a full backup takes; the stack lane asserts on the set of components.
     '--set', 'backup.enabled=true', '--set', 'backupService.enabled=true',
     '--set', 'backup.includeStorage=true', '--set', 'backup.includeForge=true',
-    '--set', 'backup.includeBroker=true',
+    '--set', 'backup.includeBroker=true', '--set', 'backup.includeGrafana=true',
     // The historian's physical backup, into a volume in the cluster; the stack lane asserts a full
     // backup was taken and WAL is being archived (timescaledb/test_physical_backup.py).
     '--set', 'timescaledb.physicalBackup.enabled=true', '--set', 'timescaledb.physicalBackup.repo.type=posix',

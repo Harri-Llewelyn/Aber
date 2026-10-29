@@ -1065,17 +1065,21 @@ const COMPONENT_LABELS = {
   'storage-objects': 'stored files',
   'forge': 'forge',
   'broker': 'broker accounts',
+  'grafana': 'Grafana',
   'ca': 'internal CA'
 }
 
+/** A label that is a name, which a sentence gives without "the". */
+const NAMED_COMPONENTS = new Set(['grafana'])
+
 /**
- * Every component a run writes, as a sentence fragment: "the platform database, ... and the internal
- * CA". Without the historian while pgBackRest backs it up.
+ * Every component a run writes, as a sentence fragment: "the platform database, ..., Grafana and the
+ * internal CA". Without the historian while pgBackRest backs it up.
  */
 function componentSentence(historianOn = false) {
   const names = Object.entries(COMPONENT_LABELS)
     .filter(([name]) => !(historianOn && name === 'timescaledb'))
-    .map(([, label]) => `the ${label}`)
+    .map(([name, label]) => (NAMED_COMPONENTS.has(name) ? label : `the ${label}`))
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 

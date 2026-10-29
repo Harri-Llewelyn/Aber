@@ -821,7 +821,7 @@ container gets back only the capabilities its process was shown to need, each na
 | `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
-| `backup-service` | `DAC_OVERRIDE` | Only with `backup.includeForge` or `backup.includeBroker`, when it runs as root. It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |
+| `backup-service` | `DAC_OVERRIDE` | Only with `backup.includeForge`, `backup.includeBroker` or `backup.includeGrafana`, when it runs as root. It archives the forge's, the broker's and Grafana's volumes, whose files belong to other uids, some at 0600. |
 
 Each of these is in the Pod Security Standards' *baseline* set. **Alloy is the exception to
 baseline**: it mounts the node's `/`, `/proc` and `/sys` read-only, as `hostPath` volumes, for the
@@ -923,7 +923,7 @@ together.
 | gateway-credential | 1883:1883 | the `mosquitto` pod: `assemble-config` and `gateway-credential` |
 | timescaledb | 70:70 | `timescaledb`, the `timescaledb-maintenance` Job |
 | db-init | 100:101 | the `db-init` Job |
-| backup-service | 100:101 | `backup-service`; as root with `backup.includeForge` or `backup.includeBroker` |
+| backup-service | 100:101 | `backup-service`; as root with `backup.includeForge`, `backup.includeBroker` or `backup.includeGrafana` |
 | supabase-db | root | `supabase-db`, which drops to 100:101; its sidecars run as 100:101 |
 
 Two images the chart does not run follow the same rule. The Remote gateway appliance runs as
@@ -966,8 +966,8 @@ These pods still start a container as root, each for the reason given:
   or the CronJob in its place, mounts its volume. On a `local` volume the kubelet then does not
   give it `fsGroup` (below), so objects stored as root stay root's at 0755. Started as root, as in
   1.3.0, storage-api can still add and delete beside them.
-- **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
-  uids own at 0600.
+- **`backup-service`**, with `backup.includeForge`, `backup.includeBroker` or
+  `backup.includeGrafana`: it reads files other uids own, some at 0600.
 
 **Pod Security admission.** A namespace that enforces the *restricted* level now admits every pod
 except the ones listed above. *baseline* admits every pod except Alloy, as before.
@@ -1075,6 +1075,8 @@ dumps, it holds:
 - the storage objects (`backup.includeStorage`);
 - the forge's volume (`backup.includeForge`);
 - the broker's document (`backup.includeBroker`);
+- Grafana's volume (`backup.includeGrafana`): every dashboard saved in Grafana, and every alert
+  rule, silence and contact point made there;
 - the internal CA's key pair (`backup.ca`, read from its Secret in cert-manager's namespace).
 
 Retention (`backup.retentionDays`) applies to scheduled backups. A requested backup is pinned until
@@ -1460,6 +1462,7 @@ because any of these can be missing while the counts agree:
 | The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
 | The restored forge mints its machine-account token into the reinstalled Secret, a write to `gitea.db` | a forge that answers every read and refuses every write, so enrolment creates no repository |
 | The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
+| A dashboard saved in Grafana before the backup is back under its title, and not as a provisioned one | every dashboard an operator saved in Grafana gone, with the alert rules and contact points made there |
 | The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
 | The copy fetched from the bucket decrypts, matches its manifest and is the volume's byte for byte, and the restored stack copies its own backup there | a restore after losing the site starts from a copy that is incomplete, unreadable or different, or the restored Vault cannot decrypt the bucket's key |
 
@@ -1469,10 +1472,12 @@ six. The dump from the failed run is attached to it for seven days. The next per
 the actual artefact, rather than re-running and hoping it fails the same way. A weekly job nobody
 watches is the same as no job.
 
-**What it does not rehearse.** The rehearsal installs only the data layer: the two databases, the
-backup service, the forge and the broker. It switches off the application layer: frontend, Node-RED,
-i3X, ingestion, playback, the cold archive, edge functions, Grafana, Studio, Swagger, Prometheus,
-Loki, Alloy and the credential sidecar. None of them holds state a tier 1 backup carries;
+**What it does not rehearse.** The rehearsal installs the data layer: the two databases, the
+backup service, the forge and the broker. It also installs Grafana, whose volume holds the
+dashboards saved in it. Grafana's datasources point at placeholder addresses, so no panel or alert
+rule query is rehearsed. It switches off the rest of the application layer: frontend, Node-RED,
+i3X, ingestion, playback, the cold archive, edge functions, Studio, Swagger, Prometheus, Loki,
+Alloy and the credential sidecar. None of them holds state a tier 1 backup carries;
 `.github/rehearsal-values.yaml` lists each with its reason. `supabase-realtime` stays **on** although
 it holds no state. It creates `supabase_realtime_admin` on first start, and the restore refuses to
 run without that role. The internal CA (`backup.ca`) is not rehearsed either, because the rehearsal

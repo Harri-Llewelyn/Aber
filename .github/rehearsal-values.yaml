@@ -22,15 +22,22 @@ backup:
   includeStorage: true
   includeForge: true
   includeBroker: true
+  includeGrafana: true
 backupService:
   enabled: true
 
 # --- The state the backup carries, beyond the two databases --------------------------------------
-# Storage (every bucket's objects), the forge (every gateway's repository and the SSH host keys) and
-# the broker (the Dynamic Security document: every issued gateway account) are on by default and
-# stay on. The broker's credential sidecar is not needed to seed or read the document.
+# Storage (every bucket's objects), the forge (every gateway's repository and the SSH host keys),
+# the broker (the Dynamic Security document: every issued gateway account) and Grafana (its SQLite:
+# every dashboard saved in the UI) are on by default and stay on. The broker's credential sidecar is
+# not needed to seed or read the document.
 gatewayCredential:
   enabled: false
+grafana:
+  # Observability is off below, so the datasources point at addresses that resolve to nothing: the
+  # render needs both, and the rehearsal seeds and reads a dashboard, not a query.
+  prometheusUrl: http://prometheus.rehearsal.invalid:9090
+  lokiUrl: http://loki.rehearsal.invalid:3100
 
 # --- The application layer: no tier 1 state of its own -------------------------------------------
 frontend:
@@ -40,9 +47,6 @@ nodeRed:
   # by the chart, and the forge holds every gateway's flow.
   enabled: false
 i3xService:
-  enabled: false
-grafana:
-  # Grafana's PVC holds no authored state: every dashboard and rule is provisioned by the chart.
   enabled: false
 supabaseStudio:
   enabled: false
