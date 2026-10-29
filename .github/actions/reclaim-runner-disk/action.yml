@@ -5,10 +5,13 @@
 # copies in the k3d node's containerd and the pulled images do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as
 # `context deadline exceeded` on `helm install`, or as ImagePullBackOff for an imported image the
 # kubelet's image GC deleted. Removing unused toolchains frees ~22 GB.
+#
+# It also starts a sampler that keeps the least free space the job reaches; report-disk-low-water,
+# the job's last step before its teardown, prints it.
 name: Reclaim Runner Disk
 description: >-
   Delete the runner's unused toolchains, then prune Docker's images, printing the free space before
-  and after.
+  and after; then keep the job's least free space for report-disk-low-water.
 runs:
   using: composite
   steps:
@@ -30,3 +33,17 @@ runs:
         docker image prune -af || true
         echo "--- after"
         df -h / | tail -1
+
+    - name: Keep The Least Free Space
+      shell: bash
+      run: |
+        # MiB free on /, every 10 s, the minimum kept in a file; it runs until the job ends.
+        avail() { df -B1M --output=avail / | tail -1 | tr -d ' '; }
+        avail > "$RUNNER_TEMP/disk-free-at-start"
+        cp "$RUNNER_TEMP/disk-free-at-start" "$RUNNER_TEMP/disk-free-least"
+        nohup bash -c '
+          least="$1"
+          while sleep 10; do
+            now=$(df -B1M --output=avail / | tail -1 | tr -d " ")
+            [ "$now" -lt "$(cat "$least")" ] && echo "$now" > "$least"
+          done' _ "$RUNNER_TEMP/disk-free-least" > /dev/null 2>&1 &
