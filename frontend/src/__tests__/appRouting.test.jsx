@@ -6,9 +6,9 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { TABS, tabIsVisible } from '../navigation'
+import { TABS, pageTabsOf, tabIsVisible } from '../navigation'
 import { VALID_TABS } from '../constants'
-import { useAppRouting, tabFromUrl } from '../hooks/useAppRouting'
+import { MOVED_PAGES, movedUrl, useAppRouting, tabFromUrl } from '../hooks/useAppRouting'
 
 describe('the nav and the router agree', () => {
   it('accepts every tab the nav renders', () => {
@@ -100,6 +100,56 @@ describe('an unknown address', () => {
     window.history.replaceState({}, '', '/no-such-page?show_state=1')
     renderHook(() => useAppRouting())
     expect(window.location.pathname + window.location.search).toBe('/site-map')
+  })
+})
+
+/**
+ * The System page was Directory until 1.8. Bookmarks, and links in old help and notes, name
+ * `/directory` and its tabs, so each still lands on the same view of System.
+ */
+describe('a page that moved', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'))
+
+  // The bare page, each tab navigation.jsx declares, and the tab the page adds for a stray type.
+  const OLD_PATHS = ['/directory', ...pageTabsOf('system').map(t => `/directory/${t.id}`), '/directory/other']
+  const renamed = (old) => `/system${old.slice('/directory'.length)}`
+
+  it.each(OLD_PATHS)('sends %s to System, replacing the entry so Back skips it', (old) => {
+    window.history.replaceState({}, '', old)
+    const push = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('system')
+    expect(window.location.pathname + window.location.search).toBe(renamed(old))
+    expect(push).not.toHaveBeenCalled()
+    push.mockRestore()
+  })
+
+  it.each(OLD_PATHS)('keeps the query string of %s', (old) => {
+    window.history.replaceState({}, '', `${old}?sort=-reach&note=a%20b`)
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('system')
+    expect(window.location.pathname + window.location.search).toBe(`${renamed(old)}?sort=-reach&note=a%20b`)
+  })
+
+  it('opens System while the old address is still in the bar, so no other page mounts first', () => {
+    expect(tabFromUrl('/directory')).toBe('system')
+    expect(tabFromUrl('/directory/ingestion?sort=name')).toBe('system')
+  })
+
+  it('moves the first segment only, and nothing that merely resembles it', () => {
+    expect(movedUrl('/directory/ingestion?sort=name')).toBe('/system/ingestion?sort=name')
+    expect(movedUrl('/system/ingestion')).toBeNull()
+    expect(movedUrl('/devices/directory')).toBeNull()
+    expect(movedUrl('/directory-old')).toBeNull()
+    expect(movedUrl('/constructor')).toBeNull()
+    expect(movedUrl('/')).toBeNull()
+  })
+
+  it('moves each old name to a page the router accepts, and no live page away', () => {
+    for (const [from, to] of MOVED_PAGES) {
+      expect(VALID_TABS).toContain(to)
+      expect(VALID_TABS).not.toContain(from)
+    }
   })
 })
 

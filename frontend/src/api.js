@@ -2897,7 +2897,7 @@ const apiMethods = {
         service_type: s.service_type,
         endpoint_url: s.endpoint_url,
         // Where the service can be reached FROM (0084). Passed through rather than defaulted here:
-        // a row that predates the column reads UNKNOWN, and the Directory page says so in words
+        // a row that predates the column reads UNKNOWN, and the System page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
         // The image the release deploys for the service (0140); null when nothing recorded one.

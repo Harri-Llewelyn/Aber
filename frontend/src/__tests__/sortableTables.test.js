@@ -50,7 +50,6 @@ const TABLES = {
   'components/tabs/CellsTab.jsx': { sortable: 1 },
   'components/tabs/ColdStorageTab.jsx': { sortable: 1 },
   'components/tabs/DevicesTab.jsx': { sortable: 2 },
-  'components/tabs/DirectoryTab.jsx': { sortable: 1 },
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
   'components/tabs/MetricsTab.jsx': { sortable: 3 },
   'components/tabs/PeopleSection.jsx': { sortable: 1 },
@@ -66,7 +65,8 @@ const TABLES = {
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']
-  }
+  },
+  'components/tabs/SystemTab.jsx': { sortable: 1 }
 }
 
 const SRC = path.resolve(__dirname, '..')

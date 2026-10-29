@@ -125,13 +125,13 @@ describe('New Read-Only Account', () => {
     expect(screen.getByText(/did not report the subscriber role’s rules/)).toBeTruthy()
   })
 
-  it('says when the Directory could not be read, rather than guessing the broker', async () => {
+  it('says when the broker address could not be read, rather than guessing it', async () => {
     api.get.mockRejectedValue(new Error('unreachable'))
     open()
     fireEvent.change(nameBox(), { target: { value: ACCOUNT.name } })
     fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
     await act(async () => { fireEvent.click(createButton()) })
-    await waitFor(() => expect(screen.getByText(/The Directory could not be read/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/The broker address could not be read, so it is not shown. The System page lists it./)).toBeTruthy())
     expect(screen.getByLabelText('Broker address').value).toBe('')
   })
 

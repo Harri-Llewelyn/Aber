@@ -45,7 +45,7 @@ The help for each page of the dashboard, in the order the sidebar lists them.
 - [Cold Storage](pages/cold-storage.md): old readings, moved out of the live database.
 - [Backups](pages/backups.md): take a backup, and see every backup run.
 - [Archived Entities](pages/archives.md): bring back, or delete, what was taken out of service.
-- [Directory](pages/directory.md): every service Aber runs, and how to reach it.
+- [System](pages/system.md): every service Aber runs, whether it is up, and how to reach it.
 - [Access Control](pages/access-control.md): who and what may reach Aber.
 - [Settings](pages/settings.md): the settings for the whole site.
 - [Profile](pages/profile.md): your account, how the dashboard looks to you, and where you are signed in.

@@ -34,7 +34,7 @@ const ROW = {
 
 beforeEach(() => { rows.data = []; });
 
-describe('the Directory through the API layer', () => {
+describe('/api/v1/directory through the API layer', () => {
   it('passes the scan of the exact image through', async () => {
     rows.data = [{
       ...ROW,

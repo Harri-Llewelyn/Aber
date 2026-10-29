@@ -610,7 +610,7 @@ runbook records.
 The CI guard against a published port leaking into cluster wiring cannot grep the whole rendered
 document for `5433`/`54322`. The manifests embed ~400 KB of SQL, and a whole-document scan fires on
 `directory_services` rows in the seed that legitimately carry `postgres://localhost:5433` as
-*display* metadata for the Directory tab, not as a connection this stack makes.
+*display* metadata for the dashboard's System page, not as a connection this stack makes.
 
 The check is therefore scoped to `value:` / `port:` / `containerPort:` / `targetPort:` lines, and
 was confirmed against a deliberate regression. **A check that reports a known-benign hit is worse

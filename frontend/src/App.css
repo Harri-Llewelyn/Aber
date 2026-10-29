@@ -1837,44 +1837,44 @@ td.row-actions, th.row-actions {
 
 .row-actions .btn + .btn { margin-left: 8px; }
 
-/* Directory service tables: one table per tab, so `table-layout: fixed` plus the widths below keep
-   every tab on the same column grid. Widths are set on the header cells only; under fixed layout
-   the first row decides every column. */
-.table-directory {
+/* The System page's service tables: one per tab, so `table-layout: fixed` plus the widths below
+   keep every tab on the same column grid. Widths are set on the header cells only; under fixed
+   layout the first row decides every column. */
+.table-system {
   table-layout: fixed;
   /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
   min-width: 880px;
 }
 
-.table-directory th:nth-child(1) { width: 20%; }  /* Service name */
-.table-directory th:nth-child(2) { width: 14%; }  /* Service type */
-.table-directory th:nth-child(3) { width: 14%; }  /* Version */
-.table-directory th:nth-child(4) { width: 28%; }  /* Endpoint URL */
-.table-directory th:nth-child(5) { width: 12%; }  /* Reach */
-.table-directory th:nth-child(6) { width: 12%; }  /* Liveness */
+.table-system th:nth-child(1) { width: 20%; }  /* Service name */
+.table-system th:nth-child(2) { width: 14%; }  /* Service type */
+.table-system th:nth-child(3) { width: 14%; }  /* Version */
+.table-system th:nth-child(4) { width: 28%; }  /* Endpoint URL */
+.table-system th:nth-child(5) { width: 12%; }  /* Reach */
+.table-system th:nth-child(6) { width: 12%; }  /* Liveness */
 
-/* Compact rows: the directory is a reference list read top to bottom, not a work surface with
+/* Compact rows: the services are a reference list read top to bottom, not a work surface with
    per-row actions. */
-.table-directory th { padding: 9px 16px; }
+.table-system th { padding: 9px 16px; }
 
-.table-directory td {
+.table-system td {
   padding: 8px 16px;
   font-size: 13px;
 }
 
 /* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
    column cannot break at a space. Without this it overruns its cell into Reach. */
-.table-directory .cell-endpoint { overflow-wrap: anywhere; }
+.table-system .cell-endpoint { overflow-wrap: anywhere; }
 
 /* A tag is one token too, and some are long (`2026.07.07-sha-a6a04f2`). */
-.table-directory .cell-version { overflow-wrap: anywhere; }
-.table-directory .cell-version .mono { font-size: 12px; }
+.table-system .cell-version { overflow-wrap: anywhere; }
+.table-system .cell-version .mono { font-size: 12px; }
 
 /* "not observed" in the Liveness column: words, not a badge, so its badges are only observations. */
-.directory-unobserved { color: var(--text-dim); }
+.system-unobserved { color: var(--text-dim); }
 
 /* The known-CVE count, or "not scanned", after a version. */
-.directory-scan { margin-left: 6px; white-space: nowrap; }
+.system-scan { margin-left: 6px; white-space: nowrap; }
 
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {

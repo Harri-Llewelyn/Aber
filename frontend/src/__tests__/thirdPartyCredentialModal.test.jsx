@@ -154,10 +154,10 @@ describe("a Third-party gateway's credential dialog", () => {
     expect(screen.getByText('ingestion.primaryHostId')).toBeInTheDocument()
   })
 
-  it('says so when the Directory cannot be read, rather than guessing an address', async () => {
+  it('says so when the broker address cannot be read, rather than guessing one', async () => {
     api.get.mockRejectedValue(new Error('permission denied'))
     render(<GatewayCredentialModal gateway={GATEWAY} confirmFirst={false} onClose={vi.fn()} showToast={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/The Directory could not be read/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/The broker address could not be read, so it is not shown. The System page lists it./)).toBeInTheDocument())
     expect(screen.getByLabelText('Broker address').value).toBe('')
   })
 })

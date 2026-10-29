@@ -2,13 +2,13 @@ import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
-import { IconExternalLink, IconBookOpen, IconAlertTriangle } from '../common/Icons'
+import { IconExternalLink, IconServer, IconAlertTriangle } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
-import { DIRECTORY_TABS } from '../../navigation'
+import { SYSTEM_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -136,7 +136,7 @@ const GROUP_TYPES = {
  * telemetry arrives on, then the stores behind it. The groups, their names and their descriptions
  * are navigation.jsx's; each description is its tab's tooltip, and the help page has the rest.
  */
-export const SERVICE_GROUPS = DIRECTORY_TABS.map(t => ({ id: t.id, title: t.label, description: t.description, types: GROUP_TYPES[t.id] }))
+export const SERVICE_GROUPS = SYSTEM_TABS.map(t => ({ id: t.id, title: t.label, description: t.description, types: GROUP_TYPES[t.id] }))
 
 /** The tooltip of the tab for services no group claims. */
 export const UNGROUPED_DESCRIPTION = 'Services registered with a type no other tab claims, listed here rather than dropped.'
@@ -148,7 +148,7 @@ export const UNGROUPED_DESCRIPTION = 'Services registered with a type no other t
  */
 const UNGROUPED_TITLE = 'Other Registered Services'
 
-/** Splits the flat directory into the groups above, dropping any that came back empty. */
+/** Splits the flat list of services into the groups above, dropping any that came back empty. */
 function groupServices(services) {
   // service_type -> [group index, position within that group].
   const rank = new Map()
@@ -231,8 +231,8 @@ function LivenessCell({ status, lastHeartbeat }) {
     )
   }
   return (
-    <Tooltip text="Nothing in Aber observes this service: no exporter reports on it, and the Directory probes no address itself.">
-      <span className="directory-unobserved">not observed</span>
+    <Tooltip text="Nothing in Aber observes this service: no exporter reports on it, and this page probes no address itself.">
+      <span className="system-unobserved">not observed</span>
     </Tooltip>
   )
 }
@@ -321,7 +321,7 @@ function ScanBadge({ scan }) {
   if (!scan.scanned) {
     return (
       <Tooltip text="The release did not scan this exact image, so its vulnerabilities are not counted. An overridden tag or an unreleased build has no scan.">
-        <span className="directory-unobserved directory-scan">not scanned</span>
+        <span className="system-unobserved system-scan">not scanned</span>
       </Tooltip>
     )
   }
@@ -330,7 +330,7 @@ function ScanBadge({ scan }) {
   const db = scan.dbDate ? ` against the vulnerability database of ${scan.dbDate}` : ''
   return (
     <Tooltip text={`${imageScanSummary(scan)}. Counted when the release was scanned${db}; a vulnerability published since is not counted.`}>
-      <span className={`badge badge-sm ${tone} directory-scan`}>
+      <span className={`badge badge-sm ${tone} system-scan`}>
         {count} {count === 1 ? 'CVE' : 'CVEs'}
       </span>
     </Tooltip>
@@ -381,7 +381,7 @@ const SERVICE_SORT = {
 }
 
 /**
- * One group's table. `.table-directory` pins the column widths so the columns hold still when the
+ * One group's table. `.table-system` pins the column widths so the columns hold still when the
  * tab changes.
  */
 function ServiceTable({ rows, onNotify }) {
@@ -394,7 +394,7 @@ function ServiceTable({ rows, onNotify }) {
 
   return (
     <div className="table-wrap">
-      <table className="table-directory">
+      <table className="table-system">
         <thead>
           <tr>
             <SortHeader sort={sort} column="name">Service Name</SortHeader>
@@ -435,7 +435,7 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function DirectoryTab({ showToast }) {
+export function SystemTab({ showToast }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
@@ -466,10 +466,10 @@ export function DirectoryTab({ showToast }) {
   usePolling(loadAll, POLL_INTERVAL_MS)
 
   const groups = groupServices(services)
-  // The tab, in the path (`/directory/<group>`); the first group is the bare page. A group has a
+  // The tab, in the path (`/system/<group>`); the first group is the bare page. A group has a
   // tab only while it has rows, so one that empties between polls leaves the address and the first
   // tab takes over. Before the first read the path is held until the list arrives.
-  const [groupId, setGroupId, groupHref] = useUrlTab('directory', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
+  const [groupId, setGroupId, groupHref] = useUrlTab('system', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
   const active = groups.find(g => g.id === groupId) || groups[0]
 
   return (
@@ -479,32 +479,32 @@ export function DirectoryTab({ showToast }) {
           <div className="callout callout-warning callout-page">
             <IconAlertTriangle size={18} className="callout-icon" />
             <div>
-              {`The latest read of the directory failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
+              {`The latest read of the service list failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
             </div>
           </div>
         )}
 
         <div className="card card-fill">
           <CardHeading
-            icon={<IconBookOpen size={15} />}
-            title="Directory"
+            icon={<IconServer size={15} />}
+            title="System"
             description="Every service this deployment runs, grouped by purpose, with its version, its address and whether that address works beyond the deployment host."
           />
 
           {loading ? (
-            <LoadingState label="directory" />
+            <LoadingState label="services" />
           ) : loadError && !lastGoodAt ? (
             <div className="callout callout-danger">
-              {`The directory could not be read: ${loadError}`}
+              {`The service list could not be read: ${loadError}`}
             </div>
           ) : !active ? (
             <EmptyState
-              icon={<IconBookOpen size={36} />}
-              message="No services are registered in the directory."
+              icon={<IconServer size={36} />}
+              message="No services are registered."
             />
           ) : (<>
             <TabStrip
-              ariaLabel="Directory"
+              ariaLabel="System"
               value={active.id}
               onChange={setGroupId}
               hrefFor={groupHref}

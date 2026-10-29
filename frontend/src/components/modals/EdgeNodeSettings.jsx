@@ -8,9 +8,9 @@ import {
 } from '../../utils/edgeNodeSettings'
 
 /**
- * The broker as the Directory's broker row publishes it, read when shown: undefined while it is
- * read, null when the Directory could not be read, otherwise `brokerAddress()`'s answer. An
- * unreadable Directory is said, not guessed.
+ * The broker as its `directory_services` row publishes it, read when shown: undefined while it is
+ * read, null when the read failed, otherwise `brokerAddress()`'s answer. A failed read is said,
+ * not guessed.
  */
 export function useDirectoryBroker() {
   const [broker, setBroker] = useState(undefined)
@@ -72,7 +72,7 @@ export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
           copy={copy}
           copied={copied}
           warning={broker === null
-            ? 'The Directory could not be read, so the broker address is not shown. The Directory page lists it.'
+            ? 'The broker address could not be read, so it is not shown. The System page lists it.'
             : broker?.problem}
         />
         <Setting

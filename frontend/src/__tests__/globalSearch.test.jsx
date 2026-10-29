@@ -150,6 +150,20 @@ describe('ranking', () => {
     expect(labels('parquet')).toContain('Cold Storage')
   })
 
+  // The page was Directory until 1.8, and that is still the word a returning reader types.
+  it('finds System by its old name, and its groups as cards on it', () => {
+    expect(labels('directory')).toContain('System')
+    expect(labels('system')[0]).toBe('System')
+    for (const [label, section] of [
+      ['Applications & User Interfaces', 'applications'],
+      ['Ingestion & Messaging', 'ingestion'],
+      ['Data & Backend Infrastructure', 'infrastructure'],
+    ]) {
+      expect(targets().find(t => t.label === label))
+        .toMatchObject({ kind: 'card', tabId: 'system', section, page: 'System' })
+    }
+  })
+
   it('breaks a tie towards the page, since a card navigates to its page anyway', () => {
     // 'Devices' is both a page and the name of the list on it. Two rows, same destination, and the
     // page is the one whose name was typed.
@@ -295,6 +309,16 @@ describe('the palette', () => {
 
     fireEvent.click(await screen.findByText('Quarantine'))
     expect(p.onSelectSection).toHaveBeenCalledWith('devices', 'quarantine')
+    expect(p.onNavigate).not.toHaveBeenCalled()
+  })
+
+  it('opens a service group on the System page, under that page\'s name', async () => {
+    const p = props()
+    render(<GlobalSearch {...p} />)
+    type('mosquitto')
+
+    fireEvent.click(await screen.findByText('Ingestion & Messaging'))
+    expect(p.onSelectSection).toHaveBeenCalledWith('system', 'ingestion')
     expect(p.onNavigate).not.toHaveBeenCalled()
   })
 

@@ -475,7 +475,7 @@ python supabase/migrations/test_system_settings_rls.py
 # that gateways.sparkplug_group now defaults to the setting rather than the old literal, and that a
 # gateway's own group is changed only by a role gateways_update_privileged admits.
 python supabase/migrations/test_sparkplug_group_setting.py
-# The Directory's Version column (0140). The chart's component -> image map reaches every row it
+# The System page's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
 # writer is callable by db-init only. Its known-CVE columns (0180) match the exact image reference,
 # so an overridden tag reads as not scanned rather than zero.
@@ -1404,7 +1404,7 @@ never on a branch:
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
 Every scan's Trivy JSON report is kept as a workflow artifact. The packaged chart carries their
-summary, which db-init records and the Directory shows beside each version
+summary, which db-init records and the System page shows beside each version
 ([`supabase/README.md`](../supabase/README.md)).
 
 The tag stamps the eleven image tags, the chart `version` and `appVersion` in one run, and the

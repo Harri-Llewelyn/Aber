@@ -196,7 +196,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'directory',
+  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'system',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
   'profile'
 ];
@@ -230,7 +230,7 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
 
 /**
  * Supabase Studio's door, as the browser reaches it. Not a link (Studio is reached from the
- * Directory); this exists for sign-out alone (`utils/studioSignOut.js`). The fallback matches
+ * System page); this exists for sign-out alone (`utils/studioSignOut.js`). The fallback matches
  * STUDIO_PUBLIC_URL's, `127.0.0.1` and not `localhost`: cookies key on host, so a session opened
  * on one cannot be ended on the other.
  */
