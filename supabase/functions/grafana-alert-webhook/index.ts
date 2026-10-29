@@ -37,6 +37,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 const NO_VALUE = "[no value]";
 
+/**
+ * Grafana's alertname for an instance of a rule it could not evaluate, under `execErrState: Error`
+ * and `noDataState: NoData`; the rule's title moves to `rulename`. No provisioned rule is titled so.
+ */
+const NOT_EVALUATED = new Set(["DatasourceError", "DatasourceNoData"]);
+const NO_DATA = "DatasourceNoData";
+
 interface GrafanaAlert {
   status?: string;
   labels?: Record<string, string>;
@@ -148,11 +155,11 @@ function valuesOf(alert: GrafanaAlert): Record<string, number> | null {
 /**
  * Normalise one Grafana alert instance into a platform_alerts row. The subject is (entity_type,
  * entity_id), not a device: a rule declares its scope with an `entity_type` label, `device` (the
- * default), `gateway`, `platform` or `service_identity`. Returns null only for a malformed instance,
- * which is not an error: a DatasourceError notification carries no labels, and the caller counts and
- * reports these. An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id`
- * enforces, and a machine identity its principal id; refusing either here keeps one bad instance
- * from failing the batch.
+ * default), `gateway`, `platform` or `service_identity`. An instance of a rule Grafana could not
+ * evaluate is about the platform, whatever the rule's scope. Returns null only for a malformed
+ * instance, which the caller counts and reports. An asset scope still requires a wire identity, as
+ * `platform_alerts_asset_has_wire_id` enforces, and a machine identity its principal id; refusing
+ * either here keeps one bad instance from failing the batch.
  */
 export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const labels = alert.labels ?? {};
@@ -161,6 +168,49 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const fingerprint = alert.fingerprint?.trim();
   const alertName = (labels.alertname ?? "").trim();
   if (!fingerprint || !alertName || !alert.startsAt) return null;
+
+  // Grafana sends `status: "resolved"` on recovery and "firing" otherwise. Anything unrecognised is
+  // treated as firing: defaulting to resolved would silently clear the dashboard on an unknown
+  // payload shape.
+  const resolved = (alert.status ?? "").toLowerCase() === RESOLVED;
+
+  // An unset or zero endsAt is Alertmanager's "still open"; Grafana sends 0001-01-01T00:00:00Z for
+  // a firing alert. The table's CHECK requires a resolved row to carry one.
+  const rawEnds = alert.endsAt ?? "";
+  const endsAt = resolved
+    ? (rawEnds && !rawEnds.startsWith("0001-01-01") ? rawEnds : new Date().toISOString())
+    : null;
+
+  const severity = (labels.severity ?? "warning").toLowerCase();
+  const occurrence = {
+    fingerprint,
+    // Constrained by a CHECK in 0023, so an unexpected label value is mapped rather than allowed to
+    // fail the whole batch's insert.
+    severity: SEVERITIES.has(severity) ? severity : "warning",
+    status: resolved ? RESOLVED : FIRING,
+    starts_at: alert.startsAt,
+    ends_at: endsAt,
+    rule_uid: ruleUidOf(alert),
+    labels,
+  };
+
+  // A rule Grafana could not evaluate arrives renamed, firing and resolving, with its title in
+  // `rulename`, its own labels (a template reads `[no value]`) and the error in the `Error`
+  // annotation. Nothing else of the rule's is kept: its summary expanded over no data, and Grafana's
+  // -1 placeholder values, would read as the condition holding.
+  if (NOT_EVALUATED.has(alertName)) {
+    const rule = labels.rulename?.trim() || occurrence.rule_uid || "An alert rule";
+    return {
+      ...occurrence,
+      entity_type: "platform",
+      entity_id: null,
+      sparkplug_id: null,
+      alert_name: `${rule} could not be evaluated`,
+      summary: annotations.Error?.trim() || (alertName === NO_DATA ? "Its query returned no data." : null),
+      device_name: null,
+      values: null,
+    };
+  }
 
   // Defaults to `device`, which keeps the machine rules working without the label. An unrecognised
   // value is refused rather than coerced, so one instance fails rather than the whole batch's
@@ -180,36 +230,14 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   // asset without naming it is the failure this function has always existed to prevent.
   if (entityType !== "platform" && !identity && !sparkplugId) return null;
 
-  // Grafana sends `status: "resolved"` on recovery and "firing" otherwise. Anything unrecognised is
-  // treated as firing: defaulting to resolved would silently clear the dashboard on an unknown
-  // payload shape.
-  const resolved = (alert.status ?? "").toLowerCase() === RESOLVED;
-
-  // An unset or zero endsAt is Alertmanager's "still open"; Grafana sends 0001-01-01T00:00:00Z for
-  // a firing alert. The table's CHECK requires a resolved row to carry one.
-  const rawEnds = alert.endsAt ?? "";
-  const endsAt = resolved
-    ? (rawEnds && !rawEnds.startsWith("0001-01-01") ? rawEnds : new Date().toISOString())
-    : null;
-
-  const severity = (labels.severity ?? "warning").toLowerCase();
-
   return {
-    fingerprint,
+    ...occurrence,
     entity_type: entityType,
     entity_id: identity ? principalId.toLowerCase() : null,
     sparkplug_id: sparkplugId,
     alert_name: alertName,
-    // Constrained by a CHECK in 0023, so an unexpected label value is mapped rather than allowed to
-    // fail the whole batch's insert.
-    severity: SEVERITIES.has(severity) ? severity : "warning",
-    status: resolved ? RESOLVED : FIRING,
     summary: annotations.summary?.trim() || annotations.description?.trim() || null,
-    starts_at: alert.startsAt,
-    ends_at: endsAt,
     device_name: labels.device?.trim() || null,
-    rule_uid: ruleUidOf(alert),
-    labels,
     values: valuesOf(alert),
   };
 }

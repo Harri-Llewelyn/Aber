@@ -5197,11 +5197,43 @@ environment variable would turn `Bearer ` into a match and the endpoint into an 
 path. The edge runtime boots with `VERIFY_JWT="false"` because each function authorises itself, so
 this is the only thing standing in front of the table.
 
-**Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
-carries no device label; inventing one would attribute a broken query to a machine. Two kinds need
-none: a `platform` alert, and a `service_identity` alert (`0204`), whose subject is the machine
-identity in its `principal_id` label. One whose `principal_id` is not a UUID is skipped the same
-way.
+**Alerts with no `sparkplug_id` label are counted and skipped.** Inventing one would attribute the
+alert to the wrong machine. Two kinds need none: a `platform` alert, and a `service_identity` alert
+(`0204`), whose subject is the machine identity in its `principal_id` label. One whose
+`principal_id` is not a UUID is skipped the same way.
+
+**A rule Grafana could not evaluate becomes a `platform` alert naming the rule.** Every provisioned
+rule is `execErrState: Error`. When a rule's query fails, the pinned Grafana (13.2.3, `errorAlert()`
+in `pkg/services/ngalert/state/compat.go`) sends an instance whose `alertname` is `DatasourceError`
+and whose `rulename` label holds the rule's title. It keeps the rule's own labels, so a template
+such as `{{ .Labels.edge_node }}` reads `[no value]`, and adds `datasource_uid` and `ref_id`. Its
+annotations carry the error text under `Error`, beside the rule's summary expanded over no data, and
+its values are `-1` for each refId. `noDataState: NoData` sends `DatasourceNoData` the same way; no
+rule uses it today. The webhook writes either as:
+
+- `entity_type` `platform`, whatever the rule's own scope: the subject is the platform, which could
+  not check, not a gateway or a machine identity;
+- `alert_name` `<rulename> could not be evaluated` (the rule's uid stands in for a missing
+  `rulename`);
+- the summary from the `Error` annotation (for no data, a fixed sentence), never the rule's;
+- no values, the rule's severity, its uid from `generatorURL`, and the labels as sent.
+
+Its fingerprint is Grafana's for the renamed instance, which differs from the condition's because
+the labels differ, so the row never closes or replaces the condition's own. Grafana renames the
+resolve the same way (it relabels from the previous state), so the resolve closes this row.
+
+Before this, an entity rule's error instance had no `sparkplug_id` or `principal_id` and was skipped
+as not attributable, and a platform rule's was recorded as a firing alert called `DatasourceError`
+whose summary read as though the condition held. Aber's own evaluator follows the same rule: a run
+that cannot read the historian raises one platform alert saying the conditions were not evaluated.
+
+**The name alone tells.** Grafana clears an instance's `Error` state reason once it is in the Error
+state, so the firing carries no `grafana_state_reason`; that annotation is `Error` only under
+`execErrState: Alerting`, whose resolve is not renamed and would leave the row open. And Grafana
+gives a no-data instance `datasource_uid` and `ref_id` labels too, so *Ingestion Consuming Nothing*
+(`noDataState: Alerting`, the one rule whose no-data is the condition) would read as not evaluated
+if the labels told. `check-docs-drift.mjs` holds every rule to `execErrState: Error` and no rule to
+a title or `rulename` label the webhook would read as an error.
 
 ### Alert retention (archived migration 0030)
 

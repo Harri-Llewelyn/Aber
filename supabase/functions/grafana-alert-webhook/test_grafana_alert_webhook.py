@@ -12,6 +12,7 @@ notification that does not close the occurrence it belongs to.
 The mirror is held to the real thing by test_matches_the_typescript_shape below, which reads
 index.ts and asserts the literals this file encodes still appear in it.
 """
+import hashlib
 import re
 import unittest
 from pathlib import Path
@@ -26,6 +27,9 @@ SEVERITIES = {"critical", "warning", "info"}
 ENTITY_TYPES = {"device", "gateway", "platform", "service_identity"}
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 NO_VALUE = "[no value]"
+NOT_EVALUATED = ("DatasourceError", "DatasourceNoData")
+NO_DATA = "DatasourceNoData"
+RULES = Path(__file__).resolve().parents[3] / "grafana" / "provisioning" / "alerting" / "alert-rules.yaml"
 
 
 def authorize_alert_webhook(auth_header, expected_secret):
@@ -53,6 +57,38 @@ def normalize_alert(alert):
     if not fingerprint or not alert_name or not starts_at:
         return None
 
+    resolved = (alert.get("status") or "").lower() == RESOLVED
+    raw_ends = alert.get("endsAt") or ""
+    if resolved:
+        ends_at = raw_ends if raw_ends and not raw_ends.startswith("0001-01-01") else "NOW"
+    else:
+        ends_at = None
+
+    severity = (labels.get("severity") or "warning").lower()
+    occurrence = {
+        "fingerprint": fingerprint,
+        "severity": severity if severity in SEVERITIES else "warning",
+        "status": RESOLVED if resolved else FIRING,
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "rule_uid": rule_uid_of(alert),
+        "labels": labels,
+    }
+
+    if alert_name in NOT_EVALUATED:
+        rule = (labels.get("rulename") or "").strip() or occurrence["rule_uid"] or "An alert rule"
+        return {
+            **occurrence,
+            "entity_type": "platform",
+            "entity_id": None,
+            "sparkplug_id": None,
+            "alert_name": f"{rule} could not be evaluated",
+            "summary": (annotations.get("Error") or "").strip()
+            or ("Its query returned no data." if alert_name == NO_DATA else None),
+            "device_name": None,
+            "values": None,
+        }
+
     entity_type = (labels.get("entity_type") or "device").strip().lower()
     if entity_type not in ENTITY_TYPES:
         return None
@@ -67,29 +103,14 @@ def normalize_alert(alert):
     if entity_type != "platform" and not identity and not sparkplug_id:
         return None
 
-    resolved = (alert.get("status") or "").lower() == RESOLVED
-    raw_ends = alert.get("endsAt") or ""
-    if resolved:
-        ends_at = raw_ends if raw_ends and not raw_ends.startswith("0001-01-01") else "NOW"
-    else:
-        ends_at = None
-
-    severity = (labels.get("severity") or "warning").lower()
-
     return {
-        "fingerprint": fingerprint,
+        **occurrence,
         "entity_type": entity_type,
         "entity_id": principal_id.lower() if identity else None,
         "sparkplug_id": sparkplug_id,
         "alert_name": alert_name,
-        "severity": severity if severity in SEVERITIES else "warning",
-        "status": RESOLVED if resolved else FIRING,
         "summary": (annotations.get("summary") or annotations.get("description") or "").strip() or None,
-        "starts_at": starts_at,
-        "ends_at": ends_at,
         "device_name": (labels.get("device") or "").strip() or None,
-        "rule_uid": rule_uid_of(alert),
-        "labels": labels,
         "values": values_of(alert),
     }
 
@@ -219,11 +240,10 @@ class TestNormalisation(unittest.TestCase):
 
     def test_unattributable_alerts_are_skipped_not_guessed(self):
         """
-        A DatasourceError notification (what `execErrState: Error` produces when a rule's query
-        breaks) carries no sparkplug_id. It must not be written as a device alert -- inventing an id
-        would attribute a broken query to a machine.
+        A device alert without a sparkplug_id must not be written: inventing an id would attribute it
+        to the wrong machine. (A rule Grafana could not evaluate is not one: TestEvaluationErrors.)
         """
-        no_id = alert(labels={"alertname": "DatasourceError", "severity": "critical"})
+        no_id = alert(labels={"alertname": "Thermal Excursion", "severity": "critical"})
         self.assertIsNone(normalize_alert(no_id))
         self.assertIsNone(normalize_alert(alert(fingerprint="")))
         self.assertIsNone(normalize_alert(alert(labels={"sparkplug_id": "dev22", "severity": "info"})))
@@ -296,6 +316,17 @@ class TestMachineIdentity(unittest.TestCase):
         self.assertEqual((resolved["status"], resolved["entity_id"]), ("resolved", PRINCIPAL.lower()))
 
 
+def provisioned_rule(uid):
+    """(title, labels) of one provisioned rule, read as written."""
+    text = RULES.read_text(encoding="utf-8")
+    start = text.index(f"      - uid: {uid}\n")
+    end = text.find("\n      - uid: ", start + 1)
+    block = text[start:] if end == -1 else text[start:end]
+    title = re.search(r"^ {8}title: (.+)$", block, re.M).group(1).strip()
+    labels = re.search(r"^ {8}labels:\n((?: {10}\S.*\n)+)", block, re.M).group(1)
+    return title, {k: v.strip().strip("'\"") for k, v in re.findall(r"^ {10}(\w+): (.*)$", labels, re.M)}
+
+
 class TestPrometheusGatewayRules(unittest.TestCase):
     """
     The gateway rules that read Prometheus. Their series carry the gateway as `edge_node` (ingestion
@@ -303,7 +334,6 @@ class TestPrometheusGatewayRules(unittest.TestCase):
     label. These read each rule's labels from the provisioned file and build what Grafana sends.
     """
 
-    RULES = Path(__file__).resolve().parents[3] / "grafana" / "provisioning" / "alerting" / "alert-rules.yaml"
     UIDS = (
         "aber-ingestion-sequence-gaps",
         "aber-ingestion-timestamps-refused",
@@ -316,14 +346,7 @@ class TestPrometheusGatewayRules(unittest.TestCase):
               "instance": "ingestion-7d9f-x2", "pod": "ingestion-7d9f-x2"}
 
     def rule(self, uid):
-        """(title, labels) of one provisioned rule, read as written."""
-        text = self.RULES.read_text(encoding="utf-8")
-        start = text.index(f"      - uid: {uid}\n")
-        end = text.find("\n      - uid: ", start + 1)
-        block = text[start:] if end == -1 else text[start:end]
-        title = re.search(r"^ {8}title: (.+)$", block, re.M).group(1).strip()
-        labels = re.search(r"^ {8}labels:\n((?: {10}\S.*\n)+)", block, re.M).group(1)
-        return title, {k: v.strip().strip("'\"") for k, v in re.findall(r"^ {10}(\w+): (.*)$", labels, re.M)}
+        return provisioned_rule(uid)
 
     @staticmethod
     def provision(value):
@@ -386,10 +409,14 @@ class TestPrometheusGatewayRules(unittest.TestCase):
                 self.assertIsNone(normalize_alert(self.payload(uid, rule_labels=before)))
 
     def test_an_instance_without_an_edge_node_names_no_gateway(self):
-        # An evaluation error has no series, so the template reads `[no value]`, which is no gateway.
-        row = self.payload("aber-gateway-clock-skew", error=True)
-        self.assertEqual(row["labels"]["sparkplug_id"], NO_VALUE)
-        self.assertIsNone(normalize_alert(row))
+        # An evaluation error has no series, so the template reads `[no value]`, which is no gateway:
+        # the error is the platform's, naming the rule.
+        sent = self.payload("aber-gateway-clock-skew", error=True)
+        self.assertEqual(sent["labels"]["sparkplug_id"], NO_VALUE)
+        row = normalize_alert(sent)
+        self.assertEqual((row["entity_type"], row["sparkplug_id"], row["alert_name"]),
+                         ("platform", None, "Gateway Clock Skew could not be evaluated"))
+        # Any other instance whose template read `[no value]` names no asset, and is skipped.
         self.assertIsNone(normalize_alert(alert(labels={**alert()["labels"], "sparkplug_id": NO_VALUE})))
 
     def test_provisioning_leaves_the_label_naming_the_gateway(self):
@@ -413,6 +440,148 @@ class TestPrometheusGatewayRules(unittest.TestCase):
         src = INDEX_TS.read_text(encoding="utf-8")
         self.assertIn(f'const NO_VALUE = "{NO_VALUE}";', src)
         self.assertIn("wireId === NO_VALUE", src)
+
+
+def fingerprint_of(labels):
+    """Alertmanager's fingerprint stands for a hash of the instance's label set."""
+    return hashlib.sha256(repr(sorted(labels.items())).encode()).hexdigest()[:16]
+
+
+class TestEvaluationErrors(unittest.TestCase):
+    """
+    A rule Grafana could not evaluate. Under `execErrState: Error` the pinned Grafana (13.2.3,
+    errorAlert() in pkg/services/ngalert/state/compat.go) renames the instance DatasourceError, with
+    the rule's title in `rulename`, and renames its resolve the same way. The instance keeps the
+    rule's labels (a template reads `[no value]`), gains `datasource_uid` and `ref_id` for a failed
+    query, and carries the error text in the `Error` annotation, the rule's summary expanded over no
+    data, and -1 for each value. `noDataState: NoData` renames one DatasourceNoData the same way.
+    """
+
+    ERROR = "[sse.dataQueryError] failed to execute query [A]: db query error: failed to connect to server"
+    UIDS = ("aber-service-token-expiring", "aber-gateway-stale", "aber-audit-trail-partitions")
+
+    def condition(self, uid, series):
+        """The rule's own instance, for an excursion on `series`."""
+        title, labels = provisioned_rule(uid)
+        sent = {**series, **labels, "alertname": title, "grafana_folder": "Aber - Platform Infrastructure"}
+        return alert(labels=sent, fingerprint=fingerprint_of(sent),
+                     annotations={"summary": f"The condition of {title} holds"},
+                     generatorURL=f"http://grafana.localhost/alerting/grafana/{uid}/view?orgId=1",
+                     values={"A": 3.0, "B": 3.0, "C": 1})
+
+    def error(self, uid, renamed="DatasourceError", **over):
+        """An instance of `uid` as the pinned Grafana sends one when its query fails."""
+        title, labels = provisioned_rule(uid)
+        rules = TestPrometheusGatewayRules
+        sent = {**{k: rules.expand(rules.provision(v), {}) for k, v in labels.items()},
+                "grafana_folder": "Aber - Platform Infrastructure", "datasource_uid": "supabase", "ref_id": "A",
+                "alertname": renamed, "rulename": title}
+        annotations = {"summary": f"The condition of {title} holds, read over {NO_VALUE}"}
+        if renamed != NO_DATA:
+            annotations["Error"] = self.ERROR
+        return alert(labels=sent, fingerprint=fingerprint_of(sent), annotations=annotations,
+                     generatorURL=f"http://grafana.localhost/alerting/grafana/{uid}/view?orgId=1",
+                     values={"A": -1, "B": -1, "C": -1}, **over)
+
+    def test_an_entity_rule_s_error_is_a_platform_row_naming_the_rule(self):
+        # Service Token Expiring is about a machine identity, Gateway Stale about a gateway: neither
+        # error instance names one, and neither is skipped.
+        for uid in ("aber-service-token-expiring", "aber-gateway-stale"):
+            with self.subTest(uid=uid):
+                self.assert_names_the_rule(uid)
+
+    def test_a_platform_rule_s_error_names_the_rule(self):
+        self.assert_names_the_rule("aber-audit-trail-partitions")
+
+    def assert_names_the_rule(self, uid):
+        title, labels = provisioned_rule(uid)
+        sent = self.error(uid)
+        row = normalize_alert(sent)
+        self.assertIsNotNone(row, f"{uid}'s evaluation error would be skipped")
+        self.assertEqual((row["entity_type"], row["entity_id"], row["sparkplug_id"]), ("platform", None, None))
+        self.assertEqual(row["alert_name"], f"{title} could not be evaluated")
+        self.assertEqual(row["summary"], self.ERROR)
+        self.assertEqual(row["severity"], labels["severity"])
+        self.assertEqual(row["rule_uid"], uid)
+        self.assertEqual(row["fingerprint"], sent["fingerprint"])
+        self.assertEqual(row["labels"], sent["labels"])
+
+    def test_it_is_never_read_as_the_condition(self):
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                title, _ = provisioned_rule(uid)
+                sent = self.error(uid)
+                row = normalize_alert(sent)
+                self.assertNotEqual(row["alert_name"], title)
+                self.assertNotEqual(row["summary"], sent["annotations"]["summary"])
+                self.assertIsNone(row["values"], "Grafana's -1 placeholders are not readings")
+                # Its labels differ from any instance of the condition, so it never closes that row.
+                held = normalize_alert(self.condition(uid, {"principal_id": PRINCIPAL, "sparkplug_id": "gw-line-4"}))
+                self.assertEqual(held["alert_name"], title)
+                self.assertNotEqual(row["fingerprint"], held["fingerprint"])
+
+    def test_its_resolve_closes_its_own_row(self):
+        # When the query succeeds again, the error instance is missing from the evaluation and
+        # resolves as MissingSeries, renamed like its firing.
+        firing = normalize_alert(self.error("aber-audit-trail-partitions"))
+        resolve = self.error("aber-audit-trail-partitions", status="resolved", endsAt="2026-08-17T09:12:00Z")
+        resolve["annotations"]["grafana_state_reason"] = "MissingSeries"
+        resolved = normalize_alert(resolve)
+        self.assertEqual((resolved["fingerprint"], resolved["starts_at"]), (firing["fingerprint"], firing["starts_at"]))
+        self.assertEqual((resolved["status"], resolved["ends_at"]), ("resolved", "2026-08-17T09:12:00Z"))
+        self.assertEqual(resolved["alert_name"], firing["alert_name"])
+
+    def test_no_rule_s_error_is_dropped(self):
+        uids = re.findall(r"^ {6}- uid: (\S+)$", RULES.read_text(encoding="utf-8"), re.M)
+        self.assertGreaterEqual(len(uids), 30)
+        for uid in uids:
+            with self.subTest(uid=uid):
+                row = normalize_alert(self.error(uid))
+                self.assertIsNotNone(row)
+                self.assertEqual((row["entity_type"], row["alert_name"]),
+                                 ("platform", f"{provisioned_rule(uid)[0]} could not be evaluated"))
+
+    def test_no_data_is_recorded_the_same_way(self):
+        # No rule is `noDataState: NoData` today. One would be renamed DatasourceNoData, with no Error.
+        row = normalize_alert(self.error("aber-gateway-stale", renamed=NO_DATA))
+        self.assertEqual((row["entity_type"], row["alert_name"], row["summary"]),
+                         ("platform", "Gateway Stale could not be evaluated", "Its query returned no data."))
+
+    def test_the_name_tells_not_the_state_reason_or_the_labels(self):
+        # Grafana clears the Error state reason once the instance is in Error, so the firing carries
+        # none; one that did would change nothing.
+        sent = self.error("aber-gateway-stale")
+        with_reason = {**sent, "annotations": {**sent["annotations"], "grafana_state_reason": "Error"}}
+        self.assertEqual(normalize_alert(with_reason), normalize_alert(sent))
+        # Ingestion Consuming Nothing alerts on no data, under its own name. Grafana gives an empty
+        # frame's instance datasource_uid and ref_id labels and the NoData reason: still the condition.
+        title, labels = provisioned_rule("aber-ingestion-silent")
+        silent = alert(labels={**labels, "alertname": title, "datasource_uid": "prometheus", "ref_id": "A"},
+                       annotations={"summary": "The ingestion daemon has recorded no Sparkplug messages",
+                                    "grafana_state_reason": "NoData"})
+        row = normalize_alert(silent)
+        self.assertEqual((row["alert_name"], row["summary"]),
+                         (title, "The ingestion daemon has recorded no Sparkplug messages"))
+
+    def test_without_a_rulename_it_names_the_rule_by_uid(self):
+        sent = self.error("aber-gateway-stale")
+        del sent["labels"]["rulename"]
+        self.assertEqual(normalize_alert(sent)["alert_name"], "aber-gateway-stale could not be evaluated")
+        self.assertEqual(normalize_alert({**sent, "generatorURL": "http://grafana.localhost/"})["alert_name"],
+                         "An alert rule could not be evaluated")
+
+    def test_the_typescript_recognises_the_same_names(self):
+        src = INDEX_TS.read_text(encoding="utf-8")
+        ts = re.search(r"const NOT_EVALUATED = new Set\(\[([^\]]*)\]\)", src)
+        self.assertIsNotNone(ts, "NOT_EVALUATED is no longer a Set literal in index.ts")
+        self.assertEqual(set(re.findall(r'"(\w+)"', ts.group(1))), set(NOT_EVALUATED))
+        self.assertIn(f'const NO_DATA = "{NO_DATA}";', src)
+        for literal in ('labels.rulename?.trim() || occurrence.rule_uid || "An alert rule"',
+                        "`${rule} could not be evaluated`", "annotations.Error?.trim()",
+                        '"Its query returned no data."', 'entity_type: "platform"', "values: null"):
+            self.assertIn(literal, src)
+        # Before the scope is read: an error instance carries the rule's own entity_type.
+        self.assertLess(src.index("if (NOT_EVALUATED.has(alertName))"), src.index('labels.entity_type ?? "device"'))
 
 
 class TestMirrorIsFaithful(unittest.TestCase):

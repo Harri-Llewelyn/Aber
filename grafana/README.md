@@ -139,8 +139,8 @@ ingestion gives it, so a Prometheus gateway rule copies it with
 `sparkplug_id: '{{ .Labels.edge_node }}'`. A label reads `.Labels.x` and never holds a `$`: file
 provisioning expands each label value as environment variables (`$$` is the escape), though not
 the annotations, so `{{ $labels.x }}` would arrive as `{{ .x }}` and be sent as written. An
-instance without `edge_node`, such as an evaluation error's, expands the label to `[no value]`,
-which the webhook treats as no subject. `check-docs-drift.mjs` holds every rule to this. A rule about a machine goes in a group of its own
+instance without `edge_node` expands the label to `[no value]`, which the webhook treats as no
+subject. `check-docs-drift.mjs` holds every rule to this. A rule about a machine goes in a group of its own
 and names a metric the example set registers (`supabase/example-metrics.sql`), which
 `check-docs-drift.mjs` asserts.
 
@@ -161,6 +161,13 @@ for the condition (no rows means nothing to report), where the series is created
 empty frame means it never happened), and where a feature can be off. It is `Alerting` in exactly
 one rule, *Ingestion Consuming Nothing*, where an empty frame means the scrape failed, which is
 worse than the condition alerted on.
+
+**`execErrState` is `Error` on every rule.** When a rule cannot be evaluated (its datasource is
+down, or its query fails), Grafana sends an instance named `DatasourceError`, with the rule's title
+in a `rulename` label. The webhook records it as a platform alert, *<rule> could not be evaluated*,
+with Grafana's error text as its summary, whatever the rule's own `entity_type`. `Alerting` would
+send the error under the rule's own name, read as the condition holding. `check-docs-drift.mjs`
+holds every rule to `Error`; `supabase/README.md` has the payload.
 
 **`for: 0s` where the window is the delay.** *Enrolment Stuck* reads a view that already carries an
 hour of age; *Gateway CA Expiring* has thirty days in its threshold; *Database Deadlocks* and
