@@ -19,7 +19,7 @@ export const POLL_INTERVAL_MS = 15000
  */
 export const alertToastUrl = (row) => (row.entity_type === 'service_identity' && row.entity_id
   ? identityUrl(row.entity_id)
-  : grafanaAlertUrl(row.alert_name))
+  : grafanaAlertUrl(row))
 
 /**
  * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
@@ -49,7 +49,7 @@ export function usePlatformAlerts(showToast) {
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from('platform_alerts_active')
-      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at')
+      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid')
       .order('starts_at', { ascending: false })
 
     if (error) {

@@ -43,7 +43,10 @@ INOTIFY_CONF=/etc/sysctl.d/60-aber-inotify.conf
 INOTIFY_INSTANCES=1280
 INOTIFY_WATCHES=655360
 # How many steps an install prints; check-docs-drift holds it to the `step` calls below.
-STEPS=9
+STEPS=10
+# A failed image download is tried this many times, this many seconds apart, before the install stops.
+PULL_TRIES=3
+PULL_PAUSE=10
 
 say() { printf '%s\n' "$*"; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
@@ -90,6 +93,23 @@ version_at_least() {
 
 # KiB as GiB to one decimal, rounded down so a figure just under a floor never prints as the floor.
 gib() { awk -v k="$1" 'BEGIN { printf "%.1f", int(k * 10 / 1048576) / 10 }'; }
+
+# Seconds as 4m 07s, or 42s under a minute.
+duration() {
+  if [ "$1" -ge 60 ]; then printf '%dm %02ds' $(($1 / 60)) $(($1 % 60)); else printf '%ds' "$1"; fi
+}
+
+# The registry an image reference $1 is pulled from: Docker Hub when its first part is no host.
+image_registry() {
+  case $1 in
+    */*) ir_host=${1%%/*} ;;
+    *) ir_host= ;;
+  esac
+  case $ir_host in
+    *.* | *:* | localhost) printf '%s' "$ir_host" ;;
+    *) printf 'docker.io' ;;
+  esac
+}
 
 # The value of the first `key: value` line in file $1, quotes removed.
 yaml_value() {
@@ -510,7 +530,8 @@ confirm() {
     "This machine's address" "$ADDRESS" "Base IRI for asset ids" "$BASE_IRI"
   say ""
   say "It installs k3s, Helm and Node.js where they are missing, then Aber. The first install takes"
-  say "5 to 20 minutes, most of it downloading."
+  say "5 to 20 minutes, most of it downloading Aber's images, and longer on a slow link. A step of"
+  say "its own downloads them before Aber starts, with a line for each image."
   dc_dns=$(dns_advice)
   if [ -n "$dc_dns" ]; then
     say ""
@@ -782,6 +803,95 @@ EOF
   fi
 }
 
+# The images the rendered manifest $1 runs, once each, in the order it names them: every container
+# and init container of its Deployments, StatefulSets, DaemonSets, Jobs, CronJobs and Pods, which
+# include Helm's hook Jobs and test Pods. A document's images are held until it ends, so its `kind:`
+# may come before or after them.
+manifest_images() {
+  awk -v sq="'" '
+    function flush(i) {
+      if (workload) for (i = 1; i <= n; i++) if (!(found[i] in seen)) { seen[found[i]] = 1; print found[i] }
+      n = 0
+      workload = 0
+    }
+    /^---/ { flush(); next }
+    /^kind:[[:space:]]*(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob)[[:space:]]*$/ { workload = 1; next }
+    /^[[:space:]]*(-[[:space:]]+)?image:[[:space:]]*[^[:space:]]/ {
+      v = $0
+      sub(/^[[:space:]]*(-[[:space:]]+)?image:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      gsub(/"/, "", v)
+      gsub(sq, "", v)
+      if (v != "") found[++n] = v
+    }
+    END { flush() }' "$1"
+}
+
+# Every image the install runs is downloaded here, one at a time, before anything starts: a slow
+# link shows as progress, and the next steps' waits time start-up alone. `k3s crictl` asks the
+# node's container runtime, as the kubelet does, so each image lands where the kubelet looks and
+# k3s's proxy and registry settings (registries.yaml) apply to it.
+pull_images() {
+  step "Download Aber's images"
+  if [ "$DRY_RUN" = 1 ] && { [ ! -f "$VALUES" ] || [ ! -f "$SITE" ] || ! command -v helm >/dev/null 2>&1; }; then
+    say "  would run: helm template aber $CHART --version $ABER_VERSION -n aber -f $VALUES -f $SITE"
+    say "  would run: k3s crictl pull <each image it names that is not on this machine>"
+    return 0
+  fi
+  # The chart, version, namespace and values install_aber passes: change them together. The node's
+  # version stands in for the cluster's, which `helm template` does not ask.
+  pi_kube=$(k3s --version 2>/dev/null | sed -n 's/^k3s version \(v[0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' | head -n 1)
+  helm template aber "$CHART" --version "$ABER_VERSION" -n aber -f "$VALUES" -f "$SITE" \
+    ${pi_kube:+--kube-version "$pi_kube"} >"$WORK/aber.yaml" 2>"$WORK/render.log" || {
+    cat "$WORK/render.log" >&2
+    die "Helm could not render Aber's chart. Its error is above: if it names a setting, correct it in
+$SITE or $VALUES, then run this again."
+  }
+  pi_images=$(manifest_images "$WORK/aber.yaml") || die "could not read the image names from Aber's chart."
+  [ -n "$pi_images" ] || die "Aber's chart, as rendered, names no images. This installer cannot read it."
+  if grep -q '^[[:space:]]*imagePullSecrets:' "$WORK/aber.yaml"; then
+    say "  the site's values give Aber's pods imagePullSecrets, which this step cannot use;"
+    say "  each part of Aber downloads its own images as it starts"
+    return 0
+  fi
+  pi_count=$(printf '%s\n' "$pi_images" | wc -l | tr -d ' ')
+  say "  $pi_count images, one at a time"
+  pi_pulled=0
+  pi_begin=$(date +%s)
+  for pi_image in $pi_images; do
+    if k3s crictl inspecti "$pi_image" >/dev/null 2>&1; then
+      printf '  %-54s already on this machine\n' "$pi_image"
+      continue
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+      say "  would run: k3s crictl pull $pi_image"
+      continue
+    fi
+    pi_try=1
+    while :; do
+      printf '  %-54s downloading... ' "$pi_image"
+      pi_start=$(date +%s)
+      if k3s crictl pull "$pi_image" >"$WORK/pull.log" 2>&1; then
+        say "done in $(duration $(($(date +%s) - pi_start)))"
+        break
+      fi
+      say "failed"
+      sed 's/^/    /' "$WORK/pull.log" >&2
+      [ "$pi_try" -lt "$PULL_TRIES" ] || die "could not download $pi_image, after $PULL_TRIES tries. crictl's message is above.
+Check that this machine can reach $(image_registry "$pi_image"). Behind a proxy or a registry mirror,
+k3s's own settings for them apply (help/site/install.md, Run it on a site). Running the same
+command again carries on from here, and keeps the images already downloaded."
+      pi_try=$((pi_try + 1))
+      say "    trying again in ${PULL_PAUSE}s (try $pi_try of $PULL_TRIES)"
+      sleep "$PULL_PAUSE"
+    done
+    pi_pulled=$((pi_pulled + 1))
+  done
+  if [ "$pi_pulled" -gt 0 ]; then
+    say "  downloaded $pi_pulled of $pi_count images in $(duration $(($(date +%s) - pi_begin)))"
+  fi
+}
+
 install_aber() {
   step "Install Aber $ABER_VERSION"
   if [ "$CLUSTER_UP" = 1 ]; then
@@ -793,10 +903,67 @@ cleared with 'helm rollback aber -n aber'; a pending first install with 'helm un
 which keeps the data volumes. Then run this again." ;;
     esac
   fi
+  # pull_images renders this chart with these values to know what to download.
   run helm upgrade --install aber "$CHART" --version "$ABER_VERSION" -n aber --create-namespace \
     -f "$VALUES" -f "$SITE" --timeout 15m ||
     die "Helm stopped. Its error is above: if it names a setting, correct it in $SITE or $VALUES,
 then run this again."
+}
+
+# What workload $1's pods were doing when its wait ran out, as the rest of the stop message: still
+# downloading an image or creating its containers (more time is the cure), failing a download, or
+# something its own messages explain. Called only once the wait has failed.
+not_ready_reason() {
+  nr_selector=$(kc -n aber get "$1" -o go-template='{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || nr_selector=
+  nr_states=
+  nr_events=
+  if [ -n "$nr_selector" ]; then
+    # A line per container: pod, init or main, container, state, its reason, image. A state with
+    # neither running nor terminated is waiting, even when Kubernetes leaves it empty.
+    nr_container='{{.name}} {{if .state.running}}running -{{else if .state.terminated}}done -{{else}}waiting {{with .state.waiting}}{{or .reason "-"}}{{else}}-{{end}}{{end}} {{.image}}{{"\n"}}'
+    nr_states=$(kc -n aber get pods -l "${nr_selector%,}" -o go-template="{{range .items}}{{\$pod := .metadata.name}}{{range .status.initContainerStatuses}}{{\$pod}} init $nr_container{{end}}{{range .status.containerStatuses}}{{\$pod}} main $nr_container{{end}}{{end}}" 2>/dev/null) || nr_states=
+    nr_events=$(kc -n aber get events --field-selector involvedObject.kind=Pod -o go-template='{{range .items}}{{.involvedObject.name}} {{.reason}} {{.message}}{{"\n"}}{{end}}' 2>/dev/null) || nr_events=
+  fi
+  # The first of: a failed download, an image a pod began and never finished downloading, an init
+  # container still running, a container still being created. As `kind pod what`.
+  nr_found=$(printf '%s\n--events--\n%s\n' "$nr_states" "$nr_events" | awk '
+    $0 == "--events--" { events = 1; next }
+    !events && NF == 6 {
+      pod[$1] = 1
+      if ($4 == "waiting" && ($5 == "ErrImagePull" || $5 == "ImagePullBackOff")) { if (failed == "") failed = $1 " " $6 }
+      else if ($2 == "init" && $4 == "running") { if (init == "") init = $1 " " $3 }
+      else if ($4 == "waiting" && ($5 == "ContainerCreating" || $5 == "PodInitializing")) { if (creating == "") creating = $1 " -" }
+      next
+    }
+    events && ($1 in pod) && ($2 == "Pulling" || $2 == "Pulled") {
+      split($0, quoted, "\"")
+      if ($2 == "Pulling") began[$1 " " quoted[2]] = 1; else finished[$1 " " quoted[2]] = 1
+    }
+    END {
+      for (k in began) if (!(k in finished)) { pulling = k; break }
+      if (failed != "") print "failed " failed
+      else if (pulling != "") print "pulling " pulling
+      else if (init != "") print "init " init
+      else if (creating != "") print "creating " creating
+    }') || nr_found=
+  read -r nr_kind nr_pod nr_what <<EOF
+$nr_found
+EOF
+  case $nr_kind in
+    failed) printf '%s' "Its pod $nr_pod could not download $nr_what.
+Kubernetes keeps trying. Check that this machine can reach $(image_registry "$nr_what"), then run the
+same command again: it carries on from here." ;;
+    pulling) printf '%s' "Its pod $nr_pod was still downloading $nr_what.
+Nothing needs fixing: run the same command again, and it carries on from here." ;;
+    init) printf '%s' "Its pod $nr_pod was still in its init container $nr_what, which runs first.
+'kubectl -n aber logs $nr_pod -c $nr_what' says what it waits for.
+Running the same command again carries on from here." ;;
+    creating) printf '%s' "Its pod $nr_pod was still creating its containers, which usually needs only more time.
+Run the same command again: it carries on from here. If it stops here again,
+'kubectl -n aber describe pod $nr_pod' says why." ;;
+    *) printf '%s' "'kubectl -n aber describe $1' and its pods' logs say why.
+Running the same command again carries on from here." ;;
+  esac
 }
 
 wait_and_test() {
@@ -811,8 +978,8 @@ wait_and_test() {
   wt_list=$(kc -n aber get statefulset,deploy -o name) || die "could not list Aber's workloads."
   for wt_name in $wt_list; do
     kc -n aber rollout status "$wt_name" --timeout=10m ||
-      die "$wt_name did not start within 10 minutes. 'kubectl -n aber describe $wt_name' and its
-pods' logs say why. Running this again carries on from here."
+      die "$wt_name did not start within 10 minutes.
+$(not_ready_reason "$wt_name")"
   done
   helm test aber -n aber ||
     die "Aber's checks failed. 'helm test aber -n aber --logs' shows what each found."
@@ -899,6 +1066,7 @@ aber_install() {
   install_helm_and_node
   prepare_cluster
   write_site_files
+  pull_images
   install_aber
   wait_and_test
   save_root_certificate

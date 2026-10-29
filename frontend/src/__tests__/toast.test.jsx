@@ -432,11 +432,11 @@ describe('a firing platform alert', () => {
   it('links the toast to its rule in Grafana, in a new tab, and dismisses it when followed', async () => {
     await mountAlerts([row])
     const link = screen.getByRole('link', { name: /Historian Backup Stale/ })
-    expect(link).toHaveAttribute('href', grafanaAlertUrl('Historian Backup Stale'))
+    expect(link).toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(link).toHaveAccessibleDescription('Open in Grafana, in a new tab')
-    expect(hook.toasts[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
+    expect(hook.toasts[0].to).toBe(grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
     expect(hook.history).toEqual([])
@@ -462,8 +462,22 @@ describe('a firing platform alert', () => {
   })
 
   it('links any other alert to its rule, whatever entity_id it carries', () => {
-    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row.alert_name))
-    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row.alert_name))
+    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row))
+    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row))
+  })
+
+  it('links straight to the rule by its uid, firing and resolved', async () => {
+    const firing = await mountAlerts([{ ...row, rule_uid: 'aber-backup-stale' }])
+    const ruleView = 'http://localhost:3002/alerting/grafana/aber-backup-stale/view'
+    expect(screen.getByRole('link', { name: /Historian Backup Stale/ })).toHaveAttribute('href', ruleView)
+    await firing([])
+    expect(hook.toasts.find(t => t.msg === 'Resolved — Historian Backup Stale').to).toBe(ruleView)
+  })
+
+  it('searches by the rule name for a row written before the uid was kept', async () => {
+    await mountAlerts([{ ...row, rule_uid: null }])
+    expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
+      .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

@@ -102,17 +102,38 @@ five questions:
 | Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](../guides/glossary.md#asset-administration-shell-aas) has been exported |
 
 It shows your answers and asks before it changes anything. Then it installs k3s, Helm and Node.js
-where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it downloading. At the end it
-prints:
+where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it
+downloading about 5 GB of images. On a slow link it takes longer.
+
+The images are downloaded in a step of their own, before Aber starts. The installer prints a line
+for each image, with how long it took, and skips an image the machine already has:
+
+```text
+  grafana/grafana:13.2.3                                 downloading... done in 2m 41s
+  curlimages/curl:8.22.0                                 already on this machine
+```
+
+Once the images are there, Aber starts in a few minutes. At the end the installer prints:
 
 - the address to sign in at, `https://app.<domain>`, with the administrator's email and password;
 - the DNS record to add, if `app.<domain>` does not reach the machine yet;
 - where it saved the root certificate, `/etc/aber/aber-ca.crt`.
 
 It keeps the site's passwords and settings in `/etc/aber`. **Keep `/etc/aber/values-local.yaml`
-safe:** it holds every password. If the install stops, fix what the message says and run the same
-command again. It carries on from where it stopped. On a finished install, it upgrades Aber to the
-release named in the command.
+safe:** it holds every password.
+
+**If the install stops, read the message, then run the same command again.** It carries on from
+where it stopped, and keeps the images it has downloaded. If the message says a part of Aber was
+still downloading an image, nothing needs fixing. Otherwise, do what the message says first. On a
+finished install, the same command upgrades Aber to the release named in the command.
+
+**Behind a proxy, or using a registry mirror?** The installer downloads the images through k3s, the
+same way Kubernetes does, so k3s's proxy and registry settings apply to them. Install k3s first, as
+[step 2](#2-install-k3s-helm-and-nodejs) shows. Then set the proxy in
+`/etc/systemd/system/k3s.service.env`, or the mirror in `/etc/rancher/k3s/registries.yaml`, and
+restart k3s with `sudo systemctl restart k3s`. k3s's guides explain both:
+[a proxy](https://docs.k3s.io/advanced#configuring-an-http-proxy) and
+[a registry mirror](https://docs.k3s.io/installation/private-registry). Then run the installer.
 
 To install without questions, give the answers as flags. `--yes` accepts the suggested address and
 base IRI, and `--help` lists every flag:
@@ -275,7 +296,9 @@ done
 helm test aber -n aber
 ```
 
-The loop waits for every part of Aber to start. Then `helm test` checks what the site depends on:
+The loop waits for every part of Aber to start. On a slow link it can stop with `exceeded its
+progress deadline` while images are still downloading: run the loop again. Then `helm test` checks
+what the site depends on:
 
 - the link between the two databases;
 - the API, answering through the gateway;

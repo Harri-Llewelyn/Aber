@@ -2129,9 +2129,11 @@ jobs:
         if: always()
         run: k3d cluster delete aber-rehearsal || true
 
-  # gitleaks over every commit the checkout holds, and the working tree. Runs on every push,
-  # documentation included: a secret pasted into a README is what it exists for. fetch-depth 0,
-  # because it reads history, and a shallow clone would scan one commit and say so.
+  # gitleaks over the history of the commit under test, and the working tree. Runs on every push,
+  # documentation included: a secret pasted into a README is what it exists for. On a pull request
+  # that commit is the merge commit, main's history plus the branch's, read against the branch's own
+  # .gitleaksignore, so another open branch's finding cannot fail it; secret-scan.yml reads every
+  # ref. fetch-depth 0, because a shallow clone would scan one commit and say so.
   secret-scan:
     name: Secret Scan
     runs-on: ubuntu-26.04
@@ -2142,8 +2144,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Scan Every Commit And The Working Tree
-        run: npm run scan:secrets
+      - name: Scan The Tested Commit's History And The Working Tree
+        run: npm run scan:secrets -- --history=head
 
   # The other eight checks in docs/static-analysis.md. Gated like k8s-validation: they judge code,
   # and a documentation-only push cannot change what they find. Each runs in a pinned container or
