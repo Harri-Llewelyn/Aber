@@ -664,7 +664,7 @@ describe('sidebar warning tone', () => {
 /**
  * The current page is the accent icon and a bar on the rail's left edge, not a filled box: the
  * scrollbar narrows a row from the right, which pushed a box off the rail's centre. The rows are
- * 36px so an Administrator's rail fits at 1080p.
+ * 32px so an Administrator's rail fits at 1080p while no page's tabs are open.
  */
 describe('the current page in the rail', () => {
   const css = APP_CSS.replace(/\r\n/g, '\n')
@@ -721,9 +721,9 @@ describe('the current page in the rail', () => {
     expect(css).toMatch(/\.user-menu-button\.active::before \{[^}]*border-left:\s*3px solid var\(--accent\)/)
   })
 
-  it('keeps the rows at 36px and the dividers tight', () => {
-    expect(rule('.sidebar-item')).toMatch(/padding:\s*6px 9px/)
-    expect(rule('.sidebar-collapse-all')).toMatch(/padding:\s*6px 9px/)
+  it('keeps the rows at 32px and the dividers tight', () => {
+    expect(rule('.sidebar-item')).toMatch(/padding:\s*4px 9px/)
+    expect(rule('.sidebar-collapse-all')).toMatch(/padding:\s*4px 9px/)
     expect(rule('.sidebar-divider')).toMatch(/margin:\s*6px 2px/)
   })
 })
