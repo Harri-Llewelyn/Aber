@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "supabase", "fu
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
 from test_enroll_gateway import ADMIN_PASSWORD, PUBLISHABLE_KEY, SERVICE_ROLE_KEY, rest, sign_in  # noqa: E402
 import stack_exec  # noqa: E402  -- kubectl exec into the release's pods
+import stack_sign_in  # noqa: E402
 
 OPERATOR_EMAIL = os.getenv("ABER_OPERATOR_EMAIL", "operator@aber.local")
 NOTE = "test_backup_service.py"
@@ -125,8 +126,10 @@ class BackupServiceTests(unittest.TestCase):
     def test_01_only_an_administrator_may_ask(self):
         try:
             operator = sign_in(OPERATOR_EMAIL, ADMIN_PASSWORD)
-        except urllib.error.HTTPError:
-            self.skipTest("the seeded Operator persona is not available with the default password")
+        except stack_sign_in.RateLimited:
+            raise
+        except AssertionError as err:
+            self.skipTest(f"the seeded Operator persona is not available with the default password ({err})")
         status, body = rpc("request_backup", {"p_note": NOTE}, operator)
         self.assertIn(status, (401, 403), body)
         self.assertEqual(psql(f"SELECT count(*) FROM public.backup_jobs WHERE note = '{NOTE}' AND requested_by IS NOT NULL AND origin = 'requested' AND status = 'PENDING'"), "0")
