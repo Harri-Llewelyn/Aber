@@ -103,6 +103,16 @@ describe('how a stored recording ended', () => {
     expect(ended.closest('.context-field-danger')).not.toBeNull()
   })
 
+  it('says a restart cut it short, as a cap does', async () => {
+    const panel = await openPanel({
+      ...CAPTURE,
+      manifest: { ...CAPTURE.manifest, stop_reason: 'restart', duration_ms: 60000, requested_seconds: 300 }
+    })
+    expect(within(panel).getByText('1m of 5m')).toBeInTheDocument()
+    const ended = within(panel).getByText('Cut short by a restart')
+    expect(ended.closest('.context-field-danger')).not.toBeNull()
+  })
+
   it.each([['duration', 'Ran its full length'], ['operator', 'Stopped by an operator']])(
     'says %s without alarm', async (reason, label) => {
       const panel = await openPanel({
