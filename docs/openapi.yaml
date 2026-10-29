@@ -5064,13 +5064,18 @@ paths:
         `grafana/provisioning/alerting/contact-points.template.yaml`, which needs Grafana 11.6 or
         newer). The gateway checks the key; this function checks the bearer.
 
-        **Alerts with no `sparkplug_id` label are counted and skipped, not stored.** A
-        `DatasourceError` notification — what `execErrState: Error` produces when a rule's query
-        breaks — carries no device label, and inventing one would attribute a broken query to a
-        machine. The response reports the skipped count so it is visible in Grafana's delivery log.
-        Two kinds need no `sparkplug_id`: `entity_type` `platform`, and `service_identity` (0204),
-        whose subject is the machine identity in `principal_id`. One whose `principal_id` is not a
-        UUID is skipped the same way.
+        **Alerts with no `sparkplug_id` label are counted and skipped, not stored.** Inventing one
+        would attribute the alert to the wrong machine. The response reports the skipped count so it
+        is visible in Grafana's delivery log. Two kinds need no `sparkplug_id`: `entity_type`
+        `platform`, and `service_identity` (0204), whose subject is the machine identity in
+        `principal_id`. One whose `principal_id` is not a UUID is skipped the same way.
+
+        **A rule Grafana could not evaluate is stored as a `platform` alert naming it.** When a
+        rule's query fails, `execErrState: Error` sends an instance named `DatasourceError`, with the
+        rule's title in a `rulename` label (`DatasourceNoData` under `noDataState: NoData`). It is
+        written as `<rulename> could not be evaluated`, whatever the rule's own scope, with Grafana's
+        error text as its summary and no values. It is never skipped, and never stored as the rule's
+        condition holding.
       security:
         - AlertWebhookBearer: []
       requestBody:
@@ -6671,13 +6676,16 @@ components:
             The subject's row id, resolved at write time from `sparkplug_id` in `devices` or
             `gateways` by `entity_type`; for `service_identity`, the machine identity's principal id.
             Null for a `platform` alert, or when no row matched.
-        alert_name: { type: string, example: Thermal Excursion }
+        alert_name:
+          type: string
+          description: "The rule's title. For a rule Grafana could not evaluate, `<title> could not be evaluated`, on a `platform` row."
+          example: Thermal Excursion
         severity: { type: string, enum: [critical, warning, info] }
         status: { type: string, enum: [firing, resolved] }
         summary:
           type: string
           nullable: true
-          description: "Grafana's own templated annotation, already carrying the device and the values that tripped the rule."
+          description: "Grafana's own templated annotation, already carrying the device and the values that tripped the rule. For a rule Grafana could not evaluate, its error text."
           example: Sim_CNC_Mill_01 is above its configured thermal limit of 90.0 degC (5.2 degC over).
         starts_at: { type: string, format: date-time, description: 'When Grafana began firing this occurrence. Part of the occurrence key.' }
         ends_at: { type: string, format: date-time, nullable: true, description: 'Null while firing. A resolved row always carries one — enforced by CHECK.' }
@@ -6704,7 +6712,8 @@ components:
           additionalProperties: { type: number }
           description: |
             What Grafana evaluated for the alert, by the refId of each query and expression node.
-            Null on a row written before 0220, or when Grafana sent none.
+            Null on a row written before 0220, when Grafana sent none, or for a rule Grafana could
+            not evaluate (it sends -1 for each).
           example: { A: 74.5, B: 74.5, C: 1 }
 
     DeviceNameplate:
