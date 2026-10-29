@@ -155,7 +155,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                       <Tooltip text="Open this rule in Grafana Alerting. The alert is about the platform, not about one asset.">
                         <a
                           className="alert-pill-item-link"
-                          href={grafanaAlertUrl(a.alert_name)}
+                          href={grafanaAlertUrl(a)}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={() => setOpen(false)}

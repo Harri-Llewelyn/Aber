@@ -1049,6 +1049,15 @@ export const SUITES = {
       'address dropped without a NOTICE or an audit row, or a second boot, 0202 or a function ' +
       'still naming the column.',
   },
+  'supabase/migrations/test_an_alert_keeps_its_rule_labels_and_values.py': {
+    lanes: ['db'],
+    why:
+      '0220 -- that platform_alerts keeps the uid of the rule that raised each alert, its labels and ' +
+      'its values, nullable so a row from before reads on; that the webhook\'s upsert on the ' +
+      'occurrence key writes them and a resolve updates the same row; that a signed-in reader ' +
+      'reads them under the table\'s RLS and writes none; and that platform_alerts_active returns ' +
+      "them, 0001's replay replacing the view 1.7.0 left once and then dropping nothing.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

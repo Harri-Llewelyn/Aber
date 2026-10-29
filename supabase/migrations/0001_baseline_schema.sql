@@ -8679,7 +8679,7 @@ ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
-COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
+COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
 
 --
 
@@ -12435,6 +12435,8 @@ ALTER TABLE public.permissions
 --
 
 -- platform_alerts :: TABLE
+-- rule_uid, labels and values are 0220's, stated here so that platform_alerts_active, below, can
+-- select them on every boot.
 CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     fingerprint text NOT NULL,
@@ -12448,6 +12450,9 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
     starts_at timestamp with time zone NOT NULL,
     ends_at timestamp with time zone,
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    rule_uid text,
+    labels jsonb,
+    "values" jsonb,
     CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL))),
     CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text]))),
     CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL))),
@@ -12472,7 +12477,10 @@ ALTER TABLE public.platform_alerts
     ADD COLUMN IF NOT EXISTS summary text,
     ADD COLUMN IF NOT EXISTS starts_at timestamp with time zone NOT NULL,
     ADD COLUMN IF NOT EXISTS ends_at timestamp with time zone,
-    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL;
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS rule_uid text,
+    ADD COLUMN IF NOT EXISTS labels jsonb,
+    ADD COLUMN IF NOT EXISTS "values" jsonb;
 
 ALTER TABLE public.platform_alerts
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -12486,7 +12494,10 @@ ALTER TABLE public.platform_alerts
     ALTER COLUMN summary DROP DEFAULT,
     ALTER COLUMN starts_at DROP DEFAULT,
     ALTER COLUMN ends_at DROP DEFAULT,
-    ALTER COLUMN recorded_at SET DEFAULT now();
+    ALTER COLUMN recorded_at SET DEFAULT now(),
+    ALTER COLUMN rule_uid DROP DEFAULT,
+    ALTER COLUMN labels DROP DEFAULT,
+    ALTER COLUMN "values" DROP DEFAULT;
 
 DO $c$ BEGIN
 
@@ -12591,6 +12602,26 @@ COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplu
 --
 
 -- platform_alerts_active :: VIEW
+-- rule_uid, labels and values are 0220's. CREATE OR REPLACE VIEW cannot drop, rename or retype a
+-- column, so a database holding another column list drops the view here first; once the list
+-- matches, a boot drops nothing. Nothing depends on the view. Its comment follows, and its grants
+-- are restated in the ACL section.
+DO $shape$
+BEGIN
+    IF to_regclass('public.platform_alerts_active') IS NOT NULL
+       AND (SELECT array_agg(attname || ' ' || format_type(atttypid, atttypmod) ORDER BY attnum)
+              FROM pg_attribute
+             WHERE attrelid = to_regclass('public.platform_alerts_active') AND attnum > 0 AND NOT attisdropped)
+           IS DISTINCT FROM ARRAY[
+               'id uuid', 'fingerprint text', 'entity_type text', 'entity_id uuid', 'sparkplug_id text',
+               'alert_name text', 'severity text', 'status text', 'summary text',
+               'starts_at timestamp with time zone', 'ends_at timestamp with time zone',
+               'recorded_at timestamp with time zone', 'rule_uid text', 'labels jsonb', 'values jsonb'] THEN
+        DROP VIEW public.platform_alerts_active;
+    END IF;
+END
+$shape$;
+
 CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='true') AS
  SELECT id,
     fingerprint,
@@ -12603,7 +12634,10 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
     summary,
     starts_at,
     ends_at,
-    recorded_at
+    recorded_at,
+    rule_uid,
+    labels,
+    "values"
    FROM ( SELECT DISTINCT ON (a.fingerprint) a.id,
             a.fingerprint,
             a.entity_type,
@@ -12615,7 +12649,10 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
             a.summary,
             a.starts_at,
             a.ends_at,
-            a.recorded_at
+            a.recorded_at,
+            a.rule_uid,
+            a.labels,
+            a."values"
            FROM public.platform_alerts a
           ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest
   WHERE (status = 'firing'::text);

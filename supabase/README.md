@@ -2350,6 +2350,53 @@ it but the Audit Trail's list of governance fields, which past rows carry.
 holds the move, the NOTICE, the audit row, the blank, a boot of `0202` then `0219`, a second boot,
 and an approved cell proposal applying with the column gone.
 
+### An alert keeps its rule's uid, labels and values (0220)
+
+`grafana-alert-webhook` used to keep an alert's title as `alert_name` and Grafana's English summary,
+and drop the rest. Nothing could key on the rule: a renamed rule, or two titles sharing words,
+sent the dashboard's link to the wrong list, and alert routes or acknowledgements would have had no
+stable name for what fired. `platform_alerts` now has three nullable columns, and
+`platform_alerts_active` returns them.
+
+- **`rule_uid text`**: the uid of the rule that raised the alert. Grafana names the rule in each
+  alert's `generatorURL`, `<root URL>/alerting/grafana/<uid>/view`; the webhook takes the uid from
+  the path, since the host is whatever root URL Grafana is configured with. Grafana also sends it as
+  `ruleUID`, which the webhook reads when the URL names none, and last an `__alert_rule_uid__` label.
+  Grafana removes that label, and every `__x__` label, before a contact point sees the alert, so
+  only a relay that kept it would send it. Anything that is not a Grafana uid (letters, digits,
+  `-` and `_`, at most 40) is stored as NULL. All 42 provisioned rules carry an explicit `uid:`.
+- **`labels jsonb`**: the alert's labels as sent, the rule's and its series' together, with
+  `alertname` and `grafana_folder`.
+- **`values jsonb`**: what Grafana evaluated, by the refId of each query and expression node, as
+  sent; NULL when it sent none.
+
+**The key is unchanged.** The upsert stays on `(fingerprint, starts_at)`. The rule's uid is the key
+for the rule, not a new `code` label: a label added to a rule changes every fingerprint it
+produces, and the fingerprint is half of the occurrence key.
+
+**A row from before keeps working.** All three are NULL on rows written before the upgrade.
+`grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
+has a uid, and otherwise Grafana's alert list searched by the rule's name, as before.
+
+**The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
+first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried
+to drop the three columns on the next boot and failed it (`cannot drop columns from view`). So
+`0001` itself declares the columns, in the `CREATE TABLE` and as `ADD COLUMN IF NOT EXISTS` for a
+database that predates them, and selects them in the view. Before the view, a `DO` block compares
+the live view's columns and types with the new list and drops the view when they differ, as `0203`
+does for `list_user_accounts()`. That happens once, on the first boot after the upgrade; every later
+boot finds the list matching and drops nothing. Nothing depends on the view, so the drop needs no
+`CASCADE`. `0001` then restates its comment and, in the ACL section, its grants, and the view keeps
+`security_invoker`. A later change to the view's columns, such as acknowledgements, edits the same
+list in both places. `0220` describes the columns and checks the result.
+
+The grants and policies are on the table and the view, not on their columns, so they cover the
+three. The file's self-check asserts the columns' types, that the view returns them under
+`security_invoker`, that `authenticated` reads them from both and writes none, and that `anon`
+reads none. `test_an_alert_keeps_its_rule_labels_and_values.py` holds the columns, a row from
+before, the upsert that resolves an occurrence, who reads them, and `0001`'s replay over the older
+view. The webhook's own suite holds the parse.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

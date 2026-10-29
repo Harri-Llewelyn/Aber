@@ -7952,8 +7952,8 @@ UPDATE public.system_settings
 -- The MCP reader
 -- =============================================================================================
 -- `i3x-mcp` takes a static `I3X_TOKEN` from its host's config file, and a GoTrue token expires
--- within the hour. This creates the identity; `scripts/mint-mcp-token.mjs` signs a long-lived
--- JWT for it with the stack's HS256 secret, so PostgREST validates it as it validates a GoTrue
+-- within the hour. This creates the identity; `scripts/mint-api-token.mjs` signs a long-lived
+-- JWT for it with the key GoTrue signs with, so PostgREST validates it as it validates a GoTrue
 -- token. Not `service_role`: the i3X server passes the caller's bearer through so that it
 -- queries as them. Not a demo persona: a machine credential borrowing a human account conflates
 -- two lifecycles. Its grant is `telemetry:read`, never `audit_trail:read`: the MCP client has

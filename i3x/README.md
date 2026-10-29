@@ -797,9 +797,6 @@ two ways:
   node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
   ```
 
-  `scripts/mint-mcp-token.mjs` is the script's old name. It still works until 1.8.0, and says so
-  on stderr.
-
 Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
 the key GoTrue signs with (ES256 with `supabaseAuth.es256Signing`, the HS256 secret without), so
 PostgREST validates it exactly as it validates a GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and

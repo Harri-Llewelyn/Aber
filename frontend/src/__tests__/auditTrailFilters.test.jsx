@@ -1429,9 +1429,9 @@ describe('Audit Trail — removed tag filter', () => {
       await waitFor(() => expect(laneLabelled('Read-only API client')).toBeTruthy())
     })
 
-    /* A mint from the shell, as mint-api-token.mjs or its old name mint-mcp-token.mjs records it:
-       no person, and the claimed os_user and host. Neither script writes its own name into the row,
-       so a row from before the rename takes the identity's current name like any other. */
+    /* A mint from the shell, as mint-api-token.mjs records it, and as its old name mint-mcp-token.mjs
+       did until 1.8.0: no person, and the claimed os_user and host. Neither name is written into the
+       row, so a row from before the rename takes the identity's current name like any other. */
     it('names a token minted from the shell by its principal, whichever script name minted it', async () => {
       respondWith([{
         event_id: 25, entity_type: 'service_principals', entity_id: READ_ONLY,

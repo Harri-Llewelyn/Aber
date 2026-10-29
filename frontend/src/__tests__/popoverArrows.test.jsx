@@ -82,10 +82,10 @@ describe('the popover arrows', () => {
       expect(declared(`.sidebar-mode-expanded ${arrow}`, 'left'))
         .toBe(`${parseFloat(declared(`.sidebar-mode-expanded ${panel}`, 'left')) + 0.5}px`)
     }
-    // Level with the account row: the foot's 10px, the 34px Collapse all tabs row, a 2px gap and half
+    // Level with the account row: the foot's 10px, the 26px Collapse all tabs row, a 2px gap and half
     // of the 38px account row.
-    expect(declared(PANELS[2].arrow, 'bottom')).toBe('65px')
-    expect(declared('.sidebar-collapse-all', 'padding')).toBe('6px 9px')
+    expect(declared(PANELS[2].arrow, 'bottom')).toBe('57px')
+    expect(declared('.sidebar-collapse-all', 'padding')).toBe('4px 9px')
   })
 
   it('places the Filters arrow from the --arrow-x its component sets', () => {
