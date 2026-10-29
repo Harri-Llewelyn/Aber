@@ -36,7 +36,7 @@ describe('isSafeDestination', () => {
     '/devices/quarantine',
     '/metrics?unmapped=1',
     '/devices?search=dev123',
-    grafanaAlertUrl('Spindle Overtemperature'),
+    grafanaAlertUrl({ alert_name: 'Spindle Overtemperature' }),
     `${GRAFANA_URL}/alerting/list`,
     GRAFANA_URL
   ])('takes %s', (to) => {
@@ -92,10 +92,10 @@ describe('the stored destination, read back', () => {
 
   it('keeps an in-app path and a Grafana URL', () => {
     store([
-      { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl('Spindle Overtemperature'), at: 2 },
+      { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl({ alert_name: 'Spindle Overtemperature' }), at: 2 },
       { id: 1, msg: 'New device', type: 'info', to: '/devices/quarantine', at: 1 }
     ])
-    expect(readStoredHistory().map(e => e.to)).toEqual([grafanaAlertUrl('Spindle Overtemperature'), '/devices/quarantine'])
+    expect(readStoredHistory().map(e => e.to)).toEqual([grafanaAlertUrl({ alert_name: 'Spindle Overtemperature' }), '/devices/quarantine'])
   })
 
   it('drops one that fails the check, and keeps the entry as plain text', () => {
@@ -140,7 +140,7 @@ describe('a toast with a destination', () => {
 
   it('opens Grafana in a new tab, marked as leaving the dashboard', () => {
     render(<Harness />)
-    act(() => { hook.showToast('Belt Slip', 'warning', { group: 'alert', to: grafanaAlertUrl('Belt Slip'), record: false }) })
+    act(() => { hook.showToast('Belt Slip', 'warning', { group: 'alert', to: grafanaAlertUrl({ alert_name: 'Belt Slip' }), record: false }) })
     const link = screen.getByRole('link', { name: /Belt Slip/ })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
@@ -152,13 +152,13 @@ describe('a toast with a destination', () => {
     expect(destinationTitle('/devices/quarantine')).toBe('Go to Devices › Quarantine')
     expect(destinationTitle('/metrics?unmapped=1')).toBe('Go to Metrics')
     expect(destinationTitle('/cold-storage')).toBe('Go to Cold Storage')
-    expect(destinationTitle(grafanaAlertUrl('x'))).toBe('Open in Grafana, in a new tab')
+    expect(destinationTitle(grafanaAlertUrl({ alert_name: 'x' }))).toBe('Open in Grafana, in a new tab')
   })
 })
 
 describe('a history row with a destination', () => {
   const rows = [
-    { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl('Spindle Overtemperature'), at: Date.now(), read: true, count: 1 },
+    { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl({ alert_name: 'Spindle Overtemperature' }), at: Date.now(), read: true, count: 1 },
     { id: 1, msg: 'New device', type: 'info', group: 'info', to: '/devices/quarantine', at: Date.now(), read: true, count: 1 }
   ]
   const openList = () => {
@@ -186,7 +186,7 @@ describe('a history row with a destination', () => {
   it('opens a Grafana rule in a new tab and closes the list', () => {
     const panel = openList()
     const link = within(panel).getByRole('link', { name: /Spindle Overtemperature/ })
-    expect(link).toHaveAttribute('href', grafanaAlertUrl('Spindle Overtemperature'))
+    expect(link).toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Spindle Overtemperature' }))
     expect(link).toHaveAttribute('target', '_blank')
     fireEvent.click(link)
     expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull()

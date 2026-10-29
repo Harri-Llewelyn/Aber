@@ -359,6 +359,13 @@ describe('AlertPill', () => {
       expect(onSelectGateway).not.toHaveBeenCalled()
     })
 
+    it('opens the rule itself when the row carries its uid', () => {
+      render(<AlertPill alerts={[{ ...platformAlert(), rule_uid: 'aber-ingestion-silent' }]} />)
+      fireEvent.click(pill())
+      expect(document.querySelector('a.alert-pill-item-link'))
+        .toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-ingestion-silent/view`)
+    })
+
     it('says what a fleet-wide alert is about instead of showing an empty id line', () => {
       render(<AlertPill alerts={[platformAlert()]} />)
       fireEvent.click(pill())

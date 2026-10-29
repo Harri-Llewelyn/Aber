@@ -25,8 +25,11 @@ registry metadata on every run, need network access.
 
 CI runs all nine on a clean `ubuntu-26.04` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
 
-- **Secret Scan** runs `scan:secrets` on every push, documentation included, over a full clone
-  (`fetch-depth: 0`), because a secret pasted into a README is the case it exists for.
+- **Secret Scan** runs `scan:secrets --history=head` on every push, documentation included, over a
+  full clone (`fetch-depth: 0`), because a secret pasted into a README is the case it exists for.
+  It reads the history of the commit under test, so a pull request fails only on what it would add
+  to main. [`secret-scan.yml`](../.github/workflows/secret-scan.yml) scans every ref, pull request
+  heads included, on each push to main and daily ([`testing.md`](testing.md#the-secret-scans)).
 - **Static Analysis** runs the other eight with `node scripts/lint-all.mjs --skip=secrets`, on
   every push that changes more than documentation (the `changes` gate that also guards the
   end-to-end stack). Its setup is Node 24 and Helm 3.16.3; Docker is on the runner already.
@@ -40,7 +43,7 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 | `lint:js` | ESLint 9 with the React and Hooks plugins | `frontend/src`, `scripts`, `forge` | `eslint:recommended`, React's recommended rules and the rules of hooks. Missing effect dependencies are a warning. A `title` on an HTML element or an icon in `frontend/src` is an error: the browser's tooltip, which the dashboard replaces with its own (`frontend/README.md`, Tooltips) | none: an inline `eslint-disable-next-line RULE -- reason` |
 | `lint:py` | Ruff 0.14.0 | Every `.py` | Pyflakes and the pycodestyle errors (`ruff.toml`), not style | none: an inline `# noqa: CODE -- reason` |
 | `lint:deno` | deno lint 2.5.6, and deno check and deno test with the Deno the functions image builds with | `supabase/functions` | Deno's recommended rules except `no-import-prefix`, type errors, and failing `*_test.ts` | none: an inline `// deno-lint-ignore RULE -- reason` |
-| `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref, and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only |
+| `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref (`--history=head`: the checked-out commit's history), and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only; with `--ignore-union`, every branch's list too, never a pull request head's |
 | `scan:config` | trivy config 0.74.0 | The chart rendered three times from `values-prod.yaml.example`: as it stands, with every optional workload on, and with the workloads a switch replaces (see below); and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
 | `scan:source` | Semgrep 1.140.0, `p/default` and `p/security-audit` | The tree, except generated files and the chart's Go templates | Injection, unsafe APIs, workflow supply chain, Dockerfile users | `scripts/lint/semgrep-allowlist.json`, by rule, file and the text of the line |
 | `audit:deps` | npm audit, pip-audit 2.9.0 | `frontend/package-lock.json`, `ingestion/` and `i3x/requirements.txt` | Known advisories, HIGH and above for npm and all of them for Python | `scripts/lint/dependency-allowlist.json`, by advisory id |
@@ -136,5 +139,5 @@ scan a mirror clone:
 
 ```bash
 git clone --mirror https://github.com/Harri-Llewelyn/Aber.git /tmp/aber-mirror.git
-node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git
+node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git --ignore-union
 ```

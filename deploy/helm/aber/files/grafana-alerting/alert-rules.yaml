@@ -937,6 +937,7 @@ groups:
         labels:
           severity: warning
           entity_type: gateway
+          sparkplug_id: '{{ .Labels.edge_node }}'
         annotations:
           summary: >-
             Edge node {{ $labels.edge_node }} is losing messages between the broker and the
@@ -989,6 +990,7 @@ groups:
         labels:
           severity: warning
           entity_type: gateway
+          sparkplug_id: '{{ .Labels.edge_node }}'
         annotations:
           summary: >-
             Edge node {{ $labels.edge_node }} sent readings the platform refused for their timestamp
@@ -1045,6 +1047,7 @@ groups:
         labels:
           severity: warning
           entity_type: gateway
+          sparkplug_id: '{{ .Labels.edge_node }}'
         annotations:
           summary: >-
             Edge node {{ $labels.edge_node }} reported an outage in which it dropped readings: they
@@ -1157,6 +1160,7 @@ groups:
         labels:
           severity: warning
           entity_type: gateway
+          sparkplug_id: '{{ .Labels.edge_node }}'
         annotations:
           summary: >-
             Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more

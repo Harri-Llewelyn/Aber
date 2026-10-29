@@ -261,16 +261,18 @@ export const i3xUrl = () =>
 export const FORGE_ORGANISATION = 'gateways'
 
 /**
- * The Grafana alert page for one rule, by rule name only. `/alerting/list` searches rule
- * definitions, so a `label:sparkplug_id=` filter (a label on evaluated series, not on the
- * definition) matches nothing and reads as "the alert has cleared". Not a rule-UID link either:
- * the UIDs live in the provisioning YAML and nowhere in `platform_alerts`, so a name-to-UID map
- * here would drift.
+ * The Grafana page for the rule that raised a `platform_alerts` row: the rule itself by its
+ * `rule_uid`, which the webhook keeps. A row written before the column existed has none, and opens
+ * the alert list searched by the rule's name. That search reads rule definitions, so a
+ * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing.
  */
-export const grafanaAlertUrl = (alertName) =>
-  (alertName
+export const grafanaAlertUrl = (alert) => {
+  const { rule_uid: ruleUid, alert_name: alertName } = alert ?? {};
+  if (ruleUid) return `${GRAFANA_URL}/alerting/grafana/${encodeURIComponent(ruleUid)}/view`;
+  return alertName
     ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(`rule:"${alertName}"`)}`
-    : `${GRAFANA_URL}/alerting/list`);
+    : `${GRAFANA_URL}/alerting/list`;
+};
 
 /**
  * Grafana's alert history (Alerting > History): every rule's state changes, the record of alerts
