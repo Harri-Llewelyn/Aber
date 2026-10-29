@@ -1,0 +1,114 @@
+{
+  "base": "supabase/postgres:17.6.1.175",
+  "covers": "Aber v1.0.0 to v1.7.0 were all built on this base, so this release covers every one of their database images already on GHCR, and every later release built on the same base.",
+  "assets": [
+    {
+      "component": "PostGIS",
+      "version": "3.3.7",
+      "url": "https://download.osgeo.org/postgis/source/postgis-3.3.7.tar.gz",
+      "asset": "postgis-3.3.7.tar.gz",
+      "sha256": "50724a0dde49adc253e59e024d8b18fef6be4e85341943c6d5e1e1b974e43fce",
+      "size": 17782849,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "pgRouting",
+      "version": "3.4.1",
+      "url": "https://github.com/pgRouting/pgrouting/releases/download/v3.4.1/pgrouting-3.4.1.tar.gz",
+      "asset": "pgrouting-3.4.1.tar.gz",
+      "sha256": "a4e034efee8cf67582b67033d9c3ff714a09d8f5425339624879df50aff3f642",
+      "size": 3735278,
+      "note": "The release archive. The base image's build fetched GitHub's archive of the v3.4.1 tag."
+    },
+    {
+      "component": "pgRouting",
+      "version": "3.4.1",
+      "url": "https://raw.githubusercontent.com/supabase/postgres/17.6.1.175/nix/ext/pgrouting/pgrouting-3.4.1-pg17.patch",
+      "asset": "pgrouting-3.4.1-pg17.patch",
+      "sha256": "cf4997ccbc256d41601d868172340e0ddaaf408b9217a7bf8b081db737ecf142",
+      "size": 1650,
+      "note": "The one patch the base image's build applies, for PostgreSQL 17; the same file as in the image's build."
+    },
+    {
+      "component": "GEOS",
+      "version": "3.14.1",
+      "url": "https://download.osgeo.org/geos/geos-3.14.1.tar.bz2",
+      "asset": "geos-3.14.1.tar.bz2",
+      "sha256": "3c20919cda9a505db07b5216baa980bacdaa0702da715b43f176fb07eff7e716",
+      "size": 7013834,
+      "note": "The release archive. The base image's build fetched GitHub's archive of the 3.14.1 tag."
+    },
+    {
+      "component": "SFCGAL",
+      "version": "2.2.0",
+      "url": "https://gitlab.com/sfcgal/SFCGAL/-/archive/v2.2.0/SFCGAL-v2.2.0.tar.gz",
+      "asset": "SFCGAL-v2.2.0.tar.gz",
+      "sha256": "bb6bb77ddb58523d8c229764de23699f99c1a7011d873419afd2a67df85602a2",
+      "size": 2974247,
+      "note": "GitLab's archive of the tag, the only one the project publishes; pinned as downloaded."
+    },
+    {
+      "component": "CGAL",
+      "version": "6.1",
+      "url": "https://github.com/CGAL/cgal/releases/download/v6.1/CGAL-6.1.tar.xz",
+      "asset": "CGAL-6.1.tar.xz",
+      "sha256": "618da8a8b3f5be46b4f0a47a1efb3c9e6c03d6aab0f5531d56d355d32701d79f",
+      "size": 26293988,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "GMP",
+      "version": "6.3.0",
+      "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.bz2",
+      "asset": "gmp-6.3.0.tar.bz2",
+      "sha256": "ac28211a7cfb609bae2e2c8d6058d66c8fe96434f740cf6fe2e47b000d1c20cb",
+      "size": 2643888,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "MPFR",
+      "version": "4.2.2",
+      "url": "https://www.mpfr.org/mpfr-4.2.2/mpfr-4.2.2.tar.xz",
+      "asset": "mpfr-4.2.2.tar.xz",
+      "sha256": "b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01",
+      "size": 1505596,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "libidn2",
+      "version": "2.3.8",
+      "url": "https://ftp.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz",
+      "asset": "libidn2-2.3.8.tar.gz",
+      "sha256": "f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a",
+      "size": 2234804,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "libunistring",
+      "version": "1.4.1",
+      "url": "https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.1.tar.gz",
+      "asset": "libunistring-1.4.1.tar.gz",
+      "sha256": "12542ad7619470efd95a623174dcd4b364f2483caf708c6bee837cb53a54cb9d",
+      "size": 5039105,
+      "note": "The release archive; the base image's build fetched this file."
+    },
+    {
+      "component": "supabase/postgres",
+      "version": "17.6.1.175",
+      "url": "https://github.com/supabase/postgres/archive/refs/tags/17.6.1.175.tar.gz",
+      "asset": "supabase-postgres-17.6.1.175.tar.gz",
+      "sha256": "e1a708973a11ceeb9f4b89fc3500319d31409e4c18a26cf1a39724cd82dc9138",
+      "size": 1432136,
+      "note": "The scripts that built the base image (nix/ext/postgis.nix, nix/ext/gdal.nix, nix/ext/pgrouting/, flake.lock). GitHub's archive of the tag; pinned as downloaded."
+    },
+    {
+      "component": "nixpkgs",
+      "version": "fb7944c166a3b630f177938e478f0378e64ce108",
+      "url": "https://releases.nixos.org/nixos/unstable/nixos-26.05pre921484.fb7944c166a3/nixexprs.tar.xz",
+      "asset": "nixpkgs-fb7944c166a3b630f177938e478f0378e64ce108.tar.xz",
+      "sha256": "54e52ce8b327da291c7576d1615186717357a02c8a45bb8df9d459717feafbc5",
+      "size": 38047476,
+      "note": "The nixpkgs supabase/postgres's flake.lock pins, which builds GEOS, SFCGAL, CGAL, GMP, MPFR, libidn2 and libunistring. The channel archive flake.lock names."
+    }
+  ]
+}

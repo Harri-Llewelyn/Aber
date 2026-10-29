@@ -1,0 +1,44 @@
+# GPL Sources: mirror the complete corresponding source of the GPL and LGPL components in the
+# images built on supabase/postgres (PostGIS, pgRouting, the copyleft libraries only PostGIS loads,
+# and the scripts that built them) to a GitHub release of its own, one per base tag:
+# `gpl-sources-supabase-postgres-<tag>`, never a `v*` tag, never the latest release. The written
+# offers in the images and NOTICE.md link it, and GPL-3.0 section 6(d) wants the source offered from
+# a place Aber answers for, not only upstream.
+#
+# By hand, once per base tag, before the first release on it: release.yml's pre-flight refuses to
+# publish images while this release lacks an archive licenses/supabase-postgres/sources.json pins.
+# The repository's releases are immutable, so scripts/mirror-gpl-sources.mjs uploads to a draft,
+# verifies every SHA-256, and only then publishes; run again, it finds the release complete and does
+# nothing. Every archive is downloaded from upstream and checked against the lock before upload.
+# licenses/README.md (The mirror) says why.
+name: GPL Sources
+
+on:
+  workflow_dispatch:
+
+# Two runs would race to create the same draft.
+concurrency:
+  group: gpl-sources
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  mirror-sources:
+    name: Mirror The GPL Sources To Their Release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: Publish And Verify The Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/mirror-gpl-sources.mjs --publish

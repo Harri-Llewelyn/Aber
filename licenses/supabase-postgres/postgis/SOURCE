@@ -11,8 +11,17 @@ three images built on that base: ghcr.io/harri-llewelyn/aber/supabase-db,
 ghcr.io/harri-llewelyn/aber/db-init and ghcr.io/harri-llewelyn/aber/backup-service.
 
 
-Where the source is
+Download the source
 -------------------
+
+Aber mirrors the complete corresponding source of every component this file lists, one archive
+each, with a SHA256SUMS file, in a GitHub release of its own:
+https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175
+It covers every Aber image built on supabase/postgres:17.6.1.175.
+
+
+Where the source is upstream
+----------------------------
 
 - PostGIS 3.3.7, with no patches:
   https://github.com/postgis/postgis/tree/3.3.7

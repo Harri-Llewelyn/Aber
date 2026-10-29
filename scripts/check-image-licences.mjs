@@ -17,6 +17,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { BASE_IMAGE, LOCK, parseLock, releaseUrl } from './lib/gpl-sources.mjs';
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const OWN = 'ghcr.io/harri-llewelyn/aber/';
 export const NAMED_CONTEXT = 'licenses=./licenses';
@@ -313,6 +315,54 @@ export function libraryProblems(notice, offer, folders, own) {
   return problems;
 }
 
+/** Where NOTICE.md names the nixpkgs revision the base's flake.lock pins. */
+export const NIXPKGS_TREE = 'https://github.com/NixOS/nixpkgs/tree/';
+
+/**
+ * Where the mirror of the source and its lock disagree with the images: a `texts` entry (a written
+ * offer, or NOTICE.md) that does not link the sources release for the Dockerfiles' base tag, or
+ * links another; a lock pinned to another base; or a lock that does not hold PostGIS, pgRouting,
+ * the copyleft libraries NOTICE.md lists, supabase/postgres and nixpkgs at the versions NOTICE.md
+ * and the Dockerfiles give, or holds a component they do not name.
+ */
+export function mirrorProblems(lockText, notice, texts, baseTags) {
+  const problems = [];
+  if (baseTags.length !== 1) return [`the Dockerfiles build on ${baseTags.length} ${BASE_IMAGE} tags; the sources release needs one`];
+  const [tag] = baseTags;
+  const url = releaseUrl(tag);
+  const prefix = url.slice(0, url.length - tag.length);
+  for (const { path, text } of texts) {
+    if (!text.includes(url)) problems.push(`${path} does not link ${url}, the source mirrored for the images' base`);
+    for (const other of tokensAfter(text, prefix)) {
+      if (other !== tag) problems.push(`${path} links the sources release for ${BASE_IMAGE}:${other}, and the images build on ${tag}`);
+    }
+  }
+
+  let lock;
+  try {
+    lock = parseLock(lockText);
+  } catch (e) {
+    return [...problems, e.message];
+  }
+  if (lock.base !== tag) problems.push(`${LOCK} is for the base ${BASE_IMAGE}:${lock.base}, and the images build on ${tag}`);
+  const nixpkgs = [...new Set(tokensAfter(notice, NIXPKGS_TREE))];
+  const want = new Map([
+    ['PostGIS', noticeExtension(notice, 'postgis')?.version],
+    ['pgRouting', noticeExtension(notice, 'pgrouting')?.version],
+    ...noticeLibraries(notice).filter((l) => /GPL/.test(l.licence)).map((l) => [l.name, l.version]),
+    ['supabase/postgres', tag],
+    ['nixpkgs', nixpkgs.length === 1 ? nixpkgs[0] : undefined],
+  ]);
+  for (const [component, version] of want) {
+    const held = lock.assets.filter((a) => a.component === component);
+    if (!version) problems.push(`NOTICE.md gives no single version of ${component} for ${LOCK} to match`);
+    else if (!held.length) problems.push(`${LOCK} holds no archive of ${component} ${version}`);
+    for (const a of held) if (version && a.version !== version) problems.push(`${LOCK} holds ${component} ${a.version} (${a.asset}), and the images ship ${version}`);
+  }
+  for (const a of lock.assets) if (!want.has(a.component)) problems.push(`${LOCK} holds ${a.component} (${a.asset}), which is no component NOTICE.md names`);
+  return problems;
+}
+
 /** `docker build` commands in a text, continuation lines joined and a continued comment's `#` dropped. */
 export function buildCommands(text) {
   const lines = text.split(/\r?\n/);
@@ -445,6 +495,20 @@ function main() {
   if (!libraries.length) {
     const named = noticeLibraries(read('NOTICE.md')).filter((l) => /GPL/.test(l.licence)).map((l) => l.name);
     pass(`the ${named.length} copyleft libraries only PostGIS loads (${named.join(', ')}) are in NOTICE.md, the offer and licenses/ alike`);
+  }
+
+  // 6. The mirrored source: the offers and NOTICE.md link its release for the base, and the lock
+  // holds every component at the version the images ship.
+  const tags = [...new Set(onBase.flatMap((d) => dockerfileBases(d.text).map(withoutDigest))
+    .filter((b) => b.startsWith(`${BASE_IMAGE}:`)).map((b) => b.slice(BASE_IMAGE.length + 1)))];
+  const linking = [...OFFERS.map((o) => `licenses/${o.file}`), 'NOTICE.md']
+    .map((path) => ({ path, text: existsSync(join(REPO, path)) ? read(path) : '' }));
+  const lockText = existsSync(join(REPO, LOCK)) ? read(LOCK) : '';
+  const mirror = lockText ? mirrorProblems(lockText, read('NOTICE.md'), linking, tags) : [`${LOCK} does not exist`];
+  for (const m of mirror) fail(m);
+  if (!mirror.length) {
+    pass(`${LOCK} pins ${parseLock(lockText).assets.length} archives for ${BASE_IMAGE}:${tags[0]}, every component at the version the images ship, `
+      + `and both offers and NOTICE.md link ${releaseUrl(tags[0])}`);
   }
 
   process.exit(failed ? 1 : 0);

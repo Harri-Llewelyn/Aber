@@ -11,8 +11,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  dockerfileBases, libraryProblems, licenceCopies, manifestProblems, namedContextProblems, noticeExtension,
-  offerProblems, templateImages, unlisted, valuesImages,
+  dockerfileBases, libraryProblems, licenceCopies, manifestProblems, mirrorProblems, namedContextProblems,
+  noticeExtension, offerProblems, templateImages, unlisted, valuesImages,
 } from './check-image-licences.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -260,6 +260,61 @@ test('each copyleft library NOTICE.md lists is in the PostGIS offer at its versi
     'licenses/supabase-postgres/gdal/ is no copyleft library NOTICE.md lists', // a made-up folder, gone from the tree
   ]);
   assert.match(libraryProblems('no table here', '', [], own)[0], /the parse has stopped matching it/);
+});
+
+test('the offers link the sources release for the base, and the lock holds every component at its version', () => {
+  const RELEASE = 'https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175';
+  const notice = [
+    NOTICE_ROWS,
+    'the [nixpkgs](https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108) its `flake.lock` pins.',
+    `[\`gpl-sources-supabase-postgres-17.6.1.175\`](${RELEASE}).`,
+    '',
+    '**The libraries only PostGIS loads.** Read from the image.',
+    '',
+    '| Library | Version | Licence | Source |',
+    '| :--- | :--- | :--- | :--- |',
+    '| GEOS | 3.14.1 | **LGPL-2.1** | x |',
+    '| PROJ | 9.7.1 | MIT | x |',
+  ].join('\n');
+  const entry = (component, version, name) => ({
+    component, version, url: `https://example.invalid/${name}`, asset: name, sha256: 'a'.repeat(64), size: 1,
+  });
+  const ASSETS = [
+    entry('PostGIS', '3.3.7', 'postgis-3.3.7.tar.gz'),
+    entry('pgRouting', '3.4.1', 'pgrouting-3.4.1.tar.gz'),
+    entry('pgRouting', '3.4.1', 'pgrouting-3.4.1-pg17.patch'),
+    entry('GEOS', '3.14.1', 'geos-3.14.1.tar.bz2'),
+    entry('supabase/postgres', '17.6.1.175', 'supabase-postgres-17.6.1.175.tar.gz'),
+    entry('nixpkgs', 'fb7944c166a3b630f177938e478f0378e64ce108', 'nixpkgs.tar.xz'),
+  ];
+  const lock = (over = {}) => JSON.stringify({ base: 'supabase/postgres:17.6.1.175', assets: ASSETS, ...over });
+  const offers = [
+    { path: 'licenses/supabase-postgres/postgis/SOURCE', text: `Download it from\n${RELEASE}\n` },
+    { path: 'NOTICE.md', text: notice },
+  ];
+  assert.deepEqual(mirrorProblems(lock(), notice, offers, ['17.6.1.175']), []);
+
+  // An offer without the release, one linking another base's, and a lock pinned to another base.
+  assert.deepEqual(mirrorProblems(lock({ base: 'supabase/postgres:17.6.1.174' }), notice, [
+    { path: 'licenses/supabase-postgres/postgis/SOURCE', text: 'No link here.\n' },
+    { path: 'licenses/supabase-postgres/pgrouting/SOURCE', text: `${RELEASE.replace('175', '174')}\n` },
+  ], ['17.6.1.175']), [
+    `licenses/supabase-postgres/postgis/SOURCE does not link ${RELEASE}, the source mirrored for the images' base`,
+    `licenses/supabase-postgres/pgrouting/SOURCE does not link ${RELEASE}, the source mirrored for the images' base`,
+    'licenses/supabase-postgres/pgrouting/SOURCE links the sources release for supabase/postgres:17.6.1.174, and the images build on 17.6.1.175',
+    'licenses/supabase-postgres/sources.json is for the base supabase/postgres:17.6.1.174, and the images build on 17.6.1.175',
+  ]);
+
+  // A component missing, one at the wrong version, and one NOTICE.md does not name.
+  const changed = [...ASSETS.filter((a) => a.component !== 'GEOS'), entry('GDAL', '3.8.5', 'gdal.tar.gz')];
+  changed[0] = { ...changed[0], version: '3.3.6' };
+  assert.deepEqual(mirrorProblems(lock({ assets: changed }), notice, offers, ['17.6.1.175']), [
+    'licenses/supabase-postgres/sources.json holds PostGIS 3.3.6 (postgis-3.3.7.tar.gz), and the images ship 3.3.7',
+    'licenses/supabase-postgres/sources.json holds no archive of GEOS 3.14.1',
+    'licenses/supabase-postgres/sources.json holds GDAL (gdal.tar.gz), which is no component NOTICE.md names',
+  ]);
+  assert.match(mirrorProblems('{"base": 1}', notice, offers, ['17.6.1.175']).join('\n'), /"base" is not/);
+  assert.match(mirrorProblems(lock(), notice, offers, ['1', '2'])[0], /build on 2 supabase\/postgres tags/);
 });
 
 test('the repository passes the check as it stands', () => {

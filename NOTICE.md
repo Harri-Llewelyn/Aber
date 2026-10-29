@@ -232,6 +232,16 @@ names where the exact source is:
   at `17.6.1.175`, and the [nixpkgs](https://github.com/NixOS/nixpkgs/tree/fb7944c166a3b630f177938e478f0378e64ce108)
   its `flake.lock` pins.
 
+**The source, mirrored.** Aber keeps a copy of the complete corresponding source of PostGIS,
+pgRouting and the copyleft libraries below, with the scripts that built them, in a GitHub release of
+its own:
+[`gpl-sources-supabase-postgres-17.6.1.175`](https://github.com/Harri-Llewelyn/Aber/releases/tag/gpl-sources-supabase-postgres-17.6.1.175).
+It holds one archive per component and a `SHA256SUMS` file, and covers every Aber image built on
+`supabase/postgres:17.6.1.175`. [`licenses/supabase-postgres/sources.json`](licenses/supabase-postgres/sources.json)
+pins every archive by SHA-256. `scripts/mirror-gpl-sources.mjs` publishes the release
+(`.github/workflows/gpl-sources.yml`), and `release.yml` refuses to publish images until it holds every
+archive the lock pins.
+
 **The written offer.** For three years from each Aber release that ships these images, Aber's
 maintainer will give anyone who asks a complete copy of the corresponding source. That covers
 PostGIS, pgRouting and the copyleft libraries below. The charge is no more than the cost of making
