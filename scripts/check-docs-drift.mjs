@@ -2488,8 +2488,12 @@ const OPERATOR_PAIRS = [
   const list = (text) => text.split(',').map((t) => t.trim()).join(', ');
 
   const spec = read('docs/openapi.yaml');
-  for (const name of ['Area', 'AreaWrite']) {
-    const body = spec.match(new RegExp(`^ {4}${name}:\\n([\\s\\S]*?)(?=^ {4}\\S)`, 'm'))?.[1] ?? null;
+  // A component schema's body: the lines after its 4-space key, up to the next 4-space key.
+  const components = {
+    Area: spec.match(/^ {4}Area:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+    AreaWrite: spec.match(/^ {4}AreaWrite:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+  };
+  for (const [name, body] of Object.entries(components)) {
     const entry = body && /^ {8}plan_rotation: \{ type: integer, enum: \[([^\]]+)\](?:, default: (\d+))?/m.exec(body);
     if (body === null) offences.push(`docs/openapi.yaml has no ${name} schema`);
     else if (!entry) offences.push(`docs/openapi.yaml's ${name} does not document plan_rotation as an integer enum`);
