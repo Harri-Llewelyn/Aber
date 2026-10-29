@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // =================================================================================================
 // Mint the long-lived JWT a read-only API client authenticates with: i3X Explorer, an MCP client,
-// Swagger UI's Try it out, a script. `scripts/mint-mcp-token.mjs` is the old name, a wrapper until 1.8.
+// Swagger UI's Try it out, a script.
 //
 // Each of those keeps a STATIC token in its settings and never refreshes it (`i3x-mcp` reads
 // `I3X_TOKEN` out of its host's config file). `GOTRUE_JWT_EXP` is 3600, so a token copied out of a

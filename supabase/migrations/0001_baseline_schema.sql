@@ -8681,7 +8681,7 @@ ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
-COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
+COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
 
 --
 

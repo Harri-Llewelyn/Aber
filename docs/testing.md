@@ -344,7 +344,7 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # the ESLint rule that fails on a `title` on an HTML element in the dashboard, the browser's
 # tooltip, against a fixture and its allow-list. And
 # `scripts/mint-api-token.mjs` against a stand-in for its recording call: it records before it
-# prints, and its old name, `mint-mcp-token.mjs`, adds one line to stderr and nothing to stdout.
+# prints, its `--json` block parses, and a refused recording prints no token.
 # And the credential service as it ships, over HTTP, against a stand-in `mosquitto_rr`: a read-only
 # account is made holding the subscriber role alone under a username it generates, the caller
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker

@@ -1260,7 +1260,7 @@ supabaseAuth:
 
 The chart refuses `0` and a number with no unit, because GoTrue does not start with either.
 
-### From 1.7.0, `scripts/mint-mcp-token.mjs` is deprecated
+### From 1.7.0, `scripts/mint-mcp-token.mjs` is deprecated (removed in 1.8.0)
 
 The script that issues a token from a shell is now `scripts/mint-api-token.mjs`. It takes the same
 arguments and prints the same output.
@@ -1491,6 +1491,20 @@ Every workload rolls once, as at every release. Beyond that:
 - **The sign-in service restarts** with the 7-day session timeout and its second-factor settings.
   **The forge restarts** with its email fallback off. **Grafana** gains one alert rule, **Service
   Token Expiring**, which warns a week before a machine identity's token expires.
+
+### From 1.8.0, `scripts/mint-mcp-token.mjs` is removed
+
+Before you upgrade, change any script or runbook that calls the removed `scripts/mint-mcp-token.mjs`.
+Call `scripts/mint-api-token.mjs` instead. It takes the same arguments and prints the same output:
+
+```bash
+node scripts/mint-api-token.mjs            # 30 days, prints the token
+node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
+```
+
+From 1.8.0, the old name stops with `Cannot find module`. A site upgrading straight from 1.6.x
+never saw the warning it printed in 1.7.x. Removing the old name changes no token already issued
+with it.
 
 ---
 
