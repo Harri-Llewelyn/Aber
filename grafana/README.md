@@ -132,7 +132,15 @@ carries `> 0` on a value that cannot be zero.
 labels: the gateway, the edge node, the `reason`, the database `job`, the container. The
 `entity_type` label (`gateway`, `platform` or `service_identity`; the webhook defaults to `device`)
 is what lets the dashboard tell an asset alert from a fleet one, and from one about a machine
-identity's token. A rule about a machine goes in a group of its own
+identity's token. The webhook names the subject from one more label, and skips an alert without
+it: `sparkplug_id` for a `gateway` or `device` rule, `principal_id` for a `service_identity` one.
+A SQL rule selects it as a column. A Prometheus series carries a gateway as `edge_node`, the label
+ingestion gives it, so a Prometheus gateway rule copies it with
+`sparkplug_id: '{{ .Labels.edge_node }}'`. A label reads `.Labels.x` and never holds a `$`: file
+provisioning expands each label value as environment variables (`$$` is the escape), though not
+the annotations, so `{{ $labels.x }}` would arrive as `{{ .x }}` and be sent as written. An
+instance without `edge_node`, such as an evaluation error's, expands the label to `[no value]`,
+which the webhook treats as no subject. `check-docs-drift.mjs` holds every rule to this. A rule about a machine goes in a group of its own
 and names a metric the example set registers (`supabase/example-metrics.sql`), which
 `check-docs-drift.mjs` asserts.
 

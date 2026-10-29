@@ -30,6 +30,12 @@ const ENTITY_TYPES = new Set(["device", "gateway", "platform", "service_identity
 /** A machine identity's principal id, as the rule's `principal_id` label carries it. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * What Grafana writes for a templated label (`{{ .Labels.edge_node }}`) whose source label the
+ * instance lacks, as an evaluation error's instance does. It names no asset.
+ */
+const NO_VALUE = "[no value]";
+
 interface GrafanaAlert {
   status?: string;
   labels?: Record<string, string>;
@@ -129,7 +135,8 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const identity = entityType === "service_identity";
   const principalId = identity ? (labels.principal_id ?? "").trim() : "";
   if (identity && !UUID.test(principalId)) return null;
-  const sparkplugId = identity ? null : labels.sparkplug_id?.trim() || null;
+  const wireId = labels.sparkplug_id?.trim() || null;
+  const sparkplugId = identity || wireId === NO_VALUE ? null : wireId;
 
   // Only a platform-scoped alert may omit the wire identity. Anything else claiming to be about an
   // asset without naming it is the failure this function has always existed to prevent.
