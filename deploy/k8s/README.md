@@ -528,6 +528,14 @@ release as a site would, then upgrades it to this tree with the same values
 that fails it: [`docs/releases.md`](../../docs/releases.md#upgrading-between-releases) promises that
 upgrade to every site.
 
+**Mirror the GPL sources once per database base.** The three images built on `supabase/postgres`
+carry GPL and LGPL binaries. Their written offer links the release that mirrors the source,
+`gpl-sources-supabase-postgres-<tag>-postgis`. Release's pre-flight refuses to publish images until
+that release holds every archive `licenses/supabase-postgres/sources.json` pins. On a new base tag,
+run Actions → GPL Sources → *Run workflow* on `main` before you tag. On a base already mirrored
+there is nothing to do: the pre-flight finds the release complete
+([`licenses/README.md`](../../licenses/README.md#the-mirror)).
+
 Then tag the commit that merged the pull request, and push the tag:
 
 ```bash
