@@ -133,6 +133,9 @@ python test-harness/test_load_generator_payloads.py
 # The broker verdict the stack suites read a credential from: a timeout is retried and is never a
 # refusal, so a slow runner neither fails a working credential nor passes a revocation.
 python test-harness/test_stack_exec.py
+# The sign-in every stack suite uses: a 429 is waited out within a bound, then fails naming the
+# status, and is never read as missing seed accounts.
+python test-harness/test_stack_sign_in.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # The historian writer -- several messages become one transaction; one bad message still loses one
@@ -1044,6 +1047,14 @@ skip is taken in `setUpClass`, which removes the whole class, and a run of nothi
 `OK (skipped=N)` and exits 0. That cost seven silently-absent tests per green Windows run (#222) and
 hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_ACCOUNTS`,
 `REQUIRE_LOG_PIPELINE` and `REQUIRE_PLAYBACK_REPLAY` are the same flag on the suites they cover.
+
+**Every suite signs in from one address.** Through a port-forward each request reaches the gateway
+from loopback, so the lane shares one sign-in budget: GoTrue's burst of 30 per address, refilled
+about once every two seconds, behind the gateway's total of 120 a minute. Whether a suite meets a
+429 depends on how quickly the suites before it signed in. So every suite that signs in with a
+password goes through `test-harness/stack_sign_in.py`, which waits a 429 out for up to 30 seconds
+and then fails naming the status and the body. A 429 is never a skip. Each suite keeps its own rule
+for a stack without the seed personas, which GoTrue answers with a 400.
 
 ## Why the database suites get their own Postgres
 

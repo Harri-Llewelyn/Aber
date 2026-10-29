@@ -57,6 +57,7 @@ from test_forge_membership import (  # noqa: E402
     through_the_door,
 )
 import stack_exec  # noqa: E402  -- on the path test_enroll_gateway puts there
+import stack_sign_in  # noqa: E402
 
 try:
     from cryptography import x509
@@ -441,6 +442,8 @@ class TestRepositories(ForgeSweepBase):
         super().setUpClass()
         try:
             cls.admin_token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
@@ -1209,6 +1212,8 @@ class TestTheSchedule(ForgeSweepBase):
     def test_a_user_cannot_ask(self):
         try:
             token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             self.skipTest(f"could not sign in as the seeded administrator ({err})")
         # `rest()` raises on a 4xx, and the 4xx is the answer under test.

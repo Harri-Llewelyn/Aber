@@ -15,11 +15,15 @@ and a Revoke on the page would.
 """
 import json
 import os
+import sys
 import time
 import unittest
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -55,13 +59,14 @@ def request(url, method="GET", token=None, body=None, apikey=True):
 
 
 def sign_in():
-    status, body = request(f"{SUPABASE_URL}/auth/v1/token?grant_type=password", method="POST",
-                           body={"email": EMAIL, "password": PASSWORD})
-    if status != 200:
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, EMAIL, PASSWORD)
+    if status == stack_sign_in.NO_SUCH_ACCOUNT:
         reason = f"could not sign in as {EMAIL} ({status}); the seed personas are absent"
         if STRICT:
             raise AssertionError(f"{reason}, and REQUIRE_SEEDED_ACCOUNTS is set")
         raise unittest.SkipTest(reason)
+    if status != 200:
+        raise AssertionError(stack_sign_in.describe(EMAIL, status, body))
     return body["access_token"]
 
 

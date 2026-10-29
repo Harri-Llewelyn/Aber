@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from test_enroll_gateway import (  # noqa: E402
     PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
 )
+import stack_sign_in  # noqa: E402  -- on the path test_enroll_gateway puts there
 
 # Differs from every other suite's fixture id in its FIRST block (sparkplug_id is the first 21 hex
 # characters of the uuid).
@@ -77,6 +78,8 @@ class InstallerBase(unittest.TestCase):
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
         try:
             cls.admin_token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
@@ -122,6 +125,8 @@ class TestTheCommand(InstallerBase):
     def test_an_operator_is_refused_and_no_token_is_minted(self):
         try:
             operator = sign_in(OPERATOR_EMAIL)
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             self.skipTest(f"could not sign in as the seeded operator ({err})")
         status, body = mint(operator)

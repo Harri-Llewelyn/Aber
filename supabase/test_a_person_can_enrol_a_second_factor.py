@@ -28,11 +28,15 @@ import hmac
 import json
 import os
 import struct
+import sys
 import time
 import unittest
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -87,15 +91,14 @@ def methods(token):
 
 
 def sign_in(email, password, skip_reason=None):
-    status, body = request("/auth/v1/token?grant_type=password", method="POST",
-                           body={"email": email, "password": password})
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, password)
+    if status == stack_sign_in.NO_SUCH_ACCOUNT and skip_reason:
+        reason = f"could not sign in as {email} ({status}); {skip_reason}"
+        if STRICT:
+            raise AssertionError(f"{reason}, and REQUIRE_SEEDED_ACCOUNTS is set")
+        raise unittest.SkipTest(reason)
     if status != 200:
-        if skip_reason:
-            reason = f"could not sign in as {email} ({status}); {skip_reason}"
-            if STRICT:
-                raise AssertionError(f"{reason}, and REQUIRE_SEEDED_ACCOUNTS is set")
-            raise unittest.SkipTest(reason)
-        raise AssertionError(f"could not sign in as {email} ({status}): {body}")
+        raise AssertionError(stack_sign_in.describe(email, status, body))
     return body["access_token"]
 
 

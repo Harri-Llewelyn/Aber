@@ -33,6 +33,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import time
 import unittest
 import urllib.error
@@ -42,6 +43,9 @@ from pathlib import Path
 import psycopg2
 
 REPO = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(REPO / "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -165,15 +169,10 @@ def _request(url, method="GET", body=None, headers=None, timeout=30):
 def sign_in():
     """A real session. Every gate this suite calls resolves auth.uid() against user_roles, which
     service_role does not have -- minting a credential and starting a playback are operators' acts."""
-    status, data = _request(
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        method="POST",
-        body={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-        headers={"apikey": PUBLISHABLE_KEY, "Content-Type": "application/json"},
-    )
-    if status != 200 or not data.get("access_token"):
+    status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, ADMIN_EMAIL, ADMIN_PASSWORD)
+    if status != 200 or not isinstance(data, dict) or not data.get("access_token"):
         raise AssertionError(
-            f"could not sign in as {ADMIN_EMAIL} ({status}). The stack lane expects the seeded "
+            f"{stack_sign_in.describe(ADMIN_EMAIL, status, data)}. The stack lane expects the seeded "
             f"Administrator; override with ABER_ADMIN_EMAIL / ABER_ADMIN_PASSWORD."
         )
     return data["access_token"]

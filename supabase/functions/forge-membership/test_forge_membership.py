@@ -15,10 +15,14 @@ and that a person whose role has gone stops seeing them -- both of which need th
 import http.cookiejar
 import json
 import os
+import sys
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -99,13 +103,12 @@ def forge_as_machine(path, method="GET"):
 
 
 def sign_in(email):
-    status, _, text = request(
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        method="POST", headers={"apikey": PUBLISHABLE_KEY}, body={"email": email, "password": PASSWORD},
-    )
-    if status != 200:
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, PASSWORD)
+    if status == stack_sign_in.NO_SUCH_ACCOUNT:
         raise unittest.SkipTest(f"could not sign in as {email} ({status}); the seed personas are absent")
-    return json.loads(text)["access_token"]
+    if status != 200:
+        raise AssertionError(stack_sign_in.describe(email, status, body))
+    return body["access_token"]
 
 
 def through_the_door(email):

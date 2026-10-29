@@ -42,6 +42,7 @@ from test_enroll_gateway import (  # noqa: E402
     PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest,
     sign_in, skip_or_fail,
 )
+import stack_sign_in  # noqa: E402  -- on the path test_enroll_gateway puts there
 
 WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
@@ -295,6 +296,8 @@ class TestTheForgeItself(ForgeEventsBase):
             skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         try:
             cls.admin_token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
@@ -492,6 +495,8 @@ class TestTheApplianceItself(ForgeEventsBase):
             skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         try:
             cls.admin_token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
         except Exception as err:  # noqa: BLE001
             skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"

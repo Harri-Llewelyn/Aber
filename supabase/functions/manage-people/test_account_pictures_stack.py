@@ -22,12 +22,16 @@ REQUIRE_SEEDED_ACCOUNTS=1 makes a skip a failure.
 import base64
 import json
 import os
+import sys
 import unittest
 import urllib.error
 import urllib.request
 import uuid
 
 import psycopg2
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -92,10 +96,11 @@ def call(url, method="GET", body=None, token=None, headers=None, raw=False):
 
 
 def sign_in(email, password):
-    status, data = call(f"{SUPABASE_URL}/auth/v1/token?grant_type=password", "POST",
-                        {"email": email, "password": password})
-    if status != 200 or not isinstance(data, dict) or not data.get("access_token"):
+    status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, password)
+    if status == stack_sign_in.NO_SUCH_ACCOUNT:
         skip_or_fail(f"could not sign in as {email} ({status})")
+    if status != 200 or not isinstance(data, dict) or not data.get("access_token"):
+        raise AssertionError(stack_sign_in.describe(email, status, data))
     return data["access_token"]
 
 

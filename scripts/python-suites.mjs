@@ -1384,6 +1384,13 @@ export const SUITES = {
       'credential on a slow runner; "connection refused" is printed for a refused TCP connection ' +
       'too, so matching it would do the first.',
   },
+  'test-harness/test_stack_sign_in.py': {
+    lanes: ['unit'],
+    why:
+      'The sign-in every stack suite uses. The lane signs in from one address, so a 429 depends on ' +
+      'the suites before it: one not waited out fails a suite the next second would pass, and one ' +
+      'read as missing seed accounts skips the suite or blames the wrong thing.',
+  },
   'test-harness/test_log_pipeline.py': {
     // STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
     // and two independent stores agreeing at run time -- broker, daemon, collector, store. The
