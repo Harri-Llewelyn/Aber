@@ -6403,10 +6403,11 @@ components:
             stop_reason:
               type: string
               nullable: true
-              enum: [duration, operator, message_cap, size_cap]
+              enum: [duration, operator, message_cap, size_cap, restart]
               description: |
                 Why a recording stopped. `message_cap` and `size_cap` mean a cap cut it short of the
-                length asked for. Absent for an upload and for a capture recorded before 1.5.
+                length asked for, and `restart` that the ingestion service restarted first. Absent
+                for an upload and for a capture recorded before 1.5.
             duration_ms:
               type: integer
               description: 'How long the recording ran; for an upload, how long the file spans.'
