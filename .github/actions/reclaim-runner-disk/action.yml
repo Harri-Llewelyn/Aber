@@ -6,12 +6,17 @@
 # `context deadline exceeded` on `helm install`, or as ImagePullBackOff for an imported image the
 # kubelet's image GC deleted. Removing unused toolchains frees ~22 GB.
 #
+# It runs only on a runner short of disk. A k3d job used at most 26.2 GiB (2026-10-29, the most of
+# the four reported by report-disk-low-water), so with NEED_GIB free (about twice that) it skips:
+# every runner since 2026-10-26 started with ~82 GiB, and the deletes took 1 to 2 minutes.
+#
 # It also starts a sampler that keeps the least free space the job reaches; report-disk-low-water,
 # the job's last step before its teardown, prints it.
 name: Reclaim Runner Disk
 description: >-
-  Delete the runner's unused toolchains, then prune Docker's images, printing the free space before
-  and after; then keep the job's least free space for report-disk-low-water.
+  On a runner with less than NEED_GIB free, delete its unused toolchains and prune Docker's images,
+  printing the free space before and after; then keep the job's least free space for
+  report-disk-low-water.
 runs:
   using: composite
   steps:
@@ -19,8 +24,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        NEED_GIB=50
         echo "--- before"
         df -h / | tail -1
+        free_gib=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+        if [ "$free_gib" -ge "$NEED_GIB" ]; then
+          echo "${free_gib} GiB free, and a k3d job needs at most about half of ${NEED_GIB}: nothing to reclaim."
+          exit 0
+        fi
         # One after another: run side by side they were slower, as the deletes share one disk.
         # The runner image changes between releases, so a delete never fails the step.
         sudo rm -rf /usr/local/lib/android      || true   # ~9 GB
