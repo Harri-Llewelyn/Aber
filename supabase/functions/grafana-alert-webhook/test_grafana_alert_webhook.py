@@ -570,19 +570,6 @@ class TestEvaluationErrors(unittest.TestCase):
         self.assertEqual(normalize_alert({**sent, "generatorURL": "http://grafana.localhost/"})["alert_name"],
                          "An alert rule could not be evaluated")
 
-    def test_the_typescript_recognises_the_same_names(self):
-        src = INDEX_TS.read_text(encoding="utf-8")
-        ts = re.search(r"const NOT_EVALUATED = new Set\(\[([^\]]*)\]\)", src)
-        self.assertIsNotNone(ts, "NOT_EVALUATED is no longer a Set literal in index.ts")
-        self.assertEqual(set(re.findall(r'"(\w+)"', ts.group(1))), set(NOT_EVALUATED))
-        self.assertIn(f'const NO_DATA = "{NO_DATA}";', src)
-        for literal in ('labels.rulename?.trim() || occurrence.rule_uid || "An alert rule"',
-                        "`${rule} could not be evaluated`", "annotations.Error?.trim()",
-                        '"Its query returned no data."', 'entity_type: "platform"', "values: null"):
-            self.assertIn(literal, src)
-        # Before the scope is read: an error instance carries the rule's own entity_type.
-        self.assertLess(src.index("if (NOT_EVALUATED.has(alertName))"), src.index('labels.entity_type ?? "device"'))
-
 
 class TestMirrorIsFaithful(unittest.TestCase):
     """
@@ -637,6 +624,19 @@ class TestMirrorIsFaithful(unittest.TestCase):
         # over again, one layer down.
         self.assertNotIn("80.0", self.src)
         self.assertNotIn("85.0", self.src)
+
+    def test_it_knows_an_evaluation_error_by_the_names_this_mirror_does(self):
+        ts = re.search(r"const NOT_EVALUATED = new Set\(\[([^\]]*)\]\)", self.src)
+        self.assertIsNotNone(ts, "NOT_EVALUATED is no longer a Set literal in index.ts")
+        self.assertEqual(set(re.findall(r'"(\w+)"', ts.group(1))), set(NOT_EVALUATED))
+        self.assertIn(f'const NO_DATA = "{NO_DATA}";', self.src)
+        for literal in ('labels.rulename?.trim() || occurrence.rule_uid || "An alert rule"',
+                        "`${rule} could not be evaluated`", "annotations.Error?.trim()",
+                        '"Its query returned no data."', 'entity_type: "platform"', "values: null"):
+            self.assertIn(literal, self.src)
+        # Before the scope is read: an error instance carries the rule's own entity_type.
+        self.assertLess(self.src.index("if (NOT_EVALUATED.has(alertName))"),
+                        self.src.index('labels.entity_type ?? "device"'))
 
 
 class TestRuleUidLabelsAndValues(unittest.TestCase):
