@@ -19,7 +19,7 @@ seeded Playback gateway (0002).
     recorder's finalise stores what it returns.
   * ingest_reconcile_capture_jobs() and playback_reconcile_jobs() fail only what is in flight,
     leave finished jobs and stored captures alone, sweep nothing the second time, and answer only
-    their own worker.
+    their own worker. The capture sweep spares a job that went quiet less than 45 s ago.
   * Row-level security and grants on captures, capture_jobs, playback_jobs,
     playback_worker_status and capture_uploads, for each role, both machine principals and anon,
     and which of them the Realtime publication carries.
@@ -147,8 +147,9 @@ class Base(unittest.TestCase):
         jid = str(uuid.uuid4())
         self.cur.execute(
             "INSERT INTO public.capture_jobs (id, subject_kind, gateway_id, sparkplug_group, "
-            "edge_node_id, subject_sparkplug_id, storage_path, status, error, started_at, finished_at) "
-            "VALUES (%s, 'gateway', %s, 'Aber', %s, %s, %s, %s, %s, "
+            "edge_node_id, subject_sparkplug_id, storage_path, status, error, created_at, started_at, "
+            "finished_at) VALUES (%s, 'gateway', %s, 'Aber', %s, %s, %s, %s, %s, "
+            "now() - interval '2 minutes', "
             "CASE WHEN %s = 'PENDING' THEN NULL ELSE now() - interval '1 minute' END, "
             "CASE WHEN %s IN ('PENDING', 'RECORDING') THEN NULL ELSE now() - interval '30 seconds' END);",
             (jid, gateway_id, wire, wire, f"{wire}/{jid}.json", status, error, status, status),
@@ -645,6 +646,30 @@ class ReconcileCaptureJobs(Base):
             self._one("SELECT id, storage_path, note FROM public.captures "
                       "WHERE subject_kind = 'gateway' AND gateway_id = %s;", (self.gw,)),
             (self.stored, f"{self.wire}/stored.json", "keep me"))
+
+    def test_a_job_another_daemon_may_still_be_storing_is_spared(self):
+        """
+        A deleted or evicted pod is replaced at once, and the new daemon sweeps while the old one may
+        still be storing its recording in the 30 s grace period. A job that reported, or was queued,
+        within the last 45 s is left for it; one quiet longer is failed.
+        """
+        recording = self._capture_job(self.gw, self.wire, "RECORDING")
+        other_gw, other_wire = self._gateway()
+        queued = self._capture_job(other_gw, other_wire, "PENDING")
+        self.cur.execute("UPDATE public.capture_jobs SET elapsed_seconds = 50 WHERE id = %s;",
+                         (recording,))
+        self.cur.execute("UPDATE public.capture_jobs SET created_at = now() - interval '10 seconds' "
+                         "WHERE id = %s;", (queued,))
+        self.assertEqual(self._sweep(), 0)
+        self.assertEqual((self._job(recording)[0], self._job(queued)[0]), ("RECORDING", "PENDING"))
+
+        # Quiet for 46 s and queued 46 s ago: past the spare, so the second sweep fails both.
+        self.cur.execute("UPDATE public.capture_jobs SET elapsed_seconds = 14 WHERE id = %s;",
+                         (recording,))
+        self.cur.execute("UPDATE public.capture_jobs SET created_at = now() - interval '46 seconds' "
+                         "WHERE id = %s;", (queued,))
+        self.assertEqual(self._sweep(), 2)
+        self.assertEqual((self._job(recording)[0], self._job(queued)[0]), ("FAILED", "FAILED"))
 
     def test_a_second_sweep_finds_nothing_and_a_new_capture_may_start(self):
         self._capture_job(self.gw, self.wire, "RECORDING")

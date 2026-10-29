@@ -1213,6 +1213,63 @@ class AShutdownStoresTheRecordingInFlight(FinishBase):
                       self.failure())
 
 
+class TheWorkerSweepsAgain(unittest.TestCase):
+    """
+    A deleted or evicted pod is replaced at once, and the new daemon's startup sweep spares a job
+    the old one may still be storing (ingest_reconcile_capture_jobs()). The idle loop sweeps once
+    more after RESWEEP_AFTER_SECONDS, which fails what nothing stored.
+    """
+
+    def one_pass(self, due, reconciled=True):
+        calls = []
+
+        def reconcile(client):
+            calls.append(client)
+            return reconciled
+
+        def claim():
+            raise StopIteration  # one pass of the idle loop is enough
+
+        with patch.object(capture_worker, "_resweep_at", due), \
+                patch.object(capture_worker, "_stopping", threading.Event()), \
+                patch.object(capture_worker, "_unsettled", None), \
+                patch.object(capture_worker, "_active", None), \
+                patch.object(capture_worker, "_next_sweep", float("inf")), \
+                patch.object(capture_worker, "_supabase", "the client"), \
+                patch.object(capture_worker, "reconcile", reconcile), \
+                patch.object(capture_worker, "_claim", claim), \
+                patch.object(capture_worker.time, "monotonic", return_value=1000.0):
+            with self.assertRaises(StopIteration):
+                capture_worker._loop()
+            return calls, capture_worker._resweep_at
+
+    def test_start_schedules_the_second_sweep(self):
+        with patch.object(capture_worker, "_resweep_at", None), \
+                patch.object(capture_worker, "_supabase", None), \
+                patch.object(capture_worker, "_storage", None), \
+                patch.object(capture_worker, "_rebirth", None), \
+                patch.object(capture_worker, "_storage_client", MagicMock()), \
+                patch.object(capture_worker, "reconcile", lambda client: True), \
+                patch.object(capture_worker.threading, "Thread", MagicMock()), \
+                patch.object(capture_worker.time, "monotonic", return_value=500.0):
+            capture_worker.start("the client")
+            self.assertEqual(capture_worker._resweep_at, 500.0 + capture_worker.RESWEEP_AFTER_SECONDS)
+
+    def test_the_idle_loop_sweeps_again_once_it_is_due_and_then_never(self):
+        calls, after = self.one_pass(due=999.0)
+        self.assertEqual((calls, after), (["the client"], None))
+        calls, after = self.one_pass(due=None)
+        self.assertEqual((calls, after), ([], None))
+
+    def test_it_waits_until_it_is_due(self):
+        self.assertEqual(self.one_pass(due=1001.0), ([], 1001.0))
+
+    def test_a_sweep_that_failed_is_tried_again_later(self):
+        calls, after = self.one_pass(due=999.0, reconciled=False)
+        self.assertEqual(calls, ["the client"])
+        self.assertEqual(after, 1000.0 + capture_worker.UNSETTLED_RETRY_SECONDS)
+
+
 class ADeviceThatPublishedNothing(FinishBase):
     """
     A device capture keeps its edge node's NBIRTH, and the capture's own rebirth request always

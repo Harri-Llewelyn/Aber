@@ -1051,7 +1051,9 @@ ever, readable by Auditors and copied into every storage backup.
   setting a flag nobody reads. The single-flight index would otherwise refuse every capture until
   the daemon restarted.
 - **A swept job says whether it started.** `ingest_reconcile_capture_jobs()` says a `PENDING` job
-  never started, and a `RECORDING` one that its recording did not survive.
+  never started, and a `RECORDING` one that its recording did not survive. It sweeps only what has
+  gone quiet for 45 seconds, longer than the pod's 30 s grace period: a replaced daemon may still be
+  storing a younger recording as it shuts down, and the new daemon sweeps again a minute later.
 - **The manifest says how a recording ended, and what a birth certificate is.** The recorder writes
   `stop_reason`, `duration_ms` and `requested_seconds`, and leaves Sparkplug plumbing and identity out
   of `metric_names`. `birth_captured` now means an `NBIRTH` was recorded, since playback refuses a

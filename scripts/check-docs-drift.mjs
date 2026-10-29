@@ -1059,7 +1059,7 @@ function edgeFunctionNames() {
     'public.register_uploaded_capture': '0190 registers only a path begin_capture_upload() issued the caller, refuses a subject being recorded, a shadow subject and a capture stored since the upload began, records the object\'s own size, bounds the message count by it and caps the manifest; the baseline took the browser\'s word for all of them, after the file had already overwritten the stored one. 0193 writes a CAPTURE_UPLOADED audit row and tells the replaced capture\'s CAPTURE_DELETED what replaced it',
     'public.ingest_finalise_capture': '0190 answers a repeated call for a job it completed with that capture, so the daemon can retry it; the baseline refused it as not RECORDING. 0193 writes a CAPTURE_RECORDED audit row and tells the replaced capture\'s CAPTURE_DELETED what replaced it',
     'public.request_capture_stop': '0190 ends a RECORDING job its daemon has not reported on for two minutes, as CANCELLED with nothing stored; the baseline only set a flag nothing was reading. 0193 writes a CAPTURE_STOPPED audit row for each stop that changes the job',
-    'public.ingest_reconcile_capture_jobs': '0190 says a swept PENDING job never started; the baseline said its recording did not survive',
+    'public.ingest_reconcile_capture_jobs': '0190 says a swept PENDING job never started, and spares a job that went quiet less than 45 s ago; the baseline swept every job in flight and said its recording did not survive',
     'public.is_active_playback_capture': '0184 answers false unless the caller could read the playback job: the playback worker, a role playback_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.playback_stale_credentials': '0184 returns no rows to a caller playback_jobs\' RLS refuses; the baseline told any signed-in account when playback credentials were issued',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
@@ -5468,10 +5468,22 @@ const OPERATOR_PAIRS = [
   }
   if (!readme.includes(`| \`TERMINATION_GRACE_SECONDS\` | \`${grace}\` |`)) problems166.push(`ingestion/README.md's configuration table does not give TERMINATION_GRACE_SECONDS as ${grace}`);
 
+  // The startup sweep spares a job that went quiet more recently than the grace period, so a
+  // replaced daemon can still store it, and the worker sweeps again once that is past.
+  const sweeps = readdirSync(join(REPO, 'supabase/migrations')).filter((n) => /^\d{4}_.*\.sql$/.test(n)).sort()
+    .map((n) => read(`supabase/migrations/${n}`))
+    .filter((t) => t.includes('CREATE OR REPLACE FUNCTION public.ingest_reconcile_capture_jobs()'));
+  const sweepBody = sweeps.pop()?.split('CREATE OR REPLACE FUNCTION public.ingest_reconcile_capture_jobs()')[1]?.split('\n$$;')[0] ?? '';
+  const spare = Number(sweepBody.match(/c_spare_seconds CONSTANT integer := (\d+);/)?.[1]);
+  const resweep = constant(worker, 'RESWEEP_AFTER_SECONDS');
+  if (!(spare > grace)) problems166.push(`ingest_reconcile_capture_jobs() spares a job quiet for ${spare || 'no'} s, not longer than the ${grace} s grace period`);
+  if (!(resweep > spare)) problems166.push(`RESWEEP_AFTER_SECONDS (${resweep}) does not outlast the sweep's ${spare} s spare`);
+  if (spare && !readme.includes(`has not reported for ${spare} seconds`)) problems166.push(`ingestion/README.md does not say the sweep spares a recording for ${spare} seconds`);
+
   if (problems166.length) {
     for (const p of problems166) fail(`shutdown budget: ${p}`);
   } else {
-    pass(`a shutdown stores a capture in what the ${grace} s grace period leaves, at least ${left} s with ${upload} s for the upload, and the ingestion pod is given the grace the daemon assumes`);
+    pass(`a shutdown stores a capture in what the ${grace} s grace period leaves, at least ${left} s with ${upload} s for the upload, and the ingestion pod is given the grace the daemon assumes; the startup sweep spares a job quiet for under ${spare} s and the worker sweeps again after ${resweep} s`);
   }
 }
 

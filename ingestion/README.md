@@ -807,12 +807,16 @@ what the shutdown has left ([the shutdown's order](#the-primary-host-and-the-sta
 Its `stop_reason` is `restart`, unless a cap had already ended it. An upload waiting to be retried
 makes its last attempt then. A job the shutdown cannot store is `FAILED` with a message that says
 the ingestion service restarted. A rollout stops the old pod before the new one starts (`Recreate`).
-A pod deleted by hand, or evicted, is replaced at once, and the new daemon's sweep (below) can fail
-the job while the old one is still storing it.
+A pod deleted by hand, or evicted, is replaced at once, so the old daemon may still be storing the
+recording when the new one starts. The new one's sweep (below) leaves that job alone.
 
 **Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a daemon killed
 mid-capture leaves a row counting down forever and a card that never clears. A `PENDING` job swept
-the same way says it never started.
+the same way says it never started. The sweep (`ingest_reconcile_capture_jobs()`) takes only what
+has gone quiet: a recording that has not reported for 45 seconds, longer than the pod's 30 s grace
+period, and a job queued before that. Another daemon may still be storing a younger one as it shuts
+down. So the worker sweeps again a minute after it starts (`RESWEEP_AFTER_SECONDS`), and fails what
+nothing stored.
 
 **A job never drops out of the daemon's sight.** Finalise and the failure write are each retried with
 backoff (1, 2, 4, 8 and 16 seconds). A failure that still cannot be written is kept, and the worker

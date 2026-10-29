@@ -823,19 +823,24 @@ COMMENT ON FUNCTION public.request_capture_stop(p_job_id uuid) IS
   'Shopfloor_Manager.';
 
 -- -------------------------------------------------------------------------------------------------
--- 9. A swept job says whether it ever started
+-- 9. A swept job says whether it ever started, and one still being stored is spared
 -- -------------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.ingest_reconcile_capture_jobs() RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
+    -- Longer than the pod's 30 s termination grace period: a daemon replaced while it shuts down
+    -- (a deleted or evicted pod) may still be storing a recording that reported this recently.
+    c_spare_seconds CONSTANT integer := 45;
     v_n integer;
 BEGIN
     PERFORM public.require_ingestion_caller('ingest_reconcile_capture_jobs');
 
     -- PENDING too: a job queued while the daemon was down would otherwise record from an arbitrary
-    -- later moment.
+    -- later moment. Only what has gone quiet: a RECORDING job whose last report (started_at plus
+    -- elapsed_seconds, as request_capture_stop() reads it) is older than c_spare_seconds, and a
+    -- PENDING one queued before that. The daemon sweeps again once the spared ones are past it.
     WITH swept AS (
         UPDATE public.capture_jobs
            SET status = 'FAILED', finished_at = now(),
@@ -845,7 +850,10 @@ BEGIN
                             ELSE 'the ingestion daemon restarted while this job was recording; the '
                                  'recording did not survive'
                        END
-         WHERE status IN ('PENDING', 'RECORDING')
+         WHERE (status = 'PENDING' AND created_at < now() - make_interval(secs => c_spare_seconds))
+            OR (status = 'RECORDING'
+                AND coalesce(started_at, created_at) + make_interval(secs => elapsed_seconds)
+                    < now() - make_interval(secs => c_spare_seconds))
         RETURNING 1
     )
     SELECT count(*) INTO v_n FROM swept;

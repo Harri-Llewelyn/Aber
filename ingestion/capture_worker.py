@@ -78,6 +78,12 @@ SHUTDOWN_WRITE_SECONDS = 1.0
 # A shutdown with less than this left for the upload does not start one.
 SHUTDOWN_MIN_UPLOAD_SECONDS = 1.0
 
+# The startup sweep spares a job another daemon may still be storing as it shuts down: a recording
+# that reported, or a job queued, in the last 45 s (ingest_reconcile_capture_jobs()). The worker
+# sweeps again this long after it starts, when any such job is past that, and fails what nothing
+# stored.
+RESWEEP_AFTER_SECONDS = 60
+
 # How often an idle worker deletes the stored files nothing refers to, and how long one must have
 # gone untouched first. A failed sweep is tried again after SWEEP_RETRY_SECONDS.
 SWEEP_INTERVAL_SECONDS = float(os.getenv("CAPTURE_SWEEP_INTERVAL_SECONDS", "3600"))
@@ -387,6 +393,8 @@ _shutdown_deadline = None
 _finishing = threading.Lock()
 # The job the worker is finishing, for a shutdown that cannot wait for it to end.
 _finishing_state = None
+# When the idle loop sweeps abandoned jobs a second time (time.monotonic()), or None once it has.
+_resweep_at = None
 
 
 def _storage_client():
@@ -980,7 +988,7 @@ def _discard(state, answer):
 
 def _loop():
     """The worker thread. It ends once a shutdown has begun, which then owns the job in flight."""
-    global _next_sweep
+    global _next_sweep, _resweep_at
     while not _stopping.is_set():
         if _unsettled is not None:
             time.sleep(UNSETTLED_RETRY_SECONDS)
@@ -989,6 +997,9 @@ def _loop():
 
         state = _active
         if state is None:
+            if _resweep_at is not None and time.monotonic() >= _resweep_at:
+                ran = reconcile(_supabase)
+                _resweep_at = None if ran else time.monotonic() + UNSETTLED_RETRY_SECONDS
             if time.monotonic() >= _next_sweep:
                 _next_sweep = sweep()
             row = _claim()
@@ -1103,7 +1114,9 @@ def reconcile(supabase):
     has no say over, and this lost that race. ingestion.py's startup healer retries until this
     returns True, and the boolean is how it knows.
 
-    IDEMPOTENT, so retrying costs nothing: sweeping an empty set of abandoned jobs is a no-op.
+    IDEMPOTENT, so retrying costs nothing: sweeping an empty set of abandoned jobs is a no-op. It
+    spares a job another daemon may still be storing, so the idle loop sweeps once more after
+    RESWEEP_AFTER_SECONDS.
     """
     try:
         res = supabase.rpc("ingest_reconcile_capture_jobs", {}).execute()
@@ -1133,11 +1146,12 @@ def start(supabase, rebirth=None):
     `request_node_rebirth` would be a cycle -- and the callable keeps this module testable without
     a broker, a database or the daemon's module-level clients.
     """
-    global _supabase, _storage, _rebirth
+    global _supabase, _storage, _rebirth, _resweep_at
     _supabase = supabase
     _storage = _storage_client()
     _rebirth = rebirth
     reconciled = reconcile(supabase)
+    _resweep_at = time.monotonic() + RESWEEP_AFTER_SECONDS
     threading.Thread(target=_loop, name="capture-worker", daemon=True).start()
     logger.info(
         "Capture worker running: polling for queued jobs every %.0fs, reporting progress every "
