@@ -1119,7 +1119,7 @@ function edgeFunctionNames() {
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Security tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
     'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
-    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture; 0203 had no such row',
+    'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -4529,6 +4529,28 @@ const OPERATOR_PAIRS = [
     fail(`${storagePolicies.join(', ')} state(s) a policy on storage.objects: storage-policies.sql is that table's access control, applied after the migrations, and a migration's arm would come back on every boot (0195)`);
   } else {
     pass(`a person reads a stored capture only through the grant issue_capture_download() (${issuer}) opens: ${arms.length} read arms, each role arm confined, Auditor's to the grant; no migration states a storage.objects policy`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 167. The Capture page's History loads as many rows at a time as its help says: the first page of
+// each table and each Show more are HISTORY_PAGE in CaptureHistory.jsx, and the help page's History
+// section states that number twice.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const size = Number(history.match(/^export const HISTORY_PAGE = (\d+)$/m)?.[1]);
+  const section = read('help/pages/capture.md').match(/^## History\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+  const problems167 = [];
+  if (!size) problems167.push('CaptureHistory.jsx declares no HISTORY_PAGE');
+  if (!section) problems167.push('help/pages/capture.md has no "## History" section');
+  for (const piece of [`the newest ${size}`, `the next ${size}`]) {
+    if (size && section && !section.includes(piece)) problems167.push(`help/pages/capture.md's History section does not say "${piece}"`);
+  }
+  if (problems167.length) {
+    for (const p of problems167) fail(`capture history: ${p}`);
+  } else {
+    pass(`the Capture page's History loads ${size} rows at a time, as its help says`);
   }
 }
 

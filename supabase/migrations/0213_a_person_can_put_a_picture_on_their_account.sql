@@ -214,10 +214,11 @@ COMMENT ON FUNCTION public.set_display_name(p_user_id uuid, p_name text) IS
   '(0203, 0213).';
 
 -- -------------------------------------------------------------------------------------------------
--- 4. Reading names by id leaves out a row with no name
+-- 4. Reading names by id leaves out a row with no name, and names a job's requester
 -- -------------------------------------------------------------------------------------------------
 -- 0203's function. A row that holds only a picture is left out, as a person with no name always
--- was, so the answer says nothing about a picture.
+-- was, so the answer says nothing about a picture. It also names the person who started a capture
+-- or playback job, for the roles those jobs' SELECT policies admit, for the Capture page's History.
 CREATE OR REPLACE FUNCTION public.display_names_for(p_ids uuid[]) RETURNS TABLE(user_id uuid, display_name text)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -230,7 +231,10 @@ CREATE OR REPLACE FUNCTION public.display_names_for(p_ids uuid[]) RETURNS TABLE(
           OR ((SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']))
               AND EXISTS (SELECT 1 FROM public.change_proposals cp WHERE cp.proposed_by = p.user_id))
           OR ((SELECT public.has_authority(ARRAY['archive:manage', 'audit_trail:read']))
-              AND EXISTS (SELECT 1 FROM public.retired_entities r WHERE r.retired_by = p.user_id)));
+              AND EXISTS (SELECT 1 FROM public.retired_entities r WHERE r.retired_by = p.user_id))
+          OR ((SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor']))
+              AND (EXISTS (SELECT 1 FROM public.capture_jobs j WHERE j.requested_by = p.user_id)
+                   OR EXISTS (SELECT 1 FROM public.playback_jobs j WHERE j.requested_by = p.user_id))));
 $$;
 
 ALTER FUNCTION public.display_names_for(p_ids uuid[]) OWNER TO postgres;
@@ -239,10 +243,11 @@ GRANT EXECUTE ON FUNCTION public.display_names_for(uuid[]) TO authenticated;
 
 COMMENT ON FUNCTION public.display_names_for(p_ids uuid[]) IS
   'The display names of the given people that the caller can already see: their own, the '
-  'proposer of a change proposal they may read (change_proposals_select_own_or_approver), and '
-  'the retirer of a retired entity they may read (retired_entities_select_privileged). Any other '
-  'id is left out rather than refused, and a person with no name has no row, whether or not they '
-  'have a picture (0203, 0213).';
+  'proposer of a change proposal they may read (change_proposals_select_own_or_approver), the '
+  'retirer of a retired entity they may read (retired_entities_select_privileged), and the person '
+  'who started a capture or playback job they may read (capture_jobs_select_privileged, '
+  'playback_jobs_select_privileged). Any other id is left out rather than refused, and a person '
+  'with no name has no row, whether or not they have a picture (0203, 0213).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 5. A person sets or clears their own picture

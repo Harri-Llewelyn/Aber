@@ -1121,9 +1121,11 @@ paths:
       summary: Look up the display names of people you can already see
       description: |
         For Approvals and Archived Entities (`0203`), which Operators and Shopfloor Managers read
-        too. Answers for your own id, for the proposer of a change proposal you may read, and for
-        the retirer of a retired entity you may read. Any other id is left out rather than refused,
-        and so is a person with no name: show the email alone for those.
+        too, and the Capture page's History (`0213`). Answers for your own id, for the proposer of
+        a change proposal you may read, for the retirer of a retired entity you may read, and for
+        the person who started a capture or playback job you may read (Administrator,
+        Shopfloor_Manager, Auditor). Any other id is left out rather than refused, and so is a
+        person with no name: show the email alone for those, or the id where there is no email.
       requestBody:
         required: true
         content:

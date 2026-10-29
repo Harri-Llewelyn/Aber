@@ -36,6 +36,10 @@ A playback you stop shows above the list as stopped, with how many messages went
 
 If a playback completes but loses readings whose timestamps were too old or too far in the future for the historian, it says so above the list. A slow playback speed can cause this. It stretches the gap between a reading's timestamp and its arrival. Try the playback again at 1x.
 
+## History
+
+**History**, below the list, shows every recording and every playback that has finished, newest first, in a table each. A row says when it was started, what it was about, how it ended and how long it ran. It also says who started it. A failed row says why it failed. The strips above the list show a failure for fifteen minutes; the History keeps it. Each table shows the newest 20. **Show more**, at its foot, loads the next 20.
+
 ## Who can use it
 
 Any role that can see plant history can read and download captures. Recording, replacing, playing back, uploading, stopping and deleting are for an Administrator or Shopfloor Manager only. Each of these acts, downloads included, is recorded in the Audit Trail with who did it. Other roles see those controls disabled, and each one says who can use it. An Operator has no access to this page at all, so it is hidden from the sidebar rather than shown as an empty table.
