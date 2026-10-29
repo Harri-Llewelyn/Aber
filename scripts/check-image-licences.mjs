@@ -189,7 +189,24 @@ export const OFFERS = [
   { file: 'supabase-postgres/pgrouting/SOURCE', extension: 'pgrouting' },
 ];
 
-const escapeRe = (s) => s.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+/** Each token that follows `prefix` in `text`, up to whitespace, `/`, or a closing `.`/`,`/`)`. */
+export function tokensAfter(text, prefix) {
+  const out = [];
+  for (let at = text.indexOf(prefix); at !== -1; at = text.indexOf(prefix, at + prefix.length)) {
+    out.push(/^[^\s/]*/.exec(text.slice(at + prefix.length))[0].replace(/[.,;:)]+$/, ''));
+  }
+  return out;
+}
+
+/** Whether `text` names `word` whole: not inside a longer word or version (`3.3.7` is not in `3.3.70`). */
+export function namesWhole(text, word) {
+  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
+    const before = text[at - 1] ?? '';
+    const after = text.slice(at + word.length, at + word.length + 2);
+    if (!/[\w.]/.test(before) && !/^(?:\w|\.\d)/.test(after)) return true;
+  }
+  return false;
+}
 
 /**
  * The NOTICE.md extension-table row whose first named extension is `name`: its version, and the
@@ -234,7 +251,7 @@ export function offerProblems(dir, pinned, notice, dockerfiles) {
 
     const text = readFileSync(full, 'utf8');
     for (const base of bases) if (!text.includes(base)) problems.push(`licenses/${file} does not name ${base}, the base its images are built on`);
-    for (const [, tag] of text.matchAll(new RegExp(`\\b${escapeRe(OFFER_BASE)}:([\\w.-]*\\w)`, 'g'))) {
+    for (const tag of tokensAfter(text, `${OFFER_BASE}:`)) {
       if (!bases.has(`${OFFER_BASE}:${tag}`)) problems.push(`licenses/${file} names ${OFFER_BASE}:${tag}, which no image builds on`);
     }
     const row = noticeExtension(notice, extension);
@@ -244,10 +261,10 @@ export function offerProblems(dir, pinned, notice, dockerfiles) {
     }
     const link = `${row.repo}/tree/${row.tag}`;
     if (!text.includes(link)) problems.push(`licenses/${file} does not link ${link}, the ${extension} NOTICE.md says the image ships`);
-    for (const [, tag] of text.matchAll(new RegExp(`${escapeRe(row.repo)}/tree/([^\\s/]+)`, 'g'))) {
+    for (const tag of tokensAfter(text, `${row.repo}/tree/`)) {
       if (tag !== row.tag) problems.push(`licenses/${file} links ${extension} at ${tag}, not ${row.tag}`);
     }
-    if (!new RegExp(`(?<![\\w.])${escapeRe(row.version)}(?![\\w]|\\.\\d)`).test(text)) problems.push(`licenses/${file} does not name ${extension} ${row.version}`);
+    if (!namesWhole(text, row.version)) problems.push(`licenses/${file} does not name ${extension} ${row.version}`);
   }
   return problems;
 }
@@ -284,7 +301,7 @@ export function libraryProblems(notice, offer, folders, own) {
   if (!copyleft.length) return [`NOTICE.md has no copyleft row under "${LIBRARIES_HEADING}"; the parse has stopped matching it`];
   const problems = [];
   for (const { name, version } of copyleft) {
-    if (!new RegExp(`(?<![\\w.])${escapeRe(`${name} ${version}`)}(?![\\w]|\\.\\d)`).test(offer)) {
+    if (!namesWhole(offer, `${name} ${version}`)) {
       problems.push(`licenses/${OFFERS[0].file} does not name ${name} ${version}, which NOTICE.md lists`);
     }
     if (!folders.includes(name.toLowerCase())) problems.push(`NOTICE.md lists ${name}, and licenses/supabase-postgres/${name.toLowerCase()}/ holds no licence text for it`);
