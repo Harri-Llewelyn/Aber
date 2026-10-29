@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
-import { planAspect, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
+import { planAspect, planRotation, placeInFrame, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { Tooltip } from './Tooltip'
 
 /**
@@ -10,13 +10,16 @@ import { Tooltip } from './Tooltip'
  * than the spacing setting allows is refused here with the neighbour named; the database refuses
  * the same write again.
  *
- * `value` is `{ x, y }` in fractions or null; `onChange` receives the same.
+ * `value` is `{ x, y }` in fractions of the drawing as uploaded, or null; `onChange` receives the
+ * same. The footer says the place as the plan is drawn, turned or not.
  */
 export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onChange, minSpacing = DEFAULT_MIN_PIN_SPACING, disabled = false }) {
   const [refusal, setRefusal] = useState(null)
   const areaId = area?.area_id ?? area?.id
   const others = (cells || []).filter(c => c.area_id === areaId && (c.cell_id ?? c.id) !== cellId)
+  // The drawing's own aspect, whatever the turn: AreaPlan hands back places on the drawing as uploaded.
   const aspect = planAspect(area)
+  const shown = value ? placeInFrame(value, planRotation(area)) : null
 
   const place = (p) => {
     if (disabled) return
@@ -57,7 +60,7 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
       </AreaPlan>
       <div className="area-plan-placement-footer">
         <span style={{ fontSize: '11px', color: refusal ? 'var(--danger)' : 'var(--text-muted)' }} role={refusal ? 'alert' : undefined}>
-          {refusal || (value ? `Placed ${formatPlace({ plan_x: value.x, plan_y: value.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
+          {refusal || (shown ? `Placed ${formatPlace({ plan_x: shown.x, plan_y: shown.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
           {!refusal && !disabled && ' Click the plan where the cell is.'}
         </span>
         {value && !disabled && (

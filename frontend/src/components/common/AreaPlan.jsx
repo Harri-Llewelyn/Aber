@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { loadAreaPlanUrl } from '../../api'
-import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
+import {
+  planFrameAspect, planRotation, planFractionsFromEvent, placeInFrame, placeOnDrawing, drawingBoxInFrame
+} from '../../utils/areaPlans'
 import { Tooltip } from './Tooltip'
 
 /**
@@ -11,7 +13,25 @@ import { Tooltip } from './Tooltip'
  *
  * Places are fractions of the drawing, not of the plan's box: the box keeps a margin of half a pin
  * round the drawing (`.area-plan` in App.css), so a pin on the plan's edge is drawn whole.
+ *
+ * A turned plan (`plan_rotation`) is drawn in a frame of the turned shape. Only the image turns:
+ * each pin turns its place into the frame and stays upright, and a click is turned back into the
+ * drawing as uploaded before it is handed on.
  */
+
+/** The turn of the plan a pin is drawn on; AreaPlan provides it to the pins among its children. */
+const PlanRotation = createContext(0)
+
+/** The image's style for a turned plan: laid out at the drawing's own shape, then turned about the frame's centre. */
+function turnedImageStyle(area) {
+  const { width, height, rotation } = drawingBoxInFrame(area)
+  if (!rotation) return undefined
+  return {
+    left: '50%', top: '50%', right: 'auto', bottom: 'auto',
+    width: `${width}%`, height: `${height}%`,
+    transform: `translate(-50%, -50%) rotate(${rotation}deg)`
+  }
+}
 
 /** The blob URL for an area's plan, or null while loading or when the area has none. */
 function useAreaPlanUrl(area) {
@@ -31,7 +51,8 @@ function useAreaPlanUrl(area) {
 }
 
 export function AreaPlan({ area, onPlaceClick, children }) {
-  const aspect = planAspect(area)
+  const aspect = planFrameAspect(area)
+  const rotation = planRotation(area)
   const { url, error } = useAreaPlanUrl(area)
   const hasPlan = !!area?.plan_path
   // The blob URL the browser refused to draw, if any: a file it cannot render fires error, not load.
@@ -45,8 +66,11 @@ export function AreaPlan({ area, onPlaceClick, children }) {
     // A click on a pin is the pin's, not a placement.
     if (e.target.closest('.area-plan-pin')) return
     // Measured against the drawing: a click on the margin round it lands on the nearest edge.
-    const place = planFractionsFromEvent(e, drawingRef.current)
-    if (place) onPlaceClick(place)
+    const framed = planFractionsFromEvent(e, drawingRef.current)
+    if (!framed) return
+    const place = placeOnDrawing(framed, rotation)
+    // The four places the fractions are read to, so 1 - x is not 0.8766000000000001.
+    onPlaceClick({ x: Number(place.x.toFixed(4)), y: Number(place.y.toFixed(4)) })
   }
 
   return (
@@ -56,14 +80,22 @@ export function AreaPlan({ area, onPlaceClick, children }) {
       onClick={handleClick}
       role={onPlaceClick ? 'button' : undefined}
       data-plan={hasPlan ? (unavailable ? 'unavailable' : 'uploaded') : 'outline'}
+      data-rotation={rotation || undefined}
     >
       <div className="area-plan-drawing" ref={drawingRef} style={{ aspectRatio: String(aspect) }}>
         {hasPlan && url && !broken ? (
-          <img className="area-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
+          <img
+            className="area-plan-image"
+            src={url}
+            alt=""
+            draggable={false}
+            style={turnedImageStyle(area)}
+            onError={() => setUndrawable(url)}
+          />
         ) : (
           <DefaultOutline aspect={aspect} unavailable={hasPlan ? unavailable : null} />
         )}
-        {children}
+        <PlanRotation.Provider value={rotation}>{children}</PlanRotation.Provider>
       </div>
     </div>
   )
@@ -96,11 +128,13 @@ function DefaultOutline({ aspect, unavailable }) {
  * here, or `muted` for a pin that is context rather than the subject. Without `onClick` the pin
  * is a mark, not a control: a span, so a read-only plan puts no dead stops in the tab order.
  * `--pin-x` lets the label slide inward at the plan's side edges while the disc stays put. `title`
- * is its tooltip, the shared one, for what the label beneath it does not say.
+ * is its tooltip, the shared one, for what the label beneath it does not say. `x` and `y` are the
+ * place on the drawing as uploaded; the pin draws it where the plan's turn puts it.
  */
 export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
   const className = `area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`
-  const style = { left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%`, '--pin-x': Number(x) }
+  const at = placeInFrame({ x, y }, useContext(PlanRotation))
+  const style = { left: `${at.x * 100}%`, top: `${at.y * 100}%`, '--pin-x': at.x }
   const content = (
     <>
       <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>

@@ -3,7 +3,7 @@ import { Modal } from './Modal'
 import { AreaPlan } from './AreaPlan'
 import { TipButton } from './TipButton'
 import { IconScan, IconZoomIn, IconZoomOut } from './Icons'
-import { planAspect } from '../../utils/areaPlans'
+import { planFrameAspect } from '../../utils/areaPlans'
 import { areaIconComponent } from '../../utils/areaIcon'
 import { commandModifierHeld, isEditableTarget } from '../../shortcuts'
 
@@ -82,7 +82,7 @@ const KEYS = {
  * corner zoom about the centre and fit; the keys in KEYS act while focus is anywhere in the dialog.
  */
 export function PlanViewer({ area, children }) {
-  const aspect = planAspect(area)
+  const aspect = planFrameAspect(area)
   const hintId = useId()
   const viewportRef = useRef(null)
   const [box, setBox] = useState(null)
