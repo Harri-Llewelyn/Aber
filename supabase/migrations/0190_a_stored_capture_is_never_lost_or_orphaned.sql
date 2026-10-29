@@ -78,10 +78,11 @@ COMMENT ON COLUMN public.captures.manifest IS
   'machine''s metrics, leaving out bdSeq, Node Control/*, Device Control/* and the identity metrics; '
   'capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz, birth_captured, '
   'uses_aliases, the edge_node_ids / device_ids the recording publishes under, and for a recording '
-  'stop_reason (duration, operator, message_cap, size_cap), duration_ms and requested_seconds. '
-  'birth_captured=false means no NBIRTH was recorded, so a playback refuses the capture: a replay '
-  'opens with the edge node''s birth certificate. A capture stored before 0190 set it for a DBIRTH '
-  'too. device_ids is what the playback dialog and ensure_shadow_devices() build the device map from.';
+  'stop_reason (duration, operator, message_cap, size_cap, restart), duration_ms and '
+  'requested_seconds. birth_captured=false means no NBIRTH was recorded, so a playback refuses the '
+  'capture: a replay opens with the edge node''s birth certificate. A capture stored before 0190 set '
+  'it for a DBIRTH too. device_ids is what the playback dialog and ensure_shadow_devices() build the '
+  'device map from.';
 COMMENT ON COLUMN public.capture_jobs.stop_requested IS
   'Set by request_capture_stop(); the daemon reads it on its next one-second progress tick and stores '
   'what it has recorded. A RECORDING job the daemon has not reported on for two minutes is instead '
