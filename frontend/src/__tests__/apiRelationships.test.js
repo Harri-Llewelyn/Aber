@@ -387,7 +387,7 @@ describe('a semantic id is corrected, never half-populated', () => {
   it('treats no metric row back as refused rather than done', async () => {
     // metric_catalog_update_privileged admits Administrators only; anyone else matches no row.
     await expect(api.put('/api/v1/metric-catalog/m2', { semantic_id: 'urn:x', semantic_id_type: 'IRI' }))
-      .rejects.toThrow(/^Semantic id not changed/);
+      .rejects.toThrow(/^Metric not changed/);
   });
 
   it('forwards a draft schema’s pair with the same rule', async () => {
@@ -419,6 +419,50 @@ describe('a semantic id is corrected, never half-populated', () => {
       name: 'Axes/ANGLE', datatype: 10, semantic_id: '', semantic_id_type: 'IRI'
     });
     expect(callFor('metric_catalog').payload).toMatchObject({ semantic_id: null, semantic_id_type: null });
+  });
+});
+
+/**
+ * A metric's permitted values are the column's shape or NULL: metric_catalog_permitted_values_shape
+ * refuses an empty list, and an edit of the values never touches the semantic id, or the reverse.
+ */
+describe('a metric’s permitted values', () => {
+  const written = { data: [{ id: 'row' }], error: null };
+
+  it('reads them with the row, NULL as null', async () => {
+    state.responses.metric_catalog = { data: [
+      { id: 'm1', name: 'Controller/EXECUTION', datatype: 12, permitted_values: ['READY', 'ACTIVE'] },
+      { id: 'm2', name: 'Systems/TEMPERATURE', datatype: 10, permitted_values: null }
+    ], error: null };
+    const [execution, temperature] = await api.get('/api/v1/metric-catalog');
+    expect(execution.permitted_values).toEqual(['READY', 'ACTIVE']);
+    expect(temperature.permitted_values).toBeNull();
+  });
+
+  it('writes them on create, and an empty list as NULL', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog', { name: 'Controller/EXECUTION', datatype: 12, permitted_values: ['READY', ' ACTIVE '] });
+    expect(callFor('metric_catalog').payload.permitted_values).toEqual(['READY', 'ACTIVE']);
+
+    state.calls = [];
+    await api.post('/api/v1/metric-catalog', { name: 'Axes/ANGLE', datatype: 10, permitted_values: [] });
+    expect(callFor('metric_catalog').payload.permitted_values).toBeNull();
+  });
+
+  it('writes only them when an edit names nothing else, and leaves the semantic id alone', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', { permitted_values: ['ARMED', 'TRIGGERED'] });
+    expect(callFor('metric_catalog').payload).toEqual({ permitted_values: ['ARMED', 'TRIGGERED'] });
+
+    state.calls = [];
+    await api.put('/api/v1/metric-catalog/m2', { permitted_values: null });
+    expect(callFor('metric_catalog').payload).toEqual({ permitted_values: null });
+  });
+
+  it('leaves them alone when an edit names only the semantic id', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', { semantic_id: 'urn:x', semantic_id_type: 'IRI' });
+    expect(callFor('metric_catalog').payload).not.toHaveProperty('permitted_values');
   });
 });
 

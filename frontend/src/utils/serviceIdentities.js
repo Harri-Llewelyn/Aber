@@ -20,7 +20,7 @@ export const BROKER_PRINCIPALS = [
   {
     role: 'ingestion',
     purpose: 'The ingestion daemon. Reads every Sparkplug topic, is the only principal that may '
-      + 'publish a command, and is the only writer of the Directory and the Unified Namespace.',
+      + 'publish a command, and is the only writer of the Factory+ Directory and the Unified Namespace.',
     // Every write is narrow: NCMD is how a rebirth is requested, `<group>/Directory/v1/#` is the
     // Directory's MQTT half, <group> being the site's Sparkplug group (`Aber` on the dev stack; off
     // unless DIRECTORY_MQTT_ENABLED), and `<root>/#` is the Unified Namespace (off unless
@@ -37,7 +37,7 @@ export const BROKER_PRINCIPALS = [
   {
     role: 'subscriber',
     purpose: 'A consumer outside Aber that only reads, such as a SCADA system or a dashboard. Reads '
-      + 'every Sparkplug topic and the Unified Namespace across the whole site, never the Directory, '
+      + 'every Sparkplug topic and the Unified Namespace across the whole site, never the Factory+ Directory, '
       + 'and publishes nothing. No account holds it until an Administrator creates one under Broker '
       + 'accounts.',
     writes: false,

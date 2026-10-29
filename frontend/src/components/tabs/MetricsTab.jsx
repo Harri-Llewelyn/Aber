@@ -42,6 +42,10 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { PermittedValuesField } from '../common/PermittedValuesField'
+import {
+  parsePermittedValues, permittedValuesApply, permittedValuesText
+} from '../../utils/schemaProperty'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
   IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck
@@ -89,6 +93,9 @@ const BLANK_METRIC = {
   standard: STANDARDS.MTCONNECT,
   group: '', newGroup: '', instance: '', type: '', customType: '',
   subType: '', units: '', datatype: 10, description: '',
+  // The Permitted Values field as typed: the operator's own, like the description, so a change of
+  // standard or type keeps it.
+  permittedValues: '',
   // The chosen OPC UA point's companion specification. Two specifications can define one browse
   // name, so `type` alone does not find the row.
   companionSpec: '',
@@ -493,6 +500,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         // nothing is minted for one.
         semantic_id: semanticIdValue,
         semantic_id_type: semanticIdTypeValue,
+        permitted_values: permitted.values,
         description: newMetric.description
       })
       closeAddMetric()
@@ -531,15 +539,25 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     }
   }
 
-  const handleEditSemanticId = async (pair) => {
+  /** Edit's save: `change` holds only what changed, the semantic id pair, the permitted values or both. */
+  const handleEditMetric = async (change) => {
+    const name = editTarget.name
+    const pairChanged = Object.hasOwn(change, 'semantic_id')
+    const valuesChanged = Object.hasOwn(change, 'permitted_values')
     try {
-      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, pair)
+      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
       setEditTarget(null)
       load()
       showToast(
-        pair.semantic_id
-          ? `Semantic id of '${editTarget.name}' saved`
-          : `Semantic id of '${editTarget.name}' cleared; the metric is now unmapped`,
+        pairChanged && valuesChanged
+          ? `Metric '${name}' saved`
+          : valuesChanged
+            ? (change.permitted_values
+              ? `Permitted values of '${name}' saved`
+              : `Permitted values of '${name}' cleared; it may report any value`)
+            : change.semantic_id
+              ? `Semantic id of '${name}' saved`
+              : `Semantic id of '${name}' cleared; the metric is now unmapped`,
         'success',
         { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
       )
@@ -711,10 +729,18 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // half-built, and complaining about it would be scolding the operator mid-keystroke.
   const nameError = effectiveType !== '' ? metricNameError(composedName) : null
 
+  // Offered once the datatype is chosen, since it decides what a value may be. A datatype that takes
+  // none sends none, whatever was typed before it changed.
+  const takesPermittedValues = datatypeChosen && permittedValuesApply(newMetric.datatype)
+  const permitted = takesPermittedValues
+    ? parsePermittedValues(newMetric.permittedValues, newMetric.datatype)
+    : { values: null, error: null }
+
   const canAddMetric =
     effectiveType !== '' &&
     isValidMetricName(composedName) &&
     datatypeChosen &&
+    !permitted.error &&
     (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
 
   /**
@@ -729,7 +755,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       disabled: !canEditMetric,
       title: !canEditMetric
         ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-        : "Correct this metric's semantic id and reference type"
+        : "Correct this metric's semantic id, or the values it may report"
     },
     m.deprecated
       ? {
@@ -1125,6 +1151,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
           { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },
           { label: 'Description', value: selected.description || null, full: true },
+          {
+            label: 'Permitted Values',
+            value: permittedValuesText(selected.permitted_values) || null,
+            full: true,
+            help: 'The only values it may report. A schema built from it copies them; blank allows any value.'
+          },
           selected.deprecated && {
             label: 'Superseded By',
             value: selectedReplacement ? selectedReplacement.name : null,
@@ -1413,6 +1445,17 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               <input id="metric-description" className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
             </div>
 
+            {takesPermittedValues && (
+              <PermittedValuesField
+                idPrefix="metric-add"
+                datatype={newMetric.datatype}
+                value={newMetric.permittedValues}
+                onChange={text => setNewMetric(m => ({ ...m, permittedValues: text }))}
+                error={permitted.error}
+                style={{ flex: '2 1 200px' }}
+              />
+            )}
+
             {/* The field Edit uses too. It shows the suggestion until the operator types or picks
                 their own, and Use suggested brings it back. */}
             <SemanticIdField
@@ -1511,7 +1554,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary
           })}
           candidates={semanticIdChoices}
-          onConfirm={handleEditSemanticId}
+          onConfirm={handleEditMetric}
           onCancel={() => setEditTarget(null)}
         />
       )}

@@ -21,6 +21,12 @@ RUN apk upgrade --no-cache \
  && rm /usr/local/bin/gosu /usr/local/bin/timescaledb-tune /usr/local/bin/timescaledb-parallel-copy \
        /docker-entrypoint-initdb.d/001_timescaledb_tune.sh
 
+# THE LICENCES, which the base does not carry and a published image must: TimescaleDB's four files
+# and PostgreSQL's COPYRIGHT, to /usr/share/licenses/. They come from licenses/timescaledb/ through
+# the named context `licenses` (`--build-context licenses=./licenses`), since this context is
+# timescaledb/. NOTICE.md says what each covers.
+COPY --from=licenses timescaledb/ /usr/share/licenses/
+
 # POSTGRES (70), FROM THE START. Started as that uid, the upstream entrypoint skips its chown and its
 # gosu, sets the data directory to 0700 (which its owner may do), and runs initdb or the server as
 # itself. PGDATA must be a directory 70 owns or may create: the chart's is a subdirectory of the

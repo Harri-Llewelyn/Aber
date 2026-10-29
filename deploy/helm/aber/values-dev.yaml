@@ -131,7 +131,7 @@ secrets:
   noderedAdminToken: ""
 
 # Studio's route is off by default as an exposure decision (values.yaml). On a loopback domain
-# there is nothing to expose, and with it on the Directory's studio link works.
+# there is nothing to expose, and with it on the System page's Studio link works.
 ingress:
   routes:
     studio: true

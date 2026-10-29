@@ -4,7 +4,7 @@ import path from 'node:path'
 import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  DirectoryTab,
+  SystemTab,
   isBrowsableEndpoint,
   endpointReach,
   viewerIsOnDeploymentHost,
@@ -12,7 +12,7 @@ import {
   imageScan,
   imageScanSummary,
   serviceTypeLabel
-} from '../components/tabs/DirectoryTab'
+} from '../components/tabs/SystemTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 import { queryTabLink, tabLink, tabLinks } from '../test/tabBar'
@@ -55,7 +55,7 @@ const SERVICES = [
 
 async function renderTab() {
   const showToast = vi.fn()
-  render(<DirectoryTab showToast={showToast} />)
+  render(<SystemTab showToast={showToast} />)
   // The table renders a tick after the first poll resolves; every test below reads it.
   await waitFor(() => expect(document.querySelector('tbody tr')).toBeTruthy())
   return { showToast }
@@ -72,7 +72,7 @@ const acrossTabs = (read) =>
  * The page must make no claim about what Node-RED is running: it has no way to observe the editor,
  * and this is the assertion most likely to be undone by somebody adding a status badge.
  */
-describe('DirectoryTab claims nothing it cannot observe', () => {
+describe('SystemTab claims nothing it cannot observe', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.get.mockResolvedValue(SERVICES)
@@ -99,7 +99,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
 })
 
 /** Three named groups, a tab each, in one card. */
-describe('DirectoryTab service groups', () => {
+describe('SystemTab service groups', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.get.mockResolvedValue(SERVICES)
@@ -127,17 +127,17 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('opens the group the address names, as a search-bar card links to it', async () => {
-    window.history.replaceState(null, '', '/directory/ingestion')
-    render(<DirectoryTab showToast={vi.fn()} />)
+    window.history.replaceState(null, '', '/system/ingestion')
+    render(<SystemTab showToast={vi.fn()} />)
     await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-current', 'page'))
   })
 
   it('puts a chosen group in the path, the first group being the bare page', async () => {
     await renderTab()
     openTab(INGEST)
-    expect(window.location.pathname).toBe('/directory/ingestion')
+    expect(window.location.pathname).toBe('/system/ingestion')
     openTab(APPS)
-    expect(window.location.pathname).toBe('/directory')
+    expect(window.location.pathname).toBe('/system')
   })
 
   // The point of the change: a service is found by what it IS, not by where the alphabet put it.
@@ -211,24 +211,24 @@ describe('DirectoryTab service groups', () => {
   it('is one card with its heading, in a page that does not scroll', async () => {
     await renderTab()
     expect(document.querySelector('.page-layout.page-fill > .page-main > .card.card-fill')).toBeTruthy()
-    const header = expectCardHeading('Directory', /^Every service this deployment runs/)
+    const header = expectCardHeading('System', /^Every service this deployment runs/)
     // One sentence of at most 28 words; the detail is in the help drawer.
     const description = header.querySelector('.card-heading-description').textContent
     expect(description.match(/[.!?](\s|$)/g)).toHaveLength(1)
     expect(description.split(/\s+/).length).toBeLessThanOrEqual(28)
     // The table is the card's scroller: a .table-wrap directly under the .card-fill.
-    expect(document.querySelector('.card-fill > .table-wrap > table.table-directory')).toBeTruthy()
+    expect(document.querySelector('.card-fill > .table-wrap > table.table-system')).toBeTruthy()
   })
 
   it('says loading and none registered inside a card', async () => {
     api.get.mockReturnValue(new Promise(() => {}))
-    const { unmount } = render(<DirectoryTab showToast={vi.fn()} />)
-    expect(screen.getByText(/Loading directory/).closest('.card')).toBeTruthy()
+    const { unmount } = render(<SystemTab showToast={vi.fn()} />)
+    expect(screen.getByText(/Loading services/).closest('.card')).toBeTruthy()
     unmount()
 
     api.get.mockResolvedValue([])
-    render(<DirectoryTab showToast={vi.fn()} />)
-    const empty = await screen.findByText('No services are registered in the directory.')
+    render(<SystemTab showToast={vi.fn()} />)
+    const empty = await screen.findByText('No services are registered.')
     expect(empty.closest('.card')).toBeTruthy()
   })
 
@@ -375,7 +375,7 @@ describe('DirectoryTab service groups', () => {
     await renderTab()
 
     const words = screen.getByText('not observed')
-    expect(words).toHaveClass('directory-unobserved')
+    expect(words).toHaveClass('system-unobserved')
     expect(words.className).not.toMatch(/badge/)
   })
 
@@ -440,7 +440,7 @@ describe('DirectoryTab service groups', () => {
   it('says so when nothing is registered at all', async () => {
     api.get.mockResolvedValue([])
     const showToast = vi.fn()
-    render(<DirectoryTab showToast={showToast} />)
+    render(<SystemTab showToast={showToast} />)
 
     expect(await screen.findByText(/No services are registered/)).toBeInTheDocument()
   })
@@ -450,7 +450,7 @@ describe('DirectoryTab service groups', () => {
  * The background refresh. A stale heartbeat and a dead service look identical here, so the page
  * cannot show what the heartbeats were at mount for as long as the tab stays open.
  */
-describe('DirectoryTab refresh', () => {
+describe('SystemTab refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -466,8 +466,8 @@ describe('DirectoryTab refresh', () => {
     expect(document.querySelector('.page-actions')).toBeNull()
     expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
-    // The page is a read-only directory with no controls of its own beyond its tabs. The endpoint
+    expect(screen.queryByRole('button', { name: /Refresh System/i })).not.toBeInTheDocument()
+    // The page is a read-only list with no controls of its own beyond its tabs. The endpoint
     // cells are still buttons, one per row a browser cannot open, and the column headers sort the
     // table, so this counts what is none of these.
     const buttons = screen.getAllByRole('button')
@@ -519,7 +519,7 @@ describe('DirectoryTab refresh', () => {
   })
 })
 
-describe('DirectoryTab read failures', () => {
+describe('SystemTab read failures', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -529,7 +529,7 @@ describe('DirectoryTab read failures', () => {
 
   it('shows the error, not the empty message, when the first read fails', async () => {
     api.get.mockRejectedValue(new Error('PostgREST is unreachable'))
-    render(<DirectoryTab showToast={vi.fn()} />)
+    render(<SystemTab showToast={vi.fn()} />)
 
     expect(await screen.findByText(/could not be read: PostgREST is unreachable/)).toBeInTheDocument()
     expect(document.querySelector('.card .callout-danger')).not.toBeNull()
@@ -544,7 +544,7 @@ describe('DirectoryTab read failures', () => {
     api.get.mockRejectedValue(new Error('gateway timeout'))
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
 
-    expect(await screen.findByText(/latest read of the directory failed .gateway timeout./)).toBeInTheDocument()
+    expect(await screen.findByText(/latest read of the service list failed .gateway timeout./)).toBeInTheDocument()
     expect(document.querySelector('.callout-warning')).not.toBeNull()
     expect(document.querySelector('.callout-danger')).toBeNull()
     expect(document.querySelector('tbody tr')).toBeTruthy()
@@ -557,7 +557,7 @@ describe('DirectoryTab read failures', () => {
 
   it('still says no services are registered for a successful empty read', async () => {
     api.get.mockResolvedValue([])
-    render(<DirectoryTab showToast={vi.fn()} />)
+    render(<SystemTab showToast={vi.fn()} />)
     expect(await screen.findByText(/No services are registered/)).toBeInTheDocument()
     expect(document.querySelector('.callout')).toBeNull()
   })
@@ -568,7 +568,7 @@ describe('DirectoryTab read failures', () => {
  * so `viewerIsOnDeploymentHost` is true for all of them and the exposure column's case has to be
  * asked for explicitly.
  */
-describe('Directory reachability', () => {
+describe('System reachability', () => {
   describe('viewerIsOnDeploymentHost', () => {
     it('recognises every spelling of this machine, including the bracketed IPv6 form', () => {
       for (const h of ['localhost', '127.0.0.1', '::1', '[::1]']) {
@@ -871,7 +871,7 @@ describe('serviceTypeLabel', () => {
     for (const s of SERVICES) expect(serviceTypeLabel(s.service_type)).not.toMatch(/_/)
   })
 
-  // Anything can register into the directory, so an unmapped type still reads as words.
+  // Anything can register into `directory_services`, so an unmapped type still reads as words.
   it('title-cases a type nobody mapped, with underscores as spaces', () => {
     expect(serviceTypeLabel('AMQP_BROKER')).toBe('Amqp Broker')
     expect(serviceTypeLabel('cache')).toBe('Cache')
@@ -884,7 +884,7 @@ describe('serviceTypeLabel', () => {
  * Each group's table sorts by its columns (#801), the sort held in the address. Every fixture here
  * is MONITORING, so all of them are on the first tab and its default order is by name.
  */
-describe('DirectoryTab: sorting by a column (#801)', () => {
+describe('SystemTab: sorting by a column (#801)', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   const at = (url) => window.history.replaceState(null, '', url)
@@ -894,7 +894,7 @@ describe('DirectoryTab: sorting by a column (#801)', () => {
   const monitoring = (name, over) => ({ ...svc(name, 'MONITORING', `http://${name.toLowerCase()}.plant.local`), ...over })
 
   it('sorts Version in natural order, reading the upstream version and dropping a leading "v", with no image last either way', async () => {
-    at('/directory')
+    at('/system')
     api.get.mockResolvedValue([
       monitoring('Grafana', { image: 'grafana/grafana:13.2.0' }),
       monitoring('Node-RED', { image: 'ghcr.io/harri-llewelyn/aber/node-red:1.4.0', upstream_version: 'v5.0.7' }),
@@ -909,16 +909,16 @@ describe('DirectoryTab: sorting by a column (#801)', () => {
     // image tag would put Node-RED's 1.4.0 first.
     expect(names()).toEqual(['Uptime', 'Prometheus', 'Node-RED', 'Grafana', 'Registered'])
     expect(screen.getByRole('columnheader', { name: 'Version' })).toHaveAttribute('aria-sort', 'ascending')
-    expect(address()).toBe('/directory?sort=version')
+    expect(address()).toBe('/system?sort=version')
 
     sortBy('Version')
     expect(names()).toEqual(['Grafana', 'Node-RED', 'Prometheus', 'Uptime', 'Registered'])
     expect(screen.getByRole('columnheader', { name: 'Version' })).toHaveAttribute('aria-sort', 'descending')
-    expect(address()).toBe('/directory?sort=-version')
+    expect(address()).toBe('/system?sort=-version')
   })
 
   it('sorts Reach from network to host to internal, with "not recorded" last either way', async () => {
-    at('/directory')
+    at('/system')
     api.get.mockResolvedValue([
       monitoring('Alpha', { exposure: 'INTERNAL' }),
       monitoring('Bravo', { exposure: 'UNKNOWN' }),
@@ -935,7 +935,7 @@ describe('DirectoryTab: sorting by a column (#801)', () => {
   })
 
   it('sorts Liveness with a DOWN service first, and "not observed" last either way', async () => {
-    at('/directory')
+    at('/system')
     api.get.mockResolvedValue([
       monitoring('Alpha', { status: 'ACTIVE' }),
       monitoring('Bravo', { status: 'UNKNOWN', last_heartbeat: null }),
@@ -948,11 +948,11 @@ describe('DirectoryTab: sorting by a column (#801)', () => {
     expect(names()).toEqual(['Charlie', 'Alpha', 'Delta', 'Bravo'])
     sortBy('Liveness')
     expect(names()).toEqual(['Alpha', 'Delta', 'Charlie', 'Bravo'])
-    expect(address()).toBe('/directory?sort=-liveness')
+    expect(address()).toBe('/system?sort=-liveness')
   })
 
   it('arrives sorted when the address already holds a sort', async () => {
-    at('/directory?sort=-reach')
+    at('/system?sort=-reach')
     api.get.mockResolvedValue([
       monitoring('Alpha', { exposure: 'NETWORK' }),
       monitoring('Bravo', { exposure: 'INTERNAL' }),
@@ -961,6 +961,6 @@ describe('DirectoryTab: sorting by a column (#801)', () => {
     await renderTab()
     expect(names()).toEqual(['Bravo', 'Charlie', 'Alpha'])
     expect(screen.getByRole('columnheader', { name: 'Reach' })).toHaveAttribute('aria-sort', 'descending')
-    expect(address()).toBe('/directory?sort=-reach')
+    expect(address()).toBe('/system?sort=-reach')
   })
 })

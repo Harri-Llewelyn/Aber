@@ -456,11 +456,15 @@ docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V .
 
 # The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
 # the server's container (archive_command, restore_command) and in its backup sidecar.
-docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
+# --build-context hands the build licenses/, the licence texts the image carries (NOTICE.md); this
+# and the next two need it, and without it the build stops with `pull access denied` for `licenses`.
+docker build -f timescaledb/Dockerfile --build-context licenses=./licenses \
+                                                -t $NS/timescaledb:$V timescaledb
 
 # The platform database -- supabase/postgres with pgBackRest and tini as PID 1, which
 # supabaseDb.physicalBackup runs inside the server's container and in its backup sidecar.
-docker build -f supabase/db/Dockerfile          -t $NS/supabase-db:$V supabase/db
+docker build -f supabase/db/Dockerfile --build-context licenses=./licenses \
+                                                -t $NS/supabase-db:$V supabase/db
 
 # The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
 # and docs/i3x-openapi.yaml copied to the document root; context is the repository root, where they
@@ -477,7 +481,8 @@ docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
 #
 # ITS TAG IS THE DATABASE VERSION. Deploying an older one replays an older schema chain, which is a
 # rollback rather than a runtime downgrade.
-docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
+docker build -f supabase/db-init/Dockerfile --build-context licenses=./licenses \
+                                                -t $NS/db-init:$V supabase
 
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately

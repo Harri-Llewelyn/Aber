@@ -62,6 +62,9 @@ python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
+# What the dashboard's schema builders write (enum, minimum, maximum), read by conformance.py:
+# test-harness/fixtures/schema-builder-output.json, whose other half is schemaBuilderContract.test.jsx.
+python ingestion/test_schema_builder_contract.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py
 # The JSON log formatter, and the drop pair. Every drop is a counter AND a warning, and the two
@@ -353,6 +356,12 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # repository's branches, never from its pull request head, tag or stash.
 npm run test:lib
 
+# NOTICE.md names every third-party image values.yaml pins, a chart template names or a Dockerfile is
+# built FROM. Each licence text in licenses/ is the file licenses/SHA256SUMS pins, and every build
+# of an image that copies them through the `licenses` named context passes it. Static; its parsing
+# is tested in test:lib (scripts/check-image-licences.test.mjs).
+node scripts/check-image-licences.mjs
+
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
 # time against it. There is no migrations ledger, so "a second run must match no rows" is what
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
@@ -475,7 +484,7 @@ python supabase/migrations/test_system_settings_rls.py
 # that gateways.sparkplug_group now defaults to the setting rather than the old literal, and that a
 # gateway's own group is changed only by a role gateways_update_privileged admits.
 python supabase/migrations/test_sparkplug_group_setting.py
-# The Directory's Version column (0140). The chart's component -> image map reaches every row it
+# The System page's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
 # writer is callable by db-init only. Its known-CVE columns (0180) match the exact image reference,
 # so an overridden tag reads as not scanned rather than zero.
@@ -1105,8 +1114,9 @@ in one afternoon and each move made both documents wrong until somebody noticed.
 becomes conservative, which is the failure worth having — `npm test` prints the exact number, and it
 is the only place that can be right on every branch at once.
 
-Four suites have a second half elsewhere, and both halves must move together:
-`test_modelled_metrics_contract.py`, `test_payload_conformance.py` and `test_rbe_telemetry.py` each
+Five suites have a second half elsewhere, and both halves must move together:
+`test_modelled_metrics_contract.py`, `test_payload_conformance.py`, `test_schema_builder_contract.py`
+and `test_rbe_telemetry.py` each
 pair with a JavaScript suite in the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and queue-overflow MUSTs
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md). The i3X server has a third check besides those two: `validate.py`'s
@@ -1414,7 +1424,7 @@ never on a branch:
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
 Every scan's Trivy JSON report is kept as a workflow artifact. The packaged chart carries their
-summary, which db-init records and the Directory shows beside each version
+summary, which db-init records and the System page shows beside each version
 ([`supabase/README.md`](../supabase/README.md)).
 
 The tag stamps the eleven image tags, the chart `version` and `appVersion` in one run, and the

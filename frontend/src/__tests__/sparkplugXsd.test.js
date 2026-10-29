@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  sparkplugToXsd, SPARKPLUG_XSD_TYPES, DEFAULT_XSD_TYPE, SPARKPLUG_DATATYPES
+  sparkplugToXsd, SPARKPLUG_XSD_TYPES, DEFAULT_XSD_TYPE, SPARKPLUG_DATATYPES,
+  datatypeToJsonSchemaType
 } from '../utils/sparkplugDatatype'
 import { SPARKPLUG_TYPES } from '../constants'
 
@@ -84,5 +85,17 @@ describe('sparkplugToXsd', () => {
     expect(sparkplugToXsd(999)).toBe(DEFAULT_XSD_TYPE)
     expect(sparkplugToXsd(null)).toBe(DEFAULT_XSD_TYPE)
     expect(sparkplugToXsd(undefined)).toBe(DEFAULT_XSD_TYPE)
+  })
+})
+
+describe('datatypeToJsonSchemaType', () => {
+  it('types every string-valued datatype as a string, so a schema built from it accepts the reading', () => {
+    // String (12), Text (14) and UUID (15) arrive in string_value.
+    expect([12, 14, 15].map(datatypeToJsonSchemaType)).toEqual(['string', 'string', 'string'])
+  })
+
+  it('types the numeric datatypes, DateTime among them, as numbers, and Boolean as a boolean', () => {
+    expect([1, 4, 8, 9, 10, 13].map(datatypeToJsonSchemaType)).toEqual(Array(6).fill('number'))
+    expect(datatypeToJsonSchemaType(11)).toBe('boolean')
   })
 })

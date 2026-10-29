@@ -15,10 +15,14 @@ export function datatypeLabel(code) {
   return SPARKPLUG_TYPES[code] || `Unknown (${code})`
 }
 
-/** Sparkplug datatype code -> JSON Schema `type`, for building a schema_definition.properties entry. */
+/**
+ * Sparkplug datatype code -> JSON Schema `type`, for building a schema_definition.properties entry.
+ * String, Text and UUID travel as `string_value`, which ingestion's conformance check reads as a
+ * string; DateTime is epoch milliseconds, a number.
+ */
 export function datatypeToJsonSchemaType(code) {
   if (code === 11) return 'boolean'
-  if (code === 12) return 'string'
+  if (code === 12 || code === 14 || code === 15) return 'string'
   return 'number'
 }
 

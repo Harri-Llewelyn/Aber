@@ -33,6 +33,9 @@ FROM supabase/edge-runtime:v1.77.0 AS runtime
 # The base's Debian packages as of its build; the security updates published since come in here.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
+# Edge Runtime's licence, which the base does not carry and a published image must (NOTICE.md).
+COPY licenses/edge-runtime/ /usr/share/licenses/
+
 # The runtime's user (10001), numeric so the kubelet can verify runAsNonRoot from the image alone.
 # It writes its analysis caches into DENO_DIR at run time, so the module cache is its own; the
 # functions stay root's.

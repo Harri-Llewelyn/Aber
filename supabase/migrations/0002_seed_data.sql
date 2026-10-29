@@ -2334,7 +2334,7 @@ ON CONFLICT (service_name) DO NOTHING;
 -- route Alloy serves their metrics on, through the `alloy` Service; Alloy is a DaemonSet, so on a
 -- cluster of several nodes the Service answers for one of them. The directory is an inventory of
 -- what is deployed. `METRICS_EXPORTER` groups an exporter with the backend it describes rather
--- than beside Grafana; DirectoryTab's SERVICE_GROUPS decides the section.
+-- than beside Grafana; SystemTab's SERVICE_GROUPS decides the section.
 -- ---------------------------------------------------------------------------------------------
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://prometheus:9090', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;

@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import {
   TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
-  DIRECTORY_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
+  SYSTEM_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
   currentTabOf, pageTabsOf, pageTitleOf, tabHref,
 } from '../navigation'
 import { pathSlug } from '../hooks/useUrlState'
@@ -19,7 +19,7 @@ import { QUEUES } from '../components/tabs/ApprovalsTab'
 import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
 import { SUBJECTS } from '../components/tabs/CaptureTab'
 import { STAGES } from '../components/tabs/ArchivesTab'
-import { SERVICE_GROUPS } from '../components/tabs/DirectoryTab'
+import { SERVICE_GROUPS } from '../components/tabs/SystemTab'
 import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { CATEGORY_DESCRIPTIONS, SettingsTab } from '../components/tabs/SettingsTab'
 import { PROFILE_SECTIONS } from '../components/tabs/ProfileTab'
@@ -49,14 +49,14 @@ describe('one list per page', () => {
     expect(SECTIONS).toBe(ACCESS_CONTROL_TABS)
     expect(PROFILE_SECTIONS).toBe(PROFILE_TABS)
     expect(SERVICE_GROUPS.map(g => [g.id, g.title, g.description]))
-      .toEqual(DIRECTORY_TABS.map(t => [t.id, t.label, t.description]))
+      .toEqual(SYSTEM_TABS.map(t => [t.id, t.label, t.description]))
     expect(Object.entries(CATEGORY_DESCRIPTIONS)).toEqual(SETTINGS_TABS.map(t => [t.label, t.description]))
   })
 
   it('names the ten tabbed pages, Profile among them though the rail does not draw it', () => {
     expect(tabbed.map(t => t.id).sort()).toEqual([
-      'access-control', 'approvals', 'archives', 'capture', 'devices', 'directory', 'metrics',
-      'profile', 'settings', 'vocabulary',
+      'access-control', 'approvals', 'archives', 'capture', 'devices', 'metrics',
+      'profile', 'settings', 'system', 'vocabulary',
     ])
   })
 

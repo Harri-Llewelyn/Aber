@@ -141,7 +141,7 @@ A system outside Aber that only reads the broker can have an account of its own.
 
 - **The password is shown once.** The broker keeps only a hash of it. If it is lost, delete the account and create another.
 - The dialog shows everything the system needs: the broker's address and port, the username, the password, the topics it may read and the root certificate.
-- **What it can read:** every Sparkplug topic, `spBv1.0/#`, and the Unified Namespace. It reads every area of the site. It does not read the Directory.
+- **What it can read:** every Sparkplug topic, `spBv1.0/#`, and the Unified Namespace. It reads every area of the site. It does not read the Factory+ Directory.
 - **It cannot publish.** The broker drops anything it sends. It is a plain MQTT reader, not a Sparkplug Host Application. It sends no STATE, and cannot ask an edge node to rebirth.
 - The account holds the **subscriber** role and nothing else. Its username is `sub` and 21 more letters and digits. If someone adds a second role to it by hand, Aber takes it away when the broker next starts.
 - Its row on **Broker accounts** shows its name, what it is for, and whether anything is connected as it.

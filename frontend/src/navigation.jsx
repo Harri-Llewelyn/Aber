@@ -11,11 +11,11 @@ import {
   IconArchive,
   IconClipboardList,
   IconFileCode,
-  IconBookOpen,
   IconHistory,
   IconRecord,
   IconDatabase,
   IconHardDrive,
+  IconServer,
   IconLock,
   IconSettings,
   IconInbox,
@@ -69,7 +69,7 @@ export const ARCHIVES_TABS = [
  * The service groups. The page draws a group's tab only while it has rows, and adds a tab for any
  * service type no group claims, so these three are the ones a link can count on.
  */
-export const DIRECTORY_TABS = [
+export const SYSTEM_TABS = [
   { id: 'applications', label: 'Applications & User Interfaces', description: 'The things with a front door: each link opens something the dashboard does not do itself.' },
   { id: 'ingestion', label: 'Ingestion & Messaging', description: 'The path a reading takes from a machine to the historian. If telemetry stops, look here first.' },
   { id: 'infrastructure', label: 'Data & Backend Infrastructure', description: 'What the services on the other tabs are built on: the databases, APIs and sign-in behind them.' },
@@ -127,7 +127,7 @@ export const PROFILE_TABS = [
  *   History        -- what happened? Both pages are a record of the past.
  *   Retention      -- what is kept, and how is it got back? Every page here runs a retention
  *                     timer over something and offers a way to restore from it.
- *   Administration -- who may do what, where does everything live, how is it configured?
+ *   Administration -- who may do what, what runs, how is it configured?
  *
  * The Site Map is the landing page, alone in `home`. Audit Trail leads History rather than
  * sitting beside Devices because it is the audit trace of every entity.
@@ -196,9 +196,10 @@ export const TABS = [
      group runs a retention timer over something and offers a way back from it. */
   { id: 'archives',       label: 'Archived Entities', group: 'retention', icon: <IconArchive size={16} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE, pageTabs: ARCHIVES_TABS },
 
-  // Where everything lives, who may touch it, and how it is tuned. Directory and Settings are
-  // ungated and Access Control is Administrator-only, so for anyone else this group is the two.
-  { id: 'directory',      label: 'Directory',      group: 'admin',   icon: <IconBookOpen size={16} />, pageTabs: DIRECTORY_TABS },
+  // What runs, who may touch it, and how it is tuned. System and Settings are ungated and Access
+  // Control is Administrator-only, so for anyone else this group is the two. IconServer, not
+  // IconActivity, which means live telemetry.
+  { id: 'system',         label: 'System',         group: 'admin',   icon: <IconServer size={16} />, pageTabs: SYSTEM_TABS },
   // Access Control is narrower than the API behind it: seeing who holds what is an access-control
   // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator', pageTabs: [ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ...ACCESS_CONTROL_TABS] },

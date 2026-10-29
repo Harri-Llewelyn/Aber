@@ -38,6 +38,11 @@ RUN rm /usr/local/bin/gosu
 # supabase-db image does, so a fix Alpine ships between two base cuts reaches the release.
 RUN apk upgrade --no-cache
 
+# THE LICENCES the base does not carry, as supabase/db/Dockerfile copies them: from
+# licenses/supabase-postgres/ through the named context `licenses`
+# (`--build-context licenses=./licenses`), since this context is supabase/.
+COPY --from=licenses supabase-postgres/ /usr/share/licenses/
+
 # TOP LEVEL ONLY. `supabase/migrations/archive/` holds the superseded migrations, kept as reasoning
 # and deliberately never executed -- a recursive copy would replay every one of them. The glob is
 # what keeps them out, and it is the same rule sync-helm-chart-files.mjs applied when this was a

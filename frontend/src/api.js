@@ -136,6 +136,15 @@ const semanticIdPair = (body) => {
   };
 };
 
+/**
+ * `metric_catalog.permitted_values` as the column holds it: a list of strings, or NULL for none.
+ * metric_catalog_permitted_values_shape refuses an empty list, a NULL element and an empty string.
+ */
+const permittedValuesColumn = (values) => {
+  const list = Array.isArray(values) ? values.map(v => String(v).trim()).filter(Boolean) : [];
+  return list.length > 0 ? list : null;
+};
+
 // The UI carries a device's gateway as `active_gateway_id`; the column is `gateway_id`.
 const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
 
@@ -2835,6 +2844,9 @@ const apiMethods = {
         // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
+        // The values a discrete metric may report, as text; NULL is no closed set. The schema
+        // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
+        permitted_values: m.permitted_values ?? null,
         description: m.description,
         deprecated: m.deprecated,
         superseded_by: m.superseded_by,
@@ -2897,7 +2909,7 @@ const apiMethods = {
         service_type: s.service_type,
         endpoint_url: s.endpoint_url,
         // Where the service can be reached FROM (0084). Passed through rather than defaulted here:
-        // a row that predates the column reads UNKNOWN, and the Directory page says so in words
+        // a row that predates the column reads UNKNOWN, and the System page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
         // The image the release deploys for the service (0140); null when nothing recorded one.
@@ -3260,6 +3272,7 @@ const apiMethods = {
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
         ...semanticIdPair(body),
+        permitted_values: permittedValuesColumn(body.permitted_values),
         description: body.description || null
       }).select();
       if (error) throw error;
@@ -3456,18 +3469,25 @@ const apiMethods = {
     const id = parts[parts.length - 1];
 
     /**
-     * Correct a catalog metric's semantic id. Only the pair is sent: `name` and `datatype` are what
-     * devices publish, and enforce_metric_catalog_immutability() refuses both regardless. No row
+     * Correct a catalog metric's semantic id pair, its permitted values, or both: each only when the
+     * body names it, so an edit of one never blanks the other. `name` and `datatype` are never sent:
+     * devices publish them, and enforce_metric_catalog_immutability() refuses both regardless. No row
      * back means RLS refused the UPDATE (Administrator only), so it is not a success.
      */
     if (/^\/api\/v1\/metric-catalog\/[^/]+$/.test(path)) {
+      const change = {
+        ...(Object.hasOwn(body || {}, 'semantic_id') && semanticIdPair(body)),
+        ...(Object.hasOwn(body || {}, 'permitted_values') && {
+          permitted_values: permittedValuesColumn(body.permitted_values)
+        })
+      };
       const { data, error } = await supabase
-        .from('metric_catalog').update(semanticIdPair(body)).eq('id', id).select();
+        .from('metric_catalog').update(change).eq('id', id).select();
       if (error) throw error;
       if (!data?.length) {
         throw new Error(
-          'Semantic id not changed — the metric may no longer exist, or you may not have permission ' +
-          'to change the catalog.'
+          'Metric not changed — it may no longer exist, or you may not have permission to change ' +
+          'the catalog.'
         );
       }
       return data[0];

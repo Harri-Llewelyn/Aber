@@ -348,20 +348,27 @@ module, no i3X entry: the panel sections `opcua_vocabulary` by `companion_spec` 
 
 **The value-domain half**: `metric_catalog.permitted_values` (archived migration 0012), the derived
 *out-of-vocabulary value* finding in `utils/deviceTags.js`, computed at read time from last
-telemetry and stored nowhere, and its wiring into the Devices tab.
+telemetry and stored nowhere, and its wiring into the Devices tab. Add Metric and Edit write the
+column; both schema builders copy it into each property's `enum`, in the property's JSON type
+(`utils/schemaProperty.js`), which is what `ingestion/conformance.py` judges a reading against.
+`test-harness/fixtures/schema-builder-output.json` holds the builders' output to ingestion's
+reading of it.
 
 **`permitted_values` is not frozen**, which is the opposite of the obvious decision. The argument
 for freezing — a device is configured against its value set the way it is configured against its
 name — does not survive asking what the column is. `name` and `datatype` are a wire contract: a
 device is physically configured against them and changing one re-points historical telemetry.
-`permitted_values` is a transcribed assertion about a standard that nothing is configured against —
-no device reads it, ingestion never consults it, and no historical row moves when it changes.
-Freezing it would mean a mistyped value could only be corrected by deprecating the metric and
-re-provisioning every device that publishes it, to fix a string that never left the database. That
-is exactly the trade archived migration 0029 already refused for `semantic_id`, in the same table,
-for the same reason. Standards also *add* values between editions, so a frozen set would go stale by
-the standard's action rather than anyone's mistake. `test_metric_catalog_seed.py` (db lane) fails if a
-later edit freezes it, or frees `name` or `datatype`.
+`permitted_values` is a transcribed assertion about a standard that nothing is configured against.
+No device reads it, and no historical row moves when it changes. Ingestion never reads the column
+itself: a published schema carries a copy of the set as it was at publish time, as `enum`. Editing
+the catalogue row changes no published schema; the next version saved in the dashboard takes the
+new set, or loses its `enum` when the set was cleared. Freezing it would mean a mistyped value could
+only be corrected by deprecating the metric and re-provisioning every device that publishes it, to
+fix a string that never left the database. That is exactly the trade archived migration 0029 already
+refused for `semantic_id`, in the same table, for the same reason. Standards also *add* values
+between editions, so a frozen set would go stale by the standard's action rather than anyone's
+mistake. `test_metric_catalog_seed.py` (db lane) fails if a later edit freezes it, or frees `name` or
+`datatype`.
 
 ## ASHRAE 223P
 
@@ -475,7 +482,7 @@ class lives only in a metric's name.
 | Question | Settled answer |
 |---|---|
 | One `opcua_vocabulary` for six specs, or one table each? | **One** — the PK is already `(companion_spec, name)` |
-| Is `permitted_values` frozen like `metric_catalog.name`? | **No.** Nothing is configured against it, and a value set widens between editions; freezing it forces a version event for a non-breaking change. `name` stays immutable |
+| Is `permitted_values` frozen like `metric_catalog.name`? | **No.** Nothing is configured against it, and a value set widens between editions; freezing it forces a version event for a non-breaking change. A published schema keeps its own copy as `enum`. `name` stays immutable |
 | Where does nameplate data live? | **`device_nameplate`**, not `asset_config`, which ingestion rewrites from every DBIRTH |
 | IDTA templates: own table or rows in `schemas`? | **Own table.** `schemas` is deployment state; templates are reference data |
 | PackML as its own standard, or under OPC UA? | **Under OPC UA** (`companion_spec = OPC 30050 PackML`) — it is what the NodeSet was read from, and it avoids a table, a panel and a mirror module |

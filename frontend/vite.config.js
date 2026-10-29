@@ -71,6 +71,8 @@ export default defineConfig(({ mode, command }) => {
     build: {
       // @google/model-viewer is a 1 MB chunk, loaded only when a device with a model is opened.
       chunkSizeWarningLimit: 1100,
+      // Legal comments stay: the copied icons' ISC/MIT notices and npm's must travel (NOTICE.md).
+      rolldownOptions: { output: { comments: { legal: true } } },
     },
     // Injected rather than left to Vite's own VITE_* inlining, because the git fallback above has
     // no environment variable behind it -- `define` is what lets one spelling in the app cover the

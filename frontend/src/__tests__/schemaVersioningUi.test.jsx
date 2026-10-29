@@ -47,10 +47,12 @@ const ARCHIVED_V1 = { ...V1, status: 'archived' }
 const ACTIVE_V2 = { ...DRAFT_V2, status: 'active' }
 
 let schemaRows = []
+// The catalog the page reads; a test that needs permitted values or descriptions replaces it.
+let catalogRows = CATALOG
 
 const routes = () => ({
   '/api/v1/schemas': schemaRows,
-  '/api/v1/metric-catalog': CATALOG,
+  '/api/v1/metric-catalog': catalogRows,
   '/api/v1/metric-groups': [],
   '/api/v1/mtconnect-vocabulary': [],
   '/api/v1/iso22400-vocabulary': [],
@@ -102,6 +104,7 @@ const panelFor = (name) => {
 beforeEach(() => {
   vi.clearAllMocks()
   schemaRows = [V1]
+  catalogRows = CATALOG
   api.get.mockImplementation((path) => {
     const table = routes()
     const key = Object.keys(table).find(r => path.startsWith(r))
@@ -483,6 +486,12 @@ describe('Detail modal — read-only vs draft', () => {
       }
     }
 
+    // The catalog holds the stored list, so the entry is already what a save would write: a list the
+    // catalog lacks is one a save removes (the next describe).
+    beforeEach(() => {
+      catalogRows = CATALOG.map(m => (m.name === 'Systems/TEMPERATURE' ? { ...m, permitted_values: ['20', '40', '60'] } : m))
+    })
+
     /** The PUT as the database would take it: only the keys sent are written. */
     const storeOnPut = () => api.put.mockImplementation(async (path, body) => {
       schemaRows = schemaRows.map(s => (path.endsWith(s.schema_uuid) ? { ...s, ...body } : s))
@@ -562,6 +571,107 @@ describe('Detail modal — read-only vs draft', () => {
         required: ['Systems/TEMPERATURE'],
         properties: { 'Controller/EXECUTION': { type: 'string' } }
       })
+    })
+  })
+
+  /**
+   * A draft is where a new version picks up permitted values and a range: a published version is
+   * immutable, so this is the only way a device on Enforce comes to be held to them. Each kept
+   * metric takes the catalog's description and permitted values as they are now, and its range from
+   * what is typed beside it.
+   */
+  describe('a save writes the catalog’s values and the typed range', () => {
+    const EXECUTION_DRAFT = {
+      ...DRAFT_V2,
+      schema_definition: {
+        type: 'object',
+        properties: {
+          'Systems/TEMPERATURE': { type: 'number', minimum: 0 },
+          'Controller/EXECUTION': { type: 'string', enum: ['RETIRED_STATE'] }
+        }
+      }
+    }
+
+    const openDraft = async () => {
+      api.put.mockResolvedValue({ id: 'v2-uuid' })
+      schemaRows = [V1, EXECUTION_DRAFT]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+      return within(document.querySelector('.modal'))
+    }
+
+    const savedProperties = () => api.put.mock.calls[0][1].schema_definition.properties
+
+    it('takes the catalog’s list and description on open, and says so', async () => {
+      catalogRows = CATALOG.map(m => (m.name === 'Controller/EXECUTION'
+        ? { ...m, description: 'Controller execution state', permitted_values: ['READY', 'ACTIVE'] }
+        : m))
+      const modal = await openDraft()
+
+      expect(modal.getByText(/One metric takes its description\s+or permitted values from the Metrics page/)).toBeTruthy()
+      expect(modal.getByText(/1 changed/)).toBeTruthy()
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      expect(savedProperties()).toEqual({
+        'Systems/TEMPERATURE': { type: 'number', minimum: 0 },
+        'Controller/EXECUTION': { type: 'string', description: 'Controller execution state', enum: ['READY', 'ACTIVE'] }
+      })
+    })
+
+    it('removes a list the catalog no longer holds, which would go on dropping readings', async () => {
+      const modal = await openDraft()
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      expect(savedProperties()['Controller/EXECUTION']).toEqual({ type: 'string' })
+    })
+
+    it('publishes a draft that only the catalog changed by saving it first', async () => {
+      catalogRows = CATALOG.map(m => (m.name === 'Controller/EXECUTION' ? { ...m, permitted_values: ['RETIRED_STATE'] } : m))
+      const order = []
+      api.put.mockImplementation(async () => { order.push('save'); return { id: 'v2-uuid' } })
+      api.post.mockImplementation(async () => { order.push('publish'); return { version: 2 } })
+      schemaRows = [V1, { ...EXECUTION_DRAFT, schema_definition: { type: 'object', properties: { 'Controller/EXECUTION': { type: 'string' } } } }]
+      renderTab()
+      await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+      fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+      fireEvent.click(screen.getByText('Publish Version v2'))
+
+      await waitFor(() => expect(order).toEqual(['save', 'publish']))
+      expect(api.put.mock.calls[0][1].schema_definition.properties['Controller/EXECUTION'])
+        .toEqual({ type: 'string', enum: ['RETIRED_STATE'] })
+    })
+
+    it('shows a stored range beside a numeric metric, writes what is typed, and removes a cleared bound', async () => {
+      catalogRows = CATALOG.map(m => (m.name === 'Controller/EXECUTION' ? { ...m, permitted_values: ['RETIRED_STATE'] } : m))
+      const modal = await openDraft()
+      const minimum = modal.getByRole('spinbutton', { name: 'Minimum of Systems/TEMPERATURE' })
+      expect(minimum.value).toBe('0')
+      // Nothing changed yet: the stored range and list are what the catalog and the fields say.
+      expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true)
+
+      fireEvent.change(modal.getByRole('spinbutton', { name: 'Maximum of Systems/TEMPERATURE' }), { target: { value: '120' } })
+      fireEvent.change(minimum, { target: { value: '' } })
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      expect(savedProperties()['Systems/TEMPERATURE']).toEqual({ type: 'number', maximum: 120 })
+    })
+
+    it('offers no range for a string metric', async () => {
+      const modal = await openDraft()
+      expect(modal.queryByRole('spinbutton', { name: 'Minimum of Controller/EXECUTION' })).toBeNull()
+    })
+
+    it('will not save a minimum above its maximum, and says which', async () => {
+      const modal = await openDraft()
+      fireEvent.change(modal.getByRole('spinbutton', { name: 'Maximum of Systems/TEMPERATURE' }), { target: { value: '-5' } })
+
+      expect(modal.getByRole('alert').textContent).toMatch(/Systems\/TEMPERATURE: The minimum is above the maximum/)
+      expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true)
+      expect(modal.getByRole('button', { name: /Publish Version v2/ }).disabled).toBe(true)
     })
   })
 

@@ -1506,6 +1506,17 @@ From 1.8.0, the old name stops with `Cannot find module`. A site upgrading strai
 never saw the warning it printed in 1.7.x. Removing the old name changes no token already issued
 with it.
 
+### From 1.8.0, the Directory page is called System
+
+The dashboard page that lists Aber's services is now called **System**. Its address is `/system`,
+and each tab's address is under it, such as `/system/ingestion`.
+
+Old links and bookmarks still work. `/directory` and each of its tab addresses open the same view
+of System, with its sort order and other settings.
+
+Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
+So does the Factory+ Directory, at `/ping` and `/v1/`.
+
 ### From 1.8.0, `cells.grafana_url` is removed
 
 1.7.0 deprecated a cell's `grafana_url` (see

@@ -14,6 +14,10 @@ FROM swaggerapi/swagger-ui:v5.33.0
 # two base cuts reaches the release rather than waiting for the next base (#347).
 RUN apk upgrade --no-cache
 
+# Swagger UI's LICENSE and NOTICE, which the base does not carry and a published image must
+# (NOTICE.md). nginx's own is already in the base, at /usr/share/licenses/nginx/.
+COPY licenses/swagger-ui/ /usr/share/licenses/
+
 # Strict-Transport-Security, from the value the chart sets when global.scheme is https: the base's
 # entrypoint renders this template into conf.d with its own. Empty sends no header.
 ENV ABER_STRICT_TRANSPORT_SECURITY=""

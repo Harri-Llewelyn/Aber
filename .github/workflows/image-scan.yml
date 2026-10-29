@@ -23,8 +23,8 @@
 # so every acceptance is re-read on the first scan after its date.
 #
 # release.yml runs the same script at each release with --reports, and the chart it packages
-# carries the result for the Directory. This run writes no such summary: a published chart cannot
-# change, and a checkout's chart carries none, so that its Directory reads "not scanned" rather
+# carries the result for the System page. This run writes no such summary: a published chart cannot
+# change, and a checkout's chart carries none, so that its System page reads "not scanned" rather
 # than dating images it does not run.
 # =================================================================================================
 name: Container Image CVE Scan

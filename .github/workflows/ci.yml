@@ -288,6 +288,12 @@ jobs:
       - name: Verify Each Image Carries The Sources It Imports
         run: node scripts/check-image-sources.mjs
 
+      # NOTICE.md names every third-party image the chart pins or a Dockerfile builds FROM, and each
+      # licence text a published image carries is the file licenses/SHA256SUMS pins. A release
+      # redistributes those bases, so an unlisted one is a licence nobody checked.
+      - name: Verify NOTICE.md Names Every Image And Its Licence Texts Are Pinned
+        run: node scripts/check-image-licences.mjs
+
       # Negative assertions about the gateway surface: a gated route must be gated, an exemption must
       # be one of the reviewed ones, and the two documents carrying the argument must match. validate.py
       # asserts the 401s that should happen; nothing else can assert the absence of a route nobody

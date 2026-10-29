@@ -114,8 +114,9 @@ export const OUT_OF_VOCABULARY_TAG = 'Out of vocabulary'
 
 /**
  * Metrics whose last reported value is not in the vocabulary their catalog entry declares. Derived,
- * never stored. A device publishing `RUNNING` where MTConnect says `ACTIVE` passes ingestion and
- * the historian, and every consumer keying on the state is silently wrong. `latestValues` is
+ * never stored. A device publishing `RUNNING` where MTConnect says `ACTIVE` passes ingestion unless
+ * its schema carries the set as `enum`, and a schema published before the set was entered does not:
+ * this is that device's only check. `latestValues` is
  * metric_name to last value from `telemetry_latest`; absent or empty means no finding, not a clean
  * bill. A metric with no `permitted_values` never contributes.
  */
