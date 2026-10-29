@@ -1279,7 +1279,10 @@ class ADownloadNeedsTheAuditedCall(unittest.TestCase):
 # memory before 1.5. The daemon drops an undeclared alias, so neither the recording nor the replay
 # writes a historian row.
 CAP_ALIASES = 50
-CAP_RATE = 400                 # messages a second, as the audit published; the cap in about 65 s
+# The case holds the cap, not a rate: the memory it guards scaled with a recording's size. The
+# daemon stays flat at this flood, the cap in about 16 s. The replay stays at 4x: faster, the
+# playback worker publishes ahead of the broker and peaks higher with the rate, not the size.
+CAP_RATE = 1600                # messages a second
 CAP_RECORD_TIMEOUT = 300
 CAP_SPEED = 4.0
 # Each worker's peak since its container started, as a share of its limit.
