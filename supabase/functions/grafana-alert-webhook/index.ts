@@ -5,8 +5,9 @@ import { serverError } from "../_shared/failure.ts";
  * Grafana alert notification receiver. Grafana evaluates the rules in
  * grafana/provisioning/alerting/alert-rules.yaml against the historian and POSTs an
  * Alertmanager-shaped payload here; this records each alert instance as an occurrence in
- * public.platform_alerts, which Realtime delivers to the dashboard. It authenticates on a narrow
- * shared secret, GRAFANA_ALERT_WEBHOOK_SECRET, which authorises exactly one thing, and only then
+ * public.platform_alerts, which Realtime delivers to the dashboard, keeping its rule's uid, its
+ * labels and its values. It authenticates on a narrow shared secret,
+ * GRAFANA_ALERT_WEBHOOK_SECRET, which authorises exactly one thing, and only then
  * uses its own service-role client; giving Grafana the service-role key would hand a
  * browser-SSO-fronted service the credential that bypasses RLS. The check cannot be delegated: the
  * edge runtime boots with VERIFY_JWT="false", and the gateway's key-auth proves only that the
@@ -43,6 +44,9 @@ interface GrafanaAlert {
   fingerprint?: string;
   startsAt?: string;
   endsAt?: string;
+  generatorURL?: string;
+  ruleUID?: string;
+  values?: Record<string, number> | null;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -105,6 +109,40 @@ interface AlertRow {
   starts_at: string;
   ends_at: string | null;
   device_name: string | null;
+  rule_uid: string | null;
+  labels: Record<string, string>;
+  values: Record<string, number> | null;
+}
+
+/** A Grafana rule uid: letters, digits, `-` and `_`, at most 40 characters. */
+const RULE_UID = /^[A-Za-z0-9_-]{1,40}$/;
+/** Where Grafana's generatorURL names the rule, under whatever root URL it serves from. */
+const RULE_VIEW_PATH = /\/alerting\/grafana\/([^/?#]+)\/view(?:[/?#]|$)/;
+
+/**
+ * The uid of the rule that raised the alert. Read from the generatorURL's path, since the host is
+ * whatever root URL Grafana is configured with; then from the payload's own ruleUID, then from an
+ * `__alert_rule_uid__` label, which Grafana strips before a contact point but a relay may carry.
+ * Anything that is not a Grafana uid is no uid.
+ */
+export function ruleUidOf(alert: GrafanaAlert): string | null {
+  let fromUrl: string | undefined;
+  try {
+    fromUrl = decodeURIComponent(RULE_VIEW_PATH.exec(alert.generatorURL ?? "")?.[1] ?? "");
+  } catch {
+    fromUrl = undefined;
+  }
+  for (const candidate of [fromUrl, alert.ruleUID, alert.labels?.__alert_rule_uid__]) {
+    const uid = typeof candidate === "string" ? candidate.trim() : "";
+    if (RULE_UID.test(uid)) return uid;
+  }
+  return null;
+}
+
+/** The values as sent, when they are an object (refId to number); anything else is none. */
+function valuesOf(alert: GrafanaAlert): Record<string, number> | null {
+  const v = alert.values;
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
 }
 
 /**
@@ -170,6 +208,9 @@ export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
     starts_at: alert.startsAt,
     ends_at: endsAt,
     device_name: labels.device?.trim() || null,
+    rule_uid: ruleUidOf(alert),
+    labels,
+    values: valuesOf(alert),
   };
 }
 
@@ -256,6 +297,9 @@ export default async function handler(req: Request): Promise<Response> {
     summary: r.summary,
     starts_at: r.starts_at,
     ends_at: r.ends_at,
+    rule_uid: r.rule_uid,
+    labels: r.labels,
+    values: r.values,
   }));
 
   // Upsert on (fingerprint, starts_at), the occurrence key. A Grafana fingerprint is a hash of the
