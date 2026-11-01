@@ -1572,7 +1572,7 @@ observability:
   alloy:
     image:
       repository: grafana/alloy
-      tag: "v1.20.1"
+      tag: "v1.21.3"
       pullPolicy: IfNotPresent
     # Node metrics from the host's /proc, /sys and /, mounted read-only. Disk is the one that
     # matters: the databases, the metrics store and the log store share the node's volume, and
