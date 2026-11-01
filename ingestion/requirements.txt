@@ -2,7 +2,7 @@ paho-mqtt==1.6.1
 # 2.9.10, not 2.9.9: 2.9.9 predates CPython 3.13 and ships no wheel for it, so `pip install -r`
 # tries to build from source and fails. The container and CI both run 3.13, so this pin is now
 # load-bearing everywhere rather than a courtesy to local development. 2.9.10 supports 3.8+.
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.13
 # THE RUNTIME AND `protoc` ARE TWO MAJORS APART, ON PURPOSE, AND NOTHING IS WRONG.
 # `sparkplug_b_pb2.py` is generated at image build by whatever protoc apt supplies -- on
 # python:3.13-slim (Debian trixie) that is libprotoc 3.21.12, the same version bookworm offered,
