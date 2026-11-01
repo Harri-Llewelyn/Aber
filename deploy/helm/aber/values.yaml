@@ -1544,7 +1544,7 @@ observability:
   prometheus:
     image:
       repository: prom/prometheus
-      tag: "v3.15.0"
+      tag: "v3.15.1"
       pullPolicy: IfNotPresent
     retentionTime: 30d
     retentionSize: 8GB
