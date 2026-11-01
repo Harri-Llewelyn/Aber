@@ -11,7 +11,7 @@
 # cheaper than one more ordering constraint.
 # 3.13-slim rather than 3.10 so the base stops bundling `setuptools` and `wheel` into
 # site-packages. ingestion/Dockerfile carries the reasoning; both images make the same choice.
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 # protobuf-compiler generates sparkplug_b_pb2 at build time; without it every DDATA arrives
 # undecodable. It does NOT match the pinned runtime and does not need to -- apt supplies libprotoc

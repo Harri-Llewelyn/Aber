@@ -2,7 +2,7 @@
 # `wheel` into site-packages, where a scanner reads them as runtime dependencies of this service.
 # They are neither -- nothing here builds a package. 3.12 onwards ships `pip` alone, so the bump
 # removes them rather than pinning them forward. Kept in step with i3x/Dockerfile.
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 # protobuf-compiler, to generate sparkplug_b_pb2.py from the .proto at build time.
 #
