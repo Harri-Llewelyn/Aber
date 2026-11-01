@@ -1559,7 +1559,7 @@ observability:
   loki:
     image:
       repository: grafana/loki
-      tag: "3.7.8"
+      tag: "3.7.9"
       pullPolicy: IfNotPresent
     persistence:
       enabled: true
