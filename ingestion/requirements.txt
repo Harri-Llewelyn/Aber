@@ -63,7 +63,7 @@ pytz==2024.2
 #
 # Imported LAZILY, inside _s3_client(), so the ingestion daemon's own start-up path never pays for
 # it. botocore comes with it and carries the retry and signing behaviour.
-boto3==1.35.76
+boto3==1.43.123
 
 # Prometheus counters, histograms and the exposition format, for the /metrics endpoint.
 #
