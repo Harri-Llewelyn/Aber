@@ -28,7 +28,7 @@
   "prHourlyLimit": 3,
 
   "constraints": {
-    "deno": "2.1.4"
+    "deno": "v2.9.8"
   },
 
   "osvVulnerabilityAlerts": true,
