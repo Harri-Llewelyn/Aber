@@ -1303,7 +1303,7 @@ grafana:
     repository: grafana/grafana
     # Pinned: grafana.ini depends on
     # `use_pkce`, `auth_style` and the env-override mapping, which have moved between releases.
-    tag: "13.2.3"
+    tag: "13.3.0"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
