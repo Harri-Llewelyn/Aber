@@ -1336,7 +1336,7 @@ gitea:
   enabled: true
   image:
     repository: gitea/gitea
-    tag: "28.0.0"
+    tag: "28.3.0"
     pullPolicy: IfNotPresent
   # The local administrator, reachable only through `gitea admin` on the volume: the password
   # form is off and the web login is the gateway's `forge` listener. The password is
