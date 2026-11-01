@@ -19,7 +19,7 @@
 #     (users.js init() + strategies.js authenticateUserToken())
 #   - httpNodeAuth may be Express middleware rather than {user, pass} (red.js:426)
 # node-red-init.mjs carries the same kind of pin for the credentials runtime.
-FROM nodered/node-red:5.0.7
+FROM nodered/node-red:5.0.9
 
 # WHAT THE BASE CARRIES THAT THIS IMAGE DOES NOT RUN, removed before anything is added (#347).
 #
