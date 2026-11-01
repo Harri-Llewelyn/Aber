@@ -855,7 +855,7 @@ initJobs:
   # storage-init runs one script with node; npm is never run.
   storageInitImage:
     repository: node
-    tag: "24.21.0-alpine3.24"
+    tag: "24.22.2-alpine3.24"
     pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------------------------
