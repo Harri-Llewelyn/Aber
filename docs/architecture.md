@@ -1,7 +1,7 @@
 # How Aber fits together
 
-What each part of Aber does, where its code lives, which standards it uses, and how it relates
-to the AMRC Connectivity Stack. Why the Kubernetes deployment is built the way it is has its own
+What Aber is for and where it stops, what each part does, where its code lives, which standards
+it uses, and how it relates to the AMRC Connectivity Stack. Why the Kubernetes deployment is built the way it is has its own
 document: [`kubernetes-architecture.md`](kubernetes-architecture.md).
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
@@ -11,6 +11,23 @@ document: [`kubernetes-architecture.md`](kubernetes-architecture.md).
 > cold archival — 21 edge functions, an i3X server and a React dashboard.
 
 ---
+
+## Where Aber stops
+
+**Aber collects, models, watches and exports a site's data. Grafana analyses it.** Use this line to
+decide where a new feature belongs.
+
+- **Aber shows the site as it is now, and what changed.** The Site Map draws the present state of
+  every area, cell and device. The Audit Trail records every change.
+- **Aber watches the readings and shows the alerts.** Every alert appears in Aber's dashboard.
+  Today Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
+- **Aber hands the readings on.** A person exports them as files, and other software reads them
+  through [i3X](i3x-openapi.yaml). The equipment register is published as Asset Administration
+  Shells.
+- **Grafana is for analysis in depth.** There, a person builds dashboards, writes their own queries
+  against the historian, and compares readings with other sources.
+- **Aber builds none of those.** It has no dashboard editor, no query language and no saved panels.
+  A feature that needs one belongs in Grafana, or is a separate decision.
 
 ## Architecture
 
