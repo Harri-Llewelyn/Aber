@@ -54,11 +54,17 @@ END
 $timed$;
 """
 
+
+def loop(expression):
+    return LOOP.format(calls=CALLS, expression=expression)
+
+
+# Each loop is written out once, here, from the constants above.
 CASES = [
-    ("loop alone", "true", True),
-    ("has_role() admitting", "public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])", True),
-    ("has_role() refusing", "public.has_role(ARRAY['Auditor'])", False),
-    ("has_authority() admitting", "public.has_authority(ARRAY['audit_trail:read'])", True),
+    ("loop alone", loop("true"), True),
+    ("has_role() admitting", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), True),
+    ("has_role() refusing", loop("public.has_role(ARRAY['Auditor'])"), False),
+    ("has_authority() admitting", loop("public.has_authority(ARRAY['audit_trail:read'])"), True),
 ]
 
 # user_roles' own policy calls has_role() beside a column comparison, so it shows both halves.
@@ -100,12 +106,12 @@ class TheRoleChecksAreTimed(unittest.TestCase):
         self.conn.rollback()
         self.conn.close()
 
-    def timed(self, expression):
+    def timed(self, statement):
         """Microseconds per call for each run, and the answer the last call gave."""
         per_call, answer = [], None
         for _ in range(RUNS):
             del self.conn.notices[:]
-            self.cur.execute(LOOP.format(calls=CALLS, expression=expression))
+            self.cur.execute(statement)
             line = next(n for n in self.conn.notices if "timed " in n)
             _, _, verdict, micros = line.strip().rsplit(" ", 3)
             answer = verdict == "t"
@@ -114,8 +120,8 @@ class TheRoleChecksAreTimed(unittest.TestCase):
 
     def test_each_check_is_timed_and_answers_as_before(self):
         print(f"\n  {CALLS} calls x {RUNS} runs, as {ADMIN_ID} (Administrator), median us per call:")
-        for label, expression, expected in CASES:
-            per_call, answer = self.timed(expression)
+        for label, statement, expected in CASES:
+            per_call, answer = self.timed(statement)
             self.assertEqual(answer, expected, label)
             runs = ", ".join(f"{t:.2f}" for t in per_call)
             print(f"    {label:28} {statistics.median(per_call):8.2f}   ({runs})")
