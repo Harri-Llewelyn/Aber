@@ -34,6 +34,7 @@ import { Modal } from '../common/Modal'
 import { plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconFactory,
@@ -183,11 +184,33 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  /** File one cell into an area, or into none. One PATCH, written at the drop. */
-  const fileCell = async (cell, areaId) => {
+  // A dropped cell waiting on its dialog, `{ cell, areaId }`; areaId null takes it out of its area.
+  const [filing, setFiling] = useState(null)
+
+  /** Ask before filing one cell into an area, or into none. Nothing is written at the drop. */
+  const fileCell = (cell, areaId) => {
     if ((cell.area_id || null) === (areaId || null)) return
+    setFiling({ cell, areaId: areaId || null })
+  }
+
+  /**
+   * The dialog's question. A place belongs to one area's plan, so a move clears it
+   * (place_cell_in_its_area() in 0001), and the dialog says so for a placed cell. A placed cell
+   * always has an area (cells_place_needs_an_area).
+   */
+  const filingQuestion = ({ cell, areaId }) => {
+    const nameOf = (id) => areas.find(a => a.area_id === id)?.area_name
+    const from = nameOf(cell.area_id)
+    const ask = areaId ? `Move ${cell.cell_name} to ${nameOf(areaId)}?` : `Take ${cell.cell_name} out of ${from}?`
+    return isPlaced(cell) ? `${ask} Its place on ${from}'s plan is cleared. Set a new one on the Cells page.` : ask
+  }
+
+  /** File the cell the dialog asked about: one PUT naming the area, or none. */
+  const confirmFiling = async () => {
+    const { cell, areaId } = filing
     try {
       await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, area_id: areaId || '' })
+      setFiling(null)
       loadAll()
       const areaName = areas.find(a => a.area_id === areaId)?.area_name
       showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success', { to: cellUrl(cell.cell_id) })
@@ -529,6 +552,18 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           onClose={() => setLinksForArea(null)}
           showToast={showToast}
           hasPermission={hasPermission}
+        />
+      )}
+
+      {filing && (
+        <ConfirmModal
+          title={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
+          message={filingQuestion(filing)}
+          confirmLabel={filing.areaId ? 'Move Cell' : 'Unfile Cell'}
+          pendingLabel={filing.areaId ? 'Moving…' : 'Unfiling…'}
+          confirmClassName="btn btn-primary"
+          onConfirm={confirmFiling}
+          onCancel={() => setFiling(null)}
         />
       )}
       </div>
