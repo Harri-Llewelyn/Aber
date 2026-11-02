@@ -366,7 +366,10 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
 # command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
-# repository's branches, never from its pull request head, tag or stash.
+# repository's branches, never from its pull request head, tag or stash. And the signing set
+# (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
+# `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
+# it keeps, and that a second run changes nothing.
 npm run test:lib
 
 # NOTICE.md names every third-party image values.yaml pins, a chart template names or a Dockerfile is
