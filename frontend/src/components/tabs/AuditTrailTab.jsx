@@ -1320,7 +1320,8 @@ export function AuditTrailTab({ userRole, showToast }) {
    *
    * The entity and action filters are cleared because one act crosses both: an approval writes an
    * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
-   * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
+   * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
+   * hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
    * no live table holds, and `transaction_rows` counts it. The time range is kept: the rows share
    * one `recorded_at`, so a range holding this event holds its siblings.
    */
