@@ -972,6 +972,12 @@ live schema carries 35 and the fixture 21, so the whole table cannot land, and `
 column that makes an audit row attributable. The rest of `auth` is GoTrue's own bookkeeping, which
 no migration reads.
 
+**The stack's partitions come too.** `pg_dump` copies a partitioned table's rows into each
+partition by name, and a stack set up in an earlier month holds `audit_trail` partitions that a
+database migrated today never made. The load creates each one the throwaway database lacks, with
+the stack's bounds, before the rows arrive, so the default partition stays empty as it is on the
+stack.
+
 **What the suites do against history.** Every database suite passes against a real stack's rows as
 it does against an empty database, because each scopes what it asserts to what it set up. A suite
 written against an empty database breaks here in one of three ways, and each has met this lane:

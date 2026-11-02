@@ -390,6 +390,26 @@ function captureHistory () {
     { maxBuffer: 512 * 1024 * 1024 })
   if (users.status !== 0) die('could not read auth.users from the live stack.', users.stderr)
 
+  // THE LIVE STACK'S PARTITIONS, made here before their rows arrive. pg_dump copies a partitioned
+  // table's rows into each partition by name, and a stack set up in an earlier month holds
+  // partitions this database, migrated today, never made. Same names and bounds, so the default
+  // partition stays as empty as it is on the stack; an audit_trail partition is secured as
+  // ensure_audit_trail_partitions() secures its own.
+  const partitions = livePsql(
+    "SELECT format('%I.%I', n.nspname, c.relname) || '|' || format('%I.%I', pn.nspname, p.relname)" +
+    " || '|' || pg_get_expr(c.relpartbound, c.oid)" +
+    ' FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_namespace n ON n.oid = c.relnamespace' +
+    ' JOIN pg_class p ON p.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = p.relnamespace' +
+    " WHERE n.nspname = 'public' AND c.relispartition ORDER BY 1;")
+    .split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+      const [child, parent, bound] = line.split('|')
+      const secure = parent === 'public.audit_trail'
+        ? ` PERFORM public.secure_audit_trail_partition('${child}'::regclass);`
+        : ''
+      return `DO $part$ BEGIN IF to_regclass('${child}') IS NULL THEN` +
+        ` CREATE TABLE ${child} PARTITION OF ${parent} ${bound};${secure} END IF; END $part$;`
+    })
+
   return [
     // Triggers and FK checks off for the load. The audit stamp trigger would re-stamp every row
     // from TODAY's classifier -- destroying the very history being reproduced -- and the dump's
@@ -416,6 +436,8 @@ function captureHistory () {
     '              AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)',
     "  LOOP EXECUTE 'TRUNCATE TABLE ' || r.t || ' CASCADE'; END LOOP;",
     'END $hist$;',
+    // After the TRUNCATE: a range partition cannot be added while the default holds rows in it.
+    ...partitions,
     'COPY auth.users (' + shared.join(', ') + ') FROM stdin;',
     users.stdout.replace(/\r/g, '').replace(/\n$/, ''),
     '\\.',
