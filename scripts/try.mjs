@@ -25,7 +25,7 @@ import {
   INIT_JOBS, apiPort, createClusterArgs, describeMissing, missingTools, parseClusters,
   portTakenMessage, publishersOf, CLUSTER_PORTS,
 } from './lib/k3d.mjs';
-import { CHART_REF, readChartVersion } from './lib/release-chart.mjs';
+import { CHART_REF, compareReleases, readChartVersion } from './lib/release-chart.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CLUSTER = 'aber-try';
@@ -161,13 +161,15 @@ async function ensureTraefikConfig() {
   die('Traefik\'s Service did not move to externalTrafficPolicy Local within 3 minutes');
 }
 
-function ensureValues(adminEmail) {
+function ensureValues(adminEmail, version) {
   step(`passwords in ${VALUES}`);
   if (existsSync(path.join(REPO, VALUES))) {
     const { email } = adminFrom(readFileSync(path.join(REPO, VALUES), 'utf8'));
     console.log('  exists: reused, so this run upgrades the trial rather than starting over');
     if (email && email !== adminEmail) console.log(`  its administrator is ${email}; delete the file to use ${adminEmail}`);
     // Setup completes an existing file with what this release needs, and leaves a complete one alone.
+    // What 1.8.0 needs would break an earlier chart, which a tree between releases still installs.
+    if (compareReleases(version, '1.8.0') < 0) return;
     const r = spawnSync(process.execPath, ['scripts/setup.mjs', `--out=${VALUES}`],
       { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     if (r.status !== 0) die(`npm run setup could not complete ${VALUES}:\n${r.stdout}${r.stderr}`);
@@ -226,7 +228,7 @@ async function up(adminEmail) {
   const version = readChartVersion(REPO);
   await ensureCluster();
   await ensureTraefikConfig();
-  ensureValues(adminEmail);
+  ensureValues(adminEmail, version);
   await install(version);
   finish();
 }

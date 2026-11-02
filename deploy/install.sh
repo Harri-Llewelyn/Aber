@@ -744,6 +744,12 @@ sets_forge_port() {
 # and keeps every value the file holds (the signing key pair, its tokens signed again, the services'
 # own secrets). The file as it was is kept beside it the first time.
 complete_site_values() {
+  # The values 1.8.0 needs would break an earlier chart: a tree between releases still installs
+  # the last one (ABER_VERSION moves at the release), so it keeps the file as it is.
+  if ! version_at_least "$ABER_VERSION" 1.8; then
+    say "  keeping the passwords and keys in $VALUES"
+    return 0
+  fi
   cs_keep=$ETC/values-local.before-$ABER_VERSION.yaml
   cs_made=
   if [ ! -f "$cs_keep" ]; then
