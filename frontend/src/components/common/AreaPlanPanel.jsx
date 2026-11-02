@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
-import { AREA_PLAN_MAX_BYTES, isSvgFile } from '../../utils/areaPlans'
+import { AREA_PLAN_MAX_BYTES, isSvgFile, nextRotation, planRotation } from '../../utils/areaPlans'
 import { HelpTip } from './HelpTip'
 import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -8,6 +8,10 @@ import { ExpandablePlanPreview } from './AreaPlanPreview'
 import { IconUpload, IconTrash, IconRotateCcw, IconRotateCw } from './Icons'
 import { areaUrl, siteMapAreaUrl } from '../../routes'
 import { Tooltip } from './Tooltip'
+import { SaveDiscard } from './SaveDiscard'
+
+/** Why Replace plan and Remove plan wait while a turn is unsaved. */
+const TURN_UNSAVED = 'Save or discard the turn first.'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
@@ -15,15 +19,31 @@ import { Tooltip } from './Tooltip'
  * its heading, Replace and Remove under its card, and Expand on the card, which opens it
  * window-sized (PlanViewer). Replace sits away from the turns because a missed turn would open a
  * file dialog. An area with no plan shows the drop zone rather than a button, the same gesture a
- * device's 3D model takes; a reader who may not upload sees the default outline instead. Each write
- * is one call and the panel asks the page to reload rather than patching its own copy; a turn
- * waits for that reload, so the next turn starts from the one just made.
+ * device's 3D model takes; a reader who may not upload sees the default outline instead.
+ *
+ * A turn is a draft held here: the preview and the expanded plan draw it, and nothing is written
+ * until Save Turn, which writes the drafted turn once. Each write is one call, and the panel asks
+ * the page to reload rather than patching its own copy.
  */
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const fileInput = useRef(null)
+
+  // The unsaved turn, `{ areaId, rotation }`. It belongs to the area it was made on: turning to
+  // another area drops it, as closing the panel does by unmounting it.
+  const [draft, setDraft] = useState(null)
+  if (draft && draft.areaId !== area.area_id) setDraft(null)
+  const turnable = !!area.plan_path && canManage
+  const savedRotation = planRotation(area)
+  const rotation = turnable && draft?.areaId === area.area_id ? draft.rotation : savedRotation
+  const turnUnsaved = rotation !== savedRotation
+  // What the preview draws. The rest of the page reads the area as saved.
+  const shownArea = useMemo(
+    () => (turnUnsaved ? { ...area, plan_rotation: rotation } : area),
+    [area, rotation, turnUnsaved]
+  )
 
   const placed = (cells || []).filter(c => c.plan_x !== null && c.plan_x !== undefined && !c.is_archived).length
   const placedLine = `${plural(placed, 'cell')} placed on it`
@@ -57,17 +77,21 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     finally { setBusy(false) }
   }
 
-  // `direction` is 1 for a quarter turn right (clockwise), -1 for left.
-  const turnPlan = async (direction) => {
+  // `direction` is 1 for a quarter turn right (clockwise), -1 for left. No request.
+  const turnPlan = (direction) => setDraft({ areaId: area.area_id, rotation: nextRotation(rotation, direction) })
+
+  // One write of the drafted turn. Kept if the write fails, so it can be saved again or discarded;
+  // dropped once the reload has the saved turn, or the preview would jump back to the old one.
+  const saveTurn = async () => {
     setBusy(true)
     try {
-      await api.turnAreaPlan(area, direction)
-      await onChanged?.()
+      await api.setAreaPlanRotation(area, rotation)
+      try { await onChanged?.() } finally { setDraft(null) }
     } catch (e) { showToast?.(e.message, 'error') }
     finally { setBusy(false) }
   }
 
-  const openPicker = () => { if (canManage && !busy) fileInput.current?.click() }
+  const openPicker = () => { if (canManage && !busy && !turnUnsaved) fileInput.current?.click() }
 
   const onDrop = (event) => {
     // preventDefault on BOTH dragover and drop, or the browser navigates to the dropped file and
@@ -119,8 +143,8 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
             size={12}
           />
         </span>
-        {area.plan_path && canManage && (
-          <span className="area-plan-panel-actions">
+        {turnable && (
+          <div className="area-plan-panel-actions">
             <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
               <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(-1)}>
                 <IconRotateCcw size={12} /> Turn left
@@ -131,22 +155,28 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
                 <IconRotateCw size={12} /> Turn right
               </button>
             </Tooltip>
-          </span>
+            <SaveDiscard dirty={turnUnsaved} disabled={busy} saveLabel="Save Turn"
+              onSave={saveTurn}
+              onDiscard={() => setDraft(null)} />
+          </div>
         )}
       </div>
 
       {/* The preview for a plan, and for anyone who may not upload one; Expand is on its card. */}
       {area.plan_path || !canManage ? (
         <>
-          <ExpandablePlanPreview area={area} cells={cells} />
-          {area.plan_path && canManage && (
+          <ExpandablePlanPreview area={shownArea} cells={cells} />
+          {turnable && (
             <div className="area-plan-panel-buttons">
               {picker}
-              <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={openPicker}>
-                <IconUpload size={13} /> Replace plan
-              </button>
-              <Tooltip text="The area keeps the default outline">
-                <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={() => setConfirm(true)}>
+              {/* Held while a turn is unsaved, so a replacement is never taken with a turn nobody saved. */}
+              <Tooltip text={turnUnsaved ? TURN_UNSAVED : null}>
+                <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={openPicker}>
+                  <IconUpload size={13} /> Replace plan
+                </button>
+              </Tooltip>
+              <Tooltip text={turnUnsaved ? TURN_UNSAVED : 'The area keeps the default outline'}>
+                <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={() => setConfirm(true)}>
                   <IconTrash size={13} /> Remove plan
                 </button>
               </Tooltip>

@@ -3439,6 +3439,10 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
 
+/* Save Turn and Discard, while a turn is unsaved: the height of the turns beside them, not of a
+   Settings row. */
+.area-plan-panel-actions .setting-actions { min-height: 0; }
+
 /* Replace and Remove under the plan's card, two to a row as the panel's own actions are. */
 .area-plan-panel-buttons {
   display: grid;

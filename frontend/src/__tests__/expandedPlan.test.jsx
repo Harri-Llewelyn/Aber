@@ -219,6 +219,14 @@ describe('the Areas panel', () => {
     expect(expand.closest('.plan-card')).not.toBeNull()
   })
 
+  it('draws an unsaved turn in the expanded plan, as the preview draws it', () => {
+    panel({ area: OFFICE, cells: [], canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Turn right' }))
+    expect(document.querySelector('.plan-card .area-plan').dataset.rotation).toBe('90')
+    press(screen.getByRole('button', { name: 'Expand plan: Office Floor' }))
+    expect(dialog().querySelector('.area-plan').dataset.rotation).toBe('90')
+  })
+
   it('offers none where the drop zone stands in for the plan, or the outline has no pin', () => {
     const { unmount } = panel({ canManage: true })
     expect(screen.queryByRole('button', { name: /Expand plan/ })).toBeNull()

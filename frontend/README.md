@@ -398,9 +398,14 @@ SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `u
   the frame (`placeInFrame()`, with the turn `AreaPlan` provides by context), so its label stays
   upright and still slides inward at the frame's edges. A click is read as fractions of the frame
   and turned back (`placeOnDrawing()`) before `onPlaceClick` sees it.
-- **A turn is one write.** `AreaPlanPanel`'s Turn left and Turn right call `turnAreaPlan()` with
-  the turn the page read, then reload. The buttons stay disabled until the reload lands, so a
-  second press starts from the first.
+- **A turn is a draft until Save Turn.** `AreaPlanPanel`'s Turn left and Turn right change a turn
+  held in the panel for the area it was made on, and pass the preview a copy of the area at that
+  turn, so the preview and the expanded plan draw it with no request. The page's own copy keeps
+  the saved turn, which the Site Map, the Cells page and the table read. While the draft differs
+  from the saved turn the shared `SaveDiscard` pair (`components/common/SaveDiscard.jsx`, as on
+  Profile) offers Save Turn, which calls `setAreaPlanRotation()` once and reloads, and Discard.
+  Replace plan and Remove plan are held until then. Opening another area or closing the panel
+  drops the draft.
 
 ---
 

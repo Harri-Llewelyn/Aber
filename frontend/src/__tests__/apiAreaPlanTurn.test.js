@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * An area's plan turned through the API layer. A turn is one write of plan_rotation and nothing
- * else; Remove plan resets the turn in the same write as the plan, since the database refuses a
+ * An area's plan turned through the API layer. Saving a turn is one write of plan_rotation and
+ * nothing else; Remove plan resets the turn in the same write as the plan, since the database refuses a
  * turn on an area with no plan; Replace plan writes no turn, so the area keeps it.
  */
 
@@ -32,22 +32,28 @@ beforeEach(() => {
 });
 
 describe('turning an area plan', () => {
-  it('writes the next quarter turn, and nothing else', async () => {
-    await api.turnAreaPlan(area(0), 1);
-    await api.turnAreaPlan(area(270), 1);
-    await api.turnAreaPlan(area(0), -1);
-    await api.turnAreaPlan(area(90), -1);
-    expect(calls.update).toEqual([{ plan_rotation: 90 }, { plan_rotation: 0 }, { plan_rotation: 270 }, { plan_rotation: 0 }]);
+  it('writes the turn it is given in one write, and nothing else', async () => {
+    await api.setAreaPlanRotation(area(0), 270);
+    expect(calls.update).toEqual([{ plan_rotation: 270 }]);
+    await api.setAreaPlanRotation(area(90), 0);
+    expect(calls.update).toEqual([{ plan_rotation: 270 }, { plan_rotation: 0 }]);
+  });
+
+  it('refuses anything but a quarter turn before asking the database', async () => {
+    for (const rotation of [45, -90, 360, '90', null]) {
+      await expect(api.setAreaPlanRotation(area(0), rotation)).rejects.toThrow('A plan turns in quarter turns.');
+    }
+    expect(calls.update).toEqual([]);
   });
 
   it('tells a turn RLS refused from one that was made', async () => {
     calls.result = { data: [], error: null };
-    await expect(api.turnAreaPlan(area(0), 1)).rejects.toThrow(/permission to change this area/);
+    await expect(api.setAreaPlanRotation(area(0), 90)).rejects.toThrow(/permission to change this area/);
   });
 
   it('says so when the plan was removed since the page read it', async () => {
     calls.result = { data: null, error: { code: '23514', message: 'new row for relation "areas" violates check constraint "areas_plan_rotation_needs_a_plan"' } };
-    await expect(api.turnAreaPlan(area(90), 1)).rejects.toThrow('The area has no plan to turn.');
+    await expect(api.setAreaPlanRotation(area(90), 180)).rejects.toThrow('The area has no plan to turn.');
   });
 
   it('resets the turn when the plan is removed', async () => {
