@@ -1,6 +1,6 @@
 import React from 'react'
 import { TooltipBubble, useTooltip } from './Tooltip'
-import { IconAlertTriangle, IconChevronRight, IconShieldAlert } from './Icons'
+import { IconAlertTriangle, IconChevronRight, IconExternalLink, IconShieldAlert } from './Icons'
 
 /**
  * The row of SummaryCards above a page's list, in its own card body: four across on a wide window,
@@ -23,11 +23,12 @@ const STATE_ICONS = { warning: IconAlertTriangle, danger: IconShieldAlert }
  * 'warning' or 'danger') and a chevron when it opens something. Each line is one line high, cut
  * short with an ellipsis, so the card keeps its height whatever its state.
  *
- * With `onOpen` it is a button, `selected` while what it opens is showing; without, a focusable
+ * With `onOpen` it is a button, `selected` while what it opens is showing; with `href`, a link
+ * that opens another application's page in a new tab, marked by its icon; with neither, a focusable
  * group, so its tooltip still shows from the keyboard. `state` is the state in words, never the
  * colour alone, in a role="status" line so a change is announced. `tip` is the whole card in
  * sentences, one paragraph per entry: the tooltip and, after the title, the accessible name.
- * `flagged` marks the detail line as a warning of its own.
+ * `flagged` marks the detail line as a warning of its own. `wide` takes two cards' room.
  *
  * @param {string} title
  * @param {React.ReactNode} value The figure.
@@ -38,12 +39,13 @@ const STATE_ICONS = { warning: IconAlertTriangle, danger: IconShieldAlert }
  * @param {string|string[]} tip
  * @param {React.ReactNode} [badge] Drawn after the title.
  */
-export function SummaryCard({ title, value, unit, detail, flagged = false, state, tone, tip, badge, onOpen, selected = false, testId }) {
+export function SummaryCard({ title, value, unit, detail, flagged = false, state, tone, tip, badge, onOpen, href, wide = false, selected = false, testId }) {
   const tooltip = useTooltip()
   // The accessible name carries the tooltip's sentences, so nothing points at the bubble as well.
   const { 'aria-describedby': _describedBy, ...trigger } = tooltip.trigger
   const StateIcon = STATE_ICONS[tone]
-  const classes = ['summary-card', tone && `summary-card-${tone}`, onOpen && 'summary-card-opens', selected && 'is-selected']
+  const opens = onOpen || href
+  const classes = ['summary-card', tone && `summary-card-${tone}`, opens && 'summary-card-opens', wide && 'summary-card-wide', selected && 'is-selected']
     .filter(Boolean).join(' ')
   const paragraphs = (Array.isArray(tip) ? tip : [tip]).filter(Boolean)
   const name = `${title}. ${paragraphs.join(' ')}`
@@ -54,6 +56,7 @@ export function SummaryCard({ title, value, unit, detail, flagged = false, state
         <span className="summary-card-title">{title}</span>
         {badge && <span className="summary-card-badge">{badge}</span>}
         {onOpen && <span className="summary-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>}
+        {!onOpen && href && <span className="summary-card-chevron" aria-hidden="true"><IconExternalLink size={13} /></span>}
       </span>
       <span className="summary-card-value">
         {value}
@@ -88,6 +91,18 @@ export function SummaryCard({ title, value, unit, detail, flagged = false, state
         >
           {lines}
         </button>
+      ) : href ? (
+        <a
+          className={classes}
+          data-testid={testId}
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={name}
+          {...trigger}
+        >
+          {lines}
+        </a>
       ) : (
         <div className={classes} data-testid={testId} role="group" aria-label={name} tabIndex={0} {...trigger}>
           {lines}

@@ -11,15 +11,15 @@ import { Tooltip } from './Tooltip'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
- * or remove it. A plan is drawn as a preview with every cell on it, Turn left, Turn right, Replace
- * and Remove beside its heading, and Expand on the preview's card, which opens it window-sized
- * (PlanViewer). An area with no plan shows the drop zone rather than a button, the same gesture a
+ * or remove it. A plan is drawn as a preview with every cell on it, Turn left and Turn right beside
+ * its heading, Replace and Remove under its card, and Expand on the card, which opens it
+ * window-sized (PlanViewer). Replace sits away from the turns because a missed turn would open a
+ * file dialog. An area with no plan shows the drop zone rather than a button, the same gesture a
  * device's 3D model takes; a reader who may not upload sees the default outline instead. Each write
  * is one call and the panel asks the page to reload rather than patching its own copy; a turn
- * waits for that reload, so the next turn starts from the one just made. `onOpen` is handed to the
- * preview: it opens the Site Map on the area.
+ * waits for that reload, so the next turn starts from the one just made.
  */
-export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, onOpen }) {
+export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -121,7 +121,6 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
         </span>
         {area.plan_path && canManage && (
           <span className="area-plan-panel-actions">
-            {picker}
             <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
               <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(-1)}>
                 <IconRotateCcw size={12} /> Turn left
@@ -132,21 +131,28 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, on
                 <IconRotateCw size={12} /> Turn right
               </button>
             </Tooltip>
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker}>
-              <IconUpload size={12} /> Replace plan
-            </button>
-            <Tooltip text="The area keeps the default outline">
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)}>
-                <IconTrash size={12} /> Remove plan
-              </button>
-            </Tooltip>
           </span>
         )}
       </div>
 
       {/* The preview for a plan, and for anyone who may not upload one; Expand is on its card. */}
       {area.plan_path || !canManage ? (
-        <ExpandablePlanPreview area={area} cells={cells} onOpen={onOpen} />
+        <>
+          <ExpandablePlanPreview area={area} cells={cells} />
+          {area.plan_path && canManage && (
+            <div className="area-plan-panel-buttons">
+              {picker}
+              <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={openPicker}>
+                <IconUpload size={13} /> Replace plan
+              </button>
+              <Tooltip text="The area keeps the default outline">
+                <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={() => setConfirm(true)}>
+                  <IconTrash size={13} /> Remove plan
+                </button>
+              </Tooltip>
+            </div>
+          )}
+        </>
       ) : (
         <div
           className="area-plan-panel-row area-plan-panel-drop"

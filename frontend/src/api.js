@@ -1270,6 +1270,35 @@ const apiMethods = {
   },
 
   /**
+   * The System page's Prometheus figures (0223): one row per figure, written every minute by
+   * refresh_directory_figures(). A NULL `value` is a figure the last answer did not carry.
+   */
+  systemFigures: async () => {
+    const { data, error } = await supabase.from('directory_figures').select('key,value,observed_at,detail');
+    if (error) throw new Error(error.message || 'Could not read the System figures');
+    return data || [];
+  },
+
+  /** `{ online, enrolled }` gateways, counted as the caller (0223). Counts only, no names. */
+  gatewayCounts: async () => {
+    const { data, error } = await supabase.rpc('directory_gateway_counts');
+    if (error) throw new Error(error.message || 'Could not count the gateways');
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error('The gateway count came back empty');
+    return { online: row.online, enrolled: row.enrolled };
+  },
+
+  /**
+   * How many devices have a reading from the last 5 minutes (0223), read from the historian over
+   * the FDW. Throws when the historian cannot be reached, which is not the same as zero.
+   */
+  devicesReporting: async () => {
+    const { data, error } = await supabase.rpc('directory_devices_reporting');
+    if (error) throw new Error(error.message || 'Could not count the devices reporting');
+    return data;
+  },
+
+  /**
    * Whether an S3 credential is in the vault (`0134`). Never what it is — nothing reads it back to
    * a browser, so this is the only question a page can ask about it.
    *

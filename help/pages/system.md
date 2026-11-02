@@ -2,6 +2,8 @@
 
 This page lists every service Aber runs, what each one is for, whether it is up, and how to reach it. Use it to find where a service answers, such as which port Grafana is on, without searching a deployment file.
 
+The **Ingestion & Messaging** tab also shows what the stack is doing now: messages arriving, readings written, messages lost, and gateways and devices reporting. See [The figures on Ingestion & Messaging](#the-figures-on-ingestion--messaging).
+
 ## What the controls do
 
 - **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door: a link there is where you go to do something the dashboard does not do itself. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. If telemetry has stopped arriving, the fault is almost always one of these. **Data & Backend Infrastructure** is what the other two are built on. It is listed so that this page does not make the stack look smaller than it is.
@@ -19,7 +21,7 @@ This page lists every service Aber runs, what each one is for, whether it is up,
 - A count is not a reason to change one service's image on its own. The fix arrives as a new Aber release, which upgrades the services together.
 - **Liveness** says whether the service is answering now: **ACTIVE**, **DOWN** or **not observed**. The page reads again every 3 seconds, so it changes without a reload.
 - **ACTIVE** and **DOWN** are observations, written every minute from the metrics store. ACTIVE means the metrics store checked the service and it answered; its tooltip gives the time. DOWN means it was checked and did not answer.
-- **not observed**, in dim text rather than a badge, means nothing in Aber watches that service. That is not the same as healthy.
+- **not observed**, in dim text rather than a badge, means nothing in Aber watches that service, or the metrics store did not answer its last check. That is not the same as healthy.
 - **Reach** says **what can get to that service**, not only where it is. It is easy to miss. A service reachable only inside the cluster can look like one published to the network. They are not equally exposed, and this column says so rather than leaving you to assume.
 - Reach **network**: published outside the cluster, through the Ingress or a LoadBalancer port.
 - Reach **host only**: bound to 127.0.0.1, so reachable from the deployment host or through an SSH tunnel.
@@ -27,6 +29,23 @@ This page lists every service Aber runs, what each one is for, whether it is up,
 - Reach **not recorded**: nothing says where it can be reached from.
 - Reach is recorded from the deployment at each install and upgrade. If an administrator turns a route on or off, the change shows here after the upgrade.
 - The **Endpoint URL** follows from Reach. It is a link where your browser can open it. Where it cannot, it is a copy button, and its tooltip says why.
+
+## The figures on Ingestion & Messaging
+
+The Ingestion & Messaging tab opens with a row of figures. They answer "is data flowing?" without leaving the dashboard. Each one is the latest value only. Point at a figure to read what it counts.
+
+- **Messages received** is how many Sparkplug messages the ingestion service handled each second, averaged over the last 5 minutes. Its tooltip splits it by message type, such as DDATA.
+- **Readings written** is how many readings the ingestion service wrote to the historian each second, over the same 5 minutes. A reading is one value of one metric.
+- **Messages lost, last hour** shows three numbers. **refused** counts messages the ingestion service turned away. **shed** counts messages the broker dropped because a subscriber was too slow. **missed** counts gaps in the Sparkplug sequence numbers.
+- The three overlap, so they are never added up. A message the broker shed also shows up as missed. The tooltip names the most common reason for a refusal.
+- **Ingestion links** says whether the ingestion service is subscribed to the broker and connected to the historian. If either one is not connected, readings are not being recorded, and the figure turns red.
+- **Gateways online** counts the gateways online now, out of those enrolled. Archived gateways, the Playback gateway and gateways still awaiting setup are not counted.
+- **Devices reporting** counts the devices that sent at least one reading in the last 5 minutes.
+- The first four come from the metrics store and change once a minute. The last two are counted from the databases each time the page reads.
+- **not observed**, in dim text, means there is no fresh value. Aber shows that rather than an old number or a zero. Usually the metrics store did not answer, or it is not installed.
+- **Devices reporting** reads **not observed** when the historian cannot be reached. The gateway count still shows.
+- **Click a figure to open its history in Grafana**, in a new tab. Messages received and Ingestion links have no Grafana panel, so they open nothing.
+- A figure opens nothing either when your browser cannot reach Grafana, for example when Grafana is published only on the deployment host.
 
 ## What the states mean
 
@@ -41,5 +60,7 @@ The deployment registers the rows at each install and upgrade. You cannot add on
 Whether a service is **healthy** in the sense that matters to its users. The page shows only whether it answers. A service that is up but answering wrongly looks the same here as one that is up and correct.
 
 Whether a version is **current**. The page does not check for a newer version of each service. The services are built, tested and upgraded together, by upgrading Aber. So a newer version of one service is not, on its own, a reason to change it. If the deployment turns on the release check, the account menu says when a newer Aber release exists.
+
+How a figure has **changed over time**. The figures are the latest values only. Their history is in Grafana.
 
 Whether a vulnerability was **published since the release**. The counts are as of the release's scan, and nothing on this page fetches a later one.

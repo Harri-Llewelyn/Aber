@@ -11642,7 +11642,7 @@ END $c$;
 --
 
 -- COLUMN directory_services.status :: COMMENT
-COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (nothing observes this service). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- a service with no exporter reads UNKNOWN, and saying so is the point.';
+COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (the last probe did not observe it: nothing scrapes this service, or Prometheus did not answer). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- a service with no exporter reads UNKNOWN, and saying so is the point.';
 
 --
 

@@ -499,6 +499,15 @@ python supabase/migrations/test_directory_images.py
 # gate refuses a version, link or `newer` the account menu could not show, and only
 # Service_ReleaseCheck may call it; its key reaches nothing else.
 python supabase/migrations/test_release_check.py
+# What the stack is doing, on the System page (0223). Answers are filed in net._http_response by
+# hand: a 200 writes each figure it carries, with the split by message type and the largest refusal
+# reason, and NULL for the rest; a non-200, no answer yet, unparseable content or no Prometheus at
+# all clears every figure, never leaving the last value. Each run fires the next query to
+# directory_prometheus_url(). Liveness reads the same address, survives content that is not JSON,
+# and sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the figures, no
+# role writes them, anon reads nothing; the gateway count is online of enrolled, and stands when the
+# historian is out. Every test rolls back.
+python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
@@ -982,6 +991,12 @@ live schema carries 35 and the fixture 21, so the whole table cannot land, and `
 column that makes an audit row attributable. The rest of `auth` is GoTrue's own bookkeeping, which
 no migration reads.
 
+**The stack's partitions come too.** `pg_dump` copies a partitioned table's rows into each
+partition by name, and a stack set up in an earlier month holds `audit_trail` partitions that a
+database migrated today never made. The load creates each one the throwaway database lacks, with
+the stack's bounds, before the rows arrive, so the default partition stays empty as it is on the
+stack.
+
 **What the suites do against history.** Every database suite passes against a real stack's rows as
 it does against an empty database, because each scopes what it asserts to what it set up. A suite
 written against an empty database breaks here in one of three ways, and each has met this lane:
@@ -1420,7 +1435,10 @@ it silently switched off every per-service Prometheus metric while leaving the s
 
 **Renovate is self-hosted**, so no third-party app holds write access to the repository, and it
 needs a `RENOVATE_TOKEN` secret (a PAT with `repo`, or fine-grained with Contents, Pull requests and
-Issues read/write). Without it the workflow fails on its first step by design — a scheduled job that
+Issues read/write and Dependabot alerts read). A token that cannot read Dependabot alerts leaves
+`vulnerabilityAlerts` with nothing to act on, and the run says so only as a warning in its log
+("Cannot access vulnerability alerts"); `osvVulnerabilityAlerts` still works. Without the secret the
+workflow fails on its first step by design — a scheduled job that
 silently does nothing leaves the repository looking as though drift is watched when it is not.
 `GITHUB_TOKEN` cannot be used: pull requests it opens trigger no workflow runs, so every bump would
 arrive with no CI result.

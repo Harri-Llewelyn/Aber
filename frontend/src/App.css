@@ -1876,6 +1876,18 @@ td.row-actions, th.row-actions {
 /* The known-CVE count, or "not scanned", after a version. */
 .system-scan { margin-left: 6px; white-space: nowrap; }
 
+/* A figure that is not observed: the same dim words, at the size of the card's other lines. */
+.summary-card-value .system-unobserved { font-size: 12px; font-weight: 400; }
+
+/* Messages lost's three counts over their three names, one column each, so each number stands
+   over its word and none reads as a total. */
+.system-lost {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 8px;
+}
+.system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
   text-decoration: none;
@@ -2624,6 +2636,15 @@ main:focus { outline: none; }
 .summary-card-danger .summary-card-state { color: var(--danger-text); }
 
 .summary-card-opens { cursor: pointer; }
+a.summary-card { text-decoration: none; }
+
+/* A card with two cards' content (the System page's Messages lost) takes two tracks; on a phone,
+   one column, it takes the one. */
+.summary-card-wide { grid-column: span 2; }
+
+@media (max-width: 600px) {
+  .summary-card-wide { grid-column: auto; }
+}
 .summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--text-muted) 18%, transparent); }
 .summary-card-warning.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--warning) 20%, transparent); }
 .summary-card-danger.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 20%, transparent); }
@@ -3199,11 +3220,9 @@ main:focus { outline: none; }
 
 .area-plan-interactive { cursor: crosshair; }
 
-/* A read-only plan in the Areas and Cells panels, capped as a Site Map card's plan is. As a link it
-   opens the Site Map on its area. It sits on a `.plan-card`, which draws its frame. */
+/* A read-only plan in the Areas and Cells panels, capped as a Site Map card's plan is. It sits on a
+   `.plan-card`, which draws its frame. */
 .area-plan-preview { --plan-max-height: 260px; border-radius: var(--radius-sm); }
-a.area-plan-preview { display: block; cursor: pointer; color: inherit; text-decoration: none; }
-.area-plan-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .area-plan-image,
 .area-plan-outline {
@@ -3411,6 +3430,13 @@ span.area-plan-pin { cursor: inherit; }
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
 .area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Replace and Remove under the plan's card, two to a row as the panel's own actions are. */
+.area-plan-panel-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+}
 
 /* An area with no plan gets the target rather than a button: the file is usually already in a
    folder somebody is dragging from. */
@@ -4094,7 +4120,6 @@ a.chip { text-decoration: none; }
   background: var(--bg-glass);
 }
 .plan-card .area-plan { border: 0; border-radius: 0; background: none; }
-.plan-card:has(> a.area-plan-preview:hover) { border-color: var(--border-hover); }
 
 /* The device drawer's 3D Model section, after the fields and above the actions (ContextPanel's
    `beforeActions`), ruled off as the actions are: with `.context-panel-facts`' 12px, 16px above the

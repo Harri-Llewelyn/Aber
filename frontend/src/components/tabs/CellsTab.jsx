@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -34,7 +34,8 @@ import {
   IconHistory,
   IconRadio,
   IconShieldAlert,
-  IconCpu
+  IconCpu,
+  IconMap
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
@@ -640,7 +641,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               : !isPlaced(selectedCell)
                 ? 'Not placed — set a place in Edit Details'
                 : selectedCellArea
-                  ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} onOpen={onShowOnSiteMap} />
+                  ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} />
                   : "Placed on its area's plan",
             full: true
           },
@@ -746,6 +747,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             to: trailUrl(selectedCell.cell_id, 'CELL'),
             onClick: () => onViewTrail?.(selectedCell),
             title: 'Open the immutable audit trace for this cell'
+          },
+          // The Site Map draws areas, so an unfiled cell has nowhere to open.
+          selectedCellArea && {
+            label: 'View in Site Map', icon: <IconMap size={13} />,
+            to: siteMapAreaUrl(selectedCellArea.area_id),
+            onClick: () => onShowOnSiteMap?.(selectedCellArea.area_id),
+            title: `Open the Site Map on ${selectedCellArea.area_name}, this cell's area`
           },
           {
             label: 'Attached Links', icon: <IconBookOpen size={13} />,

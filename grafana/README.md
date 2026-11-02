@@ -32,13 +32,13 @@ switched off with them.
 
 ## Bundled plugins
 
-**Grafana runs only the datasource plugins Aber provisions.** The image bundles thirteen backend
+**Grafana runs only the datasource plugins Aber provisions.** The image bundles fourteen backend
 datasource plugins under `/usr/share/grafana/data/plugins-bundled`. Grafana starts each one it
 loads as a process of its own, from a binary of about 30 MiB. Aber provisions three types:
 Prometheus, Loki and PostgreSQL (the TimescaleDB and Supabase datasources). `disable_plugins` in
-[`grafana.ini`](grafana.ini) names the other ten. Grafana then loads none of them, starts no process
+[`grafana.ini`](grafana.ini) names the other eleven. Grafana then loads none of them, starts no process
 for them and drops them from its preinstall list. The datasources compiled into Grafana itself
-(Azure Monitor, CloudWatch, Graphite and TestData) run inside the server process and start nothing,
+(Azure Monitor, Graphite and TestData) run inside the server process and start nothing,
 so they are not listed here.
 
 **A datasource of a disabled type stops working, and nothing is logged at start.** A site's own
@@ -48,13 +48,14 @@ the chart value `grafana.enablePlugins`, e.g. `[mysql]`, and the datasource answ
 The chart then sets `GF_PLUGINS_DISABLE_PLUGINS` to `disable_plugins` less those ids, read from
 `grafana.ini` so the list is written once, and an id it does not name fails the render. With
 `[mysql]` Grafana runs four plugin processes and MySQL registers again (measured). Grafana ignores
-an empty variable, so keeping all ten renders a lone comma.
+an empty variable, so keeping all eleven renders a lone comma.
 
-The bundled backend datasource plugins of `grafana/grafana:13.2.3`, as the image's `plugin.json`
+The bundled backend datasource plugins of `grafana/grafana:13.3.0`, as the image's `plugin.json`
 files declare them:
 
 | Plugin id | Also answers to type | In Aber |
 | :--- | :--- | :--- |
+| `cloudwatch` | | Disabled |
 | `elasticsearch` | | Disabled |
 | `grafana-postgresql-datasource` | `postgres` | Provisioned |
 | `grafana-pyroscope-datasource` | `phlare` | Disabled |
@@ -80,7 +81,7 @@ other than the one above, so a Renovate pull request that moves `grafana.image.t
 the list is refreshed. Read it from the new image (Docker and Node on the PATH):
 
 ```sh
-TAG=13.2.3   # set to the tag deploy/helm/aber/values.yaml pins
+TAG=13.3.0   # set to the tag deploy/helm/aber/values.yaml pins
 docker run --rm --entrypoint sh "grafana/grafana:$TAG" -c \
   'echo "["; s=; for f in /usr/share/grafana/data/plugins-bundled/*/plugin.json; do echo "$s"; cat "$f"; s=,; done; echo "]"' |
   node -e 'for (const p of JSON.parse(require("fs").readFileSync(0, "utf8")))
@@ -621,9 +622,10 @@ empty) and, for OTLP, adds `logForward.externalLabels`; a Loki destination gets 
   `service` label into the resource's `service.name` (the attribute OTLP stores key on; every label
   is also an attribute of its record), then `otelcol.processor.batch` (five-second batches) and
   `otelcol.exporter.otlphttp`, with a 16 MiB in-memory queue and an hour of retries.
-- **No syslog.** Alloy's `otelcol.exporter.syslog` is public preview, and using it means starting
-  all of Alloy at that stability level. A site that needs syslog runs a collector that takes OTLP
-  in and sends syslog out.
+- **No syslog.** Alloy's `otelcol.exporter.syslog` is public preview. Alloy runs at the
+  experimental level for the write-ahead log (below), so the exporter would load, but the chart
+  configures none. A site that needs syslog runs a collector that takes OTLP in and sends syslog
+  out.
 
 **A destination that stops answering does not stop the local store.** Both writers take their
 lines from one `loki.process`, so a forward that blocked would hold back the in-cluster store for
@@ -659,6 +661,14 @@ write-ahead log on its emptyDir, the OTLP queue in memory. A rollout or a node r
 they still hold. A destination unreachable for longer than the retries loses what it missed, and
 OTLP drops sooner once its queue is full. That suits operations. A site that must keep every line
 for compliance needs a collector of its own beside its store.
+
+**Alloy runs at the experimental stability level, for the write-ahead log.** `loki.write`'s WAL is
+experimental, and from Alloy 1.21 a config that enables it fails to load unless Alloy starts with
+`--stability.level=experimental`; the container does. Both writers keep theirs because it makes a
+container restart lossless. The level admits every public-preview and experimental component, not
+just the WAL; nothing else in the chart's config is below generally-available, since it loaded at
+the default level on v1.20.1. Without the WAL, Alloy could run at the default level again, and a
+restart would drop the lines still in its buffer.
 
 **Memory.** Measured in the same containers, the logs pipeline alone (no scrape), at about 240
 lines a second, once each figure had levelled. Anonymous memory (the heap, which no reclaim

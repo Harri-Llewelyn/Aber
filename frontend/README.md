@@ -278,7 +278,9 @@ Backups and Cold Storage sum up their list in one row of `common/SummaryCard.jsx
 toolbar and the table, drawn like the Site Map's lanes: a 4px cap in the state's colour (grey while
 nothing is wrong) and a chevron on a card that opens a panel. A card that opens something is a
 `<button>`; one that opens nothing is a focusable group, so its tooltip still shows from the
-keyboard. The state is in words on a `role="status"` line, and the whole card in sentences is the
+keyboard. A card that opens another application's page, as the System page's figures open their
+Grafana panels, is a link to a new tab, with the external-link icon where the chevron goes. A
+`wide` card takes two cards' room, for a figure in three parts. The state is in words on a `role="status"` line, and the whole card in sentences is the
 shared Tooltip and, after the title, the accessible name.
 
 **Every line is one line high, cut short with an ellipsis**, so a warning changes a card's colour
@@ -1084,7 +1086,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---

@@ -28,11 +28,11 @@ is not pinned.
 
 | File | Upstream, at the tag the image pins |
 | :--- | :--- |
-| `timescaledb/timescaledb/LICENSE` | [`timescale/timescaledb`](https://github.com/timescale/timescaledb) `2.29.2`, `LICENSE` |
+| `timescaledb/timescaledb/LICENSE` | [`timescale/timescaledb`](https://github.com/timescale/timescaledb) `2.31.0`, `LICENSE` |
 | `timescaledb/timescaledb/LICENSE-APACHE` | the same, `LICENSE-APACHE` |
 | `timescaledb/timescaledb/NOTICE` | the same, `NOTICE` |
 | `timescaledb/timescaledb/LICENSE-TIMESCALE` | the same, `tsl/LICENSE-TIMESCALE` |
-| `timescaledb/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_11`, `COPYRIGHT` (the PostgreSQL that `timescale/timescaledb:2.29.2-pg17` runs) |
+| `timescaledb/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_11`, `COPYRIGHT` (the PostgreSQL that `timescale/timescaledb:2.31.0-pg17` runs) |
 | `supabase-postgres/supabase-postgres/LICENSE` | [`supabase/postgres`](https://github.com/supabase/postgres) `17.6.1.175`, `LICENSE` |
 | `supabase-postgres/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6`, `COPYRIGHT` |
 | `supabase-postgres/postgis/COPYING` | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7`, `COPYING` (GPL-2.0) |
@@ -48,7 +48,7 @@ is not pinned.
 | `supabase-postgres/libidn2/COPYINGv2`, `COPYING.LESSERv3`, `COPYING`, `COPYING.unicode` | [`libidn/libidn2`](https://gitlab.com/libidn/libidn2) `v2.3.8`, the same four files (GPL-2.0, LGPL-3.0, GPL-3.0, the Unicode data licence) |
 | `supabase-postgres/libunistring/COPYING.LIB`, `COPYING` | [`libunistring-1.4.1.tar.gz`](https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.1.tar.gz), the same two files (LGPL-3.0, GPL-3.0) |
 | `edge-runtime/edge-runtime/LICENSE` | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0`, `LICENSE` |
-| `swagger-ui/swagger-ui/LICENSE` | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0`, `LICENSE` |
+| `swagger-ui/swagger-ui/LICENSE` | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.34.1`, `LICENSE` |
 | `swagger-ui/swagger-ui/NOTICE` | the same, `NOTICE` |
 
 PostGIS and pgRouting are here because `supabase/postgres` ships both extensions' binaries, under

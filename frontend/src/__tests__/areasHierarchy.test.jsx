@@ -896,16 +896,17 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(within(panel).queryByText(/Plan attached|placed on it/)).toBeNull()
   })
 
-  it('opens the Site Map on the area from its plan, a link the keyboard reaches', async () => {
+  it('opens the Site Map on the area from View in Site Map, not from its plan', async () => {
     const onShowOnSiteMap = vi.fn()
-    await openArea('North Shop', { onShowOnSiteMap })
-    const preview = screen.getByRole('link', { name: 'Open North Shop on the Site Map' })
+    const panel = await openArea('North Shop', { onShowOnSiteMap })
+    // The plan is a picture: a click that misses Expand lands on nothing.
+    expect(planPanel().querySelector('a')).toBeNull()
+    const action = within(panel.querySelector('.context-panel-actions')).getByRole('link', { name: /View in Site Map/ })
     // A real link: Tab reaches it, Enter follows it, and Ctrl-click opens the map in a new tab.
-    expect(preview.tagName).toBe('A')
-    expect(preview).toHaveAttribute('href', '/site-map?area=area-a')
-    fireEvent.click(preview)
+    expect(action).toHaveAttribute('href', '/site-map?area=area-a')
+    fireEvent.click(action)
     expect(onShowOnSiteMap).toHaveBeenLastCalledWith('area-a')
-    fireEvent.click(preview, { ctrlKey: true })
+    fireEvent.click(action, { ctrlKey: true })
     expect(onShowOnSiteMap).toHaveBeenCalledTimes(1)
   })
 

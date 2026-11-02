@@ -184,15 +184,15 @@ describe('the Site Map', () => {
 
 describe('the Areas panel', () => {
   const panel = (props) => render(
-    <AreaPlanPanel area={SHOP} cells={CELLS.filter(c => c.area_id === 'area-1')} canManage={false} showToast={vi.fn()} onChanged={vi.fn()} onOpen={vi.fn()} {...props} />
+    <AreaPlanPanel area={SHOP} cells={CELLS.filter(c => c.area_id === 'area-1')} canManage={false} showToast={vi.fn()} onChanged={vi.fn()} {...props} />
   )
 
   it("puts Expand on the preview's card for a reader, and opens the plan with its pins as marks", () => {
-    const onOpen = vi.fn()
-    panel({ onOpen })
+    panel()
     const expand = screen.getByRole('button', { name: 'Expand plan: North Shop' })
     expect(expand.closest('.area-plan-panel-header')).toBeNull()
-    expect(expand.closest('.plan-card')).toBe(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }).closest('.plan-card'))
+    expect(expand.closest('.plan-card').querySelector('.area-plan-preview')).not.toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
     press(expand)
 
     expect(within(dialog()).getByRole('heading', { name: 'North Shop' })).toBeInTheDocument()
@@ -201,16 +201,20 @@ describe('the Areas panel', () => {
     for (const pin of pins) expect(pin.tagName).toBe('SPAN')
     // Full size in the dialog, small in the preview.
     expect(dialog().querySelector('.area-plan-pin-small')).toBeNull()
-    expect(onOpen).not.toHaveBeenCalled()
     esc()
     expect(document.activeElement).toBe(expand)
   })
 
-  it('keeps Replace and Remove in the heading, and Expand on the card, for a plan a manager may change', () => {
+  it('keeps the turns in the heading, Replace and Remove under the card, and Expand on it, for a plan a manager may change', () => {
     panel({ area: OFFICE, cells: [], canManage: true })
     const expand = screen.getByRole('button', { name: 'Expand plan: Office Floor' })
-    expect(screen.getByRole('button', { name: /Replace plan/ }).closest('.area-plan-panel-header')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /Remove plan/ }).closest('.area-plan-panel-header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Turn right' }).closest('.area-plan-panel-header')).not.toBeNull()
+    for (const name of [/Replace plan/, /Remove plan/]) {
+      const button = screen.getByRole('button', { name })
+      expect(button.closest('.area-plan-panel-header')).toBeNull()
+      expect(button.closest('.area-plan-panel-buttons')).not.toBeNull()
+      expect(button).toHaveClass('context-action')
+    }
     expect(expand.closest('.area-plan-panel-header')).toBeNull()
     expect(expand.closest('.plan-card')).not.toBeNull()
   })
@@ -225,17 +229,15 @@ describe('the Areas panel', () => {
 })
 
 describe('the Cells panel', () => {
-  it("opens the plan from the preview's card, the cell ringed and the rest dimmed, without following the link", () => {
-    const onOpen = vi.fn()
-    render(<ExpandablePlanPreview area={SHOP} cells={CELLS} highlightCellId="cell-1" onOpen={onOpen} />)
+  it("opens the plan from the preview's card, the cell ringed and the rest dimmed", () => {
+    render(<ExpandablePlanPreview area={SHOP} cells={CELLS} highlightCellId="cell-1" />)
     const expand = screen.getByRole('button', { name: 'Expand plan: North Shop' })
-    // On the preview's card, beside its link rather than inside it.
-    expect(expand.closest('a')).toBeNull()
-    expect(expand.parentElement).toBe(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }).parentElement)
+    // On the preview's card, and the preview beside it is a picture, not a link.
     expect(expand.parentElement).toHaveClass('expand-frame', 'plan-card')
+    expect(expand.parentElement.querySelector('.area-plan-preview')).not.toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
     press(expand)
 
-    expect(onOpen).not.toHaveBeenCalled()
     const pins = [...dialog().querySelectorAll('.area-plan-pin')]
     const subject = pins.find(p => p.textContent === 'Assembly Line 1')
     const other = pins.find(p => p.textContent === 'Paint Booth')

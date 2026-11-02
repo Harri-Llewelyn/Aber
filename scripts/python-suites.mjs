@@ -610,6 +610,16 @@ export const SUITES = {
       'with a key that reaches nothing else -- so "Aber X.Y.Z is available" is only ever what the ' +
       'daily check found.',
   },
+  'supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py': {
+    lanes: ['db'],
+    why:
+      "0223's figures on the System page, against answers filed in net._http_response by hand: a " +
+      '200 writes each figure it carries and NULL for the rest, and a non-200, no answer yet, ' +
+      'unparseable content or no Prometheus at all clears every figure rather than leaving the last ' +
+      'value; each run fires the next query to directory_prometheus_url(), which liveness reads too, ' +
+      'and liveness sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the ' +
+      'figures and no role writes them; the gateway count stands when the historian is out.',
+  },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
     why:
