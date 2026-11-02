@@ -2448,6 +2448,94 @@ turns to the CHECK. `test_an_area_plan_can_be_turned.py` holds the checks, a tur
 cell, the spacing at every rotation, who may turn a plan and its audit row, and the file's replay
 over a drifted CHECK and over a database from before `0221`.
 
+### A decision keeps its decider's address, and the Audit Trail filters by who made a change (0222)
+
+Since `0207` an Administrator can change a person's email address. Every column that says who did
+something already held the person's `auth.users` id, but three things still leaned on the address.
+The dashboard linked to a person by it, so a link stopped finding them after a change. Approvals
+kept the proposer's address at the time and named the decider by id alone. And nothing listed what
+one person or machine identity had changed.
+
+- **`change_proposals.decided_by_email`** is the decider's email, stamped from the signed access
+  token when a proposal is approved, rejected or withdrawn, as `stamp_proposal_author()` stamps
+  `proposed_by_email` when it is filed. `stamp_proposal_decider()` is a `BEFORE INSERT OR UPDATE`
+  trigger, not a change to the three transition functions: whatever path sets `decided_by`, the
+  stamp follows it, and no client can write the column on any other path, because the trigger puts
+  back the stored value. It stamps only when `decided_by` is the caller (`auth.uid()`), which every
+  transition function sets it to; the token is somebody else's otherwise. An expiry sets no
+  decider and so no address.
+- **Past decisions keep `NULL`.** The address a decider had before this file is recorded nowhere,
+  and guessing it from the account would show today's address as if it were then's. Approvals
+  shows the account's current address for them where the viewer may read it (an Administrator,
+  through `list_user_accounts()`), and the id where not, as before.
+- **`audit_trail_page()` takes `p_changed_by uuid`**, its eleventh and last argument, and keeps the
+  rows whose `changed_by` is that id. It is `SECURITY INVOKER`, so `audit_trail`'s policies still
+  decide the rows: a Shopfloor Manager filtering by an Administrator sees that person's asset-lane
+  rows and none of their security-lane ones. Whoever can read the Audit Trail can filter it; no
+  policy changed. The predicate is one equality in the scan `matching` already makes, so it costs
+  nothing a search does not.
+- **A new argument is a new signature**, so rule 5 above applies. `0001` and `0168` both declare
+  the eleven-argument form in place. On the first boot of an upgrade, `0001` creates it beside the
+  ten-argument form the database holds, and its sweep of stale overloads drops the old one at the
+  end of the same file; `0222` drops it too if it is still there. Between the two, PostgREST cannot
+  choose between the forms, which call by argument name, so the Audit Trail fails for the seconds
+  `0001` takes on that one boot. No later boot holds two. The self-check asserts exactly one
+  `audit_trail_page`, with `p_changed_by` last: that holds on every boot, so it is not a count of
+  a total.
+- **The dashboard keys a person by their id.** `personUrl(userId)` writes `?person=<user id>` on
+  Access Control › People, and no longer a search: People checks `person=` against everyone it
+  lists, filtered or not. A link from before, `?person=<email>`, still opens whoever has that
+  address now, matched without case, and the address bar is rewritten to the id. A person's drawer
+  has **View Their Changes**, the Audit Trail with `?changed_by=<user id>`. The Audit Trail's
+  **Changed by** filter lists people (name and current address, from `list_user_accounts()`) and
+  machine identities (by name) for the roles that may read those lists. Any role that reads the
+  trail can follow a link carrying the filter.
+
+#### The address beside a person
+
+**A person is keyed by their `auth.users` id everywhere. A page shows the address their account
+has now, unless it says the address is the one they had at the time.** The pages that say so take
+the old address from a `*_email` column stamped from the signed access token when the person acted,
+and never rewrite it: Approvals (`change_proposals.proposed_by_email` and `decided_by_email`) and
+Archived Entities (`retired_entities.retired_by_email`); `asset_exports.taken_by_email` is stamped
+the same way. A stamp that is `NULL`, for a row from before its column, falls back to the current
+address. A new column that records who did something holds the id. If a page must show the address
+the person had then, the column gains a stamped `*_email` beside it, and the page says "at the time".
+
+#### What deleting an account would do to the rows that name it
+
+People are banned, never deleted (`0166`, "Ban, never delete"), so no `ON DELETE` rule fires in
+normal running. The rules say what would happen to each column if an account were deleted by hand,
+and no foreign key changes here. Rows that are the person's own go with them. Rows that record who
+did something outlive them. Counted on `0222` from the catalog of a database the chain built
+(`audit_trail`'s monthly partitions inherit its key and are not listed):
+
+- **`CASCADE`, the person's own rows (5):** `access_removals.user_id`,
+  `machine_principals.principal_id`, `person_profiles.user_id`, `principal_permissions.principal_id`,
+  `user_settings.user_id`.
+- **`NO ACTION`, so a deletion is refused while the trail names them (1):** `audit_trail.changed_by`.
+- **`SET NULL` (6):** `access_removals.removed_by`, `backup_jobs.requested_by`,
+  `backups.released_by`, `backups.requested_by`, `machine_principals.created_by`,
+  `person_profiles.updated_by`.
+- **No foreign key (19):** `asset_exports.taken_by`, `capture_downloads.created_by`,
+  `capture_jobs.requested_by`, `capture_uploads.created_by`, `captures.created_by`,
+  `change_proposals.decided_by`, `change_proposals.proposed_by`, `device_nameplate.updated_by`,
+  `gateway_enrollment_tokens.created_by`, `playback_jobs.requested_by`,
+  `rebirth_requests.requested_by`, `retired_entities.retired_by`,
+  `revoked_service_principals.principal_id`, `revoked_service_principals.revoked_by`,
+  `revoked_service_tokens.principal_id`, `revoked_service_tokens.revoked_by`,
+  `service_token_last_use.principal_id`, `system_settings.updated_by`, and `user_roles.user_id`,
+  which is `text`.
+
+Check 175 (`scripts/check-docs-drift.mjs`) holds the first three lists to the foreign keys the
+applied migrations declare. The fourth it cannot see, since a column with no key says nothing about
+whom it names: a new person column goes into it by hand. The file's self-check asserts the column,
+the stamp's `SECURITY DEFINER`, pinned path and grants, the trigger on every insert and update, and
+the one form of `audit_trail_page()` with its grants.
+`test_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.py` holds the filter
+under three roles, the stamp on each decision and its refusals, and the signature after `0168` and
+`0222` replay, over the ten-argument form too.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

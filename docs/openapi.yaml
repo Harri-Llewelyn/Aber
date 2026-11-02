@@ -835,6 +835,52 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
         '403': { description: Role lacks Audit Trail read access. }
 
+  /rest/v1/rpc/audit_trail_page:
+    post:
+      tags: [Audit]
+      summary: Read one page of the Audit Trail, filtered on the server
+      description: |
+        What the Audit Trail page reads. `SECURITY INVOKER`: the rows are the ones
+        `/rest/v1/audit_trail` would give the caller, filtered before the limit, so a page is never
+        a fraction of a larger read. Keyset paged on (`recorded_at` DESC, `id` DESC): pass the
+        previous answer's `next_cursor` back as `p_before_recorded_at` and `p_before_id`. A null
+        `next_cursor` is the only end of the data.
+
+        `p_changed_by` keeps the rows one person or machine identity wrote, matched on `changed_by`
+        (`0222`). Any role that reads the trail may filter by any id; the same policies decide which
+        of that actor's rows come back.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_limit: { type: integer, default: 200, description: 'Rows per page, 1 to 1000.' }
+                p_include_purged: { type: boolean, default: false, description: 'Include rows about an area, cell, gateway, device or schema no live table holds.' }
+                p_entity_type: { type: string, description: 'One `AuditTrailEntry.entity_type`, e.g. `devices`.' }
+                p_action: { type: string, description: 'One `AuditTrailEntry.action`, e.g. `UPDATE`.' }
+                p_entity_ids: { type: array, items: { type: string, format: uuid }, description: 'Only these entities. An empty array matches nothing.' }
+                p_since: { type: string, format: date-time }
+                p_until: { type: string, format: date-time }
+                p_before_recorded_at: { type: string, format: date-time, description: 'The cursor, with `p_before_id`.' }
+                p_before_id: { type: integer, format: int64 }
+                p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
+                p_changed_by: { type: string, format: uuid, description: 'Only the rows this person or machine identity wrote: the `changed_by` id.' }
+      responses:
+        '200':
+          description: One page, and facts about the whole match.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
+                  total_matching: { type: integer, description: 'Rows the filters select in all, not just this page.' }
+                  purged_assets: { type: integer, description: 'Deleted entities the filters cover.' }
+                  truncated: { type: boolean, description: 'There is a next page.' }
+                  next_cursor: { type: object, nullable: true, properties: { recorded_at: { type: string, format: date-time }, id: { type: integer, format: int64 } } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/revoked_service_tokens:
     get:
       tags: [Audit]
@@ -3109,6 +3155,12 @@ paths:
         Deciding is not done here. `status` cannot be written through this path at all; see
         `/rest/v1/rpc/approve_proposal`, `reject_proposal` and `withdraw_proposal`. A proposer may
         PATCH only the `patch` and `rationale` of their own **open** row.
+
+        `proposed_by` and `decided_by` are the ids every other table names a person by.
+        `proposed_by_email` and `decided_by_email` are the addresses their tokens carried when they
+        filed and decided it, stamped by the database whatever the request sends (`0222` for
+        `decided_by_email`). A decision made before `0222`, and an expiry, have no
+        `decided_by_email`.
       parameters:
         - $ref: '#/components/parameters/Select'
         - { name: status, in: query, schema: { type: string }, description: 'e.g. `eq.open`' }
