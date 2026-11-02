@@ -381,7 +381,7 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0` |
 | `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
-| `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
+| `grafana/alloy:v1.21.3` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.21.3` |
 | `gitea/gitea:28.0.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.0.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |
 | `jryberg/mosquitto-exporter:v0.7.9` | Apache 2.0 | [`jryberg/mosquitto-exporter`](https://github.com/jryberg/mosquitto-exporter) `v0.7.9` |
