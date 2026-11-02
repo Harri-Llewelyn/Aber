@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { QUEUES } from '../components/tabs/ApprovalsTab'
 import { STAGES } from '../components/tabs/ArchivesTab'
-import { SUBJECTS } from '../components/tabs/CaptureTab'
+import { VIEWS as CAPTURE_VIEWS } from '../components/tabs/CaptureTab'
 import { VIEWS as DEVICE_VIEWS } from '../components/tabs/DevicesTab'
 import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
 import { PROFILE_SECTIONS } from '../components/tabs/ProfileTab'
@@ -20,7 +20,7 @@ const TOOLTIPS = [
   ...[PEOPLE_SECTION, APPS_SECTION, ...SECTIONS].map(t => [`Access Control: ${t.label}`, t.description]),
   ...QUEUES.map(t => [`Approvals: ${t.label}`, t.description]),
   ...STAGES.map(t => [`Archived Entities: ${t.label}`, t.description]),
-  ...SUBJECTS.map(t => [`Capture: ${t.label}`, t.description]),
+  ...CAPTURE_VIEWS.map(t => [`Capture: ${t.label}`, t.description]),
   ...DEVICE_VIEWS.map(t => [`Devices: ${t.label}`, t.description]),
   ...METRIC_VIEWS.map(t => [`Metrics: ${t.label}`, t.description]),
   ...PROFILE_SECTIONS.map(t => [`Profile: ${t.label}`, t.description]),
@@ -39,7 +39,7 @@ describe('every tab tooltip', () => {
   })
 
   it('covers every tab of the pages it lists', () => {
-    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 2 + 2 + 4 + 5 + 3 + 5)
+    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 3 + 5 + 5 + 4)
   })
 
   it('has a sentence for each Settings category the database seeds', () => {

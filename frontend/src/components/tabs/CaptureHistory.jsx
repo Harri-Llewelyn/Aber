@@ -4,15 +4,14 @@ import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { Badge } from '../common/Badge'
 import { ColumnHeader } from '../common/SortHeader'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
 import { Tooltip } from '../common/Tooltip'
-import { IconShieldAlert } from '../common/Icons'
+import { IconPlay, IconRecord, IconShieldAlert } from '../common/Icons'
 import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
-/** Rows the History first shows of each kind, and how many Show more adds. */
+/** Rows the Captures and Playbacks tabs first show, and how many Show more adds. */
 export const HISTORY_PAGE = 20
 
 /** A finished job's status, as each kind names it: a stopped playback is not a fault. */
@@ -30,35 +29,15 @@ const OUTCOMES = {
 }
 
 /**
- * The Capture page's History: every finished recording and playback, newest first, in two lists
- * that load a page at a time. The strips above the subject table show a failure for fifteen
- * minutes; this is where it stays. A fragment, so each table is a direct child of the card.
+ * The Capture page's Captures or Playbacks tab: every finished recording (`kind` 'capture') or
+ * playback ('playback'), newest first, a page at a time. The strips above it show a failure for
+ * fifteen minutes; this is where it stays. A fragment, so the table is the card's scroller and
+ * Show more stays under it on screen.
  *
- * `captureKey` and `playbackKey` change when a job of that kind finishes, which re-reads its list.
+ * `refreshKey` changes when a job of this kind finishes, which reads the list again.
  * `subjectName(sparkplugId)` names a played-back capture's subject.
  */
-export function CaptureHistory({ captureKey, playbackKey, subjectName }) {
-  return (
-    <>
-      <div className="card-body profile-section-head capture-history-head">
-        <div className="profile-section-heading">
-          <h4 className="profile-section-title">History</h4>
-          <HelpTip
-            label="About the history"
-            text="Every recording and playback that has finished, newest first, with who started it and why a failed one failed. Nothing is removed from it."
-          />
-        </div>
-      </div>
-      <div className="card-fill-scroll capture-history">
-        <JobHistory kind="capture" refreshKey={captureKey} subjectName={subjectName} />
-        <JobHistory kind="playback" refreshKey={playbackKey} subjectName={subjectName} />
-      </div>
-    </>
-  )
-}
-
-/** One kind's list: its first page, and the pages Show more adds. */
-function JobHistory({ kind, refreshKey, subjectName }) {
+export function JobHistory({ kind, refreshKey, subjectName }) {
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [more, setMore] = useState(false)
@@ -108,24 +87,24 @@ function JobHistory({ kind, refreshKey, subjectName }) {
       .finally(() => setPaging(false))
   }
 
-  const title = kind === 'playback' ? 'Playbacks' : 'Captures'
+  const what = kind === 'playback' ? 'finished playbacks' : 'finished recordings'
   return (
-    <section className="capture-history-list" aria-label={`${title} history`}>
-      <h5 className="context-panel-section-label capture-history-title">{title}</h5>
+    <>
       {error && (
         <div className="card-body">
           <div className="callout callout-danger" role="status">
             <IconShieldAlert size={14} className="callout-icon" />
-            <div>Could not read the {kind} history: {error}</div>
+            <div>Could not read the {what}: {error}</div>
           </div>
         </div>
       )}
       {!loaded ? (
-        <LoadingState label={`the ${kind} history`} />
+        <LoadingState label={what} />
       ) : rows.length === 0 ? (
-        !error && <EmptyState message={kind === 'playback'
-          ? 'No playback has finished yet.'
-          : 'No recording has finished yet.'} />
+        !error && <EmptyState
+          icon={kind === 'playback' ? <IconPlay size={36} /> : <IconRecord size={36} />}
+          message={`No ${what} yet.`}
+        />
       ) : (
         <>
           <div className="table-wrap">
@@ -167,7 +146,7 @@ function JobHistory({ kind, refreshKey, subjectName }) {
           />
         </>
       )}
-    </section>
+    </>
   )
 }
 

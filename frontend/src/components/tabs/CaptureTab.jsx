@@ -16,7 +16,7 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
-import { CaptureHistory } from './CaptureHistory'
+import { JobHistory } from './CaptureHistory'
 import {
   IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload,
   IconX
@@ -40,19 +40,28 @@ import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
 const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join(' or ')}`
 
-/** What a capture records, one tab each (navigation.jsx). The description is the tab's tooltip. */
-export const SUBJECTS = CAPTURE_TABS
+/**
+ * The page's tabs (navigation.jsx): the two subjects a capture records, then the finished
+ * recordings and playbacks. The description is the tab's tooltip.
+ */
+export const VIEWS = CAPTURE_TABS
+/** The tabs that list subjects, by the subject kind each lists. */
+const SUBJECT_KINDS = ['gateway', 'device']
+/** The tabs that list finished jobs, by the kind of job each lists. */
+const JOB_KINDS = { captures: 'capture', playbacks: 'playback' }
+/** The subject tables' filters, which the two subject tabs share. */
+const SUBJECT_FILTERS = ['stored', 'search']
 
 /**
  * Recording the broker, and playing a recording back.
  *
  * Nothing on this page records or plays back: a browser cannot open an MQTT subscription, so the
  * page queues a row and the ingestion daemon (capture) or the playback worker (playback) does
- * the work, with results arriving over Realtime. One card lists the subjects; a capture or
- * playback in flight is a strip above the list on either tab. One capture at a time and one
- * stored capture per subject are partial unique indexes, not rules of this component. The role
- * gates mirror the RLS: SELECT for Administrator, Shopfloor_Manager and Auditor, writes for the
- * first two.
+ * the work, with results arriving over Realtime. One card: two tabs list the subjects, two the
+ * finished recordings and playbacks, and a capture or playback in flight is a strip above the
+ * table on every tab. One capture at a time and one stored capture per subject are partial unique
+ * indexes, not rules of this component. The role gates mirror the RLS: SELECT for Administrator,
+ * Shopfloor_Manager and Auditor, writes for the first two.
  */
 
 /** Where a capture or a recording job is about: its subject, with its captures open. */
@@ -60,9 +69,14 @@ const subjectUrlOf = (record) =>
   captureSubjectUrl(record.subject_kind, record.subject_kind === 'device' ? record.device_id : record.gateway_id)
 
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
-  // The tab, in the path: `/capture` (gateways) or `/capture/device`. The stored filter and the
-  // search sit above both tabs, so they stay in the address across a tab change.
-  const [subjectKind, setSubjectKind, subjectHref] = useUrlTab('capture', SUBJECTS.map(s => s.id), 'gateway', { keep: ['stored', 'search'] })
+  // The tab, in the path: `/capture` (gateways), `/capture/device`, `/capture/captures` or
+  // `/capture/playbacks`. The stored filter and the search belong to the subject tables, so they
+  // stay in the address between those two tabs and are left behind on the other two.
+  const [view, setView, viewHref] = useUrlTab('capture', VIEWS.map(v => v.id), 'gateway',
+    { keep: next => (SUBJECT_KINDS.includes(next) ? SUBJECT_FILTERS : []) })
+  // The subject kind the open tab lists, or null on a tab of finished jobs; and the job kind.
+  const subjectKind = SUBJECT_KINDS.includes(view) ? view : null
+  const jobKind = JOB_KINDS[view] || null
   const [gateways, setGateways] = useState([])
   const [devices, setDevices] = useState([])
   const [captures, setCaptures] = useState([])
@@ -215,7 +229,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [gateways])
 
   const allRows = useMemo(() => {
-    const source = subjectKind === 'gateway' ? gateways : devices
+    const source = subjectKind === 'gateway' ? gateways : subjectKind === 'device' ? devices : []
     return source.map(subject => ({
       id: subject.id,
       kind: subjectKind,
@@ -250,11 +264,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [allRows, storedFilter, gatewayFilter, search])
   const [rows, sort] = useSortableRows(matchingRows, subjectKind === 'device' ? DEVICE_SORT : GATEWAY_SORT)
 
-  // The gateway filter is only offered on the Devices tab, so it only counts there -- otherwise
-  // switching tabs with one set would show "Clear filters (1)" for a control that is not on screen.
-  const activeFilterCount = (storedFilter !== 'all' ? 1 : 0)
+  // A filter counts only on a tab that shows it -- otherwise switching tabs with one set would show
+  // "Clear filters (1)" for a control that is not on screen. The gateway filter is on Devices only.
+  const activeFilterCount = !subjectKind ? 0 : (
+    (storedFilter !== 'all' ? 1 : 0)
     + (search.trim() ? 1 : 0)
     + (subjectKind === 'device' && gatewayFilter ? 1 : 0)
+  )
   const clearFilters = () => { setStoredFilter('all'); setSearch(''); setGatewayFilter('') }
   const withCapture = allRows.filter(r => r.capture).length
 
@@ -270,10 +286,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }))
   ]), [gateways, devices, captureBySubject])
 
-  // A played-back capture's subject, named from its Sparkplug ID, for the History.
+  // A played-back capture's subject, named from its Sparkplug ID, for the Playbacks tab.
   const subjectNameById = useMemo(() => new Map(allSubjects.map(s => [s.sparkplugId, s.name])), [allSubjects])
   const subjectName = useCallback(id => subjectNameById.get(id), [subjectNameById])
-  // Each changes when a job of its kind finishes, which re-reads that list of the History.
+  // Changes when a job of the kind the tab lists finishes, which reads that tab's list again.
   const finishedKey = jobs => (jobs[0] ? `${jobs[0].id}:${jobs[0].finished_at}` : '')
 
   // Resolved from the current rows rather than captured on click: this page refreshes on a timer
@@ -476,47 +492,53 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
           <TabStrip
             ariaLabel="Capture"
-            value={subjectKind}
-            onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
-            hrefFor={subjectHref}
-            tabs={SUBJECTS}
+            value={view}
+            onChange={next => { setView(next); setSelectedId(null) }}
+            hrefFor={viewHref}
+            tabs={VIEWS}
           />
 
+          {/* Play a file… is the page's, on every tab; the filters are the subject tables'. The
+              finished jobs have none: they are read a page at a time, newest first. */}
           <div className="filter-bar">
-            <SearchInput
-              value={search}
-              onChange={setSearch}
-              placeholder="Search name or Sparkplug ID…"
-              ariaLabel="Search subjects"
-            />
+            {subjectKind && (
+              <>
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Search name or Sparkplug ID…"
+                  ariaLabel="Search subjects"
+                />
 
-            <select
-              className="form-control control-md"
-              value={storedFilter}
-              onChange={e => setStoredFilter(e.target.value)}
-              aria-label="Stored capture filter"
-            >
-              <option value="all">All subjects ({allRows.length})</option>
-              <option value="with">With a capture ({withCapture})</option>
-              <option value="without">Without a capture ({allRows.length - withCapture})</option>
-            </select>
+                <select
+                  className="form-control control-md"
+                  value={storedFilter}
+                  onChange={e => setStoredFilter(e.target.value)}
+                  aria-label="Stored capture filter"
+                >
+                  <option value="all">All subjects ({allRows.length})</option>
+                  <option value="with">With a capture ({withCapture})</option>
+                  <option value="without">Without a capture ({allRows.length - withCapture})</option>
+                </select>
 
-            {/* Only on the Devices tab, where a device's gateway is how the four devices behind
-                one machine are found. */}
-            {subjectKind === 'device' && (
-              <select
-                className="form-control control-lg"
-                value={gatewayFilter}
-                onChange={e => setGatewayFilter(e.target.value)}
-                aria-label="Gateway filter"
-              >
-                <option value="">All gateways</option>
-                {gateways.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({devices.filter(d => d.gateway_id === g.id).length})
-                  </option>
-                ))}
-              </select>
+                {/* Only on the Devices tab, where a device's gateway is how the four devices behind
+                    one machine are found. */}
+                {subjectKind === 'device' && (
+                  <select
+                    className="form-control control-lg"
+                    value={gatewayFilter}
+                    onChange={e => setGatewayFilter(e.target.value)}
+                    aria-label="Gateway filter"
+                  >
+                    <option value="">All gateways</option>
+                    {gateways.map(g => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({devices.filter(d => d.gateway_id === g.id).length})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
             )}
 
             <div className="filter-bar-actions">
@@ -534,7 +556,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             </div>
           </div>
 
-          {/* What is in flight or has just failed, on either tab. Each strip renders nothing when
+          {/* What is in flight or has just failed, on every tab. Each strip renders nothing when
               there is nothing to say, and the container then collapses (:empty in App.css). */}
           <div className="capture-strips">
             {error && (
@@ -555,7 +577,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <RecentDiscards jobs={recentPlaybacks} />
           </div>
 
-          {loading ? (
+          {jobKind ? (
+            <JobHistory
+              key={jobKind}
+              kind={jobKind}
+              refreshKey={finishedKey(jobKind === 'capture' ? recentJobs : recentPlaybacks)}
+              subjectName={subjectName}
+            />
+          ) : loading ? (
             <LoadingState label="captures" />
           ) : rows.length === 0 ? (
             <EmptyState
@@ -605,12 +634,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             </table>
           </div>
           )}
-
-          <CaptureHistory
-            captureKey={finishedKey(recentJobs)}
-            playbackKey={finishedKey(recentPlaybacks)}
-            subjectName={subjectName}
-          />
 
           {draggingPlay && (
             <div className="capture-drop-overlay">
