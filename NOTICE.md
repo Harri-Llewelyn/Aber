@@ -198,7 +198,7 @@ the `2.29.2` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. T
 
 ## Grafana and Loki — AGPL-3.0
 
-`grafana/grafana:13.2.3` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
+`grafana/grafana:13.3.0` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
 pinned image. **`grafana/loki:3.7.8` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
 `v3.7.8` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
 These are the most restrictive licences in the stack — more so than TimescaleDB's, which is worth
@@ -354,7 +354,7 @@ on any row.
 | pgBackRest 2.57.0, added to that image as `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescaledb/Dockerfile`) | MIT | `apk info -a pgbackrest` → `license: MIT` |
 | pgBackRest 2.57.0 and tini 0.19.0, added to `supabase/postgres:17.6.1.175` as `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/db/Dockerfile`) | MIT | `apk info -a pgbackrest`, `apk info -a tini` → `license: MIT` |
 | gosu, added from Alpine to both of those images | Apache 2.0 | `apk info -a gosu` → `license: Apache-2.0` |
-| `grafana/grafana:13.2.3` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
+| `grafana/grafana:13.3.0` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
 | `prom/prometheus:v3.15.0` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
 | `nodered/node-red:5.0.7` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
