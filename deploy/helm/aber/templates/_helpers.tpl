@@ -508,6 +508,23 @@ renders; there the pods' required keys and the gateway's initContainer refuse in
 {{- end -}}
 
 {{/*
+The signing set as a pod annotation, so a pod that reads it from the Secret restarts when it
+changes: a Secret's change alone restarts nothing. From the values, or under existingSecret from the
+Secret `lookup` reads (nothing under `helm template`). The leading marker rolls every reader once on
+the upgrade that ended HS256, where GoTrue's and PostgREST's specs need not change at all.
+*/}}
+{{- define "aber.signingChecksum" -}}
+{{- $s := .Values.secrets -}}
+{{- $parts := list ($s.jwtKeys | default "") ($s.jwtJwks | default "") ($s.realtimeJwtSecret | default "") ($s.storageJwtSecret | default "") -}}
+{{- with .Values.secrets.existingSecret -}}
+{{- $existing := lookup "v1" "Secret" $.Release.Namespace . -}}
+{{- $data := (and $existing $existing.data) | default dict -}}
+{{- $parts = list (get $data "SUPABASE_JWT_KEYS") (get $data "SUPABASE_JWT_JWKS") (get $data "REALTIME_JWT_SECRET") (get $data "STORAGE_JWT_SECRET") -}}
+{{- end -}}
+{{- prepend $parts "ES256 alone" | join "\n" | sha256sum -}}
+{{- end -}}
+
+{{/*
 Realtime's two keys have lengths enforced by the container (dbEncKey exactly 16, secretKeyBase at
 least 64), asserted here so the failure is one Helm error instead of a restarting pod with an
 Elixir stack trace. Only when realtime is enabled and the chart owns the secret.

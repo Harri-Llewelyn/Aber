@@ -64,6 +64,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
       {{- with .Values.supabaseStorage.podAnnotations }}
       {{- /* WHERE VELERO'S FILE-LEVEL BACKUP ANNOTATION GOES, and the reason this seam exists
              separately from the PVC's. Velero reads `backup.velero.io/backup-volumes` from the POD
@@ -77,7 +80,6 @@ spec:
              does not error: the Velero backup completes SUCCESSFULLY having captured no files,
              which is the same shape of quiet failure as a pg_dump written to a path that is
              discarded with the pod. */}}
-      annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:

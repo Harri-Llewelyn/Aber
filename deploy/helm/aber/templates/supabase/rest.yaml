@@ -41,6 +41,8 @@ spec:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
         # The admin listener (PGRST_ADMIN_SERVER_PORT below) is the only place PostgREST serves /metrics.
         {{- include "aber.scrapeAnnotations" (dict "port" 3001 "path" "/metrics") | nindent 8 }}
     spec:
