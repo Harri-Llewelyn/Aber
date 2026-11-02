@@ -436,7 +436,7 @@ sign-in against Aber's own GoTrue and admits `Administrator` alone. It never pub
 database owner. The NetworkPolicy follows the same shape. The ingress controller may reach the
 gateway on `8001`, the gateway may reach Studio on `3000`, and nothing else may reach Studio at all.
 
-This does **not** give Studio a second factor, or a per-user audit trail of what was run in the SQL
+This does **not** give Studio MFA, or a per-user audit trail of what was run in the SQL
 editor. It controls *who may open the console*, and everything inside it still runs as the
 database owner.
 

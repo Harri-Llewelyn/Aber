@@ -123,7 +123,7 @@ def drop_fixture_principals(user_ids):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))
             cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))

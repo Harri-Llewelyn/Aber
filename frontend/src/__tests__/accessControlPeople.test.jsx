@@ -623,7 +623,7 @@ describe('a person\'s drawer', () => {
     const end = mine.getByRole('button', { name: 'End Sessions' })
     expect(end).toBeDisabled()
     expect(end).toHaveAccessibleDescription(
-      'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Security tab.')
+      'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Sessions tab.')
     expect(mine.getByRole('button', { name: 'Remove Access' })).toBeDisabled()
     expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
   })
@@ -712,7 +712,7 @@ describe('a person\'s sessions, listed in their drawer', () => {
     return { drawer, list: await listOf(label) }
   }
 
-  it('are read only when the Sessions row is opened, newest first, in the Security tab\'s columns', async () => {
+  it('are read only when the Sessions row is opened, newest first, in the Sessions tab\'s columns', async () => {
     renderPeople()
     const drawer = await openDrawer('operator@site.test')
     await drawer.findByText(/^2 open, last active /)
@@ -773,14 +773,14 @@ describe('a person\'s sessions, listed in their drawer', () => {
     expect(within(list).getAllByRole('button', { name: /^End the session: / })[0]).toBeEnabled()
   })
 
-  it('is not in your own drawer, which points to the Security tab on Profile instead', async () => {
+  it('is not in your own drawer, which points to the Sessions tab on Profile instead', async () => {
     renderPeople()
     const mine = await openDrawer('me@site.test')
     await mine.findByText(/^2 open, last active /)
     expect(mine.queryByRole('button', { name: /Show sessions/ })).toBeNull()
-    const link = mine.getByRole('link', { name: 'Listed on Profile › Security' })
-    expect(link).toHaveAttribute('href', '/profile/security')
-    expect(link).toHaveAccessibleDescription('Your own sessions are listed on your Profile page\'s Security tab, where you can end one.')
+    const link = mine.getByRole('link', { name: 'Listed on Profile › Sessions' })
+    expect(link).toHaveAttribute('href', '/profile/sessions')
+    expect(link).toHaveAccessibleDescription('Your own sessions are listed on your Profile page\'s Sessions tab, where you can end one.')
     expect(api.personSessions).not.toHaveBeenCalled()
   })
 

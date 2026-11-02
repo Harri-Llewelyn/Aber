@@ -1,7 +1,7 @@
 -- 0206: A person can see and end their other sessions.
 --
 -- Every sign-in through GoTrue, to the dashboard or to a service (Grafana, Node-RED, Studio, the
--- forge), is one auth.sessions row. The Profile page's Security tab lists the caller's own and
+-- forge), is one auth.sessions row. The Profile page's Sessions tab lists the caller's own and
 -- ends one of them.
 --
 --   * list_my_sessions() returns the caller's sessions: the service a service session belongs to

@@ -7,7 +7,7 @@ import { sessionLabel } from '../../utils/sessions'
 
 /**
  * A list of sessions, one row each: Where, Started, Last active and End. The Profile page's
- * Security tab lists the signed-in person's own (`list_my_sessions()`, 0206), and a person's
+ * Sessions tab lists the signed-in person's own (`list_my_sessions()`, 0206), and a person's
  * drawer on People lists theirs (`person_sessions()`, 0212), so the two read alike.
  *
  * `onEnd(session)` is what a row's End does; End only asks, through the caller's dialog. The

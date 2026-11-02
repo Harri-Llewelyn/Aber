@@ -61,10 +61,10 @@ describe('the page', () => {
     expect(document.querySelector('.card-heading-note')).toHaveTextContent('Applies to you, on any browser.')
   })
 
-  it('has three tabs, Account, Appearance then Security, with the ids the routing names', () => {
+  it('has five tabs, Account, Appearance, Sessions, MFA then Allowed Apps, with the ids the routing names', () => {
     renderProfile()
-    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance', 'Security'])
-    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance', 'security'])
+    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance', 'Sessions', 'MFA', 'Allowed Apps'])
+    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance', 'sessions', 'mfa', 'allowed-apps'])
   })
 
   /* The user's rule: every tab has the header row, even a tab of one or two rows. */

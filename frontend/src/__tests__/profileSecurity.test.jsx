@@ -1,5 +1,5 @@
 /**
- * Profile > Security: the Sessions section. It lists every session the person holds, the one in
+ * Profile > Sessions. It lists every session the person holds, the one in
  * use first and marked, each by its browser or its service. End ends any other one after a dialog
  * that names it and says when it was last active, and Sign Out of All Other Sessions ends them all
  * after a dialog that says what that ends. Each act says what it did in a toast that links back
@@ -45,7 +45,7 @@ const SCRIPT = { id: 's-script', service_name: null, user_agent: 'Python-urllib/
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(NOW)
-  window.history.replaceState({}, '', '/profile/security')
+  window.history.replaceState({}, '', '/profile/sessions')
   api.listMySessions.mockReset().mockResolvedValue([FIREFOX_SESSION, SCRIPT, THIS, GRAFANA])
   api.endMySession.mockReset().mockResolvedValue(undefined)
   api.signOutOtherSessions.mockReset().mockResolvedValue(3)
@@ -57,7 +57,7 @@ afterEach(() => {
   window.history.replaceState({}, '', '/')
 })
 
-const renderSecurity = (props = {}) => {
+const renderSessions = (props = {}) => {
   const showToast = vi.fn()
   render(<ProfileTab email="operator@site.test" userRole="Operator" theme="dark" sidebarMode="hover" showToast={showToast} {...props} />)
   return { showToast }
@@ -68,14 +68,14 @@ const where = (r) => r.querySelector('.session-where').textContent
 const rowOf = (label) => rows().find(r => where(r) === label)
 const loaded = () => screen.findByText('Chrome on Windows')
 
-describe('the Security tab', () => {
+describe('the Sessions tab', () => {
   it('opens from its address, after Appearance', () => {
-    renderSecurity()
-    expect(tabLink('Security')).toHaveAttribute('aria-current', 'page')
+    renderSessions()
+    expect(tabLink('Sessions')).toHaveAttribute('aria-current', 'page')
   })
 
   it('heads its Sessions section, with an About tip and a line on what it cannot show', async () => {
-    renderSecurity()
+    renderSessions()
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'About sessions' })).toBeInTheDocument()
     expect(document.querySelector('.profile-section-note')).toHaveTextContent(/shows no device\. No address is recorded\./)
@@ -83,7 +83,7 @@ describe('the Security tab', () => {
   })
 
   it('has a header row', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toEqual(['Where', 'Started', 'Last active', 'Actions'])
   })
@@ -91,7 +91,7 @@ describe('the Security tab', () => {
 
 describe('the list', () => {
   it('puts this browser first and marks it, then the most recently active', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(rows().map(where)).toEqual(['Chrome on Windows', 'Grafana', 'Firefox on Linux', 'A program (Python-urllib)'])
     expect(within(rows()[0]).getByText('This browser')).toBeInTheDocument()
@@ -99,14 +99,14 @@ describe('the list', () => {
   })
 
   it('names a service session by its service, marked as one', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(within(rowOf('Grafana')).getByText('Service')).toBeInTheDocument()
     expect(within(rowOf('Firefox on Linux')).queryByText('Service')).toBeNull()
   })
 
   it('says how long ago each was last active', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(within(rowOf('Chrome on Windows')).getByText('1h ago')).toBeInTheDocument()
     expect(within(rowOf('Grafana')).getByText('5m ago')).toBeInTheDocument()
@@ -114,7 +114,7 @@ describe('the list', () => {
   })
 
   it('offers End on every session but this one', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(within(rowOf('Chrome on Windows')).queryByRole('button')).toBeNull()
     for (const label of ['Grafana', 'Firefox on Linux', 'A program (Python-urllib)']) {
@@ -124,13 +124,13 @@ describe('the list', () => {
 
   it("shows the database's sentence when the list cannot be read", async () => {
     api.listMySessions.mockRejectedValue(new Error('insufficient privileges to list sessions: sign in as a person with a role'))
-    renderSecurity()
+    renderSessions()
     expect(await screen.findByText(/sign in as a person with a role/)).toBeInTheDocument()
     expect(screen.queryByRole('table')).toBeNull()
   })
 
   it('asks nothing for a machine identity, which has no sessions', () => {
-    renderSecurity({ email: null })
+    renderSessions({ email: null })
     expect(screen.getByText(/A machine identity signs in with a token, so it has no sessions/)).toBeInTheDocument()
     expect(api.listMySessions).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: /Sign Out of All Other Sessions/ })).toBeNull()
@@ -144,7 +144,7 @@ describe('End', () => {
   }
 
   it('asks first, naming the session as the list does and when it was last active', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     const dialog = await askToEnd('Firefox on Linux')
     expect(dialog).toHaveAccessibleDescription('End the session in Firefox on Linux, last active 2 days ago? That browser has to sign in again.')
@@ -153,14 +153,14 @@ describe('End', () => {
   })
 
   it('starts on the dialog, not on the button that ends the session', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     const dialog = await askToEnd('Grafana')
     expect(document.activeElement).toBe(dialog)
   })
 
   it('ends nothing when cancelled', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     fireEvent.click(within(await askToEnd('Grafana')).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -169,11 +169,11 @@ describe('End', () => {
   })
 
   it('ends that session on End Session, says so with a link back here, and reads the list again', async () => {
-    const { showToast } = renderSecurity()
+    const { showToast } = renderSessions()
     await loaded()
     api.listMySessions.mockResolvedValue([THIS, GRAFANA, SCRIPT])
     fireEvent.click(within(await askToEnd('Firefox on Linux')).getByRole('button', { name: 'End Session' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Session ended: Firefox on Linux.', 'success', { to: '/profile/security' }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Session ended: Firefox on Linux.', 'success', { to: '/profile/sessions' }))
     expect(api.endMySession).toHaveBeenCalledWith('s-firefox')
     await waitFor(() => expect(rowOf('Firefox on Linux')).toBeUndefined())
     expect(api.listMySessions).toHaveBeenCalledTimes(2)
@@ -182,7 +182,7 @@ describe('End', () => {
 
   it("shows the database's refusal, and reads the list again", async () => {
     api.endMySession.mockRejectedValue(new Error('session s-grafana not found'))
-    const { showToast } = renderSecurity()
+    const { showToast } = renderSessions()
     await loaded()
     fireEvent.click(within(await askToEnd('Grafana')).getByRole('button', { name: 'End Session' }))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('session s-grafana not found', 'error'))
@@ -228,7 +228,7 @@ describe('Sign Out of All Other Sessions', () => {
   const button = () => screen.getByRole('button', { name: /Sign Out of All Other Sessions/ })
 
   it('says what it ends before it ends anything', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     fireEvent.click(button())
     const dialog = await screen.findByRole('dialog')
@@ -241,7 +241,7 @@ describe('Sign Out of All Other Sessions', () => {
   })
 
   it('names its button for the act, and starts on the dialog, not on that button', async () => {
-    renderSecurity()
+    renderSessions()
     await loaded()
     fireEvent.click(button())
     const dialog = await screen.findByRole('dialog', { name: 'Sign Out of All Other Sessions' })
@@ -250,12 +250,12 @@ describe('Sign Out of All Other Sessions', () => {
   })
 
   it('ends the others, keeps this browser, says how many and reads the list again', async () => {
-    const { showToast } = renderSecurity()
+    const { showToast } = renderSessions()
     await loaded()
     api.listMySessions.mockResolvedValue([THIS])
     fireEvent.click(button())
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign Out of All Other Sessions' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Signed out of 3 other sessions.', 'success', { to: '/profile/security' }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Signed out of 3 other sessions.', 'success', { to: '/profile/sessions' }))
     expect(api.signOutOtherSessions).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(rows().map(where)).toEqual(['Chrome on Windows']))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -263,17 +263,17 @@ describe('Sign Out of All Other Sessions', () => {
 
   it('says so when they had already ended', async () => {
     api.signOutOtherSessions.mockResolvedValue(0)
-    const { showToast } = renderSecurity()
+    const { showToast } = renderSessions()
     await loaded()
     fireEvent.click(button())
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign Out of All Other Sessions' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('You had no other sessions to sign out of.', 'info', { to: '/profile/security' }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('You had no other sessions to sign out of.', 'info', { to: '/profile/sessions' }))
   })
 
   it("shows the database's refusal, and reads the list again", async () => {
     const refusal = 'Your sign-in names no session of yours to keep, so none was ended. Sign in again.'
     api.signOutOtherSessions.mockRejectedValue(new Error(refusal))
-    const { showToast } = renderSecurity()
+    const { showToast } = renderSessions()
     await loaded()
     fireEvent.click(button())
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign Out of All Other Sessions' }))
@@ -283,7 +283,7 @@ describe('Sign Out of All Other Sessions', () => {
 
   it('is disabled, saying why, when this is the only session', async () => {
     api.listMySessions.mockResolvedValue([THIS])
-    renderSecurity()
+    renderSessions()
     await loaded()
     expect(button()).toBeDisabled()
     expect(button()).toHaveAccessibleDescription('You have no other sessions.')

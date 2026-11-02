@@ -838,7 +838,7 @@ Deno.test("nobody resets their own MFA here, and nothing is called", async () =>
   const s = stack();
   const { response, body } = await run(post({ action: "reset-mfa", user_id: ADMIN_ID }), s);
   assert.equal(response.status, 403);
-  assert.ok(/Profile page's Security tab/.test(body.details), body.details);
+  assert.ok(/Profile page's MFA tab/.test(body.details), body.details);
   assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"]);
 });
 
@@ -854,7 +854,7 @@ Deno.test("a caller who is not an Administrator resets no MFA", async () => {
 
 Deno.test("a reset the database refuses never reaches GoTrue", async () => {
   const refusals: [number, string, string, number][] = [
-    [403, "42501", "insufficient privileges to reset a person's second factor", 403],
+    [403, "42501", "insufficient privileges to reset a person's MFA", 403],
     [404, "P0002", `person ${TARGET_ID} not found`, 404],
     [400, "22023", `${TARGET_ID} is a machine identity, not a person.`, 400],
   ];
@@ -896,7 +896,7 @@ Deno.test("a reset GoTrue stops part-way records what went and says to reset aga
   });
   const answer = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
   assertServerFailure(answer, 502, "Database error deleting factor");
-  assert.ok(/1 of their 2 second factors were removed/.test(answer.body.error) && /Reset MFA again/.test(answer.body.error),
+  assert.ok(/1 of their 2 authenticators were removed/.test(answer.body.error) && /Reset MFA again/.test(answer.body.error),
     answer.body.error);
   const record = s.calls.filter((c) => c.path === MFA_RECORD_PATH)[1];
   assert.equal(record?.body, { p_user_id: TARGET_ID, p_check_only: false, p_factors_removed: 1 });
@@ -925,6 +925,6 @@ Deno.test("a reset the database did not record says the factors went and the tra
   });
   const answer = await run(post({ action: "reset-mfa", user_id: TARGET_ID }), s);
   assertServerFailure(answer, 500, "terminating connection");
-  assert.ok(/2 second factors were removed/.test(answer.body.error) && /Audit Trail did not record it/.test(answer.body.error),
+  assert.ok(/2 authenticators were removed/.test(answer.body.error) && /Audit Trail did not record it/.test(answer.body.error),
     answer.body.error);
 });

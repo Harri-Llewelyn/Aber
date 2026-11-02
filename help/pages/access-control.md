@@ -47,10 +47,10 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
 - **End Sessions** asks you to confirm. Then it signs them out of every browser and every service. Use it for a shared screen left signed in, or when you cannot tell which session to end. They keep their role, and can sign in again.
-- **Reset MFA** asks you to confirm. Then it removes every [second factor](../guides/glossary.md#second-factor-mfa) the person has, so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
-- Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new second factor on their **Profile** page's **Security** tab.
-- Each reset is recorded in the Audit Trail, with how many second factors it removed. You cannot reset your own here: remove it on your **Profile** page's **Security** tab.
-- **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as [Resetting the only Administrator's second factor](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.
+- **Reset MFA** asks you to confirm. Then it removes every authenticator the person has added for [MFA](../guides/glossary.md#mfa-multi-factor-authentication), so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
+- Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new authenticator on their **Profile** page's **MFA** tab.
+- Each reset is recorded in the Audit Trail, with how many authenticators it removed. You cannot reset your own here: remove your authenticators on your **Profile** page's **MFA** tab.
+- **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as the [security model](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
@@ -58,7 +58,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Which address shows where.** A page shows the address the account has now, unless it says it shows the one they had at the time. Approvals and Archived Entities say so: they keep the address the person had when they acted.
 - **A link to a person still works after you change their address.** A link in a notification or a bookmark names the account, not the address.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
-- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Security** tab lists your own sessions and ends them, so your drawer has no list.
+- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Sessions** tab lists your own sessions and ends them, so your drawer has no list.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Each act here is recorded in the Audit Trail. That covers adding a person, a new role, name or address, removing or restoring access, a new password and ended sessions. The record names the person and who made the change. A new address is recorded with the old one. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
@@ -86,7 +86,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - **Revoke**, on a person's row, takes back their approval. A dialog asks first. Select **Revoke Approval** to do it.
 - The app's sessions for that person end at once. The API refuses them straight away. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within an hour.
 - The app asks them to allow it again the next time it signs them in. Their role and their other sessions do not change.
-- A person can revoke their own approval on their **Profile** page, on the **Security** tab.
+- A person can revoke their own approval on their **Profile** page, on the **Allowed Apps** tab.
 - **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
 - **Aber's own four apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
 - Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.

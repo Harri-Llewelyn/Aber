@@ -102,7 +102,7 @@ describe('Reset MFA', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
     await waitFor(() => expect(api.resetPersonMfa).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      "operator@site.test's second factor is reset: their password alone signs them in", 'success',
+      "operator@site.test's MFA is reset: their password alone signs them in", 'success',
       { to: personUrl(OPERATOR) }))
     // Nothing else was asked of manage-people, and no session was ended.
     expect(api.managePeople).not.toHaveBeenCalled()
@@ -115,7 +115,7 @@ describe('Reset MFA', () => {
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Reset MFA' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'operator@site.test had no second factor to remove', 'success', { to: personUrl(OPERATOR) }))
+      'operator@site.test had no MFA to reset', 'success', { to: personUrl(OPERATOR) }))
   })
 
   it('shows a refusal as an error', async () => {
@@ -133,7 +133,7 @@ describe('Reset MFA', () => {
     const reset = mine.getByRole('button', { name: 'Reset MFA' })
     expect(reset).toBeDisabled()
     expect(reset).toHaveAccessibleDescription(
-      "You cannot reset your own second factor here. Remove it on your Profile page's Security tab.")
+      "You cannot reset your own MFA here. Remove your authenticators on your Profile page's MFA tab.")
   })
 
   it('is offered for a removed person, so Restore Access lets them in with none', async () => {
@@ -145,6 +145,6 @@ describe('Reset MFA', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
     await waitFor(() => expect(api.resetPersonMfa).toHaveBeenCalledWith(REMOVED))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      expect.stringMatching(/second factor is reset/), 'success', { to: personUrl(REMOVED, true) }))
+      expect.stringMatching(/MFA is reset/), 'success', { to: personUrl(REMOVED, true) }))
   })
 })

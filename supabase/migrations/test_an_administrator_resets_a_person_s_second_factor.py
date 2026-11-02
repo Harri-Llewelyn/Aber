@@ -156,7 +156,7 @@ class Deciding(SecondFactorResetBase):
             with self.subTest(check_only=check_only):
                 with self.assertRaises(psycopg2.errors.InsufficientPrivilege) as refused:
                     self.reset(ADMIN_ID, check_only)
-                self.assertIn("Profile page's Security tab", refused.exception.diag.message_primary)
+                self.assertIn("Profile page's MFA tab", refused.exception.diag.message_primary)
         self.assertEqual(self.rows(ADMIN_ID), [])
 
     def test_an_unknown_person_is_not_found(self):

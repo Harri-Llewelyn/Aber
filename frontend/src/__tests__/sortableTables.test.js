@@ -13,7 +13,7 @@ import path from 'node:path'
 const TABLES = {
   'components/common/AppApprovalsTable.jsx': {
     sortable: 0,
-    fixed: ["Approvals of apps, a handful: newest first, as the sign-in service lists them. The Security tab and an app's drawer on Apps both draw it."]
+    fixed: ["Approvals of apps, a handful: newest first, as the sign-in service lists them. The Allowed Apps tab and an app's drawer on Apps both draw it."]
   },
   'components/common/HelpMarkdown.jsx': {
     sortable: 0,
@@ -21,7 +21,7 @@ const TABLES = {
   },
   'components/common/SessionsTable.jsx': {
     sortable: 0,
-    fixed: ['A person\'s sessions, a handful: the one in use first, then the most recently active. The Security tab and a person\'s drawer on People both draw it.']
+    fixed: ['A person\'s sessions, a handful: the one in use first, then the most recently active. The Sessions tab and a person\'s drawer on People both draw it.']
   },
   'components/modals/AssetConfigModal.jsx': { sortable: 2 },
   'components/modals/ServiceTokenInventoryModal.jsx': { sortable: 1 },
@@ -64,7 +64,7 @@ const TABLES = {
   'components/tabs/SchemasTab.jsx': { sortable: 1 },
   'components/tabs/SecondFactorSection.jsx': {
     sortable: 0,
-    fixed: ['A person\'s own second factors, one or two: in the order they were added, as the sign-in lists them.']
+    fixed: ['A person\'s own authenticators, one or two: in the order they were added, as the sign-in lists them.']
   },
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,

@@ -6,7 +6,7 @@ import { SCOPES_TIP, scopesText } from '../../utils/apps'
 
 /**
  * Approvals of apps that sign people in, one row each, in the Sessions table's shape: who or what,
- * when it was allowed, what it may read, and Revoke. The Profile page's Security tab lists the
+ * when it was allowed, what it may read, and Revoke. The Profile page's Allowed Apps tab lists the
  * apps a person has allowed (`list_my_app_approvals()`, 0217); an app's drawer on Access Control ›
  * Apps lists the people who allowed it (`app_approvals()`).
  *

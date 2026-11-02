@@ -543,6 +543,14 @@ html, body, #root {
   border-bottom: 1px solid var(--border);
 }
 
+/* The account's mark at the head's top right, floated so the name, address and version wrap
+   beside it rather than under it. */
+.user-popover-avatar { float: right; margin: 0 0 6px 10px; }
+.user-popover-avatar .user-avatar { width: 48px; height: 48px; }
+.user-popover-avatar .user-avatar-letters { font-size: 17px; }
+.user-popover-avatar .user-avatar-icon svg { width: 22px; height: 22px; }
+.user-popover-head::after { content: ''; display: block; clear: both; }
+
 /* Wraps rather than truncating: this is the one place the address is shown in full, so an
    ellipsis here would defeat the reason it exists. */
 .user-popover-email {

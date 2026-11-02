@@ -1,6 +1,6 @@
 -- 0211: Ending another of your own sessions is recorded in the Audit Trail.
 --
--- The Profile page's Security tab ends a person's other sessions two ways: End, one session, and
+-- The Profile page's Sessions tab ends a person's other sessions two ways: End, one session, and
 -- Sign Out of All Other Sessions, every one but the session in use. Each now writes the
 -- SESSIONS_ENDED row an Administrator's End Sessions writes (0207), in the person's lane, with the
 -- person in changed_by.

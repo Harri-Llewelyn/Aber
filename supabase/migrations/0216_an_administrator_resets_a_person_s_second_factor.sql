@@ -24,10 +24,10 @@ CREATE OR REPLACE FUNCTION public.record_person_mfa_reset(
 DECLARE
   v_email text;
 BEGIN
-  PERFORM public.check_person_act(p_user_id, 'reset a person''s second factor');
+  PERFORM public.check_person_act(p_user_id, 'reset a person''s MFA');
 
   IF p_user_id = auth.uid() THEN
-    RAISE EXCEPTION 'you cannot reset your own second factor here. Remove it on your Profile page''s Security tab.'
+    RAISE EXCEPTION 'you cannot reset your own MFA here. Remove your authenticators on your Profile page''s MFA tab.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 

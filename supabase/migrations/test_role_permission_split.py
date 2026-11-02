@@ -125,10 +125,9 @@ def drop_fixture_principals(user_ids):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # `user_roles.user_id` is `text` with no foreign key to `auth.users`, so neither delete
-            # constrains the other. Grants first, so the ROLE_REVOKED row is written while the
-            # identity it names still exists.
-            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+            # Grants first, so the ROLE_REVOKED row is written while the identity it names still
+            # exists. Deleting the account would also take them, through the foreign key.
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))
             cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))

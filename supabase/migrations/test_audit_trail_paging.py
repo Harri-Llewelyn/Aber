@@ -62,6 +62,12 @@ def become(cur, user_id, role_name):
     """Grant `role_name` to `user_id`, then become them the way PostgREST does: claims only."""
     cur.execute("SELECT id FROM public.roles WHERE name = %s;", (role_name,))
     role_id = cur.fetchone()[0]
+    # user_roles names an account.
+    cur.execute(
+        "INSERT INTO auth.users (id, email, encrypted_password, created_at)"
+        " VALUES (%s, %s, 'not-a-real-hash', now()) ON CONFLICT (id) DO NOTHING;",
+        (user_id, f"{user_id}@audit-trail-paging.test"),
+    )
     cur.execute(
         "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
         " ON CONFLICT (user_id, role_id) DO NOTHING;",

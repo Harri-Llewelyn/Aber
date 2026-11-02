@@ -274,7 +274,7 @@ BEGIN
   SELECT r.name INTO v_actor_role
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id
-   WHERE ur.user_id = p_actor_id::text
+   WHERE ur.user_id = p_actor_id
    LIMIT 1;
 
   IF v_actor_role IS NULL OR v_actor_role NOT IN ('Administrator', 'Shopfloor_Manager') THEN
