@@ -621,9 +621,10 @@ empty) and, for OTLP, adds `logForward.externalLabels`; a Loki destination gets 
   `service` label into the resource's `service.name` (the attribute OTLP stores key on; every label
   is also an attribute of its record), then `otelcol.processor.batch` (five-second batches) and
   `otelcol.exporter.otlphttp`, with a 16 MiB in-memory queue and an hour of retries.
-- **No syslog.** Alloy's `otelcol.exporter.syslog` is public preview, and using it means starting
-  all of Alloy at that stability level. A site that needs syslog runs a collector that takes OTLP
-  in and sends syslog out.
+- **No syslog.** Alloy's `otelcol.exporter.syslog` is public preview. Alloy runs at the
+  experimental level for the write-ahead log (below), so the exporter would load, but the chart
+  configures none. A site that needs syslog runs a collector that takes OTLP in and sends syslog
+  out.
 
 **A destination that stops answering does not stop the local store.** Both writers take their
 lines from one `loki.process`, so a forward that blocked would hold back the in-cluster store for
@@ -659,6 +660,14 @@ write-ahead log on its emptyDir, the OTLP queue in memory. A rollout or a node r
 they still hold. A destination unreachable for longer than the retries loses what it missed, and
 OTLP drops sooner once its queue is full. That suits operations. A site that must keep every line
 for compliance needs a collector of its own beside its store.
+
+**Alloy runs at the experimental stability level, for the write-ahead log.** `loki.write`'s WAL is
+experimental, and from Alloy 1.21 a config that enables it fails to load unless Alloy starts with
+`--stability.level=experimental`; the container does. Both writers keep theirs because it makes a
+container restart lossless. The level admits every public-preview and experimental component, not
+just the WAL; nothing else in the chart's config is below generally-available, since it loaded at
+the default level on v1.20.1. Without the WAL, Alloy could run at the default level again, and a
+restart would drop the lines still in its buffer.
 
 **Memory.** Measured in the same containers, the logs pipeline alone (no scrape), at about 240
 lines a second, once each figure had levelled. Anonymous memory (the heap, which no reclaim

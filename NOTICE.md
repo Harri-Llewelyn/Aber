@@ -44,7 +44,7 @@ one.
 | `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
 | `aber/edge-runtime` | `supabase/edge-runtime:v1.77.0`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
-| `aber/node-red` | `nodered/node-red:5.0.7` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
+| `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
 | `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
@@ -357,7 +357,7 @@ on any row.
 | `grafana/grafana:13.2.3` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
 | `prom/prometheus:v3.15.1` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
-| `nodered/node-red:5.0.7` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
+| `nodered/node-red:5.0.9` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
 | `nginx:alpine` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` (nginx 1.31.8 when read; the tag moves) |
 | `python:3.13-slim` | Python Software Foundation License | `/usr/local/lib/python3.13/LICENSE.txt` (Python 3.13.16 when read; the tag moves) |
 | `node:24.21.0-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
@@ -381,7 +381,7 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.34.1` |
 | `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
-| `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
+| `grafana/alloy:v1.21.3` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.21.3` |
 | `gitea/gitea:28.0.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.0.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |
 | `jryberg/mosquitto-exporter:v0.7.9` | Apache 2.0 | [`jryberg/mosquitto-exporter`](https://github.com/jryberg/mosquitto-exporter) `v0.7.9` |

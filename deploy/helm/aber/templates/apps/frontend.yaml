@@ -132,7 +132,7 @@ for.
 {{- /* The one inline stylesheet the dashboard has: the <style> in the 3D viewer's shadow DOM
        (@google/model-viewer's lib/template.js). Check 68 hashes it from the installed package, so
        an upgrade that changes it fails there rather than leaving the viewer unstyled. */ -}}
-{{- $modelViewerStyle := "'sha256-F7kvx28zBT3UUQL/hTOYst+55RSmqyCY3muSCYmt6A4='" -}}
+{{- $modelViewerStyle := "'sha256-PXtZZkJMMyc18o/DN1ZEFOJ2qEGq95IQbVaJFMOXOb0='" -}}
 {{- $policy := join "; " (list
   "default-src 'self'"
   "script-src 'self' 'wasm-unsafe-eval'"

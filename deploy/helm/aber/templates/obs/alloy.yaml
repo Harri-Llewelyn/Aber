@@ -143,6 +143,7 @@ loki.write "local" {
 
   // The write-ahead log makes a container restart lossless. It lives on the pod's emptyDir,
   // so a pod replaced on a rollout starts afresh; that is the trade for no hostPath writes.
+  // It is experimental: the container runs Alloy at --stability.level=experimental.
   wal {
     enabled = true
   }
@@ -648,6 +649,9 @@ spec:
             - --storage.path=/var/lib/alloy-data
             # Alloy reports which components it runs to Grafana Labs unless told not to.
             - --disable-reporting
+            # loki.write's write-ahead log is experimental, and Alloy refuses a config that enables
+            # it below this level. Nothing else in the config is under generally-available.
+            - --stability.level=experimental
             - /etc/alloy/config.alloy
           env:
             - name: NODE_NAME
