@@ -199,8 +199,8 @@ the `2.29.2` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. T
 ## Grafana and Loki — AGPL-3.0
 
 `grafana/grafana:13.3.0` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
-pinned image. **`grafana/loki:3.7.8` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
-`v3.7.8` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
+pinned image. **`grafana/loki:3.7.9` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
+`v3.7.9` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
 These are the most restrictive licences in the stack — more so than TimescaleDB's, which is worth
 stating plainly because it is the opposite of the usual assumption.
 
@@ -355,7 +355,7 @@ on any row.
 | pgBackRest 2.57.0 and tini 0.19.0, added to `supabase/postgres:17.6.1.175` as `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/db/Dockerfile`) | MIT | `apk info -a pgbackrest`, `apk info -a tini` → `license: MIT` |
 | gosu, added from Alpine to both of those images | Apache 2.0 | `apk info -a gosu` → `license: Apache-2.0` |
 | `grafana/grafana:13.3.0` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
-| `prom/prometheus:v3.15.0` | Apache 2.0 | `/LICENSE` |
+| `prom/prometheus:v3.15.1` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
 | `nodered/node-red:5.0.7` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
 | `nginx:alpine` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` (nginx 1.31.8 when read; the tag moves) |
@@ -378,14 +378,14 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `supabase/edge-runtime:v1.77.0` | MIT | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0` |
 | `supabase/postgres-meta:v0.99.0` | Apache 2.0 | [`supabase/postgres-meta`](https://github.com/supabase/postgres-meta) `v0.99.0` |
 | `supabase/studio:2026.09.28-sha-5e59b60` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
-| `envoyproxy/envoy:v1.39.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.39.2` |
+| `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0` |
-| `grafana/loki:3.7.8` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.8` |
+| `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
 | `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
 | `gitea/gitea:28.0.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.0.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |
 | `jryberg/mosquitto-exporter:v0.7.9` | Apache 2.0 | [`jryberg/mosquitto-exporter`](https://github.com/jryberg/mosquitto-exporter) `v0.7.9` |
-| `curlimages/curl:8.22.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_22_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.22.0` |
+| `curlimages/curl:8.23.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_23_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.23.0` |
 | `denoland/deno:2.1.4` | MIT | [`denoland/deno`](https://github.com/denoland/deno) `v2.1.4`. A build stage only: `aber/edge-runtime` takes the module cache it resolves, not Deno |
 | `python:3.12-slim` | Python Software Foundation License | [`python/cpython`](https://github.com/python/cpython). Pinned by digest in `forge/gateway-custom-example/custom/Dockerfile`, which a site builds on its own gateway |
 
