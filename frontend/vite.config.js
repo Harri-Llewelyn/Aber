@@ -16,9 +16,11 @@ import { helpCorpus } from './helpCorpus.js'
  *   2. `git describe`, for `npm run dev` and any build run from a working tree. This is what makes
  *      a developer's build label itself without anyone remembering to set a variable.
  *
- * `--tags` counts lightweight tags, `--always` degrades to a bare commit id rather than failing on
- * a repository with no tag yet, and `--dirty` marks a build made over uncommitted edits -- which
- * is precisely the build whose identity is otherwise a lie.
+ * `--tags` counts lightweight tags, `--match 'v[0-9]*'` takes release tags only (the GPL
+ * source-mirror releases are `gpl-sources-…` tags, which name no version), `--always` degrades to a
+ * bare commit id rather than failing on a repository with no tag yet, and `--dirty` marks a build
+ * made over uncommitted edits -- which is precisely the build whose identity is otherwise a lie.
+ * scripts/dev-cluster.mjs's DESCRIBE_ARGS is the same list, held equal by its test.
  *
  * FAILURE IS NOT FATAL AND IS NOT DISGUISED. No git, no repository, no tags: the version resolves
  * to `unknown` and src/version.js renders that as the answer. A build that cannot know its version
@@ -30,7 +32,7 @@ function resolveAppVersion() {
 
   try {
     // execFileSync, not execSync: no shell, so nothing here is interpolated into a command line.
-    return execFileSync('git', ['describe', '--tags', '--always', '--dirty'], {
+    return execFileSync('git', ['describe', '--tags', '--match', 'v[0-9]*', '--always', '--dirty'], {
       cwd: import.meta.dirname,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
