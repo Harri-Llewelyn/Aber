@@ -120,6 +120,13 @@ python supabase/test_a_token_s_use_is_recorded.py
 # Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
 # reset and a non-Administrator's are refused. The account's access is removed at the end.
 python supabase/test_a_person_can_enrol_a_second_factor.py
+# No service accepts a token signed with the shared secret. Needs the stack up, with the release
+# Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
+# session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
+# and nodered-userinfo. The same claims signed HS256 with SUPABASE_JWT_SECRET are refused by each,
+# and signed with REALTIME_JWT_SECRET or STORAGE_JWT_SECRET by every service but that one. A
+# service_role token signed with the shared secret is refused by PostgREST and Storage. Writes nothing.
+python supabase/test_no_service_accepts_the_shared_secret.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction

@@ -1510,6 +1510,17 @@ export const SUITES = {
       'computed here (RFC 6238), and an Administrator resets it, which leaves one MFA_RESET row and ' +
       'the session signed in. Phone and WebAuthn enrolment are refused.',
   },
+  'supabase/test_no_service_accepts_the_shared_secret.py': {
+    lanes: ['stack'],
+    why:
+      'No service accepts a token signed with the shared secret (secrets.jwtSecret), which only the ' +
+      "running services can show: each verifies with its own configuration, and the chart's render " +
+      "proves only what it hands them. The seeded Administrator's ES256 session is served by " +
+      'PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API and an edge ' +
+      'function; the same claims signed HS256 with the shared secret are refused by each, as is a ' +
+      "service_role token signed with it, and signed with Realtime's or Storage's own secret they " +
+      'are refused by every service but that one. Writes nothing.',
+  },
   'timescaledb/test_worker_pool.py': {
     lanes: ['stack'],
     why:
