@@ -396,6 +396,10 @@ npm run test:db
 # The individual suites, for when one is being worked on. Point them at the throwaway with
 # `npm run test:db -- --keep --no-run` and SUPABASE_DB_PORT=54329 rather than running them bare.
 python supabase/migrations/test_user_roles_rls.py
+# What has_role() and has_authority() cost per call (median of 5 runs of 10,000), beside the loop
+# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards. Printed, never asserted: run it on
+# the same database before and after a change to either function or the table they read.
+python supabase/migrations/test_role_checks_are_timed.py
 # The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
 # nameplate. The rest cover the two properties a simplification would remove first -- that an

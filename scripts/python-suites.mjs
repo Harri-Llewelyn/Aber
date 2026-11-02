@@ -507,6 +507,13 @@ export const SUITES = {
     lanes: ['db'],
     why: "The role table's RLS -- who may read and who may grant.",
   },
+  'supabase/migrations/test_role_checks_are_timed.py': {
+    lanes: ['db'],
+    why:
+      'Prints what has_role() and has_authority() cost per call, and the plan of a read their ' +
+      'policy guards, so a change to either is measured before and after on the same database. ' +
+      'Fails only on a wrong answer, never on a number.',
+  },
   'supabase/migrations/test_first_administrator.py': {
     lanes: ['db'],
     why:
