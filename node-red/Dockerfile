@@ -19,7 +19,7 @@
 #     (users.js init() + strategies.js authenticateUserToken())
 #   - httpNodeAuth may be Express middleware rather than {user, pass} (red.js:426)
 # node-red-init.mjs carries the same kind of pin for the credentials runtime.
-FROM nodered/node-red:5.0.7
+FROM nodered/node-red:5.0.9
 
 # WHAT THE BASE CARRIES THAT THIS IMAGE DOES NOT RUN, removed before anything is added (#347).
 #
@@ -59,15 +59,13 @@ RUN node -e ' \
       passport-oauth2@1.8.0 \
       jsonwebtoken@9.0.2
 
-# NPM'S BUNDLED undici AND brace-expansion, replaced by their patch releases (same dependencies,
-# same engines). Node-RED's palette manager runs this npm, and an override cannot reach a bundled
-# tree; Node-RED 5.0.7 bundles npm 11.19.1, with undici 6.28.0 and brace-expansion 5.0.9. `npm pack`
-# checks each tarball against the registry's integrity. Both lines go when npm bundles the fixes.
-RUN cd /tmp && npm pack --silent undici@6.29.1 brace-expansion@5.0.11 \
- && for p in undici brace-expansion; do \
-      d=/usr/src/node-red/node_modules/npm/node_modules/$p; \
-      rm -rf "$d" && mkdir -p "$d" && tar -xzf /tmp/$p-*.tgz -C "$d" --strip-components=1; \
-    done \
+# NPM'S BUNDLED undici, replaced by its patch release (same dependencies, same engines). Node-RED's
+# palette manager runs this npm, and an override cannot reach a bundled tree; Node-RED 5.0.9 bundles
+# npm 11.21.1, with undici 6.29.0. `npm pack` checks the tarball against the registry's integrity.
+# The line goes when npm bundles the fix.
+RUN cd /tmp && npm pack --silent undici@6.29.1 \
+ && d=/usr/src/node-red/node_modules/npm/node_modules/undici \
+ && rm -rf "$d" && mkdir -p "$d" && tar -xzf /tmp/undici-*.tgz -C "$d" --strip-components=1 \
  && rm -f /tmp/*.tgz
 
 # THE PROVISIONING SCRIPT, baked in rather than mounted from a ConfigMap. Node-RED is its only
