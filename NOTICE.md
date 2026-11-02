@@ -385,7 +385,7 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `gitea/gitea:28.0.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.0.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |
 | `jryberg/mosquitto-exporter:v0.7.9` | Apache 2.0 | [`jryberg/mosquitto-exporter`](https://github.com/jryberg/mosquitto-exporter) `v0.7.9` |
-| `curlimages/curl:8.22.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_22_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.22.0` |
+| `curlimages/curl:8.23.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_23_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.23.0` |
 | `denoland/deno:2.1.4` | MIT | [`denoland/deno`](https://github.com/denoland/deno) `v2.1.4`. A build stage only: `aber/edge-runtime` takes the module cache it resolves, not Deno |
 | `python:3.12-slim` | Python Software Foundation License | [`python/cpython`](https://github.com/python/cpython). Pinned by digest in `forge/gateway-custom-example/custom/Dockerfile`, which a site builds on its own gateway |
 

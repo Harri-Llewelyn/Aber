@@ -850,7 +850,7 @@ initJobs:
   # The wait-for initContainers that probe over HTTP, in Jobs and Deployments alike.
   curlImage:
     repository: curlimages/curl
-    tag: "8.22.0"
+    tag: "8.23.0"
     pullPolicy: IfNotPresent
   # storage-init runs one script with node; npm is never run.
   storageInitImage:
