@@ -31,7 +31,8 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Operator** reads the shopfloor and its live readings, and can propose changes.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
-- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, and **Remove Access** or **Restore Access**.
+- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View Their Changes**, and **Remove Access** or **Restore Access**.
+- **View Their Changes** opens the Audit Trail with **Changed by** set to that person. It lists every change they made, under any email address they had.
 - The drawer shows their email address, display name, role, status and last sign-in.
 - **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used.
 - Select **Show sessions**, under the count, to list them. Each row says where the session is: a browser and system, a program, or a service. It says when the session started and when it was last active. No address is shown.
@@ -54,7 +55,8 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
 - An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
-- **Which address shows where.** People and the Audit Trail show the address the account has now. Approvals and Archived Entities keep the address the person had when they acted.
+- **Which address shows where.** A page shows the address the account has now, unless it says it shows the one they had at the time. Approvals and Archived Entities say so: they keep the address the person had when they acted.
+- **A link to a person still works after you change their address.** A link in a notification or a bookmark names the account, not the address.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
 - **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Security** tab lists your own sessions and ends them, so your drawer has no list.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
