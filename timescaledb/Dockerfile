@@ -7,7 +7,7 @@
 #
 # THE TAG MUST MATCH THE ONE THE MAINTENANCE JOB'S psql WAS VERIFIED AGAINST; the chart runs this
 # image for the server, the maintenance Job and the certificate-reload sidecar alike.
-FROM timescale/timescaledb:2.29.2-pg17
+FROM timescale/timescaledb:2.31.0-pg17
 
 # Alpine community. Installed whether or not physical backup is switched on, so turning it on is a
 # values change and a restart, not a different image.

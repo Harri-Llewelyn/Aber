@@ -40,11 +40,11 @@ one.
 
 | Published image | Built on | Licence of the base | The licence text in the published image |
 | :--- | :--- | :--- | :--- |
-| `aber/timescaledb` | `timescale/timescaledb:2.29.2-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
+| `aber/timescaledb` | `timescale/timescaledb:2.31.0-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
 | `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
 | `aber/edge-runtime` | `supabase/edge-runtime:v1.77.0`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
-| `aber/node-red` | `nodered/node-red:5.0.7` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
+| `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
 | `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
@@ -127,10 +127,10 @@ Upstream: [`github.com/open223/defs.open223.info`](https://github.com/open223/de
 
 ## TimescaleDB — Timescale License
 
-`timescale/timescaledb:2.29.2-pg17` is dual-licensed in a single upstream repository: the core under
+`timescale/timescaledb:2.31.0-pg17` is dual-licensed in a single upstream repository: the core under
 Apache 2.0, and the features under `tsl/` under the Timescale License, which is source-available
 rather than OSI-approved open source. The two build into separate shared objects, and the image
-ships both: `timescaledb-2.29.2.so` and `timescaledb-tsl-2.29.2.so`, with those of every release
+ships both: `timescaledb-2.31.0.so` and `timescaledb-tsl-2.31.0.so`, with those of every release
 back to 2.17.0.
 
 **This deployment runs under the Timescale License.** That is not an inference — the running server
@@ -168,7 +168,7 @@ which is Apache 2.0, but running it as a job is Timescale-Licensed.
 generator and the restore rehearsal call `compress_chunk()`, also Timescale-Licensed, but neither
 runs in a site's install.
 
-**How this was checked**, against upstream at tag `2.29.2`. Each Timescale-Licensed call above reaches
+**How this was checked**, against upstream at tag `2.31.0`. Each Timescale-Licensed call above reaches
 a cross-module function in `src/cross_module_fn.c`. Under the `apache` licence that function raises
 "functionality not supported under the current "apache" license", and `tsl/src/init.c` registers
 its implementation. The Apache 2.0 calls are declared in `sql/` and implemented outside `tsl/`.
@@ -191,16 +191,16 @@ For the ordinary case — running this at your own site, for your own operations
 not — the restriction does not engage.
 
 **The licence text travels with the image.** The upstream image ships no TimescaleDB licence file: a
-full-filesystem search of `timescale/timescaledb:2.29.2-pg17` finds only Python's. So
+full-filesystem search of `timescale/timescaledb:2.31.0-pg17` finds only Python's. So
 `timescaledb/Dockerfile` adds `LICENSE`, `LICENSE-APACHE`, `NOTICE` and `tsl/LICENSE-TIMESCALE` from
-the `2.29.2` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. The source is
+the `2.31.0` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. The source is
 [`github.com/timescale/timescaledb`](https://github.com/timescale/timescaledb).
 
 ## Grafana and Loki — AGPL-3.0
 
-`grafana/grafana:13.2.3` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
-pinned image. **`grafana/loki:3.7.8` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
-`v3.7.8` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
+`grafana/grafana:13.3.0` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
+pinned image. **`grafana/loki:3.7.9` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
+`v3.7.9` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
 These are the most restrictive licences in the stack — more so than TimescaleDB's, which is worth
 stating plainly because it is the opposite of the usual assumption.
 
@@ -350,17 +350,17 @@ on any row.
 
 | Component | Licence | Evidence |
 | :--- | :--- | :--- |
-| `timescale/timescaledb:2.29.2-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale`. No licence file of its own ([above](#timescaledb--timescale-license)) |
+| `timescale/timescaledb:2.31.0-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale`. No licence file of its own ([above](#timescaledb--timescale-license)) |
 | pgBackRest 2.57.0, added to that image as `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescaledb/Dockerfile`) | MIT | `apk info -a pgbackrest` → `license: MIT` |
 | pgBackRest 2.57.0 and tini 0.19.0, added to `supabase/postgres:17.6.1.175` as `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/db/Dockerfile`) | MIT | `apk info -a pgbackrest`, `apk info -a tini` → `license: MIT` |
 | gosu, added from Alpine to both of those images | Apache 2.0 | `apk info -a gosu` → `license: Apache-2.0` |
-| `grafana/grafana:13.2.3` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
-| `prom/prometheus:v3.15.0` | Apache 2.0 | `/LICENSE` |
+| `grafana/grafana:13.3.0` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
+| `prom/prometheus:v3.15.1` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
-| `nodered/node-red:5.0.7` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
+| `nodered/node-red:5.0.9` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
 | `nginx:alpine` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` (nginx 1.31.8 when read; the tag moves) |
 | `python:3.13-slim` | Python Software Foundation License | `/usr/local/lib/python3.13/LICENSE.txt` (Python 3.13.16 when read; the tag moves) |
-| `node:24.21.0-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
+| `node:24.22.2-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
 | `alpine:3.24` | Each package its own: BusyBox and apk-tools GPL-2.0-only, musl MIT, OpenSSL Apache 2.0 | `apk list -I` |
 
 ### Checked in the upstream repository
@@ -378,14 +378,14 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `supabase/edge-runtime:v1.77.0` | MIT | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0` |
 | `supabase/postgres-meta:v0.99.0` | Apache 2.0 | [`supabase/postgres-meta`](https://github.com/supabase/postgres-meta) `v0.99.0` |
 | `supabase/studio:2026.09.28-sha-5e59b60` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
-| `envoyproxy/envoy:v1.39.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.39.2` |
+| `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0` |
-| `grafana/loki:3.7.8` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.8` |
-| `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
+| `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
+| `grafana/alloy:v1.21.3` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.21.3` |
 | `gitea/gitea:28.3.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.3.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |
 | `jryberg/mosquitto-exporter:v0.7.9` | Apache 2.0 | [`jryberg/mosquitto-exporter`](https://github.com/jryberg/mosquitto-exporter) `v0.7.9` |
-| `curlimages/curl:8.22.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_22_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.22.0` |
+| `curlimages/curl:8.23.0` | curl licence (MIT-style); the image's own files MIT | [`curl/curl`](https://github.com/curl/curl) `curl-8_23_0`, [`curl/curl-container`](https://github.com/curl/curl-container) `8.23.0` |
 | `denoland/deno:2.1.4` | MIT | [`denoland/deno`](https://github.com/denoland/deno) `v2.1.4`. A build stage only: `aber/edge-runtime` takes the module cache it resolves, not Deno |
 | `python:3.12-slim` | Python Software Foundation License | [`python/cpython`](https://github.com/python/cpython). Pinned by digest in `forge/gateway-custom-example/custom/Dockerfile`, which a site builds on its own gateway |
 

@@ -28,11 +28,11 @@ is not pinned.
 
 | File | Upstream, at the tag the image pins |
 | :--- | :--- |
-| `timescaledb/timescaledb/LICENSE` | [`timescale/timescaledb`](https://github.com/timescale/timescaledb) `2.29.2`, `LICENSE` |
+| `timescaledb/timescaledb/LICENSE` | [`timescale/timescaledb`](https://github.com/timescale/timescaledb) `2.31.0`, `LICENSE` |
 | `timescaledb/timescaledb/LICENSE-APACHE` | the same, `LICENSE-APACHE` |
 | `timescaledb/timescaledb/NOTICE` | the same, `NOTICE` |
 | `timescaledb/timescaledb/LICENSE-TIMESCALE` | the same, `tsl/LICENSE-TIMESCALE` |
-| `timescaledb/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_11`, `COPYRIGHT` (the PostgreSQL that `timescale/timescaledb:2.29.2-pg17` runs) |
+| `timescaledb/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_11`, `COPYRIGHT` (the PostgreSQL that `timescale/timescaledb:2.31.0-pg17` runs) |
 | `supabase-postgres/supabase-postgres/LICENSE` | [`supabase/postgres`](https://github.com/supabase/postgres) `17.6.1.175`, `LICENSE` |
 | `supabase-postgres/postgresql/COPYRIGHT` | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6`, `COPYRIGHT` |
 | `supabase-postgres/postgis/COPYING` | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7`, `COPYING` (GPL-2.0) |
