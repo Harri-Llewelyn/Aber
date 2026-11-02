@@ -131,6 +131,17 @@ describe('useUrlTab\'s hrefFor', () => {
     expect(window.location.pathname + window.location.search).toBe(hrefFor('device'))
   })
 
+  it('keeps, for a function, the keys it names for the tab being opened', () => {
+    window.history.replaceState(null, '', '/capture?stored=with&search=line')
+    const keep = next => (['gateway', 'device'].includes(next) ? ['stored', 'search'] : [])
+    const { result } = renderHook(() => useUrlTab('capture', ['gateway', 'device', 'captures'], 'gateway', { keep }))
+    const [, setTab, hrefFor] = result.current
+    expect(hrefFor('device')).toBe('/capture/device?stored=with&search=line')
+    expect(hrefFor('captures')).toBe('/capture/captures')
+    act(() => setTab('captures'))
+    expect(window.location.pathname + window.location.search).toBe('/capture/captures')
+  })
+
   it('follows the address, so a link copied after a filter changes carries the new filter', () => {
     window.history.replaceState(null, '', '/capture?search=a')
     const { result } = renderHook(() => useUrlTab('capture', ['gateway', 'device'], 'gateway', { keep: ['search'] }))
