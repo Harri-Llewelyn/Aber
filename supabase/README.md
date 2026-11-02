@@ -5206,6 +5206,12 @@ both, and `npm run keys:rotate -- --service-secrets` replaces them and restarts 
 | `supabase-studio` | a placeholder |
 | `supabase-db` | nothing |
 
+Each of the seven that read the set carries `checksum/signing-keys` (`aber.signingChecksum`), so
+`helm upgrade` restarts it when the set changes; a Secret's change alone restarts nothing, and on a
+site that already signed ES256 the upgrade to 1.8.0 changed GoTrue's and PostgREST's specs not at all.
+Under `existingSecret` the checksum is of the Secret `lookup` reads, so a GitOps render (no
+`lookup`) restarts them only for the marker the checksum leads with: change the Secret, then restart.
+
 Two findings decided rows of that table:
 
 - **Studio verifies nothing.** It reports `AUTH_JWT_SECRET` (its settings endpoint and JWT pages)
