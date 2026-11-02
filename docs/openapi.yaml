@@ -3446,6 +3446,70 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/ReleaseCheck' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/directory_figures:
+    get:
+      tags: [Registry]
+      summary: What the stack is doing, as the System page shows it
+      description: |
+        One row per figure, written every minute by `refresh_directory_figures()` from Prometheus
+        over pg_net (`0223`): Sparkplug messages and readings per second over 5 minutes, messages
+        refused, shed and missed in the last hour (three counts that overlap, so never add them),
+        and whether ingestion is subscribed to the broker and connected to the historian.
+
+        A `null` `value` means the last answer did not carry that figure: Prometheus did not
+        answer, answered with an error, or is not deployed. It is never the previous value.
+        Every signed-in user reads it; no role writes it.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: The seven figures.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DirectoryFigure' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/directory_gateway_counts:
+    post:
+      tags: [Registry]
+      summary: Gateways online, of those enrolled
+      description: |
+        Counted as the caller from `gateway_status` (`0223`), whose RLS lets every signed-in user
+        read every gateway. Enrolled leaves out archived gateways, the Playback gateway and
+        gateways still `PENDING_ENROLLMENT`; online is `live_status = 'ONLINE'`, so a gateway whose
+        heartbeat has aged out is not. Counts only, never names.
+      responses:
+        '200':
+          description: One row.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    online: { type: integer, example: 3 }
+                    enrolled: { type: integer, example: 4 }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
+  /rest/v1/rpc/directory_devices_reporting:
+    post:
+      tags: [Registry]
+      summary: Devices with a reading in the last 5 minutes
+      description: |
+        Distinct telemetry asset ids with a reading from the last 5 minutes, read as the caller
+        from the historian's `telemetry_latest` over the FDW (`0223`). The count is made on the
+        historian, so one number crosses. When the historian cannot be reached the call fails
+        (`503`), which is not the same as zero.
+      responses:
+        '200':
+          description: The count.
+          content:
+            application/json:
+              schema: { type: integer, example: 12 }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   # ------------------------------------------------------------- Storage ----
   /storage/v1/object/asset-3d-models/{path}:
     parameters:
@@ -6077,6 +6141,33 @@ components:
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
+
+    DirectoryFigure:
+      type: object
+      properties:
+        key:
+          type: string
+          enum: [messages_per_second, readings_per_second, messages_refused_last_hour,
+                 messages_shed_last_hour, messages_missed_last_hour, ingestion_broker_link,
+                 ingestion_historian_link]
+        value:
+          type: number
+          nullable: true
+          description: >-
+            A rate per second, a count over the last hour, or 1 and 0 for a link. `null` when the
+            last answer did not carry it.
+        observed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When Prometheus evaluated the value; `null` with it.
+        detail:
+          type: object
+          nullable: true
+          description: >-
+            `messages_per_second` carries `by_msg_type`, its rate by Sparkplug message type;
+            `messages_refused_last_hour` carries `largest_reason` and `largest`, the reason with the
+            most refusals. `null` otherwise.
 
     ReleaseCheck:
       type: object

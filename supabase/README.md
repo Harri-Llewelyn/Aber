@@ -2448,6 +2448,102 @@ turns to the CHECK. `test_an_area_plan_can_be_turned.py` holds the checks, a tur
 cell, the spacing at every rotation, who may turn a plan and its audit row, and the file's replay
 over a drifted CHECK and over a database from before `0221`.
 
+### The System page shows what the stack is doing (0223)
+
+The System page said whether each service answers, and nothing about whether data is flowing. The
+Ingestion & Messaging tab now opens with six figures, read the way liveness is read: no edge
+function and no new network route.
+
+| Figure | Source |
+| --- | --- |
+| Sparkplug messages per second, over 5 minutes | `sum(rate(aber_ingestion_messages_total[5m]))`, and `sum by (msg_type)` for the tooltip |
+| Readings written per second, over 5 minutes | `sum(rate(aber_ingestion_metrics_written_total[5m]))` |
+| Messages lost in the last hour: refused, shed, missed | the three series of Stack & Ingestion Health's *Messages Lost* panel as `increase(...[1h])`, and `sum by (reason)` for the largest reason |
+| Ingestion's links to the broker and the historian | `min(aber_ingestion_mqtt_connected)`, `min(aber_ingestion_db_connected)` |
+| Gateways online, of those enrolled | `directory_gateway_counts()`, read live |
+| Devices reporting in the last 5 minutes | `directory_devices_reporting()`, read live from the historian |
+
+**The Prometheus figures.** `refresh_directory_figures()` is `refresh_directory_liveness()`'s
+sibling, and pg_cron runs it every minute (`refresh-directory-figures`). It collects the answer to
+the previous run's request from `net._http_response`, writes `directory_figures`, and fires the
+next request over the existing `supabase-db` → `prometheus:9090` route. Its request id is in its own
+one-row `directory_figures_probe`, so the two collectors never read each other's answers.
+
+- **One request, not one per figure.** The query joins every figure's vector with `or`, and
+  `label_replace` gives each a `figure` label, so one answer carries all of them. One request id,
+  one status check and one evaluation instant, so the figures on the page are from the same
+  moment. A request per figure needs a stored id per figure, and a run can then collect some
+  answers and not others.
+- **The query is fixed in the function.** Nothing from a browser becomes PromQL.
+- **A series that appears only at its first event reads 0 while ingestion is scraped.**
+  `aber_ingestion_messages_total{msg_type}` and `aber_ingestion_sequence_messages_missed_total`
+  have no series until something happens. `or sum(aber_ingestion_up) * 0` makes them 0 while the
+  daemon answers its scrape, and leaves them absent while it does not. The panel's `or vector(0)`
+  would claim a zero nobody observed.
+- **`sum` and `min` across ingestion pods.** One pod runs, but a restart leaves two series in the
+  window. A link reads 0 if any pod reports 0.
+
+**The honesty rule is liveness's.** A figure with no fresh answer is NULL, and the page says *not
+observed*, never the last value. Every run rewrites every row: from a 200 whose body is a
+successful Prometheus vector, or NULL. So no row yet, a timeout, a non-200, content that is not
+JSON, a result that is not a list, Infinity or NaN, and no Prometheus at all (observability off)
+each read *not observed* within a minute. Fresh means the previous tick, as liveness's status is one
+tick old. An answer the write cannot read raises inside a nested block, which clears every row
+with a WARNING, so the run still fires its next request.
+
+**`directory_figures` is read by everyone and written by no role.** One row per figure, seeded
+here, with `value`, `observed_at` (when Prometheus evaluated it) and `detail` (the split by
+message type, and the largest refusal reason). `authenticated` reads it through a `USING (true)`
+policy, since the System page is ungated and these are counts. No role holds a write grant,
+`service_role` included, and there is no write policy. This is stricter than `directory_services`,
+whose `_privileged` policies let an Administrator or Shopfloor Manager write. Anon is revoked by
+name.
+
+**One address, `directory_prometheus_url()`.** It returns the fixed `http://prometheus:9090`, and
+both collectors read it, so a configurable address changes one function. There is no setting and
+no `networkPolicy.extraEgress` rule for it. `refresh_directory_liveness()` is redeclared here to
+read it, rather than edited in `0001`:
+
+- **A new function goes in a new numbered migration** (rule 1 above), and `0178` set the pattern:
+  it declared `set_foreign_credential()` and redeclared the four readers after it.
+- **The boot window stays shut.** pg_cron runs liveness every minute while db-init replays. `0001`'s
+  copy still carries its own constant, so it never names the helper. This file declares the helper
+  first and then redeclares liveness. Had `0001` named the helper, an upgrade from 1.7 would run
+  liveness between `0001` and `0223` against a function that did not exist yet.
+
+**Liveness changes in two more ways.** Content that is not JSON used to raise in the cast. That
+rolled back the run before it fired the next probe, so every later run collected the same answer
+and raised again until pg_net pruned it, six hours on. It is now no answer. And the UNKNOWN sweep
+used to pass over every service the job map names, so a probe that failed left each scraped
+service at its last ACTIVE, with a heartbeat hours old. The sweep now covers every service the
+answer did not report. With Prometheus gone, the eight scraped services read *not observed* within
+two minutes, beside the figures.
+
+**The two figures read live, each on its own.** Neither is copied into the table.
+
+- `directory_gateway_counts()` counts `gateway_status` as the caller. `gateways` lets every
+  signed-in user read every row (`gateways_select_authenticated`, `USING (true)`), so no `SECURITY
+  DEFINER` is needed, and it returns two integers, never names. Enrolled leaves out archived
+  gateways, the Playback gateway and gateways still `PENDING_ENROLLMENT`. `AWAITING_BIRTH` is
+  enrolled, and not online. Online is `live_status = 'ONLINE'`, so an aged-out heartbeat is not.
+- `directory_devices_reporting()` counts distinct `asset_id` in the foreign `telemetry_latest` with
+  a reading from the last 5 minutes, as the caller. The bound is a plpgsql variable: postgres_fdw
+  ships a parameter, and the remote query is the whole count, so one integer crosses. `now()` in
+  the WHERE would be evaluated here, and every series would cross. postgres_fdw raises when the
+  historian cannot be reached, which the page shows as *not observed*.
+- The dashboard calls them separately, so a historian outage takes the device count and leaves
+  the gateway count.
+
+The file's self-check asserts that both collectors read the helper and name no address of their
+own, that every seeded figure is one the query names, that the job is scheduled every minute,
+that the probe has its row, that `directory_figures` is readable by `authenticated` and written
+by no role, that anon reads neither table, that no API role may run a collector, and that the two
+live reads run as the caller. `test_the_system_page_shows_what_the_stack_is_doing.py` holds every
+answer shape, the next request, liveness's two changes, who reads and writes, and the live reads,
+with a local table standing in for the foreign one. Mirror check 39 holds the seeded keys to the
+dashboard's and the API reference's, and check 176 (`scripts/check-docs-drift.mjs`) holds each
+tile's Grafana panel to the dashboard JSON.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

@@ -499,6 +499,15 @@ python supabase/migrations/test_directory_images.py
 # gate refuses a version, link or `newer` the account menu could not show, and only
 # Service_ReleaseCheck may call it; its key reaches nothing else.
 python supabase/migrations/test_release_check.py
+# What the stack is doing, on the System page (0223). Answers are filed in net._http_response by
+# hand: a 200 writes each figure it carries, with the split by message type and the largest refusal
+# reason, and NULL for the rest; a non-200, no answer yet, unparseable content or no Prometheus at
+# all clears every figure, never leaving the last value. Each run fires the next query to
+# directory_prometheus_url(). Liveness reads the same address, survives content that is not JSON,
+# and sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the figures, no
+# role writes them, anon reads nothing; the gateway count is online of enrolled, and stands when the
+# historian is out. Every test rolls back.
+python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and

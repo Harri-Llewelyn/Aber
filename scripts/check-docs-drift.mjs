@@ -1081,6 +1081,7 @@ function edgeFunctionNames() {
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
+    'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
     'public.register_uploaded_capture': '0190 registers only a path begin_capture_upload() issued the caller, refuses a subject being recorded, a shadow subject and a capture stored since the upload began, records the object\'s own size, bounds the message count by it and caps the manifest; the baseline took the browser\'s word for all of them, after the file had already overwritten the stored one. 0193 writes a CAPTURE_UPLOADED audit row and tells the replaced capture\'s CAPTURE_DELETED what replaced it',
@@ -2182,6 +2183,10 @@ const OPERATOR_PAIRS = [
       'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
+    directory_figures_probe:
+      'one row holding the in-flight pg_net request id for refresh_directory_figures() (0223), as ' +
+      'directory_liveness_probe holds liveness\'s. RLS on with no policy and nothing granted to ' +
+      'anon/authenticated; the System page reads the figures from directory_figures',
     gateway_revocation_requests:
       'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0158). RLS ' +
       'on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +
