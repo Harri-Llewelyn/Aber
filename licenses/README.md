@@ -48,7 +48,7 @@ is not pinned.
 | `supabase-postgres/libidn2/COPYINGv2`, `COPYING.LESSERv3`, `COPYING`, `COPYING.unicode` | [`libidn/libidn2`](https://gitlab.com/libidn/libidn2) `v2.3.8`, the same four files (GPL-2.0, LGPL-3.0, GPL-3.0, the Unicode data licence) |
 | `supabase-postgres/libunistring/COPYING.LIB`, `COPYING` | [`libunistring-1.4.1.tar.gz`](https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.1.tar.gz), the same two files (LGPL-3.0, GPL-3.0) |
 | `edge-runtime/edge-runtime/LICENSE` | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0`, `LICENSE` |
-| `swagger-ui/swagger-ui/LICENSE` | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0`, `LICENSE` |
+| `swagger-ui/swagger-ui/LICENSE` | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.34.1`, `LICENSE` |
 | `swagger-ui/swagger-ui/NOTICE` | the same, `NOTICE` |
 
 PostGIS and pgRouting are here because `supabase/postgres` ships both extensions' binaries, under

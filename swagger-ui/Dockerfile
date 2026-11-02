@@ -8,7 +8,7 @@
 # the next `helm upgrade`. The dev loop rebuilds every image on `node scripts/dev-cluster.mjs up`.
 #
 # Built from the repository root, so both specs resolve; .dockerignore negates each by name.
-FROM swaggerapi/swagger-ui:v5.33.0
+FROM swaggerapi/swagger-ui:v5.34.1
 
 # The base's Alpine packages, taken to the distribution's current fixes: a fix Alpine ships between
 # two base cuts reaches the release rather than waiting for the next base (#347).
