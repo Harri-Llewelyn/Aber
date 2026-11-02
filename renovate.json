@@ -82,6 +82,7 @@
     },
     {
       "description": "The same Deno, in constraints.deno above. The renovate-config manager reads that pin as a dependency of this file and proposes moving it to the newest Deno; it moves with edge-runtime, by hand.",
+      "minimumReleaseAge": null,
       "matchManagers": ["renovate-config"],
       "matchDepTypes": ["tool-constraint"],
       "matchDepNames": ["deno"],
@@ -119,6 +120,7 @@
     },
     {
       "description": "A Python minor is a new interpreter, and is held like a major. Compiled wheels lag its release: on python 3.15, psycopg2-binary had none and the ingestion image's build failed.",
+      "minimumReleaseAge": "7 days",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["python"],
       "matchUpdateTypes": ["minor"],
