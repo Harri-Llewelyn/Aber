@@ -30,7 +30,7 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
       showToast?.(
         held ? `${person.email} is now shown as ${held}` : `${person.email} is now shown by email alone`,
         'success',
-        { to: personUrl(person.email) }
+        { to: personUrl(person.user_id) }
       )
       onClose()
     } catch (err) {

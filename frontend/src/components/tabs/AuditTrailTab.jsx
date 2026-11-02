@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useUrlState } from '../../hooks/useUrlState'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { isUuid } from '../../utils/isUuid'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { sessionLabel } from '../../utils/sessions'
 import { ContextPanel } from '../common/ContextPanel'
@@ -10,7 +11,7 @@ import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
-  IconRecord, IconFileText, IconRefreshCw, IconGlobe
+  IconRecord, IconFileText, IconRefreshCw, IconGlobe, IconX
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -802,7 +803,7 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
       <p className="trail-causation-hint">{hint}</p>
 
       {offerControl && (
-        <Tooltip text="Loads every row the transaction wrote, whatever it touched. It clears the entity and action filters and shows deleted entities.">
+        <Tooltip text="Loads every row the transaction wrote, whatever it touched. It clears the entity, action and Changed by filters and shows deleted entities.">
           <button
             type="button"
             className="btn btn-ghost btn-sm trail-causation-all"
@@ -1008,6 +1009,9 @@ export function AuditTrailTab({ userRole, showToast }) {
   const [entityTypeFilter, setEntityTypeFilter] = useUrlState('type', '', { allowed: entityTypes.map(e => e.kind) })
   const [nameFilter, setNameFilter]   = useUrlState('search')
   const [actionFilter, setActionFilter] = useUrlState('action', '', { allowed: Object.keys(AUDIT_TRAIL_ACTIONS) })
+  // Whose changes: the user id the trail stamps in `changed_by`, a person's or a machine identity's.
+  // Any id is kept, listed or not: the database's policies decide which of their rows come back.
+  const [changedBy, setChangedBy] = useUrlState('changed_by', '', { allowed: isUuid })
   const [rangePreset, setRangePreset] = useUrlState('range', 'all', { allowed: [...TIME_PRESETS.map(p => p.value), 'custom'] })
   const [customStart, setCustomStart] = useUrlState('since')
   const [customEnd, setCustomEnd]     = useUrlState('until')
@@ -1125,6 +1129,33 @@ export function AuditTrailTab({ userRole, showToast }) {
     return m
   }, [entityIdentities])
 
+  /**
+   * Who Changed by offers: the people `list_user_accounts()` returned, by name and current address,
+   * and the machine identities by name, from the registry and `machine_principals`. Empty lists for
+   * a role that may read neither.
+   */
+  const actorOptions = useMemo(() => {
+    const byLabel = (a, b) => a.label.localeCompare(b.label)
+    const people = userAccounts
+      .filter(u => u?.user_id)
+      .map(u => ({
+        id: u.user_id,
+        label: u.display_name ? `${u.display_name}${u.email ? ` (${u.email})` : ''}` : (u.email || u.user_id),
+      }))
+      .sort(byLabel)
+    const machines = new Map()
+    for (const [id, meta] of Object.entries(KNOWN_PRINCIPALS)) if (meta?.name) machines.set(id, meta.name)
+    for (const [id, row] of machinePrincipals) if (row?.name && !machines.has(id)) machines.set(id, row.name)
+    return { people, machines: [...machines].map(([id, label]) => ({ id, label })).sort(byLabel) }
+  }, [userAccounts, machinePrincipals])
+
+  /** The chosen actor as the chip and the list say them, or the id where nothing here names them. */
+  const changedByName = changedBy
+    ? ([...actorOptions.people, ...actorOptions.machines].find(o => o.id === changedBy)?.label || changedBy)
+    : ''
+  const changedByListed = !changedBy
+    || [...actorOptions.people, ...actorOptions.machines].some(o => o.id === changedBy)
+
   // Deleted entities: in the log, absent from every live table. The list endpoints do not filter
   // `is_archived`, so absent means gone rather than retired. The server counts them over everything
   // the filters select, not over the page; null means it did not say, which must not render as zero.
@@ -1203,6 +1234,7 @@ export function AuditTrailTab({ userRole, showToast }) {
     let url = `/api/v1/audit-trail?limit=${PAGE_SIZE}`
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
+    if (changedBy)        url += `&changed_by=${encodeURIComponent(changedBy)}`
     if (search)           url += `&search=${encodeURIComponent(search)}`
     // Evaluated here, not held in state: see timeWindow's note on a rolling window going stale
     // under auto-refresh.
@@ -1217,7 +1249,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       url += `&before_id=${encodeURIComponent(cursor.id)}`
     }
     return url
-  }, [entityTypeFilter, actionFilter, search, rangePreset, customStart, customEnd, showPurged])
+  }, [entityTypeFilter, actionFilter, changedBy, search, rangePreset, customStart, customEnd, showPurged])
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -1275,20 +1307,20 @@ export function AuditTrailTab({ userRole, showToast }) {
     rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
 
   /** The controls in the Filters popover that are off their default; its own Clear resets them. */
-  const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0)
+  const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0) + (changedBy ? 1 : 0)
 
   const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) +
     // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
-  const clearPopoverFilters = () => { setEntityTypeFilter(''); setActionFilter('') }
+  const clearPopoverFilters = () => { setEntityTypeFilter(''); setActionFilter(''); setChangedBy('') }
 
   /**
    * Load every row one transaction wrote, by searching its id.
    *
    * The entity and action filters are cleared because one act crosses both: an approval writes an
    * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
-   * of it. Deleted entities are shown for the same reason: a delete's own row is about an entity
+   * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
    * no live table holds, and `transaction_rows` counts it. The time range is kept: the rows share
    * one `recorded_at`, so a range holding this event holds its siblings.
    */
@@ -1296,11 +1328,12 @@ export function AuditTrailTab({ userRole, showToast }) {
     setNameFilter(String(causationId))
     setEntityTypeFilter('')
     setActionFilter('')
+    setChangedBy('')
     setShowPurged(true)
   }
 
   const resetFilters = () => {
-    setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
+    setEntityTypeFilter(''); setNameFilter(''); setActionFilter(''); setChangedBy('')
     setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
   }
 
@@ -1706,7 +1739,45 @@ export function AuditTrailTab({ userRole, showToast }) {
                 ))}
               </select>
             </Tooltip>
+
+            <Tooltip text="Only the changes one person or machine identity made, under any email address they had.">
+              <select
+                className="form-control"
+                value={changedBy}
+                onChange={e => setChangedBy(e.target.value)}
+                aria-label="Changed by"
+              >
+                <option value="">Changed by anyone</option>
+                {actorOptions.people.length > 0 && (
+                  <optgroup label="People">
+                    {actorOptions.people.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                )}
+                {actorOptions.machines.length > 0 && (
+                  <optgroup label="Machine identities">
+                    {actorOptions.machines.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </optgroup>
+                )}
+                {/* An id from a link that neither list holds, so the control still shows it. */}
+                {!changedByListed && <option value={changedBy}>{changedBy}</option>}
+              </select>
+            </Tooltip>
           </FiltersPopover>
+
+          {/* The chosen actor stays in view while the popover is shut; selecting it clears it. */}
+          {changedBy && (
+            <Tooltip text="Only their changes are shown. Select to show everyone's.">
+              <button
+                type="button"
+                className="chip chip-link trail-actor-chip"
+                onClick={() => setChangedBy('')}
+                aria-label={`Changed by ${changedByName}. Show everyone's changes`}
+              >
+                <span className="chip-name">Changed by {changedByName}</span>
+                <IconX size={11} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
 
           {/* Shown only when something is deleted. The tooltip says no longer in the database,
               because absence from the lookups is all the test sees. */}

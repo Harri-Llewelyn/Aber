@@ -29,7 +29,7 @@ export function ChangeRoleModal({ person, onClose, onChanged, showToast }) {
     try {
       await api.setPersonRole(person.user_id, role)
       onChanged?.(role)
-      showToast?.(`${personLabel(person)} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.email) })
+      showToast?.(`${personLabel(person)} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.user_id) })
       onClose()
     } catch (err) {
       setError(err.message)

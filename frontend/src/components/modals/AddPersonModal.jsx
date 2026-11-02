@@ -35,8 +35,8 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       const result = await api.addPerson(email.trim(), role, normaliseDisplayName(displayName))
       setAdded(result)
       onAdded?.(result)
-      showToast?.(result.invited ? `Invitation sent to ${result.email}` : `${result.email} added`, 'success', { to: personUrl(result.email) })
-      if (result.name_error) showToast?.(result.name_error, 'warning', { to: personUrl(result.email) })
+      showToast?.(result.invited ? `Invitation sent to ${result.email}` : `${result.email} added`, 'success', { to: personUrl(result.user_id) })
+      if (result.name_error) showToast?.(result.name_error, 'warning', { to: personUrl(result.user_id) })
     } catch (err) {
       setError(err.message)
     } finally {

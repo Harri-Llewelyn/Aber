@@ -6,8 +6,8 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import {
-  IconArchive, IconChevronDown, IconChevronUp, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus, IconRefreshCw,
-  IconScan, IconShieldAlert, IconShieldCheck, IconUser,
+  IconArchive, IconChevronDown, IconChevronUp, IconHistory, IconInbox, IconLock, IconLogOut, IconPencil, IconPlus,
+  IconRefreshCw, IconScan, IconShieldAlert, IconShieldCheck, IconUser,
 } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
@@ -26,7 +26,7 @@ import { DisplayNameModal } from '../modals/DisplayNameModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
-import { personUrl, tabUrl } from '../../routes'
+import { changesByUrl, personUrl, tabUrl } from '../../routes'
 import { personLabel } from '../../utils/displayName'
 import { endSessionQuestion, sessionLabel, sortSessions } from '../../utils/sessions'
 import {
@@ -54,8 +54,20 @@ const PEOPLE_SORT = {
   last_sign_in: { type: 'time', value: p => p.last_sign_in_at }
 }
 
-/** What a person is found by in the address (`?person=`): their email, which personUrl() writes. */
-const personKey = (p) => p.email || p.user_id
+/** What a person is found by in the address (`?person=`): their user id, which personUrl() writes. */
+const personKey = (p) => p.user_id
+
+/**
+ * Whom a `?person=` value names: the person with that user id, or, for a link written with an
+ * email address before links carried the id, whoever has that address now, in any case.
+ */
+const personFor = (people, value) => {
+  if (!value) return null
+  const address = value.toLowerCase()
+  return people.find(p => p.user_id === value)
+    || people.find(p => String(p.email || '').toLowerCase() === address)
+    || null
+}
 
 /** A person in a few words, as the drawer's title names them: their name, else their email. */
 const nameOf = (p) => p.display_name || p.email || p.user_id
@@ -67,7 +79,7 @@ const CLOSED_LIST = { userId: null, rows: undefined, error: null }
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, re-address, sign out, remove or restore, to give a new
  * password, or to reset a lost second factor (Reset MFA). A row is the person, their role, status and last sign-in; a click or Enter opens their
- * drawer (`?person=<email>`), which holds every action. A person is drawn by their display name
+ * drawer (`?person=<user id>`), which holds every action. A person is drawn by their display name
  * with their email beside it, or by the email alone.
  *
  * Roles go through set_person_role(), names through set_display_name(), and ending sessions
@@ -84,9 +96,10 @@ const CLOSED_LIST = { userId: null, rows: undefined, error: null }
  * still needs Remove Access again. The filters are in the address.
  *
  * `drawerHost` is the element the drawer is drawn into, beside the page's card, where every page's
- * drawer sits; without one it is drawn in place.
+ * drawer sits; without one it is drawn in place. `canReadTrail` offers View Their Changes, the
+ * Audit Trail filtered to what the person changed.
  */
-export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
+export function PeopleSection({ showToast, currentUserId, drawerHost = null, canReadTrail = false }) {
   const [people, setPeople] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -114,8 +127,15 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
     allowed: PERSON_STATUSES.map(st => st.key).filter(key => showRemoved || key !== 'removed')
   })
   // Whoever the list holds, filtered out or not: a link to a removed person opens their drawer.
-  const [openPerson, setOpenPerson] = useUrlState('person', '', { allowed: loading ? null : people.map(personKey) })
-  const selected = useMemo(() => people.find(p => personKey(p) === openPerson) || null, [people, openPerson])
+  const [openPerson, setOpenPerson] = useUrlState('person', '', {
+    allowed: loading ? null : (value) => !!personFor(people, value),
+  })
+  const selected = useMemo(() => personFor(people, openPerson), [people, openPerson])
+  // A link by address is rewritten to the id once the list is in. The setter replaces the entry,
+  // so Back does not return to the address.
+  useEffect(() => {
+    if (selected && openPerson !== personKey(selected)) setOpenPerson(personKey(selected))
+  }, [selected, openPerson, setOpenPerson])
 
   const load = useCallback(() => {
     api.listPeople()
@@ -187,26 +207,25 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
     if (!loading && !error && showRemoved && removedCount === 0) setShowRemoved(false)
   }, [loading, error, showRemoved, removedCount, setShowRemoved])
 
-  // The address is the drawer's key in the URL. The list takes the new one first, committed at
-  // once, so the drawer and a search for the old address move with it rather than being tidied away.
+  // The drawer is keyed by the id, so it stays open. A search for the old address moves to the new
+  // one, and the list takes the new address first, committed at once, so the row stays in view.
   const emailChanged = useCallback((person, result) => {
     flushSync(() => setPeople(ps => ps.map(p => (p.user_id === person.user_id ? { ...p, email: result.email } : p))))
-    if (openPerson === person.email) setOpenPerson(result.email)
     if (search.trim().toLowerCase() === String(person.email || '').toLowerCase()) setSearch(result.email)
     rereadSessions(person.user_id)
     load()
-  }, [openPerson, setOpenPerson, search, setSearch, rereadSessions, load])
+  }, [search, setSearch, rereadSessions, load])
 
   const confirmAct = useCallback(async () => {
     const { act, person, session } = confirming
     try {
       if (act === 'remove') {
         await api.removePersonAccess(person.user_id)
-        showToast?.(`${personLabel(person)} can no longer sign in`, 'success', { to: personUrl(person.email, true) })
+        showToast?.(`${personLabel(person)} can no longer sign in`, 'success', { to: personUrl(person.user_id, true) })
       } else if (act === 'password') {
         const result = await api.managePeople({ action: 'set-password', user_id: person.user_id })
         setNewPassword({ email: person.email, password: result.password })
-        showToast?.(`${personLabel(person)} has a new password`, 'success', { to: personUrl(person.email) })
+        showToast?.(`${personLabel(person)} has a new password`, 'success', { to: personUrl(person.user_id) })
       } else if (act === 'sessions') {
         const ended = await api.endPersonSessions(person.user_id)
         showToast?.(
@@ -214,14 +233,14 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             ? `${personLabel(person)} had no session to end`
             : `${personLabel(person)} is signed out everywhere: ${ended} session${ended === 1 ? '' : 's'} ended`,
           'success',
-          { to: personUrl(person.email, accessRemoved(person)) }
+          { to: personUrl(person.user_id, accessRemoved(person)) }
         )
       } else if (act === 'session') {
         await api.endPersonSession(person.user_id, session.id)
         showToast?.(
           `Session ended for ${personLabel(person)}: ${sessionLabel(session)}`,
           'success',
-          { to: personUrl(person.email, accessRemoved(person)) }
+          { to: personUrl(person.user_id, accessRemoved(person)) }
         )
       } else if (act === 'mfa') {
         const { factors_removed: removed } = await api.resetPersonMfa(person.user_id)
@@ -230,14 +249,14 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             ? `${personLabel(person)} had no second factor to remove`
             : `${personLabel(person)}'s second factor is reset: their password alone signs them in`,
           'success',
-          { to: personUrl(person.email, accessRemoved(person)) }
+          { to: personUrl(person.user_id, accessRemoved(person)) }
         )
       } else {
         const result = await api.restorePersonAccess(person.user_id)
         showToast?.(
           `${personLabel(person)} can sign in again${result?.role ? ` as ${personRoleLabel(result.role)}` : ''}`,
           'success',
-          { to: personUrl(person.email) }
+          { to: personUrl(person.user_id) }
         )
       }
     } catch (err) {
@@ -398,6 +417,12 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             title: isSelf
               ? "You cannot reset your own second factor here. Remove it on your Profile page's Security tab."
               : 'Remove their second factor, for someone who has lost their authenticator. Their password alone signs them in until they add a new one.',
+          },
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          canReadTrail && {
+            label: 'View Their Changes', icon: <IconHistory size={13} />,
+            to: changesByUrl(p.user_id),
+            title: 'Open the Audit Trail filtered to the changes they made, under any address they had',
           },
           removed && {
             label: 'Restore Access', icon: <IconRefreshCw size={13} />,

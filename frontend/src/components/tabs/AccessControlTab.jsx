@@ -26,6 +26,7 @@ import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation'
+import { PERMISSION_UUIDS } from '../../constants'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -118,6 +119,7 @@ export const SECTIONS = ACCESS_CONTROL_TABS
  * People is the people who sign in, for an Administrator to add, re-role and remove (PeopleSection).
  * It is offered only when `userRole` is Administrator, and the page opens on it; the functions behind
  * it check the role again. `currentUserId` is the signed-in account, whose own controls are disabled.
+ * `hasPermission` decides whether a person's drawer links to the Audit Trail.
  *
  * Apps is the apps that sign those people in, such as Grafana, and who has allowed each
  * (AppsSection). Administrator only, as People is.
@@ -131,7 +133,7 @@ export const SECTIONS = ACCESS_CONTROL_TABS
  *
  * The tab is the path (`/access-control/credentials`), so a reload or Back returns to it.
  */
-export function AccessControlTab({ showToast, userRole = null, currentUserId = null }) {
+export function AccessControlTab({ showToast, userRole = null, currentUserId = null, hasPermission = null }) {
   const showPeople = userRole === 'Administrator'
   const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, APPS_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
   const [section, setSection, sectionHref] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
@@ -461,7 +463,12 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           />
 
           {section === 'people' && showPeople && (
-            <PeopleSection showToast={showToast} currentUserId={currentUserId} drawerHost={personDrawerHost} />
+            <PeopleSection
+              showToast={showToast}
+              currentUserId={currentUserId}
+              drawerHost={personDrawerHost}
+              canReadTrail={!!hasPermission?.(PERMISSION_UUIDS.AUDIT_TRAIL_READ)}
+            />
           )}
 
           {section === 'apps' && showPeople && (

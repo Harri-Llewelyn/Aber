@@ -607,6 +607,16 @@ describe('audit trail filtering', () => {
     expect(rpcArgs().p_entity_ids).toBeNull();
   });
 
+  it('sends Changed by as p_changed_by, and nothing when it is not set (0222)', async () => {
+    const id = 'a0000000-0000-4000-8000-000000000003';
+    await api.get(`/api/v1/audit-trail?changed_by=${id}`);
+    expect(rpcArgs().p_changed_by).toBe(id);
+    // Left out rather than null, so an unfiltered page still reads a database from before 0222.
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/audit-trail');
+    expect(rpcArgs()).not.toHaveProperty('p_changed_by');
+  });
+
   it('sends no search rather than an empty one', async () => {
     // `''` would be a predicate matching every row through a LIKE, which is the same answer as no
     // filter but arrived at by scanning for it.
