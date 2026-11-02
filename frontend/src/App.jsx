@@ -780,7 +780,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               <ColdStorageTab showToast={showToast} userRole={userRole} />}
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id} />}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id} hasPermission={hasPermission} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} readOnly={userRole !== 'Administrator'} />}
             {/* Every person's own page. Appearance writes through useUserSettings, as the account

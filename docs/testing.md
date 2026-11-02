@@ -843,6 +843,16 @@ python supabase/migrations/test_an_alert_keeps_its_rule_labels_and_values.py
 # A second boot drops nothing, a drifted CHECK is put back, and a database from before 0221 gets
 # the column with every area unturned and no audit row. Every test rolls back.
 python supabase/migrations/test_an_area_plan_can_be_turned.py
+# A decision keeps its decider's address, and the Audit Trail filters by who made a change (0222).
+# audit_trail_page(p_changed_by) returns one person's or machine identity's rows, counts only
+# those, and composes with the action and the cursor; a Shopfloor Manager gets that person's
+# asset-lane rows only, and an Operator none. Approving, rejecting and withdrawing stamp
+# decided_by_email from the token, and it keeps the address after the account's changes. An
+# expiry, a decider who is not the caller, a decision from before 0222 and a client's insert or
+# update leave it NULL. The function is declared once, with p_changed_by last: after the chain,
+# after 0168 and 0222 replay, and after 0222 replays over the ten-argument form; 0222's self-check
+# refuses two. Every test rolls back.
+python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

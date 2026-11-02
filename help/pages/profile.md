@@ -72,7 +72,7 @@ Your display name is shown first wherever you appear. Your email address stays t
 
 **A new name shows everywhere at once.** Pages read the name when they open. So a person who changes their name is shown under the new one, even beside things they did before.
 
-**The email address beside it is the one they had at the time.** Approvals keeps the address a proposal was made from. Archived Entities keeps the address of the person who deleted the entity. The Audit Trail and People show the address the account has now.
+**The email address beside it is the one the account has now, unless the page says it is the one they had at the time.** Approvals and Archived Entities say so. They keep the address the person had when they proposed, decided or deleted something. A decision made before Aber 1.8.0 kept no address. Approvals shows an Administrator the address the decider has now instead.
 
 ## Your picture
 

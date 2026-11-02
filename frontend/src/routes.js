@@ -35,6 +35,9 @@ export const trailKindFilter = (type) => {
 export const trailUrl = (id, type = '', deleted = false) =>
   pageUrl('audit-trail', { search: id, type: trailKindFilter(type), deleted })
 
+/** Every change one person or machine identity made, by their user id: the trail's Changed by. */
+export const changesByUrl = (userId) => pageUrl('audit-trail', { changed_by: userId })
+
 /** The readings ingestion refused or flagged for one device: its SCHEMA_REJECTION rows. */
 export const schemaRejectionsUrl = (deviceId) =>
   pageUrl('audit-trail', { search: deviceId, action: 'SCHEMA_REJECTION' })
@@ -73,11 +76,12 @@ export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id 
 export const backupUrl = (runId = '') => pageUrl('backups', { run: runId })
 
 /**
- * One person on Access Control › People, found by email with their drawer open; a removed person
- * is shown with the removed.
+ * One person on Access Control › People with their drawer open, by their user id, which survives a
+ * change of address. People opens it whatever its filters show; a removed person is shown with the
+ * removed.
  */
-export const personUrl = (email, removed = false) =>
-  pageUrl('access-control', { search: email, removed, person: email }, 'people')
+export const personUrl = (userId, removed = false) =>
+  pageUrl('access-control', { removed, person: userId }, 'people')
 
 /**
  * One machine identity on Access Control › Machine identities, found by name or principal id;

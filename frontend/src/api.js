@@ -2667,6 +2667,8 @@ const apiMethods = {
       // ordered newest first, so a client-side window would spend the budget on rows it then discards.
       const since = (url.searchParams.get('since') || '').trim();
       const until = (url.searchParams.get('until') || '').trim();
+      // Whose changes: the `changed_by` id, a person's or a machine identity's (0222).
+      const changedBy = (url.searchParams.get('changed_by') || '').trim();
 
       // The keyset cursor: both halves or neither. `recorded_at` is not unique (one transaction's rows
       // share one `now()`), so the id is what makes the position exact. The RPC ignores a half-cursor.
@@ -2706,6 +2708,8 @@ const apiMethods = {
         p_search: search || null,
         p_since: since || null,
         p_until: until || null,
+        // Sent only when set, so an unfiltered page still reads a database from before 0222.
+        ...(changedBy ? { p_changed_by: changedBy } : {}),
         // Sent only with a cursor, both halves or neither.
         ...(hasCursor
           ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }

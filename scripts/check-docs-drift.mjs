@@ -1127,7 +1127,7 @@ function edgeFunctionNames() {
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
-    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
+    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
@@ -2003,6 +2003,65 @@ const OPERATOR_PAIRS = [
     );
   } else {
     pass('0001 makes the audit trail\'s monthly partitions before its default partition and its triggers');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 175. The ON DELETE rule supabase/README.md states for each person column is the one the applied
+// migrations declare. Every foreign key to auth.users is listed under its rule, CASCADE, NO ACTION
+// or SET NULL, and nothing listed there or under "No foreign key" disagrees. A column with no key
+// cannot be found this way, so that list is kept by hand.
+// -------------------------------------------------------------------------------------------------
+{
+  const README = 'supabase/README.md';
+  const dir = 'supabase/migrations';
+  const offences = [];
+  const declared = new Map();
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  for (const file of files) {
+    const sql = read(`${dir}/${file}`);
+    // `[ADD] CONSTRAINT x FOREIGN KEY (col) REFERENCES auth.users(id)`, or an inline column
+    // `col uuid ... REFERENCES auth.users (id)`, each under the nearest CREATE or ALTER TABLE.
+    const keys = /(?:FOREIGN KEY \((\w+)\)|^\s+(\w+)\s+uuid\b[^,\n]*?)\s*REFERENCES auth\.users\s*\(id\)(?: ON DELETE (CASCADE|SET NULL))?/gm;
+    for (const m of sql.matchAll(keys)) {
+      // A guard's quoted comparison is not a declaration.
+      const line = sql.slice(sql.lastIndexOf('\n', m.index) + 1, m.index);
+      if (line.includes("'")) continue;
+      const tables = [...sql.slice(0, m.index).matchAll(/(?:CREATE TABLE(?: IF NOT EXISTS)?|ALTER TABLE(?: ONLY)?)\s+public\.(\w+)/g)];
+      if (!tables.length) continue;
+      const column = `${tables[tables.length - 1][1]}.${m[1] || m[2]}`;
+      const rule = m[3] || 'NO ACTION';
+      if (declared.has(column) && declared.get(column) !== rule) {
+        offences.push(`${column} is declared ON DELETE ${declared.get(column)} and ON DELETE ${rule}`);
+      }
+      declared.set(column, rule);
+    }
+  }
+
+  const readme = read(README);
+  const listed = new Map();
+  for (const [rule, label] of [['CASCADE', '`CASCADE`'], ['NO ACTION', '`NO ACTION`'], ['SET NULL', '`SET NULL`'], ['none', 'No foreign key']]) {
+    const item = new RegExp(`^- \\*\\*${label.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}[^*]*\\((\\d+)\\):\\*\\*([\\s\\S]*?)(?=\\n- |\\n\\n)`, 'm').exec(readme);
+    if (!item) {
+      offences.push(`${README} has no "- **${label} ... (n):**" item under "What deleting an account would do to the rows that name it"`);
+      continue;
+    }
+    const columns = [...item[2].matchAll(/`(\w+\.\w+)`/g)].map((c) => c[1]);
+    if (columns.length !== Number(item[1])) offences.push(`${README}'s ${label} item says ${item[1]} and lists ${columns.length}`);
+    for (const column of columns) listed.set(column, rule);
+  }
+  for (const [column, rule] of declared) {
+    if (!listed.has(column)) offences.push(`${column} references auth.users ON DELETE ${rule}, and ${README} does not list it`);
+    else if (listed.get(column) !== rule) offences.push(`${column} references auth.users ON DELETE ${rule}, and ${README} lists it under ${listed.get(column)}`);
+  }
+  for (const [column, rule] of listed) {
+    if (rule !== 'none' && !declared.has(column)) offences.push(`${README} lists ${column} under ${rule}, and no applied migration gives it a foreign key to auth.users`);
+  }
+
+  if (offences.length) {
+    fail(`The person columns' ON DELETE rules are stated as the migrations declare them:\n  ${offences.join('\n  ')}`);
+  } else {
+    pass(`supabase/README.md lists each of the ${declared.size} foreign keys to auth.users under the ON DELETE rule the migrations declare`);
   }
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl
+  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl
 } from '../routes'
 
 /**
@@ -143,8 +143,12 @@ describe('where a notification links to', () => {
   it('finds a backup run, a person and a machine identity', () => {
     expect(backupUrl()).toBe('/backups')
     expect(backupUrl('b-1')).toBe('/backups?run=b-1')
-    expect(personUrl('op@site.test')).toBe('/access-control/people?search=op%40site.test&person=op%40site.test')
-    expect(personUrl('op@site.test', true)).toBe('/access-control/people?search=op%40site.test&removed=1&person=op%40site.test')
+    // A person by their user id, which outlives a change of address, and no search: People opens
+    // the drawer for whoever the list holds, filtered or not.
+    const id = 'a0000000-0000-4000-8000-000000000003'
+    expect(personUrl(id)).toBe(`/access-control/people?person=${id}`)
+    expect(personUrl(id, true)).toBe(`/access-control/people?removed=1&person=${id}`)
+    expect(changesByUrl(id)).toBe(`/audit-trail?changed_by=${id}`)
     expect(identityUrl('Line 4 report', true)).toBe('/access-control/identities?search=Line+4+report&withdrawn=1')
   })
 

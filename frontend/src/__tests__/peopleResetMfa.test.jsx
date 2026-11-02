@@ -103,7 +103,7 @@ describe('Reset MFA', () => {
     await waitFor(() => expect(api.resetPersonMfa).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
       "operator@site.test's MFA is reset: their password alone signs them in", 'success',
-      { to: personUrl('operator@site.test') }))
+      { to: personUrl(OPERATOR) }))
     // Nothing else was asked of manage-people, and no session was ended.
     expect(api.managePeople).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -115,7 +115,7 @@ describe('Reset MFA', () => {
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Reset MFA' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'operator@site.test had no MFA to reset', 'success', { to: personUrl('operator@site.test') }))
+      'operator@site.test had no MFA to reset', 'success', { to: personUrl(OPERATOR) }))
   })
 
   it('shows a refusal as an error', async () => {
@@ -145,6 +145,6 @@ describe('Reset MFA', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
     await waitFor(() => expect(api.resetPersonMfa).toHaveBeenCalledWith(REMOVED))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      expect.stringMatching(/MFA is reset/), 'success', { to: personUrl('removed@site.test', true) }))
+      expect.stringMatching(/MFA is reset/), 'success', { to: personUrl(REMOVED, true) }))
   })
 })

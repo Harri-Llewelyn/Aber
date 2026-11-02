@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { proposalSubjectUrl, proposalUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
@@ -492,9 +492,27 @@ export function ApprovalsTab({
 
   usePolling(loadAll, POLL_INTERVAL_MS)
 
-  // The proposers' display names, read live beside the email stamped at the time. Only the people
-  // this viewer can already see here are answered; anyone else is drawn by email alone.
-  const proposerNames = useDisplayNames(useMemo(() => proposals.map(p => p.proposed_by), [proposals]))
+  // The proposers' and deciders' display names, read live beside the email stamped at the time. Only
+  // the people this viewer can already see here are answered; anyone else is drawn by email alone.
+  const personNames = useDisplayNames(useMemo(() => proposals.flatMap(p => [p.proposed_by, p.decided_by]), [proposals]))
+
+  // A decision made before 0222 kept no address, so the decider's current one stands in, for a role
+  // that may read the accounts (list_user_accounts(): Administrator, Auditor). Read once, when one
+  // is on the page; anyone else sees the id, as before.
+  const mayReadAccounts = userRole === 'Administrator' || userRole === 'Auditor'
+  const needsCurrentAddress = useMemo(() => proposals.some(p => p.decided_by && !p.decided_by_email), [proposals])
+  const [currentAddresses, setCurrentAddresses] = useState(() => new Map())
+  useEffect(() => {
+    if (!mayReadAccounts || !needsCurrentAddress) return undefined
+    let alive = true
+    // A thunk, so a stub without the method reads as no addresses rather than throwing.
+    Promise.resolve().then(() => api.listUserAccounts())
+      .then(rows => {
+        if (alive) setCurrentAddresses(new Map((rows || []).filter(r => r?.email).map(r => [r.user_id, r.email])))
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [mayReadAccounts, needsCurrentAddress])
 
   const refresh = useCallback(async () => {
     try { await loadAll() } catch { /* the poller reports a failing backend */ }
@@ -515,11 +533,11 @@ export function ApprovalsTab({
   )
 
   const decidedFiltered = useMemo(
-    () => filterProposals(decided, decidedKind, decidedQuery, proposerNames), [decided, decidedKind, decidedQuery, proposerNames])
+    () => filterProposals(decided, decidedKind, decidedQuery, personNames), [decided, decidedKind, decidedQuery, personNames])
 
   // The working queue filters too: the device drawer routes here with the device's id as the query.
   const openFiltered = useMemo(
-    () => filterProposals(open, openKind, openQuery, proposerNames), [open, openKind, openQuery, proposerNames])
+    () => filterProposals(open, openKind, openQuery, personNames), [open, openKind, openQuery, personNames])
 
   /* What waits on this viewer, by the rule the sidebar's count uses: lanes they may decide, and not
      their own requests. */
@@ -718,7 +736,7 @@ export function ApprovalsTab({
           {
             label: 'Proposed by',
             value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
-                               name={proposerNames.get(selected.proposed_by)}
+                               name={personNames.get(selected.proposed_by)}
                                machineName={selected.proposed_by_machine_name}
                                currentUserId={currentUserId} />,
             help: selected.proposed_by_email || !selected.proposed_by_machine_name
@@ -732,10 +750,22 @@ export function ApprovalsTab({
           },
           ...(selected.decided_at ? [{
             label: selected.status === 'expired' ? 'Expired' : `${selected.status} by`,
-            // An expired proposal names nobody: the timer has no session and is not a person.
+            // An expired proposal names nobody: the timer has no session and is not a person. A
+            // withdrawal's decider is the proposer, who may be a machine identity.
             value: selected.decided_by
-              ? <ActorLabel id={selected.decided_by} currentUserId={currentUserId} />
-              : 'the expiry timer, which is not a person'
+              ? <ActorLabel id={selected.decided_by}
+                            email={selected.decided_by_email || currentAddresses.get(selected.decided_by)}
+                            name={personNames.get(selected.decided_by)}
+                            machineName={selected.decided_by === selected.proposed_by
+                              ? selected.proposed_by_machine_name : null}
+                            currentUserId={currentUserId} />
+              : 'the expiry timer, which is not a person',
+            help: !selected.decided_by ? undefined
+              : selected.decided_by_email
+                ? 'Taken from the signed access token when the proposal was decided, not from a form.'
+                : currentAddresses.has(selected.decided_by)
+                  ? 'The address their account has now. A decision made before Aber 1.8.0 did not keep the address the decider had then.'
+                  : undefined
           }, {
             label: 'Decided at',
             value: `${formatDateTime(selected.decided_at)} (${formatRelative(selected.decided_at)})`

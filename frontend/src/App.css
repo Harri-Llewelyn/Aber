@@ -5009,6 +5009,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 
 .trail-timeline > .trail-scroll { min-height: 0; }
 
+/* The Changed by chip in the toolbar: the chosen actor's name, cut with an ellipsis, and a cross. */
+.trail-actor-chip {
+  font-size: 12px;
+  max-width: 280px;
+  flex: 0 1 auto;
+}
+
 /* The row above the timeline, holding the key. */
 .trail-header {
   display: flex;

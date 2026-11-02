@@ -17,10 +17,10 @@ import { formatDateTime } from '../utils/format'
 import { approvalsForUrl } from '../routes'
 import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
 import { tabLink, tabLinks } from '../test/tabBar'
-import { tooltipOf } from '../test/tooltips'
+import { helpTipText, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn(), displayNamesFor: vi.fn() }
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn(), displayNamesFor: vi.fn(), listUserAccounts: vi.fn() }
 }))
 
 /**
@@ -327,6 +327,65 @@ describe('the queue is worked from the front', () => {
     expect(document.querySelector('.context-panel-open')).toBeTruthy()
     showDecided()
     expect(document.querySelector('.context-panel-open')).toBeNull()
+  })
+})
+
+describe('the decider is named by the address they had when they decided', () => {
+  const ADMIN_ID = 'aaaaaaaa-0000-4000-8000-000000000003'
+  const decided = (over = {}) => deviceProposal({
+    status: 'rejected', decided_by: ADMIN_ID, decided_at: '2026-09-05T00:00:00Z',
+    decision_reason: 'not this quarter', ...over
+  })
+  const deciderField = () => screen.getByText('rejected by').nextElementSibling
+
+  beforeEach(() => {
+    api.listUserAccounts.mockResolvedValue([
+      { user_id: ADMIN_ID, email: 'admin.now@aber.test', display_name: null },
+      { user_id: OPERATOR_ID, email: 'ops.person@aber.test', display_name: null },
+    ])
+  })
+
+  it('shows the stamped address, not the one the account has now, and says where it came from', async () => {
+    mockLoad([decided({ decided_by_email: 'admin.then@aber.test' })])
+    renderTab({ userRole: 'Administrator', currentUserId: OPERATOR_ID })
+    showDecided()
+    await selectRow()
+    await waitFor(() => expect(deciderField()).toHaveTextContent('admin.then@aber.test'))
+    expect(deciderField()).not.toHaveTextContent('admin.now@aber.test')
+    expect(helpTipText('What rejected by means'))
+      .toBe('Taken from the signed access token when the proposal was decided, not from a form.')
+    // Stamped, so nothing needs the accounts read.
+    expect(api.listUserAccounts).not.toHaveBeenCalled()
+  })
+
+  it('shows the current address for a decision from before Aber kept it, to an Administrator', async () => {
+    mockLoad([decided({ decided_by_email: null })])
+    renderTab({ userRole: 'Administrator', currentUserId: OPERATOR_ID })
+    showDecided()
+    await selectRow()
+    await waitFor(() => expect(deciderField()).toHaveTextContent('admin.now@aber.test'))
+    expect(helpTipText('What rejected by means'))
+      .toMatch(/^The address their account has now\. A decision made before Aber 1\.8\.0/)
+  })
+
+  it('names the decider by their display name beside the address, as the proposer is', async () => {
+    api.displayNamesFor.mockResolvedValue(new Map([[ADMIN_ID, 'Ada Admin']]))
+    mockLoad([decided({ decided_by_email: 'admin.then@aber.test' })])
+    renderTab({ userRole: 'Administrator', currentUserId: OPERATOR_ID })
+    showDecided()
+    await selectRow()
+    await waitFor(() => expect(deciderField()).toHaveTextContent('Ada Admin'))
+    expect(deciderField()).toHaveTextContent('admin.then@aber.test')
+    expect(api.displayNamesFor).toHaveBeenCalledWith(expect.arrayContaining([OPERATOR_ID, ADMIN_ID]))
+  })
+
+  it('leaves the id for a role that may not read the accounts, and does not ask', async () => {
+    mockLoad([decided({ decided_by_email: null })])
+    renderTab({ userRole: 'Shopfloor_Manager', currentUserId: MANAGER_ID })
+    showDecided()
+    await selectRow()
+    expect(deciderField()).toHaveTextContent(ADMIN_ID.slice(0, 8))
+    expect(api.listUserAccounts).not.toHaveBeenCalled()
   })
 })
 

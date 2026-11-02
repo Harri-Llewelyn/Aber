@@ -31,7 +31,7 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
       const result = await api.changePersonEmail(person.user_id, next)
       onChanged?.(result)
       showToast?.(`${person.email} is now ${result.email}. They sign in again with it.`, 'success',
-        { to: personUrl(result.email) })
+        { to: personUrl(person.user_id) })
       onClose()
     } catch (err) {
       setError(err.message)

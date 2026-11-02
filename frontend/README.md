@@ -559,7 +559,12 @@ list again, and a reload returns to the same view.
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
 `userRole` Administrator, and the page opens on it. A row shows the person, their role as text,
 status and last sign-in; a click or Enter opens the person's drawer, in the address as
-`?person=<email>` (`personUrl()` writes it beside the search), which holds every action. The drawer
+`?person=<user id>`, which holds every action. `personUrl()` writes the id and no search: People
+checks `person` against everyone it lists, filtered or not, and the id survives a change of address.
+A link from before, `?person=<email>`, opens whoever has that address now, matched without case,
+and the address is rewritten to the id with replace. The drawer's View Their Changes is the Audit
+Trail with `?changed_by=<user id>` (`changesByUrl()`), offered when `App.jsx`'s `hasPermission`
+grants `audit_trail:read`, as the other drawers' View Audit Trail is. The drawer
 is drawn into an element `AccessControlTab` renders beside its card, where the broker-role drawer
 sits, so it pushes the table as every page's drawer does. A role changes only through the drawer's
 Change Role (`ChangeRoleModal`), which starts on the person's role and says what the chosen one lets
@@ -1019,7 +1024,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
-| Audit Trail | | `search`, `type`, `action`, `range`, `since`, `until`, `deleted`; `event` |
+| Audit Trail | | `search`, `type`, `action`, `changed_by`, `range`, `since`, `until`, `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |

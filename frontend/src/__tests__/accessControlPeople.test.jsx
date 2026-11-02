@@ -171,7 +171,7 @@ describe('the People tab', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove Access' }))
     await waitFor(() => expect(api.removePersonAccess).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith('operator@site.test can no longer sign in', 'success',
-      { to: personUrl('operator@site.test', true) }))
+      { to: personUrl(OPERATOR, true) }))
   })
 
   it('restores access after it is confirmed, naming the role that comes back', async () => {
@@ -189,7 +189,7 @@ describe('the People tab', () => {
     await waitFor(() => expect(api.restorePersonAccess).toHaveBeenCalledWith(REMOVED))
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith('removed@site.test can sign in again as Shopfloor Manager', 'success',
-        { to: personUrl('removed@site.test') }))
+        { to: personUrl(REMOVED) }))
   })
 
   it('offers removal again when sign-in was not blocked', async () => {
@@ -375,7 +375,7 @@ describe('display names', () => {
     await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, 'Owain ap Rhys'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(toast).toHaveBeenCalledWith('operator@site.test is now shown as Owain ap Rhys', 'success',
-      { to: personUrl('operator@site.test') })
+      { to: personUrl(OPERATOR) })
     await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
   })
 
@@ -389,7 +389,7 @@ describe('display names', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, null))
     expect(toast).toHaveBeenCalledWith('operator@site.test is now shown by email alone', 'success',
-      { to: personUrl('operator@site.test') })
+      { to: personUrl(OPERATOR) })
   })
 
   it('refuses a name the database would refuse before sending it', async () => {
@@ -448,7 +448,7 @@ describe('display names', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
       'Their display name was not set. Open their row and select Change Name to set it.', 'warning',
-      { to: personUrl('new@site.test') }))
+      { to: personUrl('n0000000-0000-4000-8000-000000000004') }))
   })
 })
 
@@ -491,7 +491,7 @@ describe('setting a new password', () => {
     expect(dialog).toHaveTextContent('it is not shown again')
     expect(within(dialog).getByLabelText('Password')).toHaveValue(MINTED)
     expect(within(dialog).getByLabelText('Email')).toHaveValue('operator@site.test')
-    expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success', { to: personUrl('operator@site.test') })
+    expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success', { to: personUrl(OPERATOR) })
     // Never in a toast.
     expect(JSON.stringify(toast.mock.calls)).not.toContain(MINTED)
 
@@ -526,7 +526,7 @@ describe('a person\'s drawer', () => {
     expect(await drawer.findByText(/^2 open, last active /)).toBeInTheDocument()
     expect(api.personSessionSummary).toHaveBeenCalledWith(OPERATOR)
     expect((await row('operator@site.test')).className).toContain('row-selected')
-    expect(window.location.search).toBe('?person=operator%40site.test')
+    expect(window.location.search).toBe(`?person=${OPERATOR}`)
 
     fireEvent.click(await row('operator@site.test'))
     await waitFor(() => expect(queryDrawer()).toBeNull())
@@ -540,7 +540,7 @@ describe('a person\'s drawer', () => {
   })
 
   it('opens from the address personUrl() writes, a removed person\'s with the removed', async () => {
-    window.history.replaceState(null, '', personUrl('removed@site.test', true))
+    window.history.replaceState(null, '', personUrl(REMOVED, true))
     renderPeople()
     const drawer = within(await screen.findByRole('complementary', { name: 'removed@site.test person' }))
     expect(drawer.getByText('Status').nextElementSibling).toHaveTextContent('Access removed')
@@ -554,6 +554,46 @@ describe('a person\'s drawer', () => {
     await row('operator@site.test')
     await waitFor(() => expect(window.location.search).toBe(''))
     expect(queryDrawer()).toBeNull()
+  })
+
+  it('names the person by id, which still finds them after their address changed', async () => {
+    expect(personUrl(OPERATOR)).toBe(`/access-control/people?person=${OPERATOR}`)
+    api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, email: 'owain@site.test' } : p)))
+    window.history.replaceState(null, '', personUrl(OPERATOR))
+    renderPeople()
+    expect(await screen.findByRole('complementary', { name: 'owain@site.test person' })).toBeInTheDocument()
+    expect(window.location.search).toBe(`?person=${OPERATOR}`)
+  })
+
+  it('opens a link written with an address for whoever has it now, and puts the id in its place', async () => {
+    window.history.replaceState(null, '', '/access-control/people?search=operator%40site.test&person=Operator%40Site.TEST')
+    const entries = window.history.length
+    renderPeople()
+    expect(await screen.findByRole('complementary', { name: 'operator@site.test person' })).toBeInTheDocument()
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('person')).toBe(OPERATOR))
+    // Replaced, not pushed: Back does not return to the address.
+    expect(window.history.length).toBe(entries)
+    // The search the old link carried still finds them.
+    expect(new URLSearchParams(window.location.search).get('search')).toBe('operator@site.test')
+    expect(await row('operator@site.test')).toBeTruthy()
+  })
+
+  it('links to the changes they made, for a reader of the Audit Trail', async () => {
+    render(<AccessControlTab showToast={vi.fn()} userRole="Administrator" currentUserId={ME} hasPermission={() => true} />)
+    const drawer = await openDrawer('operator@site.test')
+    const link = drawer.getByRole('link', { name: /View Their Changes/ })
+    expect(link).toHaveAttribute('href', `/audit-trail?changed_by=${OPERATOR}`)
+    expect(link).toHaveClass('context-action')
+    // Your own drawer has it too.
+    fireEvent.click(await row('me@site.test'))
+    expect(await within(await screen.findByRole('complementary', { name: 'me@site.test person' }))
+      .findByRole('link', { name: /View Their Changes/ })).toHaveAttribute('href', `/audit-trail?changed_by=${ME}`)
+  })
+
+  it('does not link to the Audit Trail for a reader who may not open it', async () => {
+    render(<AccessControlTab showToast={vi.fn()} userRole="Administrator" currentUserId={ME} hasPermission={() => false} />)
+    const drawer = await openDrawer('operator@site.test')
+    expect(drawer.queryByRole('link', { name: /View Their Changes/ })).toBeNull()
   })
 
   it('offers every action, two to a row, with Remove Access last and on its own', async () => {
@@ -633,7 +673,7 @@ describe('ending a person\'s sessions', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
     await waitFor(() => expect(api.endPersonSessions).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'operator@site.test is signed out everywhere: 3 sessions ended', 'success', { to: personUrl('operator@site.test') }))
+      'operator@site.test is signed out everywhere: 3 sessions ended', 'success', { to: personUrl(OPERATOR) }))
     await waitFor(() => expect(drawer.getByText('Sessions').nextElementSibling).toHaveTextContent('None'))
   })
 
@@ -774,7 +814,7 @@ describe('a person\'s sessions, listed in their drawer', () => {
 
     await waitFor(() => expect(api.endPersonSession).toHaveBeenCalledWith(OPERATOR, 's-grafana'))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'Session ended for operator@site.test: Grafana', 'success', { to: personUrl('operator@site.test') }))
+      'Session ended for operator@site.test: Grafana', 'success', { to: personUrl(OPERATOR) }))
     await waitFor(async () => expect((await rowsIn(list)).map(where)).toEqual(['Chrome on Windows', 'Firefox on Linux']))
     await waitFor(() => expect(drawer.getByText(/^1 open, last active /)).toBeInTheDocument())
     expect(api.personSessions).toHaveBeenCalledTimes(2)
@@ -817,7 +857,8 @@ describe('changing a person\'s email address', () => {
     api.changePersonEmail.mockResolvedValue({
       user_id: OPERATOR, email: 'owain@site.test', previous_email: 'operator@site.test', sessions_ended: 2,
     })
-    window.history.replaceState(null, '', personUrl('operator@site.test'))
+    // A search for their address beside the drawer, as an Administrator who found them by it has.
+    window.history.replaceState(null, '', `${personUrl(OPERATOR)}&search=operator%40site.test`)
     const toast = renderPeople()
     await screen.findByRole('complementary', { name: 'operator@site.test person' })
     fireEvent.click(within(queryDrawer()).getByRole('button', { name: 'Change Email' }))
@@ -831,10 +872,10 @@ describe('changing a person\'s email address', () => {
     await waitFor(() => expect(api.changePersonEmail).toHaveBeenCalledWith(OPERATOR, 'owain@site.test'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(toast).toHaveBeenCalledWith('operator@site.test is now owain@site.test. They sign in again with it.', 'success',
-      { to: personUrl('owain@site.test') })
-    // The drawer and the search move to the new address rather than closing.
+      { to: personUrl(OPERATOR) })
+    // The drawer stays open on the same id, and the search moves to the new address.
     expect(await screen.findByRole('complementary', { name: 'owain@site.test person' })).toBeInTheDocument()
-    expect(new URLSearchParams(window.location.search).get('person')).toBe('owain@site.test')
+    expect(new URLSearchParams(window.location.search).get('person')).toBe(OPERATOR)
     expect(new URLSearchParams(window.location.search).get('search')).toBe('owain@site.test')
     expect(await row('owain@site.test')).toBeTruthy()
   })
@@ -915,7 +956,7 @@ describe('changing a person\'s role', () => {
     fireEvent.click(dialog.getByRole('button', { name: 'Change Role' }))
     await waitFor(() => expect(api.setPersonRole).toHaveBeenCalledWith(OPERATOR, 'Auditor'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success', { to: personUrl('operator@site.test') })
+    expect(toast).toHaveBeenCalledWith('operator@site.test is now Auditor', 'success', { to: personUrl(OPERATOR) })
     await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
   })
 

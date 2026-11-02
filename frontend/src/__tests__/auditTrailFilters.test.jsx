@@ -1048,7 +1048,7 @@ describe('Audit Trail — removed tag filter', () => {
     expect(screen.queryByTitle(/carry this tag/i)).not.toBeInTheDocument()
   })
 
-  it('leaves two controls in the bar, four in the custom range mode, and two in the popover', async () => {
+  it('leaves two controls in the bar, four in the custom range mode, and three in the popover', async () => {
     await show()
 
     // The bar's own controls: the search box and the range. Export is a button, not a control.
@@ -1061,7 +1061,8 @@ describe('Audit Trail — removed tag filter', () => {
     await waitFor(() => expect(controls().length).toBe(4))
 
     openFilters()
-    expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(2)
+    // The kind, the action and Changed by.
+    expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(3)
   })
 
   it('puts export at the right-hand end of the toolbar, after Clear filters', async () => {

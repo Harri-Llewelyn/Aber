@@ -1103,6 +1103,15 @@ export const SUITES = {
       "that a Shopfloor Manager's turn is audited and an Operator's changes nothing; and that the " +
       'file replays, putting back a drifted CHECK and leaving a 1.7.0 database unturned.',
   },
+  'supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.py': {
+    lanes: ['db'],
+    why:
+      "0222 -- that audit_trail_page(p_changed_by) returns one person's or machine identity's rows " +
+      "and counts only those, under the caller's own policies; that a decision stamps the " +
+      "decider's address from their token, keeps it after the address changes, and that an " +
+      'expiry, a decision from before 0222 and a client write leave none; and that the function is ' +
+      'declared once, with p_changed_by last, however 0168 and 0222 replay over it.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
