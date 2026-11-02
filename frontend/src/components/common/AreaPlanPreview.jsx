@@ -2,8 +2,6 @@ import React, { useState } from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { isPlaced } from '../../utils/areaPlans'
-import { RouteLink } from './RouteLink'
-import { siteMapAreaUrl } from '../../routes'
 import { ExpandButton } from './ExpandButton'
 import { ExpandedPlanModal } from './PlanViewer'
 
@@ -21,22 +19,16 @@ import { ExpandedPlanModal } from './PlanViewer'
  * @param {string} [highlightCellId] The cell the panel is about. Its pin is ringed and full size;
  * every other pin is small and dimmed. Without it every pin is drawn alike.
  *
- * @param {Function} [onOpen] Called with the area id on a plain click, to open the Site Map on that
- * area. With it the preview is a link to that address; without it the preview is not a control.
+ * A picture, not a control: the panels open the Site Map from their actions, so a click aimed at
+ * Expand that misses lands on nothing.
  */
-export function AreaPlanPreview({ area, cells, highlightCellId = null, onOpen }) {
-  const label = `Open ${area.area_name} on the Site Map`
-  const Frame = onOpen ? RouteLink : 'div'
-  const link = onOpen
-    ? { to: siteMapAreaUrl(area.area_id), onNavigate: () => onOpen(area.area_id), 'aria-label': label, title: label }
-    : {}
-
+export function AreaPlanPreview({ area, cells, highlightCellId = null }) {
   return (
-    <Frame className="area-plan-preview" {...link}>
+    <div className="area-plan-preview">
       <AreaPlan area={area}>
         {previewPins(area, cells, highlightCellId)}
       </AreaPlan>
-    </Frame>
+    </div>
   )
 }
 
@@ -76,14 +68,13 @@ export const planIsExpandable = (area, cells, highlightCellId = null) =>
 
 /**
  * The preview on a card of its own, with Expand in the card's top-right corner, for the Areas and
- * Cells panels. The card draws the frame, so the button is on it but beside the preview's link,
- * not inside it: a button cannot sit inside a link.
+ * Cells panels.
  */
-export function ExpandablePlanPreview({ area, cells, highlightCellId = null, onOpen }) {
+export function ExpandablePlanPreview({ area, cells, highlightCellId = null }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="expand-frame plan-card">
-      <AreaPlanPreview area={area} cells={cells} highlightCellId={highlightCellId} onOpen={onOpen} />
+      <AreaPlanPreview area={area} cells={cells} highlightCellId={highlightCellId} />
       {planIsExpandable(area, cells, highlightCellId) && (
         <ExpandButton name={area.area_name} onClick={() => setExpanded(true)} />
       )}

@@ -85,13 +85,28 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(row).not.toHaveClass('row-selected')
   })
 
-  it('opens the Site Map on the cell\'s area from the panel\'s plan', async () => {
+  it('opens the Site Map on the cell\'s area from View in Site Map, not from the panel\'s plan', async () => {
     const onShowOnSiteMap = vi.fn()
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} onShowOnSiteMap={onShowOnSiteMap} />)
     await waitFor(() => expect(screen.getByText('Bay 1')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Bay 1'))
-    fireEvent.click(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }))
+    const panel = document.querySelector('.context-panel')
+    expect(panel.querySelector('.plan-card a')).toBeNull()
+    const action = within(panel.querySelector('.context-panel-actions')).getByRole('link', { name: /View in Site Map/ })
+    expect(action).toHaveAttribute('href', '/site-map?area=area-1')
+    fireEvent.click(action)
     expect(onShowOnSiteMap).toHaveBeenCalledWith('area-1')
+  })
+
+  it('offers View in Site Map to a filed cell, placed or not, and not to an unfiled one', async () => {
+    const unfiled = { cell_id: 'cell-3', cell_name: 'Loose Bay', area_id: null, plan_x: null, plan_y: null, is_archived: false, gateways: [], gateway_count: 0 }
+    api.get.mockImplementation(path => path.startsWith('/api/v1/cells') ? Promise.resolve([...cells, unfiled]) : routeGet(path))
+    await renderCells()
+    const actionIn = () => within(document.querySelector('.context-panel-actions')).queryByRole('link', { name: /View in Site Map/ })
+    fireEvent.click(screen.getByText('Bay 2'))
+    expect(actionIn()).toHaveAttribute('href', '/site-map?area=area-1')
+    fireEvent.click(screen.getByText('Loose Bay'))
+    expect(actionIn()).toBeNull()
   })
 
   it('titles the panel with the cell\'s icon, Edit Details its one primary', async () => {
@@ -256,22 +271,10 @@ describe('AreaPlanPreview on its own', () => {
     expect(pinFor('Old Bay')).toHaveClass('area-plan-pin-selected')
   })
 
-  it('is a link to the Site Map, and nothing to tab to without one', () => {
-    const onOpen = vi.fn()
-    const { unmount } = render(<AreaPlanPreview area={area} cells={placed} onOpen={onOpen} />)
-    const link = screen.getByRole('link', { name: 'Open North Shop on the Site Map' })
-    // A real <a>: the keyboard reaches and follows it, and Ctrl-click opens the map in a new tab.
-    expect(link.tagName).toBe('A')
-    expect(link).toHaveAttribute('href', '/site-map?area=area-1')
-    fireEvent.click(link)
-    fireEvent.click(link, { ctrlKey: true })
-    expect(onOpen.mock.calls).toEqual([['area-1']])
-    // The pins are marks inside the link, not controls of their own.
-    expect(link.querySelector('button')).toBeNull()
-    unmount()
-
+  it('is a picture, with nothing to click or tab to', () => {
     render(<AreaPlanPreview area={area} cells={placed} />)
     expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
     expect(document.querySelector('.area-plan-preview')).not.toHaveAttribute('tabindex')
   })
 })
