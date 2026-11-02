@@ -492,7 +492,7 @@ static_resources:
     # session cookie, and an Administrator check. Its own listener because machine principals on 8000
     # cannot complete a browser login. The role claim in the access token is checked first, then
     # user_roles on every request (studio-admission). No openid scope: the door needs the access token
-    # alone, and GoTrue refuses an ID token under HS256. Minimum Envoy 1.34 (PKCE).
+    # alone. Minimum Envoy 1.34 (PKCE).
     - name: studio
       address:
         socket_address: { address: 0.0.0.0, port_value: 8001 }
@@ -582,9 +582,9 @@ static_resources:
                             name: studio-proxy-hmac-secret
                             sds_config:
                               path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
-                  # 2. THE TOKEN: verifies what GoTrue signed, against the JWKS the initContainer renders (ES256 by
-                  # kid and the HS256 `oct` key, or the `oct` key alone). No issuer check, because GoTrue's OAuth
-                  # access token carries no iss. Forwarded after verification for step 4; step 5 strips it, so
+                  # 2. THE TOKEN: verifies what GoTrue signed, ES256 by kid, against the JWKS the initContainer
+                  # renders (it refuses an `oct` key). No issuer check, because GoTrue's OAuth access token
+                  # carries no iss. Forwarded after verification for step 4; step 5 strips it, so
                   # Studio never sees a Supabase JWT.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:

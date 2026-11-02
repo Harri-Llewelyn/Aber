@@ -328,8 +328,9 @@ prometheus.io/path: {{ .path | default "/metrics" | quote }}
 {{/* 2. Validation. Every check here FAILS THE RENDER: each misconfiguration otherwise produces a stack that reports healthy and refuses every request, or a CrashLoopBackOff whose logs name something other than the cause. */}}
 {{/* ======================================================================================== */}}
 {{/*
-The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by jwtSecret, and
-publishableKey/secretKey are what callers present for the gateway to translate. All supplied or
+The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by the private key in
+jwtKeys (aber.validateSigningKeys), and publishableKey/secretKey are what callers present for the
+gateway to translate. jwtSecret is GoTrue's, which requires it and signs nothing with it. All supplied or
 none; the chart never generates them. Skipped under existingSecret, when the values are not the
 chart's to see (kubernetes-architecture.md §3.2).
 */}}
@@ -363,7 +364,7 @@ this is a Helm error rather than a CrashLoopBackOff.
 {{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
 {{- end -}}
 {{- if not .Values.secrets.playbackKey -}}
-{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required even with playback off -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback, the identity broker playback publishes under and deliberately not service_role)" -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required even with playback off -- a JWT signed by the key in jwtKeys for subject b0000000-0000-4000-8000-000000000003, Service_Playback, the identity broker playback publishes under and deliberately not service_role)" -}}
 {{- end -}}
 {{- if not .Values.secrets.fdwReaderPassword -}}
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
@@ -388,92 +389,121 @@ Conditional, because the release check is off by default: without the key every 
 gate, and the only sign is a menu that never says anything.
 */}}
 {{- if and .Values.releaseCheck.enabled (not .Values.secrets.releaseCheckKey) -}}
-{{- $missing = append $missing "secrets.releaseCheckKey (SUPABASE_RELEASE_CHECK_KEY, required when releaseCheck.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000004, Service_ReleaseCheck)" -}}
+{{- $missing = append $missing "secrets.releaseCheckKey (SUPABASE_RELEASE_CHECK_KEY, required when releaseCheck.enabled -- a JWT signed by the key in jwtKeys for subject b0000000-0000-4000-8000-000000000004, Service_ReleaseCheck)" -}}
 {{- end -}}
 {{- if $missing -}}
-{{- fail (printf "\n\naber: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
+{{- fail (printf "\n\naber: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by the\nkey pair in jwtKeys and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
 {{/*
-The demo secret is refused on anything that is not plainly local. values-dev.yaml carries the
-published Supabase demo credentials and CI installs with it, so the value alone cannot be banned;
-its combination with a public hostname has no innocent reading. node scripts/setup.mjs mints a
-matching set.
+The demo credentials are refused on anything that is not plainly local. values-dev.yaml carries the
+published demo secret and demonstration key pair and CI installs with it, so the values alone
+cannot be banned; their combination with a public hostname has no innocent reading. node
+scripts/setup.mjs mints a matching set.
 */}}
 {{- $demoJwtSecret := "super-secret-jwt-token-with-at-least-32-characters" -}}
-{{- if eq (.Values.secrets.jwtSecret | default "") $demoJwtSecret -}}
+{{- $demoKid := "aber-development-demonstration-key" -}}
+{{- if or (eq (.Values.secrets.jwtSecret | default "") $demoJwtSecret) (contains $demoKid (.Values.secrets.jwtKeys | default "")) -}}
 {{- $domain := .Values.global.publicBaseDomain | default "" -}}
 {{- $isLocal := or (empty $domain) (contains "127.0.0.1" $domain) (contains "localhost" $domain) (contains "192.168." $domain) (hasSuffix ".local" $domain) (hasSuffix ".localhost" $domain) (hasSuffix ".internal" $domain) -}}
 {{- if not $isLocal -}}
-{{- fail (printf "\n\naber: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret, so this deployment would authenticate\nanyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes values-local.yaml with a fresh, internally consistent set\n\nthen install with -f values-local.yaml (or carry the four values into your own values file, see\nvalues-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
+{{- fail (printf "\n\naber: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret or secrets.jwtKeys = the demonstration values, committed in this repository\n\nanonKey and serviceRoleKey are signed by the demonstration key pair, so this deployment would\nauthenticate anyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes values-local.yaml with a fresh, internally consistent set\n\nthen install with -f values-local.yaml (or carry the four values into your own values file, see\nvalues-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-With supabaseAuth.es256Signing the signing set is part of the SET: jwtKeys and jwtJwks are both
-required, hold one EC P-256 pair under one kid (the private half only in jwtKeys, the one key there
-GoTrue signs with), and both carry jwtSecret as the `oct` legacy key, or the stack comes up and
-refuses every token one side signed. Skipped under existingSecret, as aber.validateSecrets is.
+Every token is signed ES256 by the private key in jwtKeys and verified against jwtJwks, which hold
+EC keys alone: an `oct` key there would verify a token signed with jwtSecret. Realtime and Storage
+verify HS256 with secrets of their own, each different from jwtSecret and from the other. Every
+render, including supabaseAuth.es256Signing false. Under existingSecret the Secret is read with
+`lookup`, which answers on install and upgrade and is empty under `helm template` and GitOps
+renders; there the pods' required keys and the gateway's initContainer refuse instead.
 */}}
 {{- define "aber.validateSigningKeys" -}}
-{{- if and .Values.supabaseAuth.es256Signing (not .Values.secrets.existingSecret) -}}
-{{- $s := .Values.secrets -}}
 {{- $problems := list -}}
-{{- if not $s.jwtKeys -}}
-{{- $problems = append $problems "secrets.jwtKeys (SUPABASE_JWT_KEYS) is not set" -}}
+{{- if eq (toString (dig "es256Signing" true .Values.supabaseAuth)) "false" -}}
+{{- $problems = append $problems "supabaseAuth.es256Signing is false, and HS256 signing has ended. Remove the setting: true is accepted and ignored" -}}
 {{- end -}}
-{{- if not $s.jwtJwks -}}
-{{- $problems = append $problems "secrets.jwtJwks (SUPABASE_JWT_JWKS) is not set" -}}
+{{- $check := true -}}
+{{- $v := dict -}}
+{{- $n := dict -}}
+{{- with .Values.secrets.existingSecret -}}
+{{- $existing := lookup "v1" "Secret" $.Release.Namespace . -}}
+{{- if and $existing $existing.data -}}
+{{- range $key, $env := dict "keys" "SUPABASE_JWT_KEYS" "jwks" "SUPABASE_JWT_JWKS" "realtime" "REALTIME_JWT_SECRET" "storage" "STORAGE_JWT_SECRET" "shared" "SUPABASE_JWT_SECRET" -}}
+{{- $_ := set $v $key (get $existing.data $env | b64dec) -}}
+{{- $_ := set $n $key (printf "%s in the Secret %s" $env $.Values.secrets.existingSecret) -}}
 {{- end -}}
-{{- if not $problems -}}
-{{- $legacy := (b64enc ($s.jwtSecret | default "")) | replace "+" "-" | replace "/" "_" | trimSuffix "=" | trimSuffix "=" -}}
+{{- else -}}
+{{- $check = false -}}
+{{- end -}}
+{{- else -}}
+{{- $s := .Values.secrets -}}
+{{- $v = dict "keys" ($s.jwtKeys | default "") "jwks" ($s.jwtJwks | default "") "realtime" ($s.realtimeJwtSecret | default "") "storage" ($s.storageJwtSecret | default "") "shared" ($s.jwtSecret | default "") -}}
+{{- $n = dict "keys" "secrets.jwtKeys (SUPABASE_JWT_KEYS)" "jwks" "secrets.jwtJwks (SUPABASE_JWT_JWKS)" "realtime" "secrets.realtimeJwtSecret (REALTIME_JWT_SECRET)" "storage" "secrets.storageJwtSecret (STORAGE_JWT_SECRET)" "shared" "secrets.jwtSecret" -}}
+{{- end -}}
+{{- if $check -}}
+{{- if not $v.keys -}}
+{{- $problems = append $problems (printf "%s is not set: the ES256 key pair GoTrue signs every token with" $n.keys) -}}
+{{- end -}}
+{{- if not $v.jwks -}}
+{{- $problems = append $problems (printf "%s is not set: the public key every service checks a token with" $n.jwks) -}}
+{{- end -}}
+{{- if and $v.keys $v.jwks -}}
 {{- $keys := list -}}
-{{- if hasPrefix "[" (trim $s.jwtKeys) -}}{{- $keys = fromJsonArray $s.jwtKeys -}}{{- end -}}
+{{- if hasPrefix "[" (trim $v.keys) -}}{{- $keys = fromJsonArray $v.keys -}}{{- end -}}
 {{- $jwks := dict -}}
-{{- if hasPrefix "{" (trim $s.jwtJwks) -}}{{- $jwks = fromJson $s.jwtJwks -}}{{- end -}}
+{{- if hasPrefix "{" (trim $v.jwks) -}}{{- $jwks = fromJson $v.jwks -}}{{- end -}}
 {{- $published := $jwks.keys | default list -}}
 {{- if not (kindIs "slice" $published) -}}{{- $published = list -}}{{- end -}}
 {{- $signing := list -}}
-{{- $keysLegacy := false -}}
-{{- range $keys -}}
-{{- if kindIs "map" . -}}
-{{- if has "sign" (.key_ops | default list) -}}{{- $signing = append $signing . -}}{{- end -}}
-{{- if and (eq (.kty | default "") "oct") (eq (.k | default "") $legacy) -}}{{- $keysLegacy = true -}}{{- end -}}
+{{- $oct := false -}}
+{{- range concat $keys $published -}}
+{{- if and (kindIs "map" .) (eq (.kty | default "") "oct") -}}{{- $oct = true -}}{{- end -}}
 {{- end -}}
+{{- range $keys -}}
+{{- if and (kindIs "map" .) (has "sign" (.key_ops | default list)) -}}{{- $signing = append $signing . -}}{{- end -}}
+{{- end -}}
+{{- if $oct -}}
+{{- $problems = append $problems (printf "%s or %s holds an `oct` (HS256) key, which would verify a token signed with %s. Take it out of both" $n.keys $n.jwks $n.shared) -}}
 {{- end -}}
 {{- if ne (len $signing) 1 -}}
-{{- $problems = append $problems (printf "secrets.jwtKeys must be a JSON array holding exactly one key with \"sign\" in key_ops (it holds %d)" (len $signing)) -}}
+{{- $problems = append $problems (printf "%s must be a JSON array holding exactly one key with \"sign\" in key_ops (it holds %d)" $n.keys (len $signing)) -}}
 {{- else -}}
 {{- $key := first $signing -}}
 {{- if not (and (eq ($key.kty | default "") "EC") (eq ($key.crv | default "") "P-256") (eq ($key.alg | default "") "ES256") $key.kid $key.d) -}}
-{{- $problems = append $problems "the signing key in secrets.jwtKeys must be an EC P-256 private key with alg ES256, a kid and its d" -}}
+{{- $problems = append $problems (printf "the signing key in %s must be an EC P-256 private key with alg ES256, a kid and its d" $n.keys) -}}
 {{- else -}}
 {{- $public := false -}}
 {{- range $published -}}
 {{- if and (kindIs "map" .) (eq (.kid | default "") $key.kid) (eq (.x | default "") $key.x) (eq (.y | default "") $key.y) -}}{{- $public = true -}}{{- end -}}
 {{- end -}}
 {{- if not $public -}}
-{{- $problems = append $problems (printf "secrets.jwtJwks has no public key with the signing key's kid %q and coordinates: the two values are from different pairs" $key.kid) -}}
+{{- $problems = append $problems (printf "%s has no public key with the signing key's kid %q and coordinates: the two values are from different pairs" $n.jwks $key.kid) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $jwksLegacy := false -}}
 {{- range $published -}}
-{{- if kindIs "map" . -}}
-{{- if hasKey . "d" -}}
-{{- $problems = append $problems "secrets.jwtJwks carries a private key (a \"d\" member): it goes to every verifier, so it must hold public keys only" -}}
-{{- end -}}
-{{- if and (eq (.kty | default "") "oct") (eq (.k | default "") $legacy) -}}{{- $jwksLegacy = true -}}{{- end -}}
+{{- if and (kindIs "map" .) (hasKey . "d") -}}
+{{- $problems = append $problems (printf "%s carries a private key (a \"d\" member): it goes to every verifier, so it must hold public keys only" $n.jwks) -}}
 {{- end -}}
 {{- end -}}
-{{- if not (and $keysLegacy $jwksLegacy) -}}
-{{- $problems = append $problems "secrets.jwtKeys and secrets.jwtJwks must both carry secrets.jwtSecret as the legacy `oct` key (k, base64url), or HS256 tokens signed before stop verifying" -}}
+{{- end -}}
+{{- range $which, $service := dict "realtime" "Realtime" "storage" "Storage" -}}
+{{- if not (get $v $which) -}}
+{{- $problems = append $problems (printf "%s is not set: %s's own signing secret" (get $n $which) $service) -}}
+{{- else if eq (get $v $which) $v.shared -}}
+{{- $problems = append $problems (printf "%s is the same value as %s: %s's secret must be its own" (get $n $which) $n.shared $service) -}}
+{{- end -}}
+{{- end -}}
+{{- if and $v.realtime (eq $v.realtime $v.storage) -}}
+{{- $problems = append $problems (printf "%s and %s are the same value: each must be its own" $n.realtime $n.storage) -}}
 {{- end -}}
 {{- end -}}
 {{- if $problems -}}
-{{- fail (printf "\n\naber: supabaseAuth.es256Signing is on, and the signing key set is not complete:\n  - %s\n\nThe key set is a SET with jwtSecret: GoTrue signs with the private key in jwtKeys, every\nverifier checks the public key in jwtJwks, and both keep jwtSecret as the legacy key so tokens\nsigned before keep verifying. A partial set gives a stack that reports healthy and refuses every\ntoken one side signed. The chart does not generate them.\n\nFor a new site:       npm run setup   (mints the whole set)\nFor an existing site: npm run keys:rotate -- --signing-keys   (help/site/upgrading.md)\n" (join "\n  - " $problems)) -}}
-{{- end -}}
+{{- $guide := `help/site/upgrading.md, "From 1.8.0, every token is signed ES256"` -}}
+{{- fail (printf "\n\naber: Aber signs every token ES256 and accepts none signed with secrets.jwtSecret, and\nthis release's signing values fall short of that:\n  - %s\n\nThe key pair in jwtKeys and jwtJwks signs and checks every token, and holds EC keys alone.\nRealtime and Storage each check a token with a secret of their own. The chart generates none\nof them, and a partial set gives a stack that reports healthy and refuses every token.\n\nInstalled with the server installer:  run the installer of this release again; it adds them.\nInstalled with npm run setup:         npm run setup   (completes values-local.yaml), then upgrade.\nValues or a Secret kept elsewhere:    npm run keys:rotate -- --signing-keys\n\nThe steps: %s.\n" (join "\n  - " $problems) $guide) -}}
 {{- end -}}
 {{- end -}}
 
@@ -503,9 +533,9 @@ Elixir stack trace. Only when realtime is enabled and the chart owns the secret.
 {{- end -}}
 
 {{/*
-Realtime's tenant health check with an HS256 token the probe signs itself, for when the anon key is
-ES256: the /api routes verify with API_JWT_SECRET alone. The image has openssl. A list item, so a
-probe's `command` includes it after `/bin/sh -c`.
+Realtime's tenant health check with a one-minute HS256 token the probe signs itself: the /api routes
+verify with API_JWT_SECRET (Realtime's own secret) alone, and take no ES256 token. The image has
+openssl. A list item, so a probe's `command` includes it after `/bin/sh -c`.
 */}}
 {{- define "aber.realtimeHealthCommand" -}}
 - |
@@ -1447,13 +1477,8 @@ when read makes the settings look wrong and get rewritten on every boot, silentl
 {{ include "aber.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") }}
 {{ include "aber.secretEnv" (dict "name" "NODERED_WEBHOOK_JWT_SECRET" "secretName" $secretName "key" "NODERED_WEBHOOK_JWT_SECRET") }}
 {{ include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") }}
-{{- if .Values.supabaseAuth.es256Signing }}
-{{- /* adminAuth.tokens verifies with the JWKS: ES256 by kid, HS256 by its legacy key. Its presence
-       also turns on the editor sign-in's `openid` scope, whose ID token is verified the same way. */}}
+{{- /* adminAuth.tokens and the editor sign-in's ID token verify ES256 against the JWKS, by kid. */}}
 {{ include "aber.secretEnv" (dict "name" "SUPABASE_JWT_JWKS" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") }}
-{{- else }}
-{{ include "aber.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") }}
-{{- end }}
 {{ include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") }}
 - name: NODERED_OAUTH_CLIENT_ID
   value: {{ .Values.nodeRed.oauthClientId | default "c0ffee00-0000-4000-8000-000000000002" | quote }}

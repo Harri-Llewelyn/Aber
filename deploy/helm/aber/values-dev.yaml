@@ -9,8 +9,8 @@
 # is the starting point for anything reachable by another person.
 #
 # The anon and service-role keys are JWTs signed ES256 by the demonstration key pair in jwtKeys
-# below, which carries jwtSecret as its legacy key; the set is matching and must be replaced
-# together. See the note on `secrets` in values.yaml.
+# below; the set is matching and must be replaced together. See the note on `secrets` in
+# values.yaml.
 # =============================================================================================
 
 global:
@@ -28,8 +28,6 @@ supabaseAuth:
   # The four demo personas (supabase/seed.sql), whose password is published. This file is the only
   # place they are turned on; validate.py and the stack lane sign in as them.
   demoAccounts: true
-  # ES256, so the stack lane tests the signing new sites get; the upgrade rehearsal keeps HS256.
-  es256Signing: true
 
 dbInit:
   # The example metric catalog (supabase/example-metrics.sql). validate.py and the AAS conformance
@@ -37,11 +35,12 @@ dbInit:
   exampleMetrics: true
 
 secrets:
+  # GoTrue's required, inert secret: no service accepts a token signed with it.
   jwtSecret: super-secret-jwt-token-with-at-least-32-characters
   # The DEMONSTRATION EC P-256 pair, for development only like everything here: GoTrue's signing
-  # set and the verifiers' JWKS, each with jwtSecret above as the legacy `oct` key.
-  jwtKeys: '[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["sign","verify"],"d":"_ZIWwzwKT1hRrDYRBv5EuCpn-r1ZS_nkFh8ISZQVbaM"},{"kty":"oct","k":"c3VwZXItc2VjcmV0LWp3dC10b2tlbi13aXRoLWF0LWxlYXN0LTMyLWNoYXJhY3RlcnM","alg":"HS256"}]'
-  jwtJwks: '{"keys":[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["verify"]},{"kty":"oct","k":"c3VwZXItc2VjcmV0LWp3dC10b2tlbi13aXRoLWF0LWxlYXN0LTMyLWNoYXJhY3RlcnM","alg":"HS256"}]}'
+  # set and the verifiers' JWKS.
+  jwtKeys: '[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["sign","verify"],"d":"_ZIWwzwKT1hRrDYRBv5EuCpn-r1ZS_nkFh8ISZQVbaM"}]'
+  jwtJwks: '{"keys":[{"kty":"EC","kid":"aber-development-demonstration-key","use":"sig","alg":"ES256","crv":"P-256","x":"7_yJLFbbSFPSHklYZFespYf-U4kxR_CqJtnAaKaLnvg","y":"sNgk6zj2eHqrFMfnAtFsoS6HLeNWyePs5tQ7x7GQO5M","key_ops":["verify"]}]}'
   anonKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.JMb7HUEgwdqrj-6LwYAEYRassYEe7ZXBwRrBcmNJ77d0w9xG0dynSoCcNTOc_QMQdR2J4Z7JFRV5prMWdBxL6w
   serviceRoleKey: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImFiZXItZGV2ZWxvcG1lbnQtZGVtb25zdHJhdGlvbi1rZXkifQ.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9._7pCG15S37d0VzyCq5F2jHhRgMonld1k26pQV8U9NRyBUy9PkodxdEOsI9s_vNI0d7pDc4_pZA1kiC30aGj0yQ
   # The keys callers present; demo values, as the two JWTs above are.
@@ -77,6 +76,9 @@ secrets:
 
   # Realtime's own metrics endpoint, separate from the session JWT secret.
   realtimeMetricsJwtSecret: aber_realtime_metrics_jwt_secret_development_only
+  # Realtime's and Storage's own signing secrets (its /api routes; its signed URLs).
+  realtimeJwtSecret: aber_realtime_api_jwt_secret_development_only
+  storageJwtSecret: aber_storage_signed_url_jwt_secret_development_only
 
   # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
   realtimeDbEncKey: supabaserealtime

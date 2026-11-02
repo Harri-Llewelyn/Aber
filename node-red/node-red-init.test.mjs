@@ -53,7 +53,7 @@ function boot(dir, extraEnv = {}) {
     NODERED_CREDENTIAL_SECRET: SECRET,
     NODERED_OAUTH_CLIENT_ID: 'x', NODERED_OAUTH_CLIENT_SECRET: 'x', NODERED_OAUTH_AUTH_URL: 'x',
     NODERED_OAUTH_TOKEN_URL: 'x', NODERED_OAUTH_CALLBACK_URL: 'x', NODERED_USERINFO_URL: 'x',
-    SUPABASE_JWT_SECRET: 'x', SUPABASE_PUBLISHABLE_KEY: 'x', NODERED_WEBHOOK_JWT_SECRET: 'x',
+    SUPABASE_JWT_JWKS: JWKS, SUPABASE_PUBLISHABLE_KEY: 'x', NODERED_WEBHOOK_JWT_SECRET: 'x',
     MQTT_GW_TEST_USER: BROKER.user, MQTT_GW_TEST_PASSWORD: BROKER.password,
     MQTT_GW_TWO_USER: TWO.user, MQTT_GW_TWO_PASSWORD: TWO.password,
     ...extraEnv,
@@ -185,24 +185,17 @@ describe('the broker credential pair', () => {
 
 /**
  * The settings.js a boot writes, loaded with stand-ins for the two modules it requires from the
- * image (the OAuth strategy is only referenced; the JWT module only decodes here), and with fetch
- * answered by `answer(url, init)`. Every fetch is recorded.
+ * image (the OAuth strategy is only referenced; the JWT module is JWT_STAND_IN below), and with
+ * fetch answered by `answer(url, init)`. Every fetch is recorded.
  */
 function editorSettings(answer) {
   const dir = volume(JSON.stringify(flow()));
   const runtime = path.join(dir, 'no-runtime');
   fs.mkdirSync(runtime, { recursive: true });
   fs.writeFileSync(path.join(runtime, 'passport-oauth2.js'), 'module.exports = function OAuth2Strategy() {};\n');
-  fs.writeFileSync(path.join(runtime, 'jsonwebtoken.js'), `
-module.exports = {
-  decode(token) {
-    try { return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString()); } catch { return null; }
-  },
-  verify() { throw new Error('not used here'); },
-};
-`);
+  fs.writeFileSync(path.join(runtime, 'jsonwebtoken.js'), JWT_STAND_IN);
   run(dir);
-  for (const [name, value] of Object.entries(SETTINGS_ENV)) process.env[name] = value;
+  for (const [name, value] of Object.entries({ ...SETTINGS_ENV, SUPABASE_JWT_JWKS: JWKS })) process.env[name] = value;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), init });
@@ -229,8 +222,9 @@ const accessToken = (name, seconds = 3600) =>
 
 /** Signs `info` in through the strategy's verify, as Node-RED does after the OAuth callback. */
 function signIn(adminAuth, access, refresh) {
+  const idToken = gotrueToken({ sub: ADMIN_INFO.sub, aud: SETTINGS_ENV.NODERED_OAUTH_CLIENT_ID });
   return new Promise((resolve, reject) => {
-    adminAuth.strategy.options.verify(access, refresh, {}, (err, profile) => (err ? reject(err) : resolve(profile)));
+    adminAuth.strategy.options.verify(access, refresh, { idToken }, (err, profile) => (err ? reject(err) : resolve(profile)));
   });
 }
 
@@ -379,8 +373,10 @@ module.exports = {
 const LEGACY_SECRET = 'node-red-init-test-signing-secret-of-32-characters';
 const KID = 'node-red-init-test-kid';
 const { privateKey: EC_PRIVATE, publicKey: EC_PUBLIC } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+const EC_JWK = { ...EC_PUBLIC.export({ format: 'jwk' }), kid: KID, alg: 'ES256', use: 'sig', key_ops: ['verify'] };
+// The shared secret as the `oct` key a 1.7 key set carried.
 const LEGACY_JWK = { kty: 'oct', k: Buffer.from(LEGACY_SECRET).toString('base64url'), alg: 'HS256' };
-const JWKS = JSON.stringify({ keys: [{ ...EC_PUBLIC.export({ format: 'jwk' }), kid: KID, alg: 'ES256', use: 'sig', key_ops: ['verify'] }, LEGACY_JWK] });
+const JWKS = JSON.stringify({ keys: [EC_JWK] });
 
 /** A token GoTrue could have signed: ES256 under `kid`, or HS256 under `secret`. */
 function gotrueToken(claims, { alg = 'ES256', kid = KID, secret = LEGACY_SECRET, key = EC_PRIVATE } = {}) {
@@ -415,30 +411,26 @@ describe("GoTrue's tokens, verified", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     delete process.env.SUPABASE_JWT_JWKS;
-    delete process.env.SUPABASE_JWT_SECRET;
   });
 
-  it('without the JWKS: an HS256 token under the secret passes adminAuth.tokens, and nothing else does', async () => {
-    const { adminAuth } = gotrueSettings({ SUPABASE_JWT_SECRET: LEGACY_SECRET });
-    assert.deepEqual(await adminAuth.tokens(gotrueToken(access(), { alg: 'HS256' })), { username: EMAIL, permissions: '*' });
-    assert.equal(await adminAuth.tokens(gotrueToken(access())), null, 'no ES256 without the JWKS');
-    assert.equal(await adminAuth.tokens(gotrueToken(access(), { alg: 'HS256', secret: 'another-secret' })), null);
-    assert.equal(await adminAuth.tokens(gotrueToken(access({ aud: 'node-red-hooks' }), { alg: 'HS256' })), null, 'the audience is checked');
-    assert.deepEqual(adminAuth.strategy.options.scope, ['email', 'profile'], 'no openid under HS256');
-  });
-
-  it('with the JWKS: ES256 by kid and HS256 by the legacy key pass, through 1.7', async () => {
-    const { adminAuth } = gotrueSettings({ SUPABASE_JWT_JWKS: JWKS, SUPABASE_JWT_SECRET: '' });
+  it('ES256 by kid passes adminAuth.tokens, and no HS256 token does', async () => {
+    const { adminAuth } = gotrueSettings({ SUPABASE_JWT_JWKS: JWKS });
     assert.deepEqual(await adminAuth.tokens(gotrueToken(access())), { username: EMAIL, permissions: '*' });
-    assert.deepEqual(await adminAuth.tokens(gotrueToken(access({ n: 2 }), { alg: 'HS256' })), { username: EMAIL, permissions: '*' });
     assert.equal(await adminAuth.tokens(gotrueToken(access(), { kid: 'another-kid' })), null, 'an unknown kid verifies nothing');
     const other = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey;
     assert.equal(await adminAuth.tokens(gotrueToken(access({ n: 3 }), { key: other })), null, 'another pair under the kid');
-    assert.equal(await adminAuth.tokens(gotrueToken(access({ n: 4 }), { alg: 'HS256', secret: 'another-secret' })), null);
+    assert.equal(await adminAuth.tokens(gotrueToken(access({ aud: 'node-red-hooks' }))), null, 'the audience is checked');
+    assert.equal(await adminAuth.tokens(gotrueToken(access({ n: 2 }), { alg: 'HS256' })), null, 'a token signed with the shared secret');
     assert.deepEqual(adminAuth.strategy.options.scope, ['openid', 'email', 'profile']);
   });
 
-  it('with the JWKS the sign-in takes the ID token: for this client, and naming the person userinfo names', async () => {
+  it('an `oct` key left in the JWKS verifies nothing', async () => {
+    const { adminAuth } = gotrueSettings({ SUPABASE_JWT_JWKS: JSON.stringify({ keys: [EC_JWK, LEGACY_JWK] }) });
+    assert.equal(await adminAuth.tokens(gotrueToken(access({ n: 5 }), { alg: 'HS256' })), null);
+    assert.deepEqual(await adminAuth.tokens(gotrueToken(access({ n: 6 }))), { username: EMAIL, permissions: '*' });
+  });
+
+  it('the sign-in takes the ID token: for this client, and naming the person userinfo names', async () => {
     const settings = gotrueSettings({ SUPABASE_JWT_JWKS: JWKS });
     const { adminAuth } = settings;
     const signInWith = (idToken) => new Promise((resolve, reject) => {
@@ -462,10 +454,10 @@ describe("GoTrue's tokens, verified", () => {
     assert.match(result.stderr, /SUPABASE_JWT_JWKS is not a JWKS with an EC P-256 key/);
   });
 
-  it('refuses to boot with neither the JWKS nor the secret', () => {
-    const result = boot(volume(JSON.stringify(flow())), { SUPABASE_JWT_SECRET: '' });
+  it('refuses to boot without the JWKS, whatever else is set', () => {
+    const result = boot(volume(JSON.stringify(flow())), { SUPABASE_JWT_JWKS: '', SUPABASE_JWT_SECRET: LEGACY_SECRET });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /SUPABASE_JWT_JWKS \(or SUPABASE_JWT_SECRET\) not set/);
+    assert.match(result.stderr, /SUPABASE_JWT_JWKS not set/);
   });
 });
 

@@ -30,14 +30,17 @@ secrets:
   #
   # Point it at a Secret managed outside the chart. Every value below is then ignored, the chart
   # renders no Secret of its own, and the credential validation is skipped -- because the values
-  # are no longer the chart's to see. No template change is needed; this is the seam.
+  # are no longer the chart's to see. No template change is needed; this is the seam. The signing
+  # set is the exception: `helm install` and `helm upgrade` read the Secret and refuse one
+  # aber.validateSigningKeys would (`helm template` cannot read it, so a GitOps render cannot).
   #
   # THE SECRET MUST CARRY THESE KEYS. They are the ENVIRONMENT VARIABLE names, not the camelCase
   # values-file names, precisely so an externally-managed Secret has one obvious contract:
   #
   #   SUPABASE_JWT_SECRET          SUPABASE_ANON_KEY          SUPABASE_SERVICE_ROLE_KEY
-  #   SUPABASE_JWT_KEYS            (read only with supabaseAuth.es256Signing: GoTrue's signing set)
-  #   SUPABASE_JWT_JWKS            (read only with supabaseAuth.es256Signing: the verifiers' JWKS)
+  #   SUPABASE_JWT_KEYS            (GoTrue's signing set: the EC private key, and no `oct` key)
+  #   SUPABASE_JWT_JWKS            (the verifiers' JWKS: its public key, and no `oct` key)
+  #   REALTIME_JWT_SECRET          STORAGE_JWT_SECRET         (each its own, unlike the others)
   #   SUPABASE_PUBLISHABLE_KEY     SUPABASE_SECRET_KEY        SUPABASE_INGESTION_KEY
   #   POSTGRES_PASSWORD            DB_PASSWORD                PG_META_CRYPTO_KEY
   #   INGEST_WRITER_PASSWORD       FDW_READER_PASSWORD        BI_READER_PASSWORD
@@ -66,14 +69,17 @@ secrets:
   #   STUDIO_PROXY_HMAC_SECRET     (read only when ingress.routes.studio is on)
   #
   # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are JWTs signed ES256 by the
-  # private key in SUPABASE_JWT_KEYS (HS256 by SUPABASE_JWT_SECRET without es256Signing);
-  # SUPABASE_JWT_KEYS and SUPABASE_JWT_JWKS both carry SUPABASE_JWT_SECRET as the legacy key; and
+  # private key in SUPABASE_JWT_KEYS; SUPABASE_JWT_KEYS and SUPABASE_JWT_JWKS hold EC keys alone,
+  # for an `oct` key would verify a token signed with SUPABASE_JWT_SECRET, which only GoTrue reads
+  # (it requires one, and signs nothing with it); REALTIME_JWT_SECRET and STORAGE_JWT_SECRET each
+  # differ from it and from each other; and
   # SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY are the keys callers present, which the gateway
   # translates to those JWTs. Rotating the signing key in your secret
   # store WITHOUT re-minting both tokens gives a stack that reports healthy and rejects every
   # request at the gateway -- and the chart cannot warn you, because it cannot see them. Rotate
   # them together, always. SUPABASE_INGESTION_KEY and the two service keys above are signed by it
-  # too, so re-sign them in the same change (npm run keys:rotate prints them).
+  # too, so re-sign them in the same change (npm run keys:rotate prints them). A Secret made before
+  # 1.8.0 is completed by npm run keys:rotate -- --signing-keys (help/site/upgrading.md).
   #
   # NODERED_ADMIN_TOKEN must be present but EMPTY. It is a break-glass static token that bypasses
   # Supabase Auth entirely. Node-RED's pod reads the key whatever its value, so a Secret without
@@ -132,14 +138,16 @@ secrets:
   # ---- Only needed when existingSecret is empty -------------------------------------------
   #
   # THESE ARE A SET. anonKey and serviceRoleKey are JWTs with {"iss":"supabase","role":"anon"}
-  # and {"iss":"supabase","role":"service_role"}, signed ES256 by the private key in jwtKeys
-  # (supabaseAuth.es256Signing below); jwtKeys and jwtJwks carry jwtSecret as the legacy key;
-  # publishableKey and secretKey are the `sb_publishable_*` / `sb_secret_*` keys callers present,
+  # and {"iss":"supabase","role":"service_role"}, signed ES256 by the private key in jwtKeys;
+  # jwtKeys and jwtJwks hold EC keys alone; realtimeJwtSecret and storageJwtSecret are Realtime's
+  # and Storage's own; publishableKey and secretKey are the `sb_publishable_*` / `sb_secret_*` keys callers present,
   # which the gateway translates to those JWTs. `npm run setup` mints a matching set. Changing one
   # alone gives a stack where every request fails at the gateway while it reports healthy.
   jwtSecret: ""
   jwtKeys: ""
   jwtJwks: ""
+  realtimeJwtSecret: ""
+  storageJwtSecret: ""
   anonKey: ""
   serviceRoleKey: ""
   publishableKey: ""
@@ -236,9 +244,6 @@ supabaseAuth:
   # demo accounts are for development (values-dev.yaml) and sign-up is closed.
   firstAdministrator:
     email: ""
-  # Tokens signed ES256 with the key pair in SUPABASE_JWT_KEYS / secrets.jwtKeys. HS256 signing is
-  # deprecated in 1.7 and removed in 1.8; a new site starts here.
-  es256Signing: true
 
 # ---------------------------------------------------------------------------------------------
 # The two identities a site names once, and cannot comfortably change afterwards.

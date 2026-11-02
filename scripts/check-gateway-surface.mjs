@@ -538,8 +538,7 @@ const TEMPLATE_PLACEHOLDERS = [
   '__SUPABASE_SECRET_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',
   // The studio listener's four. The first is the JWKS GoTrue's tokens verify against (the EC public
-  // key and the HS256 `oct` key, or the `oct` key alone): not a credential the gateway presents but
-  // the one it verifies with.
+  // key): not a credential the gateway presents but the one it verifies with.
   '__SUPABASE_JWT_JWKS__',
   '__SUPABASE_PUBLIC_URL__',
   '__STUDIO_PUBLIC_URL__',
