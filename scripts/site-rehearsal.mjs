@@ -288,9 +288,22 @@ function packageChart (version) {
   return chart
 }
 
+/**
+ * A copy of the values as the checkout's setup.mjs completes them, for reading the candidate's
+ * render before the release is installed. The site's own file stays as the release wrote it until
+ * the upgrade guide's step, which completeValues() takes; the candidate refuses it until then.
+ */
+function completedCopy () {
+  const copy = path.join(WORK, 'values-completed-preview.yaml')
+  writeFileSync(copy, readFileSync(VALUES, 'utf8'))
+  const r = capture('node', [path.join(REPO, 'scripts', 'setup.mjs'), `--out=${copy}`], { cwd: REPO })
+  if (!r.ok) die(`the checkout's setup.mjs could not complete a copy of the values:\n${r.out}\n${r.err}`)
+  return copy
+}
+
 /** The built images this site pulls, read off the rendered chart; every one must carry the candidate tag. */
-function imagesToBuild (chart, version) {
-  const r = capture('helm', ['template', RELEASE, chart, '-n', NS, '-f', VALUES, '-f', SITE], { maxBuffer: 64 * 1024 * 1024 })
+function imagesToBuild (chart, version, values = VALUES) {
+  const r = capture('helm', ['template', RELEASE, chart, '-n', NS, '-f', values, '-f', SITE], { maxBuffer: 64 * 1024 * 1024 })
   if (!r.ok) die(`the packaged chart does not render with the site's values:\n${r.err}`)
   const refs = [...new Set([...r.out.matchAll(/image:\s*"?([^"\s]+)"?/g)].map(m => m[1]).filter(i => i.startsWith(`${IMG_NS}/`)))]
   const stray = refs.filter(i => !i.endsWith(`:${version}`))
@@ -632,7 +645,7 @@ async function rehearse () {
   })
   writeSiteValues(nodeAddress, hardened)
   const chart = packageChart(candidate)
-  const names = imagesToBuild(chart, candidate)
+  const names = imagesToBuild(chart, candidate, from ? completedCopy() : VALUES)
   await phase(`build the checkout's images as ${candidate}`, () => buildImages(candidate, names))
   await phase('import them into the node', () => {
     importImages(candidate, names, CLUSTER)
