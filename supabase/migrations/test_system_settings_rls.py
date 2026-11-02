@@ -149,11 +149,10 @@ def drop_fixture_principals(user_ids):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # ORDER MATTERS ONLY FOR THE AUDIT ROW, not for integrity: `user_roles.user_id` is
-            # `text` and carries no foreign key to `auth.users`, so neither delete constrains the
-            # other. Grants go first so the ROLE_REVOKED row is written while the identity it
-            # names still exists, which is what `changed_by` attribution assumes.
-            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+            # Grants go first so the ROLE_REVOKED row is written while the identity it names still
+            # exists, which is what `changed_by` attribution assumes. Deleting the account would
+            # also take them, through the foreign key.
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))
             cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))

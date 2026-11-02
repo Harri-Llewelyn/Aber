@@ -108,7 +108,7 @@ def drop_fixture_principals(user_ids):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s);",
+            cur.execute("DELETE FROM public.user_roles WHERE user_id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))
             cur.execute("DELETE FROM auth.users WHERE id = ANY(%s::uuid[]);",
                         ([str(u) for u in user_ids],))
@@ -149,7 +149,7 @@ class UserAccountsListing(unittest.TestCase):
                 cur.execute(
                     "SELECT ur.user_id, r.name FROM public.user_roles ur"
                     "  JOIN public.roles r ON r.id = ur.role_id"
-                    " WHERE ur.user_id = ANY(%s);", ([str(u) for u in FIXTURE_ROLES],)
+                    " WHERE ur.user_id = ANY(%s::uuid[]);", ([str(u) for u in FIXTURE_ROLES],)
                 )
                 granted = {str(u): r for u, r in cur.fetchall()}
                 for user_id, role in FIXTURE_ROLES.items():

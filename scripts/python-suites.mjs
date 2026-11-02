@@ -507,6 +507,16 @@ export const SUITES = {
     lanes: ['db'],
     why: "The role table's RLS -- who may read and who may grant.",
   },
+  'supabase/migrations/test_user_roles_name_their_person_by_uuid.py': {
+    lanes: ['db'],
+    why:
+      "user_roles.user_id is a uuid with a foreign key to auth.users, so a role for an id with no " +
+      'account is refused and goes with its account; that 0001\'s head converts 1.7.0\'s text ' +
+      'column once, deleting and counting the rows that name no account, and a second boot changes ' +
+      'nothing; and that a sign-in, Add Person, a role change, has_role() and the machine guard ' +
+      'answer as before after each boot. An empty database never meets the conversion, so the ' +
+      'suite rebuilds 1.7.0\'s column.',
+  },
   'supabase/migrations/test_role_checks_are_timed.py': {
     lanes: ['db'],
     why:

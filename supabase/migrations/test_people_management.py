@@ -172,7 +172,7 @@ class PeopleManagement(unittest.TestCase):
         last-Administrator rule is decided by the fixtures alone."""
         self.cur.execute(
             "UPDATE auth.users SET banned_until = now() + interval '1 day'"
-            " WHERE id::text IN (SELECT ur.user_id FROM public.user_roles ur"
+            " WHERE id IN (SELECT ur.user_id FROM public.user_roles ur"
             "                     JOIN public.roles r ON r.id = ur.role_id"
             "                    WHERE r.name = 'Administrator')"
             "   AND NOT (id = ANY (%s::uuid[]));",

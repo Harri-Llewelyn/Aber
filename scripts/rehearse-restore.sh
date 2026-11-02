@@ -279,11 +279,11 @@ cmd_seed() {
   log "making the rehearsal user an Administrator"
   sb -q -v email="$REHEARSAL_EMAIL" -f - <<'SQL'
 INSERT INTO public.user_roles (user_id, role_id)
-SELECT u.id::text, r.id
+SELECT u.id, r.id
   FROM auth.users u
   JOIN public.roles r ON r.name = 'Administrator'
  WHERE u.email = :'email'
-   AND NOT EXISTS (SELECT 1 FROM public.user_roles x WHERE x.user_id = u.id::text AND x.role_id = r.id);
+   AND NOT EXISTS (SELECT 1 FROM public.user_roles x WHERE x.user_id = u.id AND x.role_id = r.id);
 SQL
 
   # A storage object, written onto the volume the backup archives. Through the pod's filesystem

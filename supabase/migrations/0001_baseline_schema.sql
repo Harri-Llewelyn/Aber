@@ -422,6 +422,66 @@ REVOKE ALL ON FUNCTION public.replay_policy(regclass, name, text, text) FROM PUB
 REVOKE ALL ON FUNCTION public.replay_trigger(regclass, name, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
+-- 3d. user_roles.user_id becomes a uuid
+-- ---------------------------------------------------------------------------------------------
+-- Before 1.8 the column was text. It is converted here, before section 4 declares anything that
+-- compares it with a uuid. Its policy goes first, since a column a policy reads cannot change
+-- type; section 4 and 0177 state it again. Rows that name no account grant nothing and are
+-- deleted, and deleted again on any boot that finds the foreign key missing, so an account deleted
+-- before section 4 adds the key cannot stop it being added. Skipped once the key is there.
+-- supabase/README.md, "user_roles.user_id is a uuid referencing auth.users".
+DO $user_id_uuid$
+DECLARE
+    v_text     boolean;
+    v_unshaped text[];
+    v_orphans  bigint;
+BEGIN
+    IF to_regclass('public.user_roles') IS NULL THEN
+        RETURN;
+    END IF;
+    SELECT a.atttypid = 'text'::regtype INTO v_text
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.user_roles'::regclass AND a.attname = 'user_id' AND NOT a.attisdropped;
+    IF NOT v_text AND EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+                               WHERE conrelid = 'public.user_roles'::regclass
+                                 AND conname = 'user_roles_user_id_fkey') THEN
+        RETURN;
+    END IF;
+
+    IF v_text THEN
+        DROP POLICY IF EXISTS user_roles_select_own_or_privileged ON public.user_roles;
+    END IF;
+
+    -- Not the lower-case form auth.uid()::text gives, so it never matched anyone. The audit
+    -- trigger would cast it to the audit row's uuid and fail, so these go without one and are
+    -- named here instead.
+    SELECT array_agg(ur.user_id::text ORDER BY ur.user_id::text) INTO v_unshaped
+      FROM public.user_roles ur
+     WHERE ur.user_id::text !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+    IF v_unshaped IS NOT NULL THEN
+        ALTER TABLE public.user_roles DISABLE TRIGGER trg_user_roles_audit_trail;
+        DELETE FROM public.user_roles ur WHERE ur.user_id::text = ANY (v_unshaped);
+        ALTER TABLE public.user_roles ENABLE TRIGGER trg_user_roles_audit_trail;
+        RAISE NOTICE 'user_roles: deleted % row(s) whose user_id is not a uuid: %',
+            cardinality(v_unshaped), v_unshaped;
+    END IF;
+
+    -- Each of these writes its ROLE_REVOKED audit row, as the migration.
+    DELETE FROM public.user_roles ur
+     WHERE NOT EXISTS (SELECT 1 FROM auth.users u WHERE u.id::text = ur.user_id::text);
+    GET DIAGNOSTICS v_orphans = ROW_COUNT;
+    IF v_orphans > 0 THEN
+        RAISE NOTICE 'user_roles: deleted % row(s) naming no account', v_orphans;
+    END IF;
+
+    IF v_text THEN
+        ALTER TABLE public.user_roles ALTER COLUMN user_id TYPE uuid USING user_id::uuid;
+        RAISE NOTICE 'user_roles: user_id is now a uuid';
+    END IF;
+END
+$user_id_uuid$;
+
+-- ---------------------------------------------------------------------------------------------
 -- 4. public and timescale, generated from the end state of the chain
 -- ---------------------------------------------------------------------------------------------
 -- Every object below is taken from a dump of a database the whole chain built, so each one is
@@ -758,7 +818,7 @@ BEGIN
   SELECT r.name INTO v_actor_role
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id
-   WHERE ur.user_id = p_actor_id::text
+   WHERE ur.user_id = p_actor_id
    LIMIT 1;
 
   IF v_actor_role IS NULL OR v_actor_role NOT IN ('Administrator', 'Shopfloor_Manager') THEN
@@ -2466,7 +2526,7 @@ BEGIN
   SELECT r.name INTO role_name
   FROM public.user_roles ur
   JOIN public.roles r ON r.id = ur.role_id
-  WHERE ur.user_id = (event->>'user_id')
+  WHERE ur.user_id = (event->>'user_id')::uuid
   LIMIT 1;
 
   claims := event->'claims';
@@ -4139,12 +4199,12 @@ BEGIN
   END IF;
 
   -- Never override an explicit mapping (e.g. the seeded personas).
-  IF EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = NEW.id::text) THEN
+  IF EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = NEW.id) THEN
     RETURN NEW;
   END IF;
 
   INSERT INTO public.user_roles (user_id, role_id)
-  VALUES (NEW.id::text, default_role_id)
+  VALUES (NEW.id, default_role_id)
   ON CONFLICT (user_id, role_id) DO NOTHING;
 
   UPDATE auth.users
@@ -4186,7 +4246,7 @@ CREATE OR REPLACE FUNCTION public.has_authority(allowed_permissions text[]) RETU
               FROM public.user_roles ur
               JOIN public.role_permissions rp ON rp.role_id = ur.role_id
               JOIN public.permissions p ON p.id = rp.permission_id
-             WHERE ur.user_id = auth.uid()::text
+             WHERE ur.user_id = auth.uid()
                AND p.name = ANY (allowed_permissions)
         )
     END;
@@ -4211,7 +4271,7 @@ CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
     SELECT 1
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id
-    WHERE ur.user_id = auth.uid()::text
+    WHERE ur.user_id = auth.uid()
       AND r.name = ANY (allowed_roles)
   );
 $$;
@@ -5587,7 +5647,7 @@ BEGIN
     causation_id, recorded_at
   ) VALUES (
     'user_roles',
-    v_row.user_id::uuid,
+    v_row.user_id,
     v_action,
     CASE WHEN TG_OP = 'DELETE'
       THEN jsonb_build_object('role_id', OLD.role_id,
@@ -6996,7 +7056,7 @@ BEGIN
       SELECT 1
         FROM public.user_roles ur
         JOIN public.roles r ON r.id = ur.role_id
-       WHERE ur.user_id = v_actor::text
+       WHERE ur.user_id = v_actor
          AND r.name = 'Administrator'
     ) THEN
       RAISE EXCEPTION
@@ -7017,7 +7077,7 @@ BEGIN
     INTO v_roles
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id
-   WHERE ur.user_id = p_principal_id::text;
+   WHERE ur.user_id = p_principal_id;
 
   INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
@@ -7238,13 +7298,9 @@ COMMENT ON FUNCTION public.refuse_hand_assigning_a_replay_lane() IS 'Refuses a d
 CREATE OR REPLACE FUNCTION public.refuse_role_for_machine_principal() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
-    AS $_$
+    AS $$
 BEGIN
-    -- `user_roles.user_id` is TEXT and carries no FK, so it is not guaranteed to be a uuid. A cast
-    -- that raises here would refuse a row for the wrong reason and name the wrong problem, so the
-    -- shape is checked before the predicate is asked.
-    IF NEW.user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-       AND public.is_machine_principal(NEW.user_id::uuid) THEN
+    IF public.is_machine_principal(NEW.user_id) THEN
         RAISE EXCEPTION
             'user_roles: % is a machine principal and may not hold a role. Grant it permissions '
             'with create_machine_principal() or principal_permissions instead -- 0080 separated the '
@@ -7255,7 +7311,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$_$;
+$$;
 
 
 ALTER FUNCTION public.refuse_role_for_machine_principal() OWNER TO postgres;
@@ -14045,7 +14101,7 @@ COMMENT ON VIEW public.telemetry_latest IS 'Newest sample per (asset_id, metric_
 
 -- user_roles :: TABLE
 CREATE TABLE IF NOT EXISTS public.user_roles (
-    user_id text NOT NULL,
+    user_id uuid NOT NULL,
     role_id integer NOT NULL
 );
 
@@ -14053,7 +14109,7 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 ALTER TABLE public.user_roles OWNER TO postgres;
 
 ALTER TABLE public.user_roles
-    ADD COLUMN IF NOT EXISTS user_id text NOT NULL,
+    ADD COLUMN IF NOT EXISTS user_id uuid NOT NULL,
     ADD COLUMN IF NOT EXISTS role_id integer NOT NULL;
 
 ALTER TABLE public.user_roles
@@ -16705,6 +16761,25 @@ END $c$;
 
 --
 
+-- user_roles user_roles_user_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'user_roles_user_id_fkey'
+                AND conrelid = 'public.user_roles'::regclass
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_user_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'user_roles_user_id_fkey'
+                    AND conrelid = 'public.user_roles'::regclass) THEN
+    ALTER TABLE ONLY public.user_roles
+        ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $c$;
+
+--
+
 -- areas :: ROW SECURITY
 ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
 
@@ -17548,7 +17623,7 @@ ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 -- user_roles user_roles_select_own_or_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.user_roles', 'user_roles_select_own_or_privileged', $ddl$
-CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (auth.uid())::text) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
+CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = auth.uid()) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
 $ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 COMMIT;
 

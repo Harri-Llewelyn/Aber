@@ -181,6 +181,46 @@ probe that reads and writes as a signed-in Administrator while the chain replays
   on, so every audited write failed `NOT NULL` in between (88 to 221 of the probe's updates per
   replay). A column whose default arrives that way is now left alone; `roles.id` had the same gap.
 
+### `user_roles.user_id` is a uuid referencing `auth.users`
+
+Every person column is a `uuid` with a foreign key to `auth.users(id)`. Until 1.8,
+`user_roles.user_id` was the exception: `text`, with no key. So every role check compared it with
+`auth.uid()::text`, `refuse_role_for_machine_principal()` checked the value's shape before it
+dared cast it, and a role row outlived its account. It is now a `uuid` referencing
+`auth.users(id)` `ON DELETE CASCADE`, as `person_profiles` (`0203`) and `user_settings` (`0188`)
+are, and every declaration that reads it compares a uuid with a uuid.
+
+**The conversion is in `0001`'s hand-written head (section 3d), not in a file at the end.** db-init
+replays every file on every boot, so every declaration that compares the column replays before a
+file at the end could change it. Once the column is a uuid, a declaration still comparing text
+fails. A `CREATE POLICY` stops db-init. A function body is not checked when it is created
+(`check_function_bodies = false`), so it fails when called: every token GoTrue issues, every role
+check, every People act. So each declaration is edited where it is stated (`0001`, `0165`, `0166`
+and `0177`), and the column changes before the first of them. `scripts/generate-baseline-section.mjs`
+writes section 4 only, so section 3d survives the next squash.
+
+Section 3d, in one transaction:
+
+- **Runs only while the column is `text` or the foreign key is missing.** On a fresh install the
+  table does not exist yet, and section 4 creates it with a `uuid`. Every later boot skips it.
+- **Drops `user_roles_select_own_or_privileged` first.** PostgreSQL will not change the type of a
+  column a policy reads. Section 4 creates the policy again, and `0177` states its final form.
+- **Deletes the rows that grant nothing, and counts them in a NOTICE.** A `user_id` naming no
+  account writes its `ROLE_REVOKED` row, as the migration. A `user_id` that is not a lower-case
+  uuid never matched `auth.uid()::text`. The audit row cannot name it, so it goes with the audit
+  trigger off and the NOTICE names it instead.
+- **Then `ALTER COLUMN user_id TYPE uuid`.** It holds `ACCESS EXCLUSIVE` on a table of a few dozen
+  rows for a moment. Section 4 adds `user_roles_user_id_fkey`, guarded as every constraint is. An
+  account deleted between the two would fail the key, so a boot that finds the key missing
+  deletes those rows again first.
+
+**The first 1.8 boot has a short window the other way.** From section 3d until each new body is
+declared, the 1.7.0 body meets a uuid column and fails with `operator does not exist: uuid = text`.
+A probe asking as a signed-in Administrator about every 16 ms, while a 1.7.0 test database took its
+first 1.8 boot (36 s), saw the token hook fail for 0.16 s and `has_role()` for 0.31 s, both within
+`0001`. `list_people()` failed for 6.9 s, until `0166` declared it, and the other People acts with
+it. Every later boot has no window.
+
 ### Constraints, policies and triggers are re-created only when they differ
 
 A boot that changes no constraint, policy or trigger takes no lock for one. Each migration states a
@@ -2789,7 +2829,7 @@ holds them for every other writer, a Manager's PATCH included.
 | `schemas` | Versioned. `version` / `parent_schema_id` / `status` / `change_description` |
 | `device_submodels` | Many schemas per device, one AAS Submodel each |
 | `mtconnect_vocabulary`, `iso22400_vocabulary`, `opcua_vocabulary`, `ashrae223_vocabulary` | Reference data. `SELECT` to `authenticated`, everything else revoked |
-| `roles`, `permissions`, `role_permissions`, `user_roles` | RBAC |
+| `roles`, `permissions`, `role_permissions`, `user_roles` | RBAC. `user_roles.user_id` is a `uuid` referencing `auth.users(id)` `ON DELETE CASCADE`, so a role goes with its account ([1.8](#user_rolesuser_id-is-a-uuid-referencing-authusers)) |
 | `webhook_endpoints` | Outbound targets. **No write RLS policy by design** — a writable endpoint table is an SSRF primitive |
 
 ### Views
@@ -3060,6 +3100,11 @@ public.has_role(allowed_roles text[]) RETURNS boolean
 
 Reads `public.user_roles` **directly rather than trusting a JWT claim**. This is deliberate: a role
 revocation takes effect on the next query, not on the next token refresh.
+
+**What it costs is printed, not asserted.** `test_role_checks_are_timed.py` (db lane) times 10,000
+calls of `has_role()` and `has_authority()` as one signed-in person and explains the read
+`user_roles`' policy guards. A change to either function, or to the table they read, runs it on a
+freshly migrated database before and after; the baseline is on issue #1194.
 
 `custom_access_token_hook()` also mirrors the role into `app_metadata.role` for clients that want
 it — but **nothing authorises on that claim**. The edge functions were corrected during pre-beta

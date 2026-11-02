@@ -47,6 +47,6 @@ COMMIT;
 
 BEGIN;
 SELECT public.replay_policy('public.user_roles', 'user_roles_select_own_or_privileged', $ddl$
-CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (( SELECT auth.uid() AS uid))::text) OR ( SELECT public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AS has_role)));
+CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = ( SELECT auth.uid() AS uid)) OR ( SELECT public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AS has_role)));
 $ddl$);
 COMMIT;
