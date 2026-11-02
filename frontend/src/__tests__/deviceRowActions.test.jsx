@@ -124,6 +124,44 @@ describe('device row actions', () => {
     expect(panelLabels()).not.toMatch(/Archive Device/i)
   })
 
+  /** Restore asks first, in the dialog Archived Entities' Restore uses, replay lanes and all. */
+  describe('Restore Device asks first', () => {
+    const openRestore = async () => {
+      await show([device({ is_archived: true })])
+      fireEvent.click(openPanel().getByText('Restore Device').closest('button'))
+      return screen.getByRole('dialog', { name: 'Restore device' })
+    }
+
+    it('names the device and says its replay lanes come back with it', async () => {
+      const dialog = await openRestore()
+
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/^Restore the device 'CNC_01' to active service\?/))
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/Any replay lane recorded from it comes back with it\.$/))
+      expect(within(dialog).getByRole('button', { name: 'Restore Device' })).toHaveClass('btn-primary')
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('restores nothing when cancelled', async () => {
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog', { name: 'Restore device' })).toBeNull()
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('restores the device once, when confirmed', async () => {
+      api.post.mockResolvedValue({})
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Device' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore device' })).toBeNull())
+      expect(api.post).toHaveBeenCalledTimes(1)
+      expect(api.post).toHaveBeenCalledWith('/api/v1/devices/aaaaaaaa-0000-4000-8000-000000000001/restore', {})
+    })
+  })
+
   it('disables the write actions for a role that cannot manage devices', async () => {
     await show([device()], () => false)
     const panel = openPanel()
