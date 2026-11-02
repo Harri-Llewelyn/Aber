@@ -108,23 +108,29 @@ class AuditDomainFixture(unittest.TestCase):
                 for needed in ("Administrator", "Shopfloor_Manager", "Auditor"):
                     if needed not in cls.role_id:
                         raise RuntimeError(f"role {needed!r} is missing; 0001 did not run cleanly.")
-
-                # These three grants are themselves ROLE_GRANTED rows now, which is the feature.
-                # ON CONFLICT DO NOTHING keeps a re-run from appending three more.
-                cur.execute(
-                    "INSERT INTO public.user_roles (user_id, role_id)"
-                    " VALUES (%s, %s), (%s, %s), (%s, %s)"
-                    " ON CONFLICT (user_id, role_id) DO NOTHING;",
-                    (ADMIN_ID, cls.role_id["Administrator"],
-                     MANAGER_ID, cls.role_id["Shopfloor_Manager"],
-                     AUDITOR_ID, cls.role_id["Auditor"]),
-                )
-                conn.commit()
         finally:
+            conn.rollback()
             conn.close()
 
     def setUp(self):
+        # The people, in the test's own transaction: user_roles names an account, so each has one.
+        # SUBJECT_ID holds no role until a test grants it one.
         self.conn = get_connection()
+        with self.conn.cursor() as cur:
+            for user_id in (ADMIN_ID, MANAGER_ID, AUDITOR_ID, SUBJECT_ID):
+                cur.execute(
+                    "INSERT INTO auth.users (id, email, encrypted_password, created_at)"
+                    " VALUES (%s, %s, 'not-a-real-hash', now()) ON CONFLICT (id) DO NOTHING;",
+                    (user_id, f"{user_id}@audit-domain.test"),
+                )
+            cur.execute(
+                "INSERT INTO public.user_roles (user_id, role_id)"
+                " VALUES (%s, %s), (%s, %s), (%s, %s)"
+                " ON CONFLICT (user_id, role_id) DO NOTHING;",
+                (ADMIN_ID, self.role_id["Administrator"],
+                 MANAGER_ID, self.role_id["Shopfloor_Manager"],
+                 AUDITOR_ID, self.role_id["Auditor"]),
+            )
 
     def tearDown(self):
         self.conn.rollback()

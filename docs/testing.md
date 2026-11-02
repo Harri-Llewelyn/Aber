@@ -396,6 +396,18 @@ npm run test:db
 # The individual suites, for when one is being worked on. Point them at the throwaway with
 # `npm run test:db -- --keep --no-run` and SUPABASE_DB_PORT=54329 rather than running them bare.
 python supabase/migrations/test_user_roles_rls.py
+# user_roles names its person by uuid (0001, 0165, 0166, 0177). user_id references auth.users ON
+# DELETE CASCADE: a role for an id with no account is refused, and deleting the account deletes its
+# role with a ROLE_REVOKED row. On 1.7.0's text column, rebuilt in the transaction, 0001's head
+# deletes the rows naming no account and the one that is not a uuid, counting them in NOTICEs,
+# converts the column, and the key and policy follow; a second boot changes nothing. After each, a
+# sign-in carries the role, Add Person and a role change write the row, has_role() admits and
+# refuses as before, and a machine principal is refused. Every test rolls back.
+python supabase/migrations/test_user_roles_name_their_person_by_uuid.py
+# What has_role() and has_authority() cost per call (median of 5 runs of 10,000), beside the loop
+# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards. Printed, never asserted: run it on
+# the same database before and after a change to either function or the table they read.
+python supabase/migrations/test_role_checks_are_timed.py
 # The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
 # nameplate. The rest cover the two properties a simplification would remove first -- that an

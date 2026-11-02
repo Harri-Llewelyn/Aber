@@ -99,7 +99,7 @@ SET search_path TO 'public'
 AS $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id
-                  WHERE ur.user_id = p_user_id::text AND r.name = 'Administrator') THEN
+                  WHERE ur.user_id = p_user_id AND r.name = 'Administrator') THEN
     RETURN;
   END IF;
 
@@ -107,7 +107,7 @@ BEGIN
     SELECT 1
       FROM public.user_roles ur
       JOIN public.roles r ON r.id = ur.role_id AND r.name = 'Administrator'
-      JOIN auth.users u ON u.id::text = ur.user_id
+      JOIN auth.users u ON u.id = ur.user_id
      WHERE u.id <> p_user_id
        AND NOT public.person_access_is_removed(u.id)
   ) THEN
@@ -133,18 +133,18 @@ AS $$
 DECLARE
   v_rows integer;
 BEGIN
-  SELECT count(*) INTO v_rows FROM public.user_roles WHERE user_id = p_user_id::text;
+  SELECT count(*) INTO v_rows FROM public.user_roles WHERE user_id = p_user_id;
 
   IF v_rows = 1 THEN
     UPDATE public.user_roles SET role_id = p_role_id
-     WHERE user_id = p_user_id::text AND role_id <> p_role_id;
+     WHERE user_id = p_user_id AND role_id <> p_role_id;
     RETURN FOUND;
   END IF;
 
   IF v_rows > 1 THEN
-    DELETE FROM public.user_roles WHERE user_id = p_user_id::text AND role_id <> p_role_id;
+    DELETE FROM public.user_roles WHERE user_id = p_user_id AND role_id <> p_role_id;
   END IF;
-  INSERT INTO public.user_roles (user_id, role_id) VALUES (p_user_id::text, p_role_id)
+  INSERT INTO public.user_roles (user_id, role_id) VALUES (p_user_id, p_role_id)
   ON CONFLICT (user_id, role_id) DO NOTHING;
   RETURN true;
 END
@@ -216,7 +216,7 @@ BEGIN
   SELECT u.id,
          u.email::text,
          (SELECT r.name FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id
-           WHERE ur.user_id = u.id::text ORDER BY r.id LIMIT 1),
+           WHERE ur.user_id = u.id ORDER BY r.id LIMIT 1),
          CASE WHEN a.user_id IS NOT NULL OR coalesce(u.banned_until > now(), false) THEN 'removed'
               WHEN u.last_sign_in_at IS NULL THEN 'invited'
               ELSE 'active' END,
@@ -369,14 +369,14 @@ BEGIN
 
   SELECT ur.role_id, r.name INTO v_role_id, v_role
     FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id
-   WHERE ur.user_id = p_user_id::text
+   WHERE ur.user_id = p_user_id
    ORDER BY r.id
    LIMIT 1;
   SELECT u.email::text INTO v_email FROM auth.users u WHERE u.id = p_user_id;
 
   INSERT INTO public.access_removals (user_id, role_id, removed_by)
   VALUES (p_user_id, v_role_id, auth.uid());
-  DELETE FROM public.user_roles WHERE user_id = p_user_id::text;
+  DELETE FROM public.user_roles WHERE user_id = p_user_id;
 
   INSERT INTO public.audit_trail (
     entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
@@ -437,7 +437,7 @@ BEGIN
 
   SELECT r.name INTO v_role
     FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id
-   WHERE ur.user_id = p_user_id::text
+   WHERE ur.user_id = p_user_id
    ORDER BY r.id
    LIMIT 1;
   SELECT u.email::text INTO v_email FROM auth.users u WHERE u.id = p_user_id;
