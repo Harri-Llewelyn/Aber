@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
-import { POLL_INTERVAL_MS } from '../../constants'
+import { GRAFANA_URL, POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { IconExternalLink, IconServer, IconAlertTriangle } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
@@ -15,6 +15,7 @@ import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
+import { SystemFigures } from './SystemFigures'
 
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
@@ -89,6 +90,22 @@ export function endpointReach(url, exposure, viewerOnHost) {
   }
 
   return { open: true, note: 'Open this endpoint in a new tab' }
+}
+
+const withoutTrailingSlashes = (url) => {
+  let s = String(url ?? '')
+  while (s.endsWith('/')) s = s.slice(0, -1)
+  return s
+}
+
+/**
+ * Whether this browser can open the Grafana the dashboard links to (GRAFANA_URL), by
+ * endpointReach() and the reach of the service registered at that address. With no such row the
+ * reach is unknown, which endpointReach() treats as published.
+ */
+export function grafanaReachable(services, viewerOnHost) {
+  const row = (services || []).find(s => withoutTrailingSlashes(s.endpoint_url) === GRAFANA_URL)
+  return endpointReach(GRAFANA_URL, row?.exposure, viewerOnHost).open
 }
 
 /**
@@ -231,7 +248,7 @@ function LivenessCell({ status, lastHeartbeat }) {
     )
   }
   return (
-    <Tooltip text="Nothing in Aber observes this service: no exporter reports on it, and this page probes no address itself.">
+    <Tooltip text="Nothing in Aber observes this service: no exporter reports on it, and this page probes no address itself. A service Prometheus scrapes reads the same while Prometheus is not answering.">
       <span className="system-unobserved">not observed</span>
     </Tooltip>
   )
@@ -402,7 +419,7 @@ function ServiceTable({ rows, onNotify }) {
             <SortHeader sort={sort} column="version" title="The version this release deploys; point at it for the image. The badge counts fixable HIGH and CRITICAL vulnerabilities, dated.">Version</SortHeader>
             <SortHeader sort={sort} column="endpoint" title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</SortHeader>
             <SortHeader sort={sort} column="reach" title="Where the service can be reached from, as the chart publishes it, recorded at every install and upgrade.">Reach</SortHeader>
-            <SortHeader sort={sort} column="liveness" title="Written every minute from Prometheus's up series. A service nothing scrapes reads as not observed.">Liveness</SortHeader>
+            <SortHeader sort={sort} column="liveness" title="Written every minute from Prometheus's up series. A service nothing scrapes, or one the last check did not report, reads as not observed.">Liveness</SortHeader>
           </tr>
         </thead>
         <tbody>
@@ -471,6 +488,7 @@ export function SystemTab({ showToast }) {
   // tab takes over. Before the first read the path is held until the list arrives.
   const [groupId, setGroupId, groupHref] = useUrlTab('system', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
   const active = groups.find(g => g.id === groupId) || groups[0]
+  const viewerOnHost = viewerIsOnDeploymentHost(typeof window === 'undefined' ? '' : window.location?.hostname)
 
   return (
     <div className="page-layout page-fill">
@@ -511,7 +529,10 @@ export function SystemTab({ showToast }) {
               tabs={groups.map(g => ({ id: g.id, label: g.title, description: g.description }))}
             />
             {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type
-                picker. */}
+                picker. The path a reading takes is the tab that says what is flowing along it. */}
+            {active.id === 'ingestion' && (
+              <SystemFigures grafanaOpen={grafanaReachable(services, viewerOnHost)} />
+            )}
             <ServiceTable rows={active.rows} onNotify={showToast} />
           </>)}
         </div>

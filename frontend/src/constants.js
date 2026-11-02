@@ -275,6 +275,13 @@ export const grafanaAlertUrl = (alert) => {
 };
 
 /**
+ * One panel of a provisioned dashboard, opened on its own: `/d/<uid>?viewPanel=<id>`. The uid and
+ * the panel id are the dashboard JSON's, which stay stable when a dashboard is edited or renamed.
+ */
+export const grafanaPanelUrl = ({ uid, panel }) =>
+  `${GRAFANA_URL}/d/${encodeURIComponent(uid)}?viewPanel=${encodeURIComponent(panel)}`;
+
+/**
  * Grafana's alert history (Alerting > History): every rule's state changes, the record of alerts
  * that fired and cleared. Opens on the last 24 hours; the page's own default is one. The page
  * needs grafana.ini to keep that history in Loki (grafana/README.md).
