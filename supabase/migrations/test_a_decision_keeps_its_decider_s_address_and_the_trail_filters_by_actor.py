@@ -172,46 +172,47 @@ class TheActorFilter(Base):
                 (entity_type, SUBJECTS[subject], action, actor, source, i),
             )
 
-    def page(self, as_user=None, **kwargs):
+    PAGE = (
+        "SELECT public.audit_trail_page(p_entity_ids => %(ids)s::uuid[], p_include_purged => true,"
+        " p_changed_by => %(changed_by)s::uuid, p_action => %(action)s, p_limit => %(limit)s,"
+        " p_before_recorded_at => %(before_at)s::timestamptz, p_before_id => %(before_id)s::bigint);"
+    )
+
+    def page(self, as_user=None, changed_by=None, action=None, limit=None, cursor=None):
         """The page over this suite's subjects, deleted ones included (none of them is live)."""
-        args = {"p_entity_ids": SUBJECTS, "p_include_purged": True, **kwargs}
-        casts = {"p_entity_ids": "::uuid[]", "p_changed_by": "::uuid"}
-        names = ", ".join(f"{k} => %({k})s{casts.get(k, '')}" for k in args)
-        sql = f"SELECT public.audit_trail_page({names});"
+        args = {"ids": SUBJECTS, "changed_by": changed_by, "action": action, "limit": limit,
+                "before_at": (cursor or {}).get("recorded_at"), "before_id": (cursor or {}).get("id")}
         if as_user:
-            payload = self.as_person(as_user, sql, args)[0][0]
-        else:
-            self.cur.execute(sql, args)
-            payload = self.cur.fetchone()[0]
-        return payload
+            return self.as_person(as_user, self.PAGE, args)[0][0]
+        self.cur.execute(self.PAGE, args)
+        return self.cur.fetchone()[0]
 
     def actors(self, payload):
         return sorted(e["changed_by"] or "" for e in payload["events"])
 
     def test_one_person_s_rows_and_no_one_else_s(self):
-        payload = self.page(p_changed_by=ADMIN)
+        payload = self.page(changed_by=ADMIN)
         self.assertEqual(self.actors(payload), [ADMIN] * 3)
         self.assertEqual(payload["total_matching"], 3)
 
     def test_a_machine_identity_is_filtered_the_same_way(self):
-        payload = self.page(p_changed_by=MACHINE)
+        payload = self.page(changed_by=MACHINE)
         self.assertEqual([e["entity_type"] for e in payload["events"]], ["devices"])
         self.assertEqual(payload["total_matching"], 1)
 
     def test_no_filter_is_everyone_and_an_unknown_id_is_nobody(self):
         self.assertEqual(self.page()["total_matching"], len(self.ROWS))
-        self.assertEqual(self.page(p_changed_by=None)["total_matching"], len(self.ROWS))
-        payload = self.page(p_changed_by=NOBODY)
+        self.assertEqual(self.page(changed_by=None)["total_matching"], len(self.ROWS))
+        payload = self.page(changed_by=NOBODY)
         self.assertEqual((payload["events"], payload["total_matching"]), ([], 0))
 
     def test_it_composes_with_the_action_and_the_cursor(self):
-        payload = self.page(p_changed_by=ADMIN, p_action="UPDATE")
+        payload = self.page(changed_by=ADMIN, action="UPDATE")
         self.assertEqual([e["entity_id"] for e in payload["events"]], [SUBJECTS[0]])
         # One row a page: the cursor walks the Administrator's three rows and nothing else.
         seen, cursor = [], None
         for _ in range(5):
-            extra = {"p_before_recorded_at": cursor["recorded_at"], "p_before_id": cursor["id"]} if cursor else {}
-            payload = self.page(p_changed_by=ADMIN, p_limit=1, **extra)
+            payload = self.page(changed_by=ADMIN, limit=1, cursor=cursor)
             seen += [e["entity_id"] for e in payload["events"]]
             self.assertEqual(payload["total_matching"], 3)
             cursor = payload["next_cursor"]
@@ -221,13 +222,13 @@ class TheActorFilter(Base):
 
     def test_the_caller_s_own_policies_decide_which_of_those_rows_come_back(self):
         # An Administrator reads both lanes.
-        self.assertEqual(self.page(as_user=ADMIN, p_changed_by=ADMIN)["total_matching"], 3)
+        self.assertEqual(self.page(as_user=ADMIN, changed_by=ADMIN)["total_matching"], 3)
         # A Shopfloor Manager reads the asset lane only: the role grant is not theirs to see.
-        payload = self.page(as_user=MANAGER, p_changed_by=ADMIN)
+        payload = self.page(as_user=MANAGER, changed_by=ADMIN)
         self.assertEqual(sorted(e["entity_type"] for e in payload["events"]), ["areas", "areas"])
         self.assertEqual(payload["total_matching"], 2)
         # An Operator reads no audit row, filtered or not.
-        payload = self.page(as_user=OPERATOR, p_changed_by=ADMIN)
+        payload = self.page(as_user=OPERATOR, changed_by=ADMIN)
         self.assertEqual((payload["events"], payload["total_matching"]), ([], 0))
 
 
