@@ -199,8 +199,8 @@ the `2.29.2` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. T
 ## Grafana and Loki — AGPL-3.0
 
 `grafana/grafana:13.2.3` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
-pinned image. **`grafana/loki:3.7.8` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
-`v3.7.8` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
+pinned image. **`grafana/loki:3.7.9` is AGPL-3.0 too**, like Grafana: its repository's `LICENSE` at
+`v3.7.9` says so. The Loki image carries Debian's generic copy of the AGPL, not Loki's own file.
 These are the most restrictive licences in the stack — more so than TimescaleDB's, which is worth
 stating plainly because it is the opposite of the usual assumption.
 
@@ -380,7 +380,7 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `supabase/studio:2026.09.28-sha-5e59b60` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
 | `envoyproxy/envoy:v1.39.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.39.2` |
 | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0` |
-| `grafana/loki:3.7.8` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.8` |
+| `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
 | `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
 | `gitea/gitea:28.0.0` | MIT | [`go-gitea/gitea`](https://github.com/go-gitea/gitea) `v28.0.0` |
 | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | Apache 2.0 | [`prometheus-community/postgres_exporter`](https://github.com/prometheus-community/postgres_exporter) `v0.20.1` |

@@ -107,7 +107,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
 | `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
 | `load-test` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`loadTest.enabled`): synthetic Sparkplug load, applied by `scripts/load-test.mjs` |
-| `loki` | `grafana/loki:3.7.8` | `loki:3100`, read by Grafana |
+| `loki` | `grafana/loki:3.7.9` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
 | `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
