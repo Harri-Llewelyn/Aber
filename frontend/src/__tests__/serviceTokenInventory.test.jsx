@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ServiceTokenInventoryModal } from '../components/modals/ServiceTokenInventoryModal'
 import { tokenStatus, tokenStatusLabel, tokenStatusDetail, TOKEN_STATES } from '../utils/serviceIdentities'
-import { NO_VALUE, formatDateTime } from '../utils/format'
+import { NO_VALUE, formatDate, formatDateTime } from '../utils/format'
 import { api } from '../api'
 
 vi.mock('../api', () => ({ api: { revokeServiceToken: vi.fn() } }))
@@ -86,7 +86,12 @@ describe('ServiceTokenInventoryModal', () => {
     />
   )
 
-  const rowFor = (jti) => screen.getByText(jti).closest('tr')
+  const rowFor = (jti) => screen.getByText(jti, { selector: 'td' }).closest('tr')
+  /** Revoke on the row, then Revoke Token in the dialog it opens. */
+  const revokeConfirmed = (jti) => {
+    fireEvent.click(within(rowFor(jti)).getByRole('button', { name: /Revoke/i }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Revoke Token' })).getByRole('button', { name: 'Revoke Token' }))
+  }
 
   it('offers Revoke on a live token and not on one already revoked', () => {
     openWith([mint('live-one', 10), mint('gone-one', 20)], new Set(['gone-one']))
@@ -111,11 +116,15 @@ describe('ServiceTokenInventoryModal', () => {
     api.revokeServiceToken.mockResolvedValue(1)
     openWith([mint('doomed', 10)])
 
-    within(rowFor('doomed')).getByRole('button', { name: /Revoke/i }).click()
+    revokeConfirmed('doomed')
 
     await waitFor(() => expect(api.revokeServiceToken).toHaveBeenCalledWith('doomed'))
+    expect(api.revokeServiceToken).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(within(rowFor('doomed')).getByText('REVOKED')).toBeTruthy())
     expect(within(rowFor('doomed')).queryByRole('button', { name: /Revoke/i })).toBeNull()
+    // The confirmation closes; the list it was opened over stays.
+    expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: /Tokens for/ })).toBeInTheDocument()
   })
 
   /** Per-row, not a dialog banner: several tokens can be revoked in one visit. */
@@ -123,11 +132,66 @@ describe('ServiceTokenInventoryModal', () => {
     api.revokeServiceToken.mockRejectedValue(new Error('insufficient privileges'))
     openWith([mint('stubborn', 10)])
 
-    within(rowFor('stubborn')).getByRole('button', { name: /Revoke/i }).click()
+    revokeConfirmed('stubborn')
 
     await waitFor(() => expect(within(rowFor('stubborn')).getByText(/insufficient privileges/i)).toBeTruthy())
+    // Closed, so the row's message can be read.
+    expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
     expect(within(rowFor('stubborn')).getByText('ACTIVE')).toBeTruthy()
     expect(within(rowFor('stubborn')).getByRole('button', { name: /Revoke/i })).toBeTruthy()
+  })
+
+  /** Revoking cannot be undone, so it asks first, over the list, as Revoke Approval does. */
+  describe('Revoke asks first', () => {
+    const issued = formatDate(NOW - 5 * DAY)
+
+    it('names the token as its row does, and says it cannot be undone', () => {
+      openWith([mint('a1b2c3', 10)])
+      fireEvent.click(within(rowFor('a1b2c3')).getByRole('button', { name: /Revoke/i }))
+
+      const dialog = screen.getByRole('dialog', { name: 'Revoke Token' })
+      const question = dialog.querySelector('.modal-lead').textContent.replace(/\s+/g, ' ')
+      expect(question).toContain(`Revoke the token a1b2c3, issued ${issued}, for “Read-only API client”?`)
+      expect(question).toContain(`until it expires on ${formatDate(NOW + 10 * DAY)}`)
+      expect(question).toMatch(/This cannot be undone\.$/)
+      expect(within(dialog).getByRole('button', { name: 'Revoke Token' })).toHaveClass('btn-danger')
+      expect(api.revokeServiceToken).not.toHaveBeenCalled()
+    })
+
+    it('leaves out the issue date when none is recorded', () => {
+      openWith([{ ...mint('undated', 10), issued_at: null }])
+      fireEvent.click(within(rowFor('undated')).getByRole('button', { name: /Revoke/i }))
+
+      const question = screen.getByRole('dialog', { name: 'Revoke Token' }).querySelector('.modal-lead').textContent
+      expect(question.replace(/\s+/g, ' ')).toContain('Revoke the token undated for “Read-only API client”?')
+    })
+
+    it('revokes nothing on Cancel, and leaves the list open', () => {
+      openWith([mint('kept', 10)])
+      fireEvent.click(within(rowFor('kept')).getByRole('button', { name: /Revoke/i }))
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Revoke Token' })).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
+      expect(screen.getByRole('dialog', { name: /Tokens for/ })).toBeInTheDocument()
+      expect(api.revokeServiceToken).not.toHaveBeenCalled()
+      expect(within(rowFor('kept')).getByText('ACTIVE')).toBeTruthy()
+    })
+
+    it('closes only itself on Escape, handing focus back to the row', () => {
+      const onClose = vi.fn()
+      openWith([mint('kept', 10)], new Set(), { onClose })
+      const button = within(rowFor('kept')).getByRole('button', { name: /Revoke/i })
+      button.focus()
+      fireEvent.click(button)
+      expect(screen.getByRole('dialog', { name: 'Revoke Token' })).toHaveFocus()
+
+      fireEvent.keyDown(document, { key: 'Escape' })
+
+      expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(button).toHaveFocus()
+      expect(api.revokeServiceToken).not.toHaveBeenCalled()
+    })
   })
 
   /** The dialog is opened to look at least as often as to act; a glance must not refetch. */
@@ -141,8 +205,9 @@ describe('ServiceTokenInventoryModal', () => {
     expect(onChanged).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalled()
 
-    within(rowFor('one')).getByRole('button', { name: /Revoke/i }).click()
+    revokeConfirmed('one')
     await waitFor(() => expect(api.revokeServiceToken).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull())
     screen.getByRole('button', { name: /Done/i }).click()
     expect(onChanged).toHaveBeenCalled()
   })
@@ -199,6 +264,7 @@ describe('ServiceTokenInventoryModal: sorting by a column (#801)', () => {
     sortBy('State')
     expect(jtis()).toEqual(['pulled', 'lapsed', 'undated', 'live'])
     fireEvent.click(within(screen.getByText('live').closest('tr')).getByRole('button', { name: /Revoke/i }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Revoke Token' })).getByRole('button', { name: 'Revoke Token' }))
     await waitFor(() => expect(jtis()).toEqual(['pulled', 'live', 'lapsed', 'undated']))
   })
 
