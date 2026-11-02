@@ -360,7 +360,7 @@ on any row.
 | `nodered/node-red:5.0.9` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
 | `nginx:alpine` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` (nginx 1.31.8 when read; the tag moves) |
 | `python:3.13-slim` | Python Software Foundation License | `/usr/local/lib/python3.13/LICENSE.txt` (Python 3.13.16 when read; the tag moves) |
-| `node:24.21.0-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
+| `node:24.22.2-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
 | `alpine:3.24` | Each package its own: BusyBox and apk-tools GPL-2.0-only, musl MIT, OpenSSL Apache 2.0 | `apk list -I` |
 
 ### Checked in the upstream repository
