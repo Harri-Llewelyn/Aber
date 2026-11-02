@@ -757,7 +757,7 @@ complete_site_values() {
   chmod 600 "$VALUES"
   case $cs_out in
     *"Completed "*)
-      say "  added what Aber $ABER_VERSION needs to $VALUES, keeping every value it held:"
+      say "  completed $VALUES with what Aber $ABER_VERSION needs; every other value is as it was:"
       printf '%s\n' "$cs_out" | sed -n 's/^   - /    - /p'
       say "  the file as it was: $cs_keep"
       case $cs_out in

@@ -1598,8 +1598,8 @@ it was. Then it upgrades. There is no other step.
 
 **Installed with `npm run setup`:**
 
-1. In a checkout of 1.8.0, run setup again. It completes your values file and keeps every value
-   already in it:
+1. In a checkout of 1.8.0, run setup again. It completes your values file. It keeps every value
+   already in it but the deprecated `supabaseAuth.es256Signing`:
 
    ```bash
    npm run setup

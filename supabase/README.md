@@ -5237,8 +5237,10 @@ holder can mint nothing any other service takes.
 already meets it, so a second run changes nothing. Where `secrets.jwtKeys` is empty it mints the
 pair, and signs each HS256 JWT among the anon, service-role and three service keys again ES256 with
 its claims unchanged, so a `jti` the credential inventory recorded still names it. It takes an `oct`
-key out of both halves, mints a missing service secret, and turns `supabaseAuth.es256Signing: false`
-true. `npm run setup` applies it to an existing values file instead of leaving it, which is what the
+key out of both halves, mints a missing service secret, and removes the deprecated
+`supabaseAuth.es256Signing` (where it is the map's only key, removing it would null the chart's
+`supabaseAuth`, so `false` becomes `true` instead). `npm run setup` applies it to an existing values
+file instead of leaving it, which is what the
 server installer runs on every run; `npm run keys:rotate -- --signing-keys` applies it to a values
 file, or to the release Secret (`ABER_SECRET` names one kept under another name), printing the keys
 or, with `--apply`, patching them in.

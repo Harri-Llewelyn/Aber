@@ -117,6 +117,25 @@ test('a 1.7 site on ES256 loses the `oct` key and gains the two secrets, and kee
   assert.equal(completeValuesText(text).changed, false);
 });
 
+test('the deprecated switch is removed where its map keeps another key, and turned true where it would not', () => {
+  const pair = generateSigningKeys();
+  const extra = ['  realtimeJwtSecret: "r-secret"', '  storageJwtSecret: "s-secret"'];
+  const complete = valuesFile({ pair, sign: { signingKey: signingKeyFrom(pair.jwtKeys) }, extra });
+  const as17 = complete.replace('secrets:\n', [
+    'supabaseAuth:', '  firstAdministrator:', '    email: "ops@plant.test"',
+    '  # Tokens are signed ES256 with the key pair in secrets.jwtKeys.', '  es256Signing: true', '', 'secrets:', '',
+  ].join('\n'));
+  const removed = completeValuesText(as17);
+  assert.deepEqual(removed.notes, ['removed supabaseAuth.es256Signing, which is deprecated: every token is ES256']);
+  assert.match(removed.text, /^supabaseAuth:\n {2}firstAdministrator:\n {4}email: "ops@plant\.test"\n\nsecrets:/m);
+  assert.doesNotMatch(removed.text, /es256Signing|Tokens are signed ES256/);
+  assert.equal(completeValuesText(removed.text).changed, false);
+
+  // Alone in its map: removing it would null the chart's supabaseAuth, so true stays.
+  const alone = complete.replace('secrets:\n', 'supabaseAuth:\n  es256Signing: true\n\nsecrets:\n');
+  assert.equal(completeValuesText(alone).changed, false);
+});
+
 test('a complete file is left exactly as it was, CRLF line ends and all', () => {
   const pair = generateSigningKeys();
   const complete = valuesFile({
@@ -200,7 +219,7 @@ test('setup completes an existing values file, says what it added, and leaves a 
   writeFileSync(out, valuesFile());
   const first = setup(out);
   assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stdout, /Completed .*keeping every value it held/);
+  assert.match(first.stdout, /Completed .*; every other value is as it was/);
   assert.match(first.stdout, /signed again ES256, claims unchanged/);
   assert.match(first.stdout, /This site signed tokens HS256 until now/);
   const text = readFileSync(out, 'utf8');

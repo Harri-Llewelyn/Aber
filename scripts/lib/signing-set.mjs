@@ -204,12 +204,42 @@ export function writeSecrets(text, updates) {
   return lines.join(eol);
 }
 
-const ES256_OFF = /^([ \t]+)es256Signing:[ \t]*false[ \t]*(#.*)?$/m;
+/**
+ * `text` without the deprecated supabaseAuth.es256Signing, and the comment setup.mjs wrote above
+ * it, where its map keeps another key. Where it is the map's only key, removing it would leave
+ * `supabaseAuth:` null, which replaces the chart's map: there `false`, which the chart refuses,
+ * becomes `true`, which it ignores. Null and no note when there is no such line.
+ */
+function withoutSwitch(text) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((l) => /^[ \t]+es256Signing:[ \t]*(true|false)[ \t]*(#.*)?$/.test(l));
+  if (at < 0) return null;
+  const indent = indentOf(lines[at]);
+  let parent = at - 1;
+  while (parent >= 0 && (!lines[parent].trim() || lines[parent].trimStart().startsWith('#') || indentOf(lines[parent]) >= indent)) parent--;
+  if (parent < 0 || !/^supabaseAuth:\s*(#.*)?$/.test(lines[parent])) return null;
+  let siblings = 0;
+  for (let i = parent + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    if (indentOf(line) < indent) break;
+    if (i !== at && indentOf(line) === indent) siblings++;
+  }
+  if (!siblings) {
+    if (!/:[ \t]*false/.test(lines[at])) return null;
+    lines[at] = `${lines[at].slice(0, indent)}es256Signing: true`;
+    return { text: lines.join(eol), note: 'supabaseAuth.es256Signing: false is now true, which the chart accepts and ignores' };
+  }
+  const comment = at > 0 && indentOf(lines[at - 1]) === indent && /^\s*#.*ES256/.test(lines[at - 1]);
+  lines.splice(comment ? at - 1 : at, comment ? 2 : 1);
+  return { text: lines.join(eol), note: 'removed supabaseAuth.es256Signing, which is deprecated: every token is ES256' };
+}
 
 /**
- * A values file completed as completeSigningSet() completes its secrets, and with
- * `supabaseAuth.es256Signing: false` turned true, which the chart refuses. `changed` is false, and
- * `text` the file as it was, when there is nothing to do.
+ * A values file completed as completeSigningSet() completes its secrets, and without the deprecated
+ * supabaseAuth.es256Signing (withoutSwitch). `changed` is false, and `text` the file as it was,
+ * when there is nothing to do.
  *
  * @returns {{text: string, changed: boolean, notes: string[], resigned: string[], kid: string}}
  */
@@ -218,9 +248,10 @@ export function completeValuesText(text) {
   if (!values) throw new Error('it has no secrets: block');
   const { updates, notes, resigned, kid } = completeSigningSet(values);
   let next = Object.keys(updates).length ? writeSecrets(text, updates) : text;
-  if (ES256_OFF.test(next)) {
-    next = next.replace(ES256_OFF, '$1es256Signing: true');
-    notes.push('supabaseAuth.es256Signing: false is now true, which the chart accepts and ignores');
+  const unswitched = withoutSwitch(next);
+  if (unswitched) {
+    next = unswitched.text;
+    notes.push(unswitched.note);
   }
   return { text: next, changed: next !== text, notes, resigned, kid };
 }

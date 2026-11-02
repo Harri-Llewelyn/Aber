@@ -17,9 +17,10 @@
  *     -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
  *
  * `--out=<path>` writes the values file elsewhere. An existing file is never overwritten: it is
- * COMPLETED, its every value kept, with what this release needs and it lacks
- * (lib/signing-set.mjs: the ES256 key pair, its JWTs signed again ES256, Realtime's and Storage's
- * own secrets). A complete file is left as it was. The server installer runs this on every run.
+ * COMPLETED with what this release needs and it lacks (lib/signing-set.mjs: the ES256 key pair, its
+ * JWTs signed again ES256, Realtime's and Storage's own secrets), keeping every value it holds but
+ * the deprecated supabaseAuth.es256Signing. A complete file is left as it was. The server installer
+ * runs this on every run.
  *
  * The JWTs are a set: the anon and service-role keys are ES256 JWTs signed by the EC P-256 key
  * pair minted here, and replacing one without re-minting the rest yields a stack that comes up
@@ -81,7 +82,7 @@ if (fs.existsSync(outPath)) {
     process.exit(0);
   }
   fs.writeFileSync(outPath, completed.text, { mode: 0o600 });
-  console.log(`✅ Completed ${valuesFile}, keeping every value it held:`);
+  console.log(`✅ Completed ${valuesFile}; every other value is as it was:`);
   for (const note of completed.notes) console.log(`   - ${note}`);
   if (completed.resigned.length) {
     console.log('');
