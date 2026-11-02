@@ -99,7 +99,7 @@ Three things follow, and none of them is obvious:
   Administrator is refused on the next request, not when the token expires. A 5xx from that step
   admits on the claim already checked, as the forge's door does, so a broken edge runtime does not
   also take away the console. `openid` is absent from the requested scope: the door needs the
-  access token alone, and under HS256 GoTrue refuses to sign an ID token.
+  access token alone.
 - **It closes the unauthenticated MCP server.** Studio's port also served `/api/mcp` — a Supabase
   MCP server exposing `execute_sql` and `apply_migration` as the owner, completing `initialize` with
   no credential at all. It is covered because it is not exempted, and an MCP client cannot complete
@@ -375,11 +375,18 @@ Storage, Realtime and the edge runtime verify the signature for themselves and c
 a revoked token still opens those doors until its own `exp` — at most 90 days for a token naming a
 principal.
 
-Who can sign one is narrower with `supabaseAuth.es256Signing`: GoTrue and `mint-service-token`
-hold the private key, and every verifier the public key. Through 1.7 each verifier also holds the
-legacy HS256 key, so a holder could still sign an HS256 token until 1.8 removes it
-([supabase/README.md](../supabase/README.md#signing-with-es256)). Without the switch every verifier
-holds the HS256 secret, and could sign any token, a `service_role` one included.
+Who can sign one is narrow: GoTrue and `mint-service-token` hold the ES256 private key, and every
+verifier holds the public key, which signs nothing. No service accepts a token signed with the
+shared secret (`secrets.jwtSecret`): GoTrue alone reads it, because it requires one, and the key
+set it verifies with holds no `oct` key ([supabase/README.md](../supabase/README.md#signing-with-es256)).
+Two services keep an HS256 secret, each its own. Realtime verifies its `/api` routes with
+`secrets.realtimeJwtSecret`, and Storage signs its signed URLs with `secrets.storageJwtSecret`.
+A leaked one forges tokens for its own service alone, as Realtime's metrics secret already does.
+
+Node-RED's webhook secret (`secrets.noderedWebhookJwtSecret`) also stays HS256, and stays apart:
+the database signs a 60-second token with it for one Node-RED route (`aud` `node-red-hooks`),
+and nothing else accepts it. Postgres cannot sign ES256 without an extension the platform database
+does not have ([node-red/README.md](../node-red/README.md)).
 
 **Accepted because** every write that matters goes through PostgREST and RLS, including the two a
 machine identity may hold, the other surfaces are read-side or gated by a separate login, and the

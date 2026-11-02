@@ -894,9 +894,9 @@ paths:
         That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
-        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime`, the edge
-        runtime and Studio each verify `SUPABASE_JWT_SECRET` for themselves and consult no
-        denylist, so a listed token still satisfies those four until it expires.
+        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime` and the
+        edge runtime each verify the signature for themselves, against `SUPABASE_JWT_JWKS`, and
+        consult no denylist, so a listed token still satisfies those three until it expires.
 
         Read is `Administrator` and `Auditor`; `anon` is granted nothing.
       parameters:
@@ -3920,10 +3920,9 @@ paths:
       description: |
         Signs a JWT naming a **service principal** as its subject, records the issue, and returns
         the token. It is shown once and is not recoverable: nothing in the stack keeps a copy, and
-        the signature is reproducible only from the signing key. With `supabaseAuth.es256Signing`
-        it is ES256, with the `kid` of the private key in `JWT_KEYS`, GoTrue's signing set;
-        without, HS256 with `JWT_SECRET`. HS256 tokens stop verifying in 1.8, so one minted before
-        the switch is minted again then.
+        the signature is reproducible only from the signing key. It is ES256, with the `kid` of
+        the private key in `JWT_KEYS`, GoTrue's signing set. No service accepts an HS256 token
+        from 1.8.0, so one minted while a site signed HS256 is minted again.
 
         **Why this is a function and not an RPC.** `pgjwt` is installed, so a `SECURITY DEFINER`
         RPC could sign in-database — but the signing key is *not* in that database, and putting
@@ -4009,7 +4008,7 @@ paths:
         '403': { description: 'Forbidden: requires Administrator.' }
         '500':
           description: >-
-            `JWT_SECRET` is not set, so this worker cannot sign.
+            `JWT_KEYS` is not set, so this worker cannot sign.
             Otherwise an unexpected failure, as a `FunctionError`.
           headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
           content:

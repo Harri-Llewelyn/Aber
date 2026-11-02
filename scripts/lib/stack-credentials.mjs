@@ -10,20 +10,22 @@
  *   import { stackCredentials } from './lib/stack-credentials.mjs';
  *   const { SUPABASE_JWT_KEYS } = stackCredentials(['SUPABASE_JWT_KEYS']);
  *
- * ABER_NAMESPACE and ABER_RELEASE select the release (default aber, aber).
+ * ABER_NAMESPACE and ABER_RELEASE select the release (default aber, aber), and ABER_SECRET the
+ * Secret, for one kept under another name (secrets.existingSecret; default <release>-secrets).
  */
 import { spawnSync } from 'node:child_process';
 import { signingKeyFrom } from './service-jwt.mjs';
 
 export const NAMESPACE = process.env.ABER_NAMESPACE || 'aber';
 export const RELEASE = process.env.ABER_RELEASE || 'aber';
+export const SECRET = process.env.ABER_SECRET || `${RELEASE}-secrets`;
 
 let cached = null;
 
 /** Every key in the release Secret, decoded. Empty when the cluster is unreachable. */
 export function releaseSecret() {
   if (cached) return cached;
-  const r = spawnSync('kubectl', ['-n', NAMESPACE, 'get', 'secret', `${RELEASE}-secrets`, '-o', 'json'], {
+  const r = spawnSync('kubectl', ['-n', NAMESPACE, 'get', 'secret', SECRET, '-o', 'json'], {
     encoding: 'utf8',
   });
   cached = {};
@@ -67,7 +69,7 @@ export async function liveSigningKey({ jwtKeys, supabaseUrl, apikey }) {
     const { keys = [] } = await res.json();
     return keys.some((k) => k.kid === key.kid)
       ? { key, why: `GoTrue publishes kid ${key.kid}` }
-      : { key: null, why: `GoTrue does not publish kid ${key.kid}: supabaseAuth.es256Signing is off on this release` };
+      : { key: null, why: `GoTrue does not publish kid ${key.kid}: the release signs HS256 (a release before 1.8.0 with supabaseAuth.es256Signing off), or with another key` };
   } catch (err) {
     return { key: null, why: `${url} could not be reached (${err.message})` };
   }
@@ -75,7 +77,7 @@ export async function liveSigningKey({ jwtKeys, supabaseUrl, apikey }) {
 
 /** The sentence a script prints when a credential is missing from both places. */
 export function missingCredentialAdvice(name) {
-  return `${name} is not set and the release Secret ${RELEASE}-secrets in namespace ${NAMESPACE} ` +
+  return `${name} is not set and the release Secret ${SECRET} in namespace ${NAMESPACE} ` +
     'does not carry it (or the cluster is unreachable: is the kube context right?). Export it, or ' +
-    'point ABER_NAMESPACE/ABER_RELEASE at the release.';
+    'point ABER_NAMESPACE/ABER_RELEASE (or ABER_SECRET) at the release.';
 }

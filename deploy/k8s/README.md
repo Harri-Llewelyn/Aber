@@ -521,9 +521,9 @@ install.
 pushed. A dry run also checks the ingestion chain's attestations, from the OCI archives it builds
 into. The other ten images produce theirs only when pushing.
 
-**Rehearse the upgrade from the last release.** The pull request's *Upgrade From The Last Release
-(k3d)* job does it, and `npm run rehearse:upgrade` does the same on a laptop. It installs the last
-release as a site would, then upgrades it to this tree with the same values
+**Rehearse the upgrade from the last release.** The pull request's two *Upgrade From The Last
+Release (k3d, ...)* jobs do it, and `npm run rehearse:upgrade` does the same on a laptop. It installs
+the last release as a site would, then upgrades it to this tree with the same values
 ([`docs/testing.md`](../../docs/testing.md#the-install-and-upgrade-rehearsals)). Do not tag a tree
 that fails it: [`docs/releases.md`](../../docs/releases.md#upgrading-between-releases) promises that
 upgrade to every site.

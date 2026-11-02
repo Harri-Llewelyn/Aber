@@ -1200,7 +1200,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
-| **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
+| **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d, twice (`es256`, `hs256`): the last release installed as published, its values completed by the checkout's `setup.mjs`, then `helm upgrade` to the checkout |
 | **secret-scan** | gitleaks over the history of the commit under test and the working tree, on every push (*The secret scans*, below) |
 | **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
@@ -1293,10 +1293,16 @@ a failure leaves it, and prints where its kubeconfig and values are.
   (`--from=<tag>` names another). That tag's own `setup.mjs` writes the values, run from a `git
   worktree` that is removed straight after. The script installs
   `oci://ghcr.io/harri-llewelyn/aber/aber` at that version, with its published images, and waits for
-  it to be healthy. Then it runs `helm upgrade` to the checkout with the same two values files, as
-  [`upgrades.md`](upgrades.md) says. From a release before 1.1.0 (`--from=v1.0.2`) both the install
-  and the upgrade run with NetworkPolicies off: those charts lack the edges their own hooks need
-  under the layer (#755).
+  it to be healthy. Then the checkout's `setup.mjs` completes the values, as the server installer
+  and [`upgrades.md`](upgrades.md) do, and it runs `helm upgrade` to the checkout with the same two
+  values files. From a release before 1.1.0 (`--from=v1.0.2`) both the install and the upgrade run
+  with NetworkPolicies off: those charts lack the edges their own hooks need under the layer (#755).
+- **upgrade --from-signing=hs256** starts from a site still signing HS256: the last release's values
+  with no key pair, `supabaseAuth.es256Signing` false and every JWT signed with `jwtSecret`. It
+  asserts that release takes a token signed with `jwtSecret` before the upgrade, so the site is the
+  HS256 one it rehearses. CI runs the upgrade twice, `es256` (the values as that release's
+  `setup.mjs` wrote them) and `hs256`. From a release that signs ES256 alone (1.8.0 on) the two
+  are the same.
 
 **The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.g<commit>`. The
 checkout's chart is packaged with that as its version and `appVersion`, as `release.yml` packages a
@@ -1312,7 +1318,9 @@ Both end with the same checks:
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
   certificate from the internal CA, using the password in the values file;
-- `admin@aber.local` with `aber123` is refused.
+- `admin@aber.local` with `aber123` is refused;
+- the API serves the session's ES256 token, and answers 401 to the same claims signed HS256 with
+  `jwtSecret`.
 
 **With `--i3x-suite=<dir>`, CESMII's i3X conformance suite runs last**, against
 `https://i3x.rehearsal.aber.test/v1` through Traefik. `<dir>` is the `conformance-tests` folder of a

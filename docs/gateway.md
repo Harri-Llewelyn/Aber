@@ -202,18 +202,18 @@ cover the keys, which come from the Secret: rotating one needs
 ## The signing keys
 
 The studio and forge listeners verify GoTrue's session token themselves, with `jwt_authn`, against
-the JWKS the initContainer substitutes for `__SUPABASE_JWT_JWKS__`:
+the JWKS the initContainer substitutes for `__SUPABASE_JWT_JWKS__`: `SUPABASE_JWT_JWKS` from the
+Secret, the public key under its `kid`. `jwt_authn` checks an ES256 token by its `kid`, and
+refuses an HS256 one. The initContainer makes the JWKS one line, and refuses one holding a quote,
+backslash, ampersand or bar, because `sed` substitutes it into a single-quoted YAML string.
 
-- **With `supabaseAuth.es256Signing`:** `SUPABASE_JWT_JWKS` from the Secret, the public key under
-  its `kid` and the HS256 secret as an `oct` key. `jwt_authn` checks an ES256 token by its `kid` and
-  an HS256 one, which carries none, by the `oct` key, so a session signed before the switch keeps its
-  door open. The initContainer makes it one line, and refuses one holding a quote, backslash,
-  ampersand or bar, because `sed` substitutes it into a single-quoted YAML string.
-- **Without:** `SUPABASE_JWT_SECRET`, base64url-encoded into an `oct` JWKS, which is what the
-  gateway has always verified with.
+**It also refuses an `oct` key**, and the gateway does not start. Such a key would let PostgREST,
+GoTrue and these two listeners take a token signed with `SUPABASE_JWT_SECRET`. The render refuses
+one where it can see the Secret; under `secrets.existingSecret` rendered with `helm template`, as a
+GitOps tool renders it, it cannot, and this is where it is caught.
 
-The anon and service-role JWTs the API listener hands its upstreams are signed with the same key:
-ES256 with the switch, HS256 without. Re-signing them is
+The anon and service-role JWTs the API listener hands its upstreams are signed ES256 with the same
+key. Re-signing them is
 `npm run keys:rotate -- --apply --anon-and-service-role`, which restarts the gateway
 ([supabase/README.md](../supabase/README.md#re-signing-the-anon-and-service-role-keys)).
 

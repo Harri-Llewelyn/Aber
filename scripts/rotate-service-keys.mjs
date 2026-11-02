@@ -70,7 +70,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
-  NAMESPACE, RELEASE, liveSigningKey, missingCredentialAdvice, stackCredentials,
+  NAMESPACE, RELEASE, SECRET, liveSigningKey, missingCredentialAdvice, stackCredentials,
 } from './lib/stack-credentials.mjs';
 import { hostname, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -163,7 +163,7 @@ const supabaseUrl = envValue('SUPABASE_URL') || 'http://127.0.0.1:54321';
 /** Patches the release Secret with `values` (env name -> value); exits on a refusal. */
 function patchSecret(values) {
   const patch = { data: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Buffer.from(v).toString('base64')])) };
-  const patched = spawnSync('kubectl', ['-n', NAMESPACE, 'patch', 'secret', `${RELEASE}-secrets`, '--type=merge', '-p', JSON.stringify(patch)], { encoding: 'utf8' });
+  const patched = spawnSync('kubectl', ['-n', NAMESPACE, 'patch', 'secret', SECRET, '--type=merge', '-p', JSON.stringify(patch)], { encoding: 'utf8' });
   if (patched.status !== 0) {
     console.error(`❌ could not patch the Secret: ${(patched.stderr || '').trim()}`);
     process.exit(1);
@@ -208,13 +208,13 @@ if (signingKeys) {
       process.exit(1);
     }
     ({ updates, notes } = completed);
-    if (!Object.keys(updates).length) console.log(`ℹ️  ${RELEASE}-secrets already holds the signing set 1.8.0 needs.`);
+    if (!Object.keys(updates).length) console.log(`ℹ️  ${SECRET} already holds the signing set 1.8.0 needs.`);
   }
   for (const note of notes) console.log(`   - ${note}`);
   const changedEnv = secretFromUpdates(updates);
   if (apply) {
     patchSecret(changedEnv);
-    console.log(`✅ Wrote ${Object.keys(changedEnv).join(', ')} into ${RELEASE}-secrets. Nothing restarted.`);
+    console.log(`✅ Wrote ${Object.keys(changedEnv).join(', ')} into ${SECRET}. Nothing restarted.`);
   } else if (!existsSync(valuesPath) && Object.keys(changedEnv).length) {
     for (const [k, v] of Object.entries(changedEnv)) console.log(`${k}=${v}`);
     console.error('Printed only. Put these in the release Secret where it lives, or re-run with --apply.');
@@ -242,12 +242,12 @@ if (serviceSecrets) {
   const env = secretFromUpdates(fresh);
   if (!apply) {
     for (const [k, v] of Object.entries(env)) console.log(`${k}=${v}`);
-    console.error(`Printed only. Put these in ${RELEASE}-secrets, or re-run with --apply; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
+    console.error(`Printed only. Put these in ${SECRET}, or re-run with --apply; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
     process.exit(0);
   }
   patchSecret(env);
   const restarted = spawnSync('kubectl', ['-n', NAMESPACE, 'rollout', 'restart', ...restart], { encoding: 'utf8' });
-  console.log(`✅ Replaced ${Object.keys(env).join(' and ')} in ${RELEASE}-secrets.`);
+  console.log(`✅ Replaced ${Object.keys(env).join(' and ')} in ${SECRET}.`);
   console.log(restarted.status === 0 ? `   Restarted ${restart.join(' ')}.` : `   Restart by hand: kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
   console.log('   A signed URL Storage issued before stops working.');
   process.exit(0);
@@ -476,7 +476,7 @@ if (existsSync(valuesPath)) {
 if (!apply) {
   for (const key of all) console.log(`${key.env}=${key.token}`);
   console.error('');
-  console.error(`Signed ${signedWith}. Printed only. Put these in the release Secret (${RELEASE}-secrets in`);
+  console.error(`Signed ${signedWith}. Printed only. Put these in the release Secret (${SECRET} in`);
   console.error(`${NAMESPACE}), or re-run with --apply to patch it here; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
   console.error('The release check reads its key at each run; nothing restarts for it.');
   process.exit(0);

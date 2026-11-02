@@ -88,8 +88,8 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
 - **A storage policy of your own, another database server image, or a broker account named `sub`
   and 21 hex characters?** Check them first: see
   [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
-- **Tokens still signed HS256?** Plan to turn ES256 on before 1.8.0: see
-  [*sign tokens with ES256*](#from-170-sign-tokens-with-es256).
+- **Upgrading to 1.8.0?** Add the signing values it needs, and list the tokens to mint again,
+  first: see [*every token is signed ES256*](#from-180-every-token-is-signed-es256).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -1569,6 +1569,97 @@ kubectl -n aber rollout status deploy/backup-service
 If it stays Pending, turn the setting off again. Grafana's volume is then on another node than a
 volume the backup already includes. Restoring Grafana's volume is one step of the runbook in
 [`supabase/README.md`](../../supabase/README.md), *Backup and Recovery*.
+
+### From 1.8.0, every token is signed ES256
+
+From 1.8.0, Aber signs every token with its ES256 key pair. No service accepts a token signed with
+the shared secret, `secrets.jwtSecret`. Realtime and Storage each get a secret of their own. This
+changes every site, including one that turned ES256 on in 1.7.
+
+**`helm upgrade` stops before it changes anything** until the site's values have what 1.8.0
+needs. Its error lists what is missing and names this section. Add the values with the steps for
+your site below, then upgrade.
+
+**First, list the tokens to mint again.** A machine identity's token from Access Control, or the
+Read-only API client's token, stops working if it was signed HS256. From a checkout of 1.8.0, on a
+machine whose kube context reaches the release, run:
+
+```bash
+npm run keys:check
+```
+
+The last part of its output lists those tokens. After the upgrade, mint each one again: on
+**Access Control** → **Issue Token**, or with `scripts/mint-api-token.mjs` for the Read-only API
+client. On a site that signed HS256 until now, that is every token minted before the upgrade.
+
+**Installed with the server installer:** run the 1.8.0 installer again, with the command you
+installed with. It adds what the values file in `/etc/aber` lacks, and keeps a copy of the file as
+it was. Then it upgrades. There is no other step.
+
+**Installed with `npm run setup`:**
+
+1. In a checkout of 1.8.0, run setup again. It completes your values file and keeps every value
+   already in it:
+
+   ```bash
+   npm run setup
+   ```
+
+   It completes `deploy/helm/aber/values-local.yaml`. For another file, run
+   `npm run setup -- --out=<file>`. It prints what it added; a second run adds nothing.
+
+2. If `site.yaml` sets `supabaseAuth.es256Signing: false`, delete that line.
+3. Upgrade with the same values, as in [*The command*](#the-command).
+
+**A site still signing HS256** follows the same steps. You do not need to turn ES256 on in 1.7
+first. The steps also add the key pair, and sign the site's own tokens again with it: the anon and
+service-role keys and the three service keys. After the upgrade, mint every machine identity's
+token again, and people may need to sign in again.
+
+**Credentials kept outside the chart** (`secrets.existingSecret`, or a GitOps tool): the Secret
+needs these keys.
+
+- `SUPABASE_JWT_KEYS` and `SUPABASE_JWT_JWKS`: the key pair, with no `oct` key in either.
+- `REALTIME_JWT_SECRET` and `STORAGE_JWT_SECRET`: two new secrets. Each must differ from
+  `SUPABASE_JWT_SECRET` and from the other.
+- `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_INGESTION_KEY`,
+  `SUPABASE_PLAYBACK_KEY` and `SUPABASE_RELEASE_CHECK_KEY`, signed ES256 by that key pair.
+
+To make them:
+
+1. On a machine whose kube context reaches the release, in a checkout of 1.8.0, run this with the
+   name of your Secret:
+
+   ```bash
+   ABER_SECRET=<the Secret's name> npm run keys:rotate -- --signing-keys
+   ```
+
+   It reads that Secret and prints each key to set. It keeps every value that already fits.
+
+2. Put those keys in your secret store just before the upgrade. Where the Secret lives in the
+   cluster itself, add `--apply` to write them into it. Nothing restarts until the upgrade.
+3. Upgrade.
+
+`helm upgrade` reads the Secret and stops if it falls short. A tool that renders the chart with
+`helm template` cannot read it. There, the gateway does not start while `SUPABASE_JWT_JWKS` holds
+an `oct` key. A pod whose Secret lacks a key it reads does not start either, and
+`kubectl -n aber describe pod` names the key.
+
+What else changes:
+
+- **Storage's signed URLs issued before the upgrade stop working.** They are short-lived: make
+  them again.
+- **Grafana and the Node-RED editor sign in with OpenID Connect**, if the site signed HS256 until
+  now. They ask for one more scope, `openid`, so each person may see the consent page once more.
+- **Node-RED's webhook secret does not change.** `secrets.noderedWebhookJwtSecret` signs only the
+  database's messages to Node-RED, and stays HS256.
+- **`secrets.jwtSecret` stays, and is deprecated.** The sign-in service requires a value, but no
+  service accepts a token signed with it.
+- **`supabaseAuth.es256Signing` is deprecated.** Remove it from your values. `true` is accepted and
+  ignored, with a warning after each upgrade. `false` stops the upgrade.
+
+The reasons, and how to rotate the key pair later, are in
+[supabase/README.md](../../supabase/README.md#signing-with-es256).
 
 ---
 

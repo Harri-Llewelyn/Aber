@@ -5119,8 +5119,8 @@ the other half was the defect ([#101](https://github.com/Harri-Llewelyn/Aber/iss
 * **There is a refresh path**, and building it was cheap because these keys are signed with the
   stack's signing key and **re-signing them does not rotate that key**. A new token with a later
   `exp` is valid the instant it is signed, so nothing else is re-issued — not the anon key, not the
-  service-role key, not a gateway credential. It signs ES256 once the stack verifies ES256, HS256
-  until then ([Signing with ES256](#signing-with-es256)).
+  service-role key, not a gateway credential. It signs ES256, once GoTrue publishes the key's `kid`
+  ([Signing with ES256](#signing-with-es256)).
 * **Length never fixed "a date nobody wrote down"**, it deferred it to 2036 and removed every
   chance to notice on the way. Visibility fixes it, which is what `--check` is for.
 
@@ -5145,74 +5145,114 @@ overlap. Rotating a ten-year one left ten years.
 
 ### Signing with ES256
 
-`supabaseAuth.es256Signing` makes GoTrue sign every token ES256 with an EC P-256 key pair, and
-every verifier check it with the public key. Under HS256 anything that verifies a token can also
-sign one, a `service_role` token included; with the pair, verifying needs only the public key. Off
-by default in 1.7, because a minor release keeps an upgrade's behaviour (`docs/releases.md`); on in
-`values-dev.yaml` and in what `npm run setup` writes. HS256 signing is deprecated, and 1.8
-([#1007](https://github.com/Harri-Llewelyn/Aber/issues/1007)) removes it. The upgrade steps are in
-[help/site/upgrading.md](../help/site/upgrading.md#from-170-sign-tokens-with-es256).
+GoTrue signs every token ES256 with an EC P-256 key pair, and every verifier checks it with the
+public key, so verifying a token needs nothing that can sign one. No service accepts a token signed
+with the shared secret, `secrets.jwtSecret`. 1.7.0 brought the pair as an opt-in
+(`supabaseAuth.es256Signing`), kept the secret beside it as an `oct` key so tokens signed before
+kept verifying, and announced the end of HS256. 1.8.0
+([#1007](https://github.com/Harri-Llewelyn/Aber/issues/1007)) made the pair mandatory and took the
+secret out. The upgrade steps are in
+[help/site/upgrading.md](../help/site/upgrading.md#from-180-every-token-is-signed-es256).
+`supabaseAuth.es256Signing` is deprecated: `true` is ignored with a warning, and `false` fails the
+render.
 
 **The key set is two values,** in upstream's shapes
 ([*New API Keys and Asymmetric Authentication*](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys)):
 
 - `SUPABASE_JWT_KEYS` (`secrets.jwtKeys`): GoTrue's `GOTRUE_JWT_KEYS`, a JSON array of the private
-  key (`key_ops` `sign` and `verify`, `alg` `ES256`, a `kid`) and the secret as an `oct` JWK with no
-  `kid` and no `key_ops`. GoTrue signs with the one key whose `key_ops` hold `sign`, and refuses a
-  set with none or two. It verifies with every key, and keeps `GOTRUE_JWT_SECRET`, which it requires.
-- `SUPABASE_JWT_JWKS` (`secrets.jwtJwks`): `{"keys": [...]}`, the public key and the same `oct` JWK.
+  key (`key_ops` `sign` and `verify`, `alg` `ES256`, a `kid`). GoTrue signs with the one key whose
+  `key_ops` hold `sign`, refuses a set with none or two, and verifies with every key in it.
+- `SUPABASE_JWT_JWKS` (`secrets.jwtJwks`): `{"keys": [...]}`, the public key.
 
-The `oct` key is the transition: an HS256 token carries no `kid`, so every verifier checks it
-against that key, and a token signed before the switch keeps verifying through 1.7. #1007 takes
-it out of both values. `aber.validateSigningKeys` refuses a set that is partial or does not agree
-with itself or with `jwtSecret`. The chart cannot see an `existingSecret`'s contents, so there the
-check is the operator's.
+**Neither holds an `oct` key.** GoTrue builds the algorithms it accepts from the keys in
+`GOTRUE_JWT_KEYS` (`internal/conf/configuration.go` at v2.197.0), and PostgREST, Node-RED's
+`adminAuth.tokens` and the gateway's `jwt_authn` take any key in the JWKS. An `oct` key in either
+would let each accept a token signed with its secret, so `aber.validateSigningKeys` refuses one on
+every render, with a set that is partial or does not agree with itself. Under `existingSecret` it
+reads the Secret with `lookup`, which Helm answers on `helm install` and `helm upgrade`. A
+`helm template` render, as a GitOps tool makes, cannot read it: there the gateway's initContainer
+refuses an `oct` key in `SUPABASE_JWT_JWKS`, so the gateway does not start, and a pod whose Secret
+lacks a key it reads does not start either.
+
+**`GOTRUE_JWT_SECRET` is still `secrets.jwtSecret`,** because GoTrue requires one. With
+`GOTRUE_JWT_KEYS` set it signs and verifies nothing with it, and nothing else reads it. The value is
+deprecated, and goes when GoTrue stops requiring it.
+
+**Realtime and Storage each verify HS256 with a secret of their own,** because each uses one itself:
+
+- Realtime's `/api` routes, its probes' among them, verify with `API_JWT_SECRET` and no JWKS
+  (`check_auth` in `router.ex`), and the tenant's `jwt_secret`, which the seed copies from it,
+  verifies an HS256 channel join. It is `secrets.realtimeJwtSecret` (`REALTIME_JWT_SECRET`). The
+  probe signs a one-minute HS256 token with it.
+- storage-api signs its signed URLs with `PGRST_JWT_SECRET`, and falls back to it for an HS256
+  token. It is `secrets.storageJwtSecret` (`STORAGE_JWT_SECRET`). The signed URLs issued under the
+  shared secret stopped working at the upgrade to 1.8.0; they are short-lived.
+
+A leaked one forges tokens for its own service alone, as `REALTIME_METRICS_JWT_SECRET` already did.
+The render refuses either missing, or equal to `jwtSecret` or to the other. `npm run setup` mints
+both, and `npm run keys:rotate -- --service-secrets` replaces them and restarts the two services.
 
 **Who holds what** (the pinned images, read at their tags):
 
-| Workload | Without the switch | With it |
-| :--- | :--- | :--- |
-| `supabase-auth` | the secret | `GOTRUE_JWT_KEYS`, and the secret GoTrue requires |
-| `supabase-rest` | the secret, `PGRST_JWT_SECRET` | the JWKS as `PGRST_JWT_SECRET`, which PostgREST reads as a JWK set when it parses as one |
-| `supabase-realtime` | the secret, `API_JWT_SECRET` | `API_JWT_JWKS` too: the seed writes it to the `realtime-dev` tenant's `jwt_jwks` on every start. The secret stays: the tenant's HS256 fallback, and the only key Realtime's `/api` routes take |
-| `supabase-storage` | the secret | `JWT_JWKS` too. The secret stays: storage-api signs its own signed URLs with it |
-| `supabase-functions` | the secret, for `mint-service-token` | `JWT_KEYS`, for `mint-service-token`, in place of it. Nothing else here verifies a token, so the runtime has no `SUPABASE_JWKS` |
-| `supabase-envoy` | the secret, as an `oct` JWKS | the JWKS, for the studio and forge listeners' `jwt_authn` |
-| `node-red` | the secret | the JWKS (`adminAuth.tokens`, and the sign-in's ID token) |
-| `supabase-studio` | the secret, which it only reports | a placeholder |
-| `supabase-db` | the secret, read by nothing | nothing |
+| Workload | Holds |
+| :--- | :--- |
+| `supabase-auth` | `GOTRUE_JWT_KEYS`, and `GOTRUE_JWT_SECRET`, which GoTrue requires and does not use |
+| `supabase-rest` | the JWKS as `PGRST_JWT_SECRET`, which PostgREST reads as a JWK set when it parses as one |
+| `supabase-realtime` | `API_JWT_JWKS`, which the seed writes to the `realtime-dev` tenant's `jwt_jwks` on every start, and its own `API_JWT_SECRET` |
+| `supabase-storage` | `JWT_JWKS`, and its own `PGRST_JWT_SECRET` |
+| `supabase-functions` | `JWT_KEYS`, for `mint-service-token`. Nothing else here verifies a token, so the runtime has no JWKS |
+| `supabase-envoy` | the JWKS, for the studio and forge listeners' `jwt_authn` |
+| `node-red` | the JWKS (`adminAuth.tokens`, and the sign-in's ID token) |
+| `supabase-studio` | a placeholder |
+| `supabase-db` | nothing |
 
-Three findings decided rows of that table:
+Two findings decided rows of that table:
 
 - **Studio verifies nothing.** It reports `AUTH_JWT_SECRET` (its settings endpoint and JWT pages)
   and signs HS256 tokens with it in the browser, for GraphiQL's and the Realtime inspector's role
-  impersonation. With the switch it is given a placeholder, so the settings endpoint cannot hand the
-  secret out; unset, it would report the published demo value. Those two impersonations stop
-  working; the SQL editor's does not use it. The Administrator gate on the listener stays the control
-  for the two API keys the endpoint still returns.
-- **The platform database does not keep the secret.** The image's init scripts read no
+  impersonation. It is given a placeholder, so the settings endpoint cannot hand a secret out;
+  unset, it would report the published demo value. Those two impersonations do not work; the SQL
+  editor's does not use it. The Administrator gate on the listener stays the control for the two
+  API keys the endpoint still returns.
+- **The platform database does not keep a secret.** The image's init scripts read no
   `JWT_SECRET`, no database or role setting holds one, and the only vault secret named for a JWT is
-  `nodered_webhook_jwt_secret`. So with the switch the variable is not passed.
-- **Realtime's `/api` routes verify with `API_JWT_SECRET` and no JWKS** (`check_auth` in
-  `router.ex`). The tenant health endpoint its probes call is one, and with the anon key ES256 the
-  probe signs a one-minute HS256 token with that secret instead.
+  `nodered_webhook_jwt_secret`. So the variable is not passed.
 
 **The forge and discovery do not change.** GoTrue's `/.well-known/openid-configuration` is built
 from `GOTRUE_JWT_ISSUER`, which the chart leaves unset, so the issuer stays empty and the endpoints
-relative under ES256 too; `id_token_signing_alg_values_supported` is a fixed list. `jwks_uri`
-(`/.well-known/jwks.json`) now serves the public key, never the `oct` one. Setting the issuer changes
-every token's `iss`, so the forge stays on reverse-proxy headers
+relative; `id_token_signing_alg_values_supported` is a fixed list. `jwks_uri`
+(`/.well-known/jwks.json`) serves the public key. Setting the issuer changes every token's `iss`, so
+the forge stays on reverse-proxy headers
 ([the forge's door](#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
 
-**`NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret.** It is not GoTrue's: the
-database signs the webhook's 60-second token with it (pgjwt implements only the HS family), and
-Node-RED's `httpNodeAuth` alone verifies it, for `aud` `node-red-hooks`. No GoTrue verifier accepts
-it, and its holder can mint nothing any other service takes. #1007 decides its end.
+**`NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret** (decided 2026-10-28). It is not
+GoTrue's: the database signs the webhook's 60-second token with it (pgjwt implements only the HS
+family, and Postgres cannot sign ES256 without an extension the image does not have), and Node-RED's
+`httpNodeAuth` alone verifies it, for `aud` `node-red-hooks`. No other service accepts it, and its
+holder can mint nothing any other service takes.
+
+#### Completing a set made before 1.8.0
+
+`scripts/lib/signing-set.mjs` brings a site's values to the set above and keeps every value that
+already meets it, so a second run changes nothing. Where `secrets.jwtKeys` is empty it mints the
+pair, and signs each HS256 JWT among the anon, service-role and three service keys again ES256 with
+its claims unchanged, so a `jti` the credential inventory recorded still names it. It takes an `oct`
+key out of both halves, mints a missing service secret, and turns `supabaseAuth.es256Signing: false`
+true. `npm run setup` applies it to an existing values file instead of leaving it, which is what the
+server installer runs on every run; `npm run keys:rotate -- --signing-keys` applies it to a values
+file, or to the release Secret (`ABER_SECRET` names one kept under another name), printing the keys
+or, with `--apply`, patching them in.
+
+A token issued outside the stack is no value to complete. `npm run keys:check` lists the live ones
+(`service_token_health`, renewal `access_control`) that were signed HS256: every one while GoTrue
+publishes no ES256 key, else those issued before the release began signing ES256, which it reads
+from `helm history` and each revision's values (`scripts/lib/signing-history.mjs`). The issue record
+does not say how a token was signed, so where Helm cannot say when ES256 began, it lists them all.
 
 #### Re-signing the anon and service-role keys
 
 No client holds them: callers present `sb_publishable_*` / `sb_secret_*`, and the gateway hands
-upstreams the JWT each stands for. So re-signing them is one command once ES256 is live:
+upstreams the JWT each stands for. So re-signing them is one command:
 
 ```bash
 npm run keys:rotate -- --apply --anon-and-service-role
@@ -5300,14 +5340,14 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 
 **Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
 `supabase-realtime` and the edge runtime (which boots `VERIFY_JWT="false"`) each verify the signature
-for themselves (`SUPABASE_JWT_SECRET`, or the JWKS with [ES256](#signing-with-es256)) and consult no
+for themselves (the JWKS, [ES256](#signing-with-es256)) and consult no
 denylist. That is complete coverage for what
 this is about — the Read-only API client and `Service_Ingestor` reach PostgREST and nothing else — but the
 expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
 
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
-the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
+the database". The extension is installed; the premise is not true — the signing key is not in
 this database, and nothing in `vault` is that one. Putting it there would let any
 path to SQL execution mint a `service_role` token, which is valid at the services above and
 which `0074` cannot revoke. So the signing lives in
@@ -6196,7 +6236,7 @@ what it lacks:
 | Filter | What it does | The thing worth knowing |
 | :--- | :--- | :--- |
 | `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
-| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key and the HS256 `oct` key with `supabaseAuth.es256Signing`, the `oct` key alone without it ([Signing with ES256](#signing-with-es256)). **No issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key, ES256 by `kid`, and no `oct` key, which the initContainer refuses ([Signing with ES256](#signing-with-es256)). **No issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
 | `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
 | `ext_authz` | Asks [`studio-admission`](functions/studio-admission) whether the caller is an Administrator **now** | GoTrue for the session, then `user_roles`, on every request. `failure_mode_allow`: a 5xx admits on the claim `rbac` checked; a 403 and a 302 to `/oauth2/signout` are honoured |
 | `header_mutation` | Removes `Authorization` before the request reaches Studio | Studio runs as the owner and needs no Supabase JWT, so it never sees one |
@@ -6217,9 +6257,8 @@ step fails open on a 5xx because the claim has already been checked, and an outa
 runtime or the API should not also take away the console that mends it.
 
 **`openid` is absent from the requested scope.** The door needs the access token alone, which
-`jwt_authn` verifies, and under HS256 GoTrue refuses to mint an ID token (`HS256 is not supported
-for ID token signing`). Grafana and the Node-RED editor ask for it only with
-`supabaseAuth.es256Signing`, where GoTrue signs one ES256.
+`jwt_authn` verifies. Grafana and the Node-RED editor ask for it, and take the ID token GoTrue signs
+ES256.
 
 #### Nothing upgrades on this listener, and that was measured rather than assumed
 
@@ -6302,10 +6341,10 @@ puts the forge in the Directory.
 **Gitea is not an OIDC client of GoTrue, and cannot be.** Three things were measured against
 `gitea/gitea:1.27.3`: GoTrue's discovery document carries an empty `issuer` and relative endpoint
 paths, so Gitea resolves `/oauth/authorize` against itself; its request carries `scope=openid`,
-which GoTrue refuses with `HS256 is not supported for ID token signing`; and whether it sends the
-`code_challenge` GoTrue requires is unmeasured behind the first two. `supabaseAuth.es256Signing`
-removes the second and not the first: discovery is built from `GOTRUE_JWT_ISSUER`, unset here, so
-the paths stay relative under ES256 ([Signing with ES256](#signing-with-es256)).
+which GoTrue refused under HS256 (`HS256 is not supported for ID token signing`); and whether it
+sends the `code_challenge` GoTrue requires is unmeasured behind the first two. ES256 signing removed
+the second and not the first: discovery is built from `GOTRUE_JWT_ISSUER`, unset here, so the paths
+stay relative ([Signing with ES256](#signing-with-es256)).
 
 **Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
