@@ -8,7 +8,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { TABS, pageTabsOf, tabIsVisible } from '../navigation'
 import { VALID_TABS } from '../constants'
-import { MOVED_PAGES, movedUrl, useAppRouting, tabFromUrl } from '../hooks/useAppRouting'
+import { MOVED_PAGES, MOVED_TABS, movedUrl, useAppRouting, tabFromUrl } from '../hooks/useAppRouting'
 
 describe('the nav and the router agree', () => {
   it('accepts every tab the nav renders', () => {
@@ -100,6 +100,39 @@ describe('an unknown address', () => {
     window.history.replaceState({}, '', '/no-such-page?show_state=1')
     renderHook(() => useAppRouting())
     expect(window.location.pathname + window.location.search).toBe('/site-map')
+  })
+})
+
+/**
+ * Profile's Security tab became Sessions, MFA and Allowed Apps in 1.8. A link to it, in a toast,
+ * a bookmark or old help, opens Sessions, the first of the three.
+ */
+describe('a tab that moved', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'))
+
+  it('sends /profile/security to Sessions with its query, replacing the entry so Back skips it', () => {
+    window.history.replaceState({}, '', '/profile/security?note=a%20b')
+    const push = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('profile')
+    expect(window.location.pathname + window.location.search).toBe('/profile/sessions?note=a%20b')
+    expect(push).not.toHaveBeenCalled()
+    push.mockRestore()
+  })
+
+  it('moves that tab only, and nothing that merely resembles it', () => {
+    expect(movedUrl('/profile/security')).toBe('/profile/sessions')
+    expect(movedUrl('/profile/sessions')).toBeNull()
+    expect(movedUrl('/profile')).toBeNull()
+    expect(movedUrl('/profile/security-old')).toBeNull()
+    expect(movedUrl('/access-control/security')).toBeNull()
+  })
+
+  it('moves each old tab to a tab its page declares', () => {
+    for (const [, to] of MOVED_TABS) {
+      const [page, tab] = to.split('/')
+      expect(pageTabsOf(page).map(t => t.id)).toContain(tab)
+    }
   })
 })
 

@@ -122,7 +122,7 @@ describe("endSessionQuestion, for another person's session", () => {
       .toBe("End Owain Operator's session with no browser recorded, last active 5 minutes ago? Whatever used it has to sign in again.")
   })
 
-  it('without a person, asks about your own session as the Security tab does', () => {
+  it('without a person, asks about your own session as the Sessions tab does', () => {
     expect(endSessionQuestion(browser, NOW))
       .toBe('End the session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.')
   })

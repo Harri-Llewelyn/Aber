@@ -1,5 +1,5 @@
 /**
- * The table of sessions the Profile page's Security tab and a person's drawer on People share
+ * The table of sessions the Profile page's Sessions tab and a person's drawer on People share
  * (components/common/SessionsTable.jsx): Where, Started, Last active and End, the session in use
  * marked and without End, a service marked as one, and the column tips worded for whose they are.
  */

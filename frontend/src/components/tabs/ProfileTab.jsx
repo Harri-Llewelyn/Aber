@@ -352,7 +352,8 @@ function ProfileTable({ children }) {
 
 /**
  * The signed-in person's own page: who they are signed in as, the token and key that call the API as
- * them, how the dashboard looks to them, and where they are signed in (Security).
+ * them, how the dashboard looks to them, where they are signed in (Sessions), their authenticators
+ * (MFA) and the apps they let sign them in (Allowed Apps).
  * Reached from the account menu at the foot of the sidebar, not from the page list. Appearance is
  * the person's `user_settings` row (useUserSettings.js), so it follows them to any browser.
  *
@@ -364,7 +365,7 @@ function ProfileTable({ children }) {
  * saves it and rejects with the database's sentence.
  * `pictureUrl` is their own picture's blob URL, or null; `onSavePicture(blob)` and
  * `onRemovePicture()` change it and reject with the sentence to show.
- * `showToast` is App's; the Security tab says through it what was ended.
+ * `showToast` is App's; the Sessions tab says through it what was ended.
  * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
@@ -411,6 +412,8 @@ export function ProfileTab({
 
           {section === 'account' && (
             <ProfileTable>
+              <PictureRow pictureUrl={pictureUrl} displayName={displayName} onSave={onSavePicture}
+                onRemove={onRemovePicture} isPerson={!!email} />
               <ProfileRow
                 id="email"
                 label="Email address"
@@ -419,8 +422,6 @@ export function ProfileTab({
                 actions={email ? <span className="setting-fixed">{whoChangesThis}</span> : undefined}
               />
               <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
-              <PictureRow pictureUrl={pictureUrl} displayName={displayName} onSave={onSavePicture}
-                onRemove={onRemovePicture} isPerson={!!email} />
               <ProfileRow
                 id="role"
                 label="Role"
@@ -544,10 +545,10 @@ export function ProfileTab({
             </ProfileTable>
           </>)}
 
-          {/* A section per subject, each with its own heading: Sessions is the first. */}
-          {section === 'security' && <SessionsSection isPerson={!!email} showToast={showToast} />}
-          {section === 'security' && <SecondFactorSection isPerson={!!email} showToast={showToast} />}
-          {section === 'security' && <AllowedAppsSection isPerson={!!email} showToast={showToast} />}
+          {/* One subject per tab, each with its own heading, so its table has the card's height. */}
+          {section === 'sessions' && <SessionsSection isPerson={!!email} showToast={showToast} />}
+          {section === 'mfa' && <SecondFactorSection isPerson={!!email} showToast={showToast} />}
+          {section === 'allowed-apps' && <AllowedAppsSection isPerson={!!email} showToast={showToast} />}
         </div>
       </div>
     </div>

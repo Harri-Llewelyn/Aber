@@ -148,6 +148,17 @@ describe('the account menu', () => {
     expect(supabase.storage).toBeUndefined()
   })
 
+  it('shows the same mark in the account menu\'s head, beside the name, hidden from assistive technology', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Signed in as Ada Admin/ }))
+    const head = screen.getByRole('menu').querySelector('.user-popover-head')
+    const mark = head.querySelector('.user-popover-avatar .user-avatar')
+    await waitFor(() => expect(mark).toHaveAttribute('data-avatar', 'initials'))
+    expect(mark).toHaveTextContent('AA')
+    expect(mark).toHaveAttribute('aria-hidden', 'true')
+    expect(mark.parentElement).toBe(head.firstElementChild)
+  })
+
   it('marks the control with the person\'s own picture when they have one', async () => {
     const picture = vi.spyOn(api, 'ownPictureUrl').mockResolvedValue('blob:mine')
     try {

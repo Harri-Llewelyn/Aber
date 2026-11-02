@@ -367,7 +367,7 @@ class WhatIsRefused(PersonSessionsBase):
         before = self.last_audit_id()
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege) as refused:
             self.end(ADMIN_SESSION, target=ADMIN_ID)
-        self.assertIn("Profile page's Security tab", refused.exception.diag.message_primary)
+        self.assertIn("Profile page's Sessions tab", refused.exception.diag.message_primary)
         self.assertEqual(self.sessions_of(ADMIN_ID), [ADMIN_SESSION])
         self.assertEqual(self.new_rows(before), 0)
 

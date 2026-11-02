@@ -6,7 +6,7 @@ import { Modal } from '../common/Modal'
 import { CODE_LENGTH, factorLabel, isCode, normaliseCode } from '../../utils/secondFactor'
 
 /**
- * Remove, on a row of Profile › Security's Second factor section: asks first, then has GoTrue
+ * Remove, on a row of Profile's MFA tab: asks first, then has GoTrue
  * remove the factor. GoTrue removes a verified factor only from an aal2 session, so a session that
  * has not given a code (`needsCode`) gives one from this factor first. `others` are the person's
  * other verified factors: with none left, the password alone signs them in.
@@ -43,8 +43,8 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
       icon={<IconScan size={18} />}
       onClose={busy ? () => {} : onClose}
       lead={others.length
-        ? `Signing in stops accepting codes from ${label}. Your other second factor still works. If ${label} is the one you signed in with, the dashboard asks for a code from another one straight away.`
-        : `Signing in stops asking for a code: your password alone signs you in. You can add a second factor again at any time.`}
+        ? `Signing in stops accepting codes from ${label}. Your other authenticator still works. If ${label} is the one you signed in with, the dashboard asks for a code from another one straight away.`
+        : `Signing in stops asking for a code: your password alone signs you in. You can set up MFA again at any time.`}
       initialFocus={needsCode ? codeRef : undefined}
       error={error}
       footer={(
@@ -58,7 +58,7 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
             disabled={needsCode && !normaliseCode(code)}
             title={needsCode && !normaliseCode(code) ? 'Enter a code first' : undefined}
           >
-            Remove Second Factor
+            Remove Authenticator
           </ActionButton>
         </>
       )}
@@ -80,7 +80,7 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
             aria-describedby="second-factor-remove-code-hint"
           />
           <div id="second-factor-remove-code-hint" className="form-hint">
-            This session has not given a code yet, and the sign-in service asks for one before it removes a second factor.
+            This session has not given a code yet, and the sign-in service asks for one before it removes an authenticator.
           </div>
         </div>
       )}

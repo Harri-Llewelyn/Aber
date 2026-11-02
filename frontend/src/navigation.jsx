@@ -112,9 +112,11 @@ export const SETTINGS_TABS = [
 
 /** The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_TABS = [
-  { id: 'account', label: 'Account', description: 'The address you sign in with, your role, and your password.' },
+  { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
-  { id: 'security', label: 'Security', description: 'Where you are signed in, your second factor, and the apps you have allowed.' },
+  { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them.' },
+  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: the authenticator apps that give a code after your password.' },
+  { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you.' },
 ]
 
 /*

@@ -66,7 +66,7 @@ const CLOSED_LIST = { userId: null, rows: undefined, error: null }
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, re-address, sign out, remove or restore, to give a new
- * password, or to reset a lost second factor (Reset MFA). A row is the person, their role, status and last sign-in; a click or Enter opens their
+ * password, or to reset lost MFA (Reset MFA). A row is the person, their role, status and last sign-in; a click or Enter opens their
  * drawer (`?person=<email>`), which holds every action. A person is drawn by their display name
  * with their email beside it, or by the email alone.
  *
@@ -227,8 +227,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
         const { factors_removed: removed } = await api.resetPersonMfa(person.user_id)
         showToast?.(
           removed === 0
-            ? `${personLabel(person)} had no second factor to remove`
-            : `${personLabel(person)}'s second factor is reset: their password alone signs them in`,
+            ? `${personLabel(person)} had no MFA to reset`
+            : `${personLabel(person)}'s MFA is reset: their password alone signs them in`,
           'success',
           { to: personUrl(person.email, accessRemoved(person)) }
         )
@@ -305,10 +305,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
                   <div>
                     <RouteLink
                       className="count-link"
-                      to={tabUrl('profile', 'security')}
-                      title="Your own sessions are listed on your Profile page's Security tab, where you can end one."
+                      to={tabUrl('profile', 'sessions')}
+                      title="Your own sessions are listed on your Profile page's Sessions tab, where you can end one."
                     >
-                      Listed on Profile › Security
+                      Listed on Profile › Sessions
                     </RouteLink>
                   </div>
                 ) : offerList && (
@@ -390,14 +390,14 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
             disabled: !!sessionsBlocked,
             title: sessionsBlocked || 'Sign them out of every browser and service. They keep their role, and can sign in again.',
           },
-          // Your own second factor is removed on Profile, as your own sessions are ended there.
+          // Your own authenticators are removed on Profile, as your own sessions are ended there.
           {
             label: 'Reset MFA', icon: <IconScan size={13} />,
             onClick: () => setConfirming({ act: 'mfa', person: p }),
             disabled: isSelf,
             title: isSelf
-              ? "You cannot reset your own second factor here. Remove it on your Profile page's Security tab."
-              : 'Remove their second factor, for someone who has lost their authenticator. Their password alone signs them in until they add a new one.',
+              ? "You cannot reset your own MFA here. Remove your authenticators on your Profile page's MFA tab."
+              : 'Remove their MFA, for someone who has lost their authenticator. Their password alone signs them in until they set it up again.',
           },
           removed && {
             label: 'Restore Access', icon: <IconRefreshCw size={13} />,
@@ -653,9 +653,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null }) {
           icon={<IconScan size={18} />}
           message={(
             <>
-              Every second factor they have is removed, so signing in asks only for their password.
+              Every authenticator they have is removed, so signing in asks only for their password.
               Use it when they have lost their authenticator app. They can add a new one on their
-              Profile page&apos;s Security tab. Their sessions stay signed in: to sign them out, use
+              Profile page&apos;s MFA tab. Their sessions stay signed in: to sign them out, use
               End Sessions as well.
             </>
           )}

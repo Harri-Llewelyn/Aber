@@ -378,6 +378,11 @@ function UserMenu({
       {open && (
         <div className="user-popover" role="menu">
           <div className="user-popover-head">
+            {/* The sidebar's mark, larger, in the head's top-right corner. Decoration: the name
+                beside it says the same, so AccountAvatar hides it from assistive technology. */}
+            <span className="user-popover-avatar">
+              <AccountAvatar pictureUrl={pictureUrl} displayName={displayName} />
+            </span>
             {displayName && <div className="user-popover-email"><bdi>{displayName}</bdi></div>}
             <div className={displayName ? 'user-popover-address' : 'user-popover-email'}>{persona}</div>
             <div className="user-popover-role">{userRole}</div>
@@ -963,7 +968,7 @@ export default function App() {
   // A session that ended while the tab was out of sight ends here too when it is shown again.
   useSessionRecheck(!!session, endRejectedSession)
 
-  // A person with a second factor gives a code after their password, before anything opens:
+  // A person with MFA gives a code after their password, before anything opens:
   // undefined while that is read. A prompt, not a gate: nothing on the server reads aal.
   const secondFactor = useSecondFactorDue(session)
   const secondFactorScreen = secondFactor === undefined
@@ -990,7 +995,7 @@ export default function App() {
       setRecovering(false)
       window.history.replaceState({}, '', '/site-map')
     }
-    // GoTrue changes the password of an account with a second factor only from an aal2 session.
+    // GoTrue changes the password of an account with MFA only from an aal2 session.
     if (session) return secondFactorScreen || <ResetPasswordScreen email={session.user?.email} onDone={finish} />
     // The link's token was rejected or already spent: no session arrived with it.
     return (
