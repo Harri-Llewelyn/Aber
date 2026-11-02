@@ -33,6 +33,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -85,13 +88,12 @@ spec:
             # Followed by the BROWSER, so the ingress address rather than the in-cluster one.
             - name: API_EXTERNAL_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
+            # Required by GoTrue, and inert: with GOTRUE_JWT_KEYS set it builds its keys and the
+            # algorithms it accepts from that set, which holds no `oct` key, so no HS256 token verifies.
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            {{- if .Values.supabaseAuth.es256Signing }}
-            # Signs with the one key whose key_ops hold `sign` (ES256, with its kid) and verifies
-            # with every key, the legacy secret among them. GOTRUE_JWT_SECRET stays: GoTrue
-            # requires it, and it is that legacy key.
+            # Signs with the one key whose key_ops hold `sign` (ES256, with its kid), and verifies
+            # with every key in the set.
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_KEYS" "secretName" $secretName "key" "SUPABASE_JWT_KEYS") | nindent 12 }}
-            {{- end }}
             - name: GOTRUE_JWT_EXP
               value: {{ .Values.supabaseAuth.jwtExpiry | quote }}
             {{- /* Unset is off. GoTrue exits on a duration of zero or less, or one with no unit. */}}

@@ -1,6 +1,6 @@
 /**
- * Signs a service-principal token: ES256 with the kid of the signing key in JWT_KEYS (GoTrue's
- * signing set, under supabaseAuth.es256Signing), HS256 with JWT_SECRET otherwise.
+ * Signs a service-principal token ES256, with the kid of the signing key in JWT_KEYS (GoTrue's
+ * signing set). No service accepts an HS256 token, so nothing here signs one.
  */
 
 import { create, type Payload } from "djwt";
@@ -20,33 +20,20 @@ export function signingKeyFrom(jwtKeys: string): JsonWebKey & { kid: string } {
   return key;
 }
 
-/**
- * The signed token. `jwtKeys` wins over `jwtSecret` when both are set; neither is a caller error
- * the handler answers as a misconfiguration.
- */
+/** The signed token. No JWT_KEYS is a misconfiguration the handler answers as one. */
 export async function signServiceToken(
   payload: Payload,
-  { jwtKeys, jwtSecret }: { jwtKeys?: string; jwtSecret?: string },
-): Promise<{ token: string; alg: "ES256" | "HS256" }> {
-  if (jwtKeys) {
-    const { kid, crv, x, y, d } = signingKeyFrom(jwtKeys);
-    // The key's own members alone; kid, use and key_ops are the set's bookkeeping.
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      { kty: "EC", crv, x, y, d },
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["sign"],
-    );
-    return { token: await create({ alg: "ES256", typ: "JWT", kid }, payload, key), alg: "ES256" };
-  }
-  if (!jwtSecret) throw new Error("neither JWT_KEYS nor JWT_SECRET is set");
+  { jwtKeys }: { jwtKeys?: string },
+): Promise<{ token: string; alg: "ES256" }> {
+  if (!jwtKeys) throw new Error("JWT_KEYS is not set");
+  const { kid, crv, x, y, d } = signingKeyFrom(jwtKeys);
+  // The key's own members alone; kid, use and key_ops are the set's bookkeeping.
   const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(jwtSecret),
-    { name: "HMAC", hash: "SHA-256" },
+    "jwk",
+    { kty: "EC", crv, x, y, d },
+    { name: "ECDSA", namedCurve: "P-256" },
     false,
-    ["sign", "verify"],
+    ["sign"],
   );
-  return { token: await create({ alg: "HS256", typ: "JWT" }, payload, key), alg: "HS256" };
+  return { token: await create({ alg: "ES256", typ: "JWT", kid }, payload, key), alg: "ES256" };
 }

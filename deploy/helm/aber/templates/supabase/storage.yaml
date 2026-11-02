@@ -64,6 +64,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
       {{- with .Values.supabaseStorage.podAnnotations }}
       {{- /* WHERE VELERO'S FILE-LEVEL BACKUP ANNOTATION GOES, and the reason this seam exists
              separately from the PVC's. Velero reads `backup.velero.io/backup-volumes` from the POD
@@ -77,7 +80,6 @@ spec:
              does not error: the Velero backup completes SUCCESSFULLY having captured no files,
              which is the same shape of quiet failure as a pg_dump written to a path that is
              discarded with the pod. */}}
-      annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
@@ -118,12 +120,11 @@ spec:
           env:
             {{- include "aber.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
-            {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            {{- if .Values.supabaseAuth.es256Signing }}
-            # Verifies ES256 by kid and HS256 by the legacy key. The secret above stays: storage-api
-            # signs its own signed URLs with it, and falls back to it for an HS256 token.
+            # Storage's own secret: storage-api signs its signed URLs with it, and falls back to it
+            # for an HS256 token, so it is no other service's.
+            {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "STORAGE_JWT_SECRET") | nindent 12 }}
+            # Every other token: ES256, by kid.
             {{- include "aber.secretEnv" (dict "name" "JWT_JWKS" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
-            {{- end }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

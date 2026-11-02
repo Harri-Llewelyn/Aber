@@ -75,8 +75,8 @@ There is one deliberate exception, covered in §3.4 (Realtime's tenant hostname)
 Rationale, briefly, since the alternative is reasonable:
 
 - The stack's dominant pattern is *one secret consumed by many services in slightly different
-  forms* — `SUPABASE_JWT_SECRET` reaches GoTrue, PostgREST, Realtime, Storage, edge-runtime and
-  Node-RED; `POSTGRES_PASSWORD` is composed into four different DSNs. Helm's `_helpers.tpl` is the
+  forms* — `SUPABASE_JWT_JWKS` reaches PostgREST, Realtime, Storage, the gateway and Node-RED;
+  `POSTGRES_PASSWORD` is composed into four different DSNs. Helm's `_helpers.tpl` is the
   direct equivalent of the `x-nodered-auth-env` YAML anchor and preserves the property that anchor
   exists to guarantee: **one definition, so the values cannot drift between the writer and the
   reader.** Kustomize expresses shared *patches*, not shared *values*, and would reintroduce the
@@ -325,14 +325,13 @@ form after a separator.
 `.env` becomes a Secret. One thing must be got right or the stack fails in a way that reads as an
 auth bug:
 
-**`SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are JWTs *signed by* `SUPABASE_JWT_SECRET`**,
-or by the private key in `SUPABASE_JWT_KEYS` with `supabaseAuth.es256Signing`, a pair that carries
-the secret as its legacy key ([supabase/README.md](../supabase/README.md#signing-with-es256)).
-A Helm template that generates a random `SUPABASE_JWT_SECRET` on install (the obvious convenience)
-silently invalidates both pre-minted keys, and every request through the gateway's key check then
-fails against a stack that otherwise looks healthy. The three are a **set**: either all three are
-supplied by the operator, or all three are generated together by a pre-install Job that mints the
-JWTs from the generated secret. **Supplied** is the choice here: `values.yaml` refuses to install if
+**`SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are JWTs *signed by* the private key in
+`SUPABASE_JWT_KEYS`**, whose public half every verifier takes as `SUPABASE_JWT_JWKS`
+([supabase/README.md](../supabase/README.md#signing-with-es256)). A Helm template that generates a
+random key pair on install (the obvious convenience) silently invalidates both pre-minted keys, and
+every request through the gateway's key check then fails against a stack that otherwise looks
+healthy. They are a **set**: either all are supplied by the operator, or all are generated together
+by a pre-install Job that mints the JWTs from the generated pair. **Supplied** is the choice here: `values.yaml` refuses to install if
 they are absent (`fail` in a helper), and `values-dev.yaml` carries the `.env.example` demo values
 explicitly marked as such.
 
@@ -1459,10 +1458,11 @@ reports healthy and then refuses every request, or a CrashLoopBackOff whose logs
 other than the cause. `aber.validate` runs them in order from `NOTES.txt`, most fundamental first,
 so a stack with no credentials is told that and not about the hostnames it also lacks.
 
-**The Supabase credentials are a set.** `anonKey` and `serviceRoleKey` are JWTs signed by
-`jwtSecret` (or, with `supabaseAuth.es256Signing`, by the key pair in `jwtKeys` and `jwtJwks`,
-which `aber.validateSigningKeys` holds to each other and to `jwtSecret`), and `publishableKey` and `secretKey` are what callers present for the gateway to
-translate; generating one without the others invalidates the rest, and every request then fails at
+**The Supabase credentials are a set.** `anonKey` and `serviceRoleKey` are JWTs signed by the key
+pair in `jwtKeys` and `jwtJwks`, which `aber.validateSigningKeys` holds to each other, to EC keys
+alone, and beside Realtime's and Storage's own secrets on every render (reading an existing Secret
+with `lookup` where Helm can), and `publishableKey` and `secretKey` are what callers present for
+the gateway to translate; generating one without the others invalidates the rest, and every request then fails at
 the gateway against a stack that looks fine. The chart never generates them, and the check is
 skipped under `existingSecret`, when the values are not the chart's to see (§3.2). Beyond the set,
 each conditional requirement is stated with the failure it prevents: the BI reader password when

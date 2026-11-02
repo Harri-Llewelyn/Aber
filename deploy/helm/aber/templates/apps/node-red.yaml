@@ -62,6 +62,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:

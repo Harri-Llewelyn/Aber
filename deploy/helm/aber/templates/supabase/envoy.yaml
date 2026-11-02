@@ -108,6 +108,8 @@ spec:
         # It does NOT cover the API keys, which live in the Secret the chart may not own. Rotating
         # one needs `kubectl rollout restart deployment/supabase-envoy`.
         checksum/envoy-template: {{ $envoy | sha256sum }}
+        # And with a change to the signing set the studio and forge listeners verify with.
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
         {{- if .Values.supabaseEnvoy.metrics.enabled }}
         # The admin listener serves the scrape at /stats/prometheus, not /metrics.
         {{- include "aber.scrapeAnnotations" (dict "port" .Values.supabaseEnvoy.metrics.port "path" "/stats/prometheus") | nindent 8 }}
@@ -185,17 +187,21 @@ spec:
               # key in a YAML flow mapping, not a key and a value, and Envoy refuses the whole
               # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
-              {{- if .Values.supabaseAuth.es256Signing }}
 
-              # The JWKS the studio and forge listeners verify session tokens against: ES256 by kid,
-              # and HS256 by its legacy `oct` key. sed substitutes it into a single-quoted YAML
-              # string, so it is made one line and may hold no quote, backslash, ampersand or bar;
-              # a JWK never needs them.
+              # The JWKS the studio and forge listeners verify session tokens against: ES256 by kid.
+              # sed substitutes it into a single-quoted YAML string, so it is made one line and may
+              # hold no quote, backslash, ampersand or bar; a JWK never needs them. An `oct` key is
+              # refused: every service behind this gateway would take a token signed with its
+              # secret. The render refuses one too, where it can read the Secret.
               require_set SUPABASE_JWT_JWKS "$SUPABASE_JWT_JWKS"
               JWT_JWKS=$(printf '%s' "$SUPABASE_JWT_JWKS" | tr -d '\r\n')
               case "$JWT_JWKS" in
                 *"'"*|*'\'*|*'&'*|*'|'*)
                   echo 'SUPABASE_JWT_JWKS holds a quote, backslash, ampersand or bar, which no JWKS needs; npm run setup writes one without.' >&2
+                  exit 1
+                  ;;
+                *'"kty":"oct"'*|*'"kty": "oct"'*)
+                  echo 'SUPABASE_JWT_JWKS holds an oct (HS256) key, which would verify a token signed with SUPABASE_JWT_SECRET. Take it out of SUPABASE_JWT_JWKS and SUPABASE_JWT_KEYS: help/site/upgrading.md, "From 1.8.0, every token is signed ES256".' >&2
                   exit 1
                   ;;
                 '{'*'"keys"'*'}') ;;
@@ -204,15 +210,6 @@ spec:
                   exit 1
                   ;;
               esac
-              {{- else }}
-
-              # The signing secret as an `oct` JWKS key, which the studio listener verifies session
-              # tokens against. base64url, so the wrapping, the +/ alphabet and the padding all
-              # have to go -- a stray newline yields a JWKS Envoy parses and then rejects every
-              # token against.
-              JWT_B64URL=$(printf '%s' "$SUPABASE_JWT_SECRET" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
-              JWT_JWKS="{\"keys\":[{\"kty\":\"oct\",\"alg\":\"HS256\",\"k\":\"$JWT_B64URL\"}]}"
-              {{- end }}
 
               # FAIL CLOSED, NOT SHUT. The chart does not publish the studio
               # listener at all by default (routes.studio is false), so an unset pair here is the
@@ -328,15 +325,8 @@ spec:
             # ------------------------------------------------------------------------------
             # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
             # ------------------------------------------------------------------------------
-            {{- if .Values.supabaseAuth.es256Signing }}
-            # What jwt_authn verifies the session token against: the JWKS of the key GoTrue signs
-            # with, the legacy secret among them.
+            # What jwt_authn verifies the session token against: the JWKS of the key GoTrue signs with.
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_JWT_JWKS" "secretName" (include "aber.secretName" .) "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
-            {{- else }}
-            # What jwt_authn verifies the session token against -- the same secret GoTrue signs
-            # with, which is why it is this key and not one of its own.
-            {{- include "aber.secretEnv" (dict "name" "SUPABASE_JWT_SECRET" "secretName" (include "aber.secretName" .) "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            {{- end }}
             # OPTIONAL, unlike every secret above. `routes.studio` is false by default, so most
             # installs never publish this listener and have no reason to hold its credential; a
             # required ref would fail those pods on a key nothing reads. The init container's

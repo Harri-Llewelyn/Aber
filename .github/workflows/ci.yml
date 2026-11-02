@@ -522,8 +522,8 @@ jobs:
 
           DEV=deploy/helm/aber/values-dev.yaml
 
-          # The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
-          # jwtSecret, and publishableKey and secretKey are what the gateway translates to them,
+          # The Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by the
+          # key pair in jwtKeys, and publishableKey and secretKey are what the gateway translates to them,
           # so a partial set yields a stack that 401s at the gateway while looking fine. The primary
           # host id is set because its own refusal fires first and would mask this one.
           expect_failure "no credentials at all" "required credentials are not set" \
@@ -532,12 +532,45 @@ jobs:
             -f "$DEV" --set secrets.anonKey=
           expect_failure "publishableKey empty" "secrets.publishableKey" \
             -f "$DEV" --set secrets.publishableKey=
-          # With supabaseAuth.es256Signing the key pair joins the set, and both halves keep jwtSecret
-          # as the legacy key (aber.validateSigningKeys).
-          expect_failure "es256Signing with no signing set" "secrets.jwtKeys (SUPABASE_JWT_KEYS) is not set" \
-            -f "$DEV" --set secrets.jwtKeys=
-          expect_failure "es256Signing with a jwtSecret the key set does not carry" "legacy" \
-            -f "$DEV" --set secrets.jwtSecret=a-different-secret-of-at-least-32-characters
+          # Every token is signed ES256 and none with jwtSecret (aber.validateSigningKeys): the key
+          # pair holds EC keys alone, and Realtime and Storage each have a secret of their own. A
+          # site set up before that is refused, in one message that lists what it lacks.
+          expect_failure "es256Signing false" "supabaseAuth.es256Signing is false" \
+            -f "$DEV" --set supabaseAuth.es256Signing=false
+          expect_failure "no key pair, as on a site still signing HS256" "secrets.jwtKeys (SUPABASE_JWT_KEYS) is not set" \
+            -f "$DEV" --set secrets.jwtKeys= --set secrets.jwtJwks=
+          # 1.7's key set: the pair, and jwtSecret as an `oct` key in both halves.
+          python3 - "$DEV" > /tmp/oct-key-set.yaml <<'PY'
+          import base64, json, sys, yaml
+          s = yaml.safe_load(open(sys.argv[1], encoding='utf-8'))['secrets']
+          oct = {'kty': 'oct', 'k': base64.urlsafe_b64encode(s['jwtSecret'].encode()).decode().rstrip('='), 'alg': 'HS256'}
+          jwks = json.loads(s['jwtJwks'])
+          jwks['keys'].append(oct)
+          print(yaml.safe_dump({'secrets': {'jwtKeys': json.dumps(json.loads(s['jwtKeys']) + [oct]), 'jwtJwks': json.dumps(jwks)}}))
+          PY
+          expect_failure "an oct key left in the key set" 'holds an .oct. (HS256) key' \
+            -f "$DEV" -f /tmp/oct-key-set.yaml
+          expect_failure "no secret of Realtime's own" "secrets.realtimeJwtSecret (REALTIME_JWT_SECRET) is not set" \
+            -f "$DEV" --set secrets.realtimeJwtSecret=
+          expect_failure "Storage's secret is jwtSecret" "is the same value as secrets.jwtSecret" \
+            -f "$DEV" --set secrets.storageJwtSecret=super-secret-jwt-token-with-at-least-32-characters
+          expect_failure "one secret for Realtime and Storage" "are the same value: each must be its own" \
+            -f "$DEV" --set secrets.storageJwtSecret=aber_realtime_api_jwt_secret_development_only
+          for want in "supabaseAuth.es256Signing is false" "secrets.jwtJwks (SUPABASE_JWT_JWKS) is not set" \
+            "secrets.realtimeJwtSecret (REALTIME_JWT_SECRET) is not set" "secrets.storageJwtSecret (STORAGE_JWT_SECRET) is not set" \
+            "help/site/upgrading.md, \"From 1.8.0, every token is signed ES256\""; do
+            expect_failure "a 1.7 site still signing HS256, all in one message: $want" "$want" \
+              -f "$DEV" --set supabaseAuth.es256Signing=false --set secrets.jwtKeys= --set secrets.jwtJwks= \
+              --set secrets.realtimeJwtSecret= --set secrets.storageJwtSecret=
+          done
+          expect_failure "the demonstration key pair on a public domain" "PUBLISHED demo credentials" \
+            -f "$DEV" --set global.publicBaseDomain=aber.example.com --set secrets.jwtSecret=another-secret-of-at-least-32-characters
+          # Deprecated, and accepted: true renders.
+          if ! out=$(helm template aber deploy/helm/aber -f "$DEV" --set supabaseAuth.es256Signing=true 2>&1); then
+            echo "::error::supabaseAuth.es256Signing: true is deprecated and must still render"
+            printf '%s\n' "$out" | head -20
+            fail=1
+          fi
 
           # The first administrator is created by the db-init hook, so a bad address or a missing
           # password would fail the install only after everything else had been created.
@@ -2093,11 +2126,18 @@ jobs:
 
   # docs/releases.md promises that any 1.x upgrades to any later 1.x with one `helm upgrade`. This
   # installs the last release as a site would (its own setup.mjs, the published chart and images),
-  # then upgrades it to the checkout with the same values, as docs/upgrades.md says.
+  # then upgrades it to the checkout with the same values, completed by the checkout's setup.mjs as
+  # the installer and help/site/upgrading.md complete them. Twice: from the values that release's
+  # setup.mjs writes (es256), and from a site still signing HS256 (hs256), which 1.8.0 refuses until
+  # its values are completed. From a release that signs ES256 alone the two are the same.
   upgrade-rehearsal:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    name: Upgrade From The Last Release (k3d)
+    name: Upgrade From The Last Release (k3d, ${{ matrix.signing }})
+    strategy:
+      fail-fast: false
+      matrix:
+        signing: [es256, hs256]
     runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
@@ -2125,7 +2165,9 @@ jobs:
       # With NetworkPolicies on, as the install rehearsal has them, when the last release is 1.1.0 or
       # later; the enforcement probes run after the upgrade.
       - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
-        run: node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+        run: >-
+          node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+          --from-signing=${{ matrix.signing }}
 
       - name: Diagnostics On Failure
         if: failure()

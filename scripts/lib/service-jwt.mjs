@@ -7,9 +7,9 @@
 // are not cosmetic: PostgREST switches database role on `role`, RLS resolves `auth.uid()` from
 // `sub`, and `record_service_token_issued()` (0043) keys its audit row on `jti`.
 //
-// ES256 with a `kid` when given the signing key (`supabaseAuth.es256Signing`), HS256 with the
-// secret otherwise. generateSigningKeys() makes the pair as GOTRUE_JWT_KEYS and the verifiers'
-// JWKS take it, with the secret as the legacy `oct` key in both, so HS256 tokens keep verifying.
+// ES256 with a `kid`, by the private key in the key set: no service accepts a token signed with the
+// shared secret. generateSigningKeys() makes the pair as GOTRUE_JWT_KEYS and the verifiers' JWKS
+// take it: EC keys only, for an `oct` (HS256) key there would verify a token signed with its secret.
 //
 // -------------------------------------------------------------------------------------------------
 // TWO KINDS OF KEY, AND THE DIFFERENCE IS WHETHER ANYONE IS BEHIND THEM
@@ -75,28 +75,34 @@ export const EXPIRY_WARN_DAYS = 14;
 const b64url = (input) =>
   Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-/** The secret as the legacy JWK, in upstream's shape: no kid and no key_ops, so it never signs. */
-export function legacyJwk(secret) {
-  return { kty: 'oct', k: b64url(secret), alg: 'HS256' };
-}
-
 /**
  * A new EC P-256 pair as the two Secret values: SUPABASE_JWT_KEYS (GoTrue's GOTRUE_JWT_KEYS: the
- * private key, the one with `sign` in key_ops, and the legacy key) and SUPABASE_JWT_JWKS (what
- * every verifier takes: the public key and the legacy key).
+ * private key, the one with `sign` in key_ops) and SUPABASE_JWT_JWKS (what every verifier takes:
+ * the public key).
  *
  * @returns {{kid: string, jwtKeys: string, jwtJwks: string}}
  */
-export function generateSigningKeys(secret, { kid = randomUUID() } = {}) {
-  if (!secret) throw new Error('generateSigningKeys: the secret is required; it stays in the set as the legacy key');
+export function generateSigningKeys({ kid = randomUUID() } = {}) {
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const { crv, x, y, d } = privateKey.export({ format: 'jwk' });
   const pub = { kty: 'EC', kid, use: 'sig', alg: 'ES256', crv, x, y };
   return {
     kid,
-    jwtKeys: JSON.stringify([{ ...pub, key_ops: ['sign', 'verify'], d }, legacyJwk(secret)]),
-    jwtJwks: JSON.stringify({ keys: [{ ...pub, key_ops: ['verify'] }, legacyJwk(secret)] }),
+    jwtKeys: JSON.stringify([{ ...pub, key_ops: ['sign', 'verify'], d }]),
+    jwtJwks: JSON.stringify({ keys: [{ ...pub, key_ops: ['verify'] }] }),
   };
+}
+
+/** The JWKS every verifier takes, made from a key set: each EC key's public half. */
+export function publicJwksFrom(jwtKeys) {
+  const keys = typeof jwtKeys === 'string' ? JSON.parse(jwtKeys) : jwtKeys;
+  return JSON.stringify({
+    keys: keys.filter((k) => k?.kty === 'EC').map((k) => {
+      const pub = { ...k, key_ops: ['verify'] };
+      delete pub.d;
+      return pub;
+    }),
+  });
 }
 
 /**
@@ -123,9 +129,9 @@ export function signingKeyFrom(jwtKeys) {
 }
 
 /**
- * Whether a token's signature verifies as the stack's verifiers verify it: HS256 against the secret
- * or the JWKS's legacy key, ES256 against the JWKS's EC key with the token's kid. The signature
- * only: no claim is checked.
+ * Whether a token's signature verifies: ES256 against the JWKS's EC key with the token's kid, as the
+ * stack's verifiers verify it, or HS256 against `secret` (Realtime's or Storage's own). The
+ * signature only: no claim is checked.
  */
 export function signatureVerifies(token, { secret = null, jwks = null } = {}) {
   const parts = typeof token === 'string' ? token.split('.') : [];
@@ -140,10 +146,8 @@ export function signatureVerifies(token, { secret = null, jwks = null } = {}) {
   const data = Buffer.from(`${parts[0]}.${parts[1]}`);
   const signature = Buffer.from(parts[2], 'base64url');
   if (header.alg === 'HS256') {
-    const legacy = (set?.keys || []).find((k) => k.kty === 'oct' && typeof k.k === 'string' && !k.kid);
-    const key = secret ? Buffer.from(secret) : legacy ? Buffer.from(legacy.k, 'base64url') : null;
-    if (!key) return false;
-    const expected = createHmac('sha256', key).update(data).digest();
+    if (!secret) return false;
+    const expected = createHmac('sha256', Buffer.from(secret)).update(data).digest();
     return expected.length === signature.length && timingSafeEqual(expected, signature);
   }
   if (header.alg === 'ES256' && set) {
@@ -157,22 +161,20 @@ export function signatureVerifies(token, { secret = null, jwks = null } = {}) {
 }
 
 /**
- * Sign a Supabase-shaped JWT: ES256 with the key's kid when `signingKey` is given, HS256 with the
- * secret otherwise.
+ * Sign a Supabase-shaped JWT, ES256 with the key's kid.
  *
  * @param {object}  opts
  * @param {string}  opts.role         `anon`, `service_role` or `authenticated`.
- * @param {string} [opts.secret]      SUPABASE_JWT_SECRET, for HS256.
- * @param {object} [opts.signingKey]  The private JWK signingKeyFrom() returns, for ES256.
+ * @param {object}  opts.signingKey   The private JWK signingKeyFrom() returns.
  * @param {string} [opts.subject]     Principal uuid. Its presence is what makes this a SERVICE key.
  * @param {number} [opts.days]        Lifetime. Defaults to SERVICE_KEY_DEFAULT_DAYS when a subject
  *                                    is given, INFRASTRUCTURE_KEY_DAYS when one is not.
  * @param {number} [opts.now]         Epoch ms, injectable so the tests are not clock-dependent.
  * @returns {{token: string, jti: string|null, issuedAt: Date, expiresAt: Date, days: number, alg: string}}
  */
-export function mintJwt({ role, secret = null, signingKey = null, subject = null, days = null, now = Date.now() }) {
+export function mintJwt({ role, signingKey = null, subject = null, days = null, now = Date.now() }) {
   if (!role) throw new Error('mintJwt: role is required');
-  if (!secret && !signingKey) throw new Error('mintJwt: a secret or a signing key is required');
+  if (!signingKey) throw new Error('mintJwt: the signing key is required (signingKeyFrom(SUPABASE_JWT_KEYS))');
 
   const ttlDays = days ?? (subject ? SERVICE_KEY_DEFAULT_DAYS : INFRASTRUCTURE_KEY_DAYS);
   if (!Number.isFinite(ttlDays) || ttlDays <= 0) {
@@ -208,7 +210,7 @@ export function mintJwt({ role, secret = null, signingKey = null, subject = null
     ...(jti ? { jti } : {}),
     iat: issuedAt,
     exp: expiresAt,
-  }, { secret, signingKey });
+  }, { signingKey });
 
   return {
     token,
@@ -221,14 +223,15 @@ export function mintJwt({ role, secret = null, signingKey = null, subject = null
 }
 
 /**
- * Sign `claims` as they are: ES256 with the key's kid when `signingKey` is given, HS256 with the
- * secret otherwise. The kid is what Realtime and PostgREST pick the public key by; an HS256 token
- * carries none, so it matches the legacy key, which has none either.
+ * Sign `claims` as they are: ES256 with the key's kid when `signingKey` is given, which is how every
+ * token the stack accepts is signed; the kid is what Realtime and PostgREST pick the public key by.
+ * HS256 with `secret` otherwise: only Realtime and Storage accept that, each with its own secret,
+ * and the tests and the upgrade rehearsal use it to make the token the rest refuse.
  *
  * @returns {{token: string, alg: 'ES256'|'HS256'}}
  */
 export function signJwt(claims, { secret = null, signingKey = null }) {
-  if (!secret && !signingKey) throw new Error('signJwt: a secret or a signing key is required');
+  if (!secret && !signingKey) throw new Error('signJwt: a signing key (or a secret, for HS256) is required');
   const alg = signingKey ? 'ES256' : 'HS256';
   const header = b64url(JSON.stringify(signingKey ? { alg, typ: 'JWT', kid: signingKey.kid } : { alg, typ: 'JWT' }));
   const data = `${header}.${b64url(JSON.stringify(claims))}`;
@@ -236,6 +239,22 @@ export function signJwt(claims, { secret = null, signingKey = null }) {
     ? sign('sha256', Buffer.from(data), { key: createPrivateKey({ key: signingKey, format: 'jwk' }), dsaEncoding: 'ieee-p1363' })
     : createHmac('sha256', secret).update(data).digest();
   return { token: `${data}.${b64url(signature)}`, alg };
+}
+
+/** A token's claims signed again, unchanged, ES256 by `signingKey`: its jti still names it. */
+export function resignJwt(token, signingKey) {
+  const claims = decodeJwt(token);
+  if (!claims) throw new Error('resignJwt: not a JWT');
+  return signJwt(claims, { signingKey }).token;
+}
+
+/** A token's alg, from its header: what a verifier picks its key by. '?' for anything else. */
+export function algorithmOf(token) {
+  try {
+    return JSON.parse(Buffer.from(String(token).split('.')[0], 'base64url').toString('utf8')).alg ?? '?';
+  } catch {
+    return '?';
+  }
 }
 
 /**

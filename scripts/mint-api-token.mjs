@@ -12,8 +12,8 @@
 //
 // WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. With the key GoTrue signs with, so PostgREST
 // validates it exactly as it validates a GoTrue token -- there is no second trust path: ES256 with
-// the private key in SUPABASE_JWT_KEYS once the stack verifies ES256 (liveSigningKey() in
-// lib/stack-credentials.mjs decides), HS256 with SUPABASE_JWT_SECRET until then.
+// the private key in SUPABASE_JWT_KEYS, once GoTrue publishes its kid (liveSigningKey() in
+// lib/stack-credentials.mjs decides). No service accepts an HS256 token.
 // The subject is `b0000000-0000-4000-8000-000000000001`, the Read-only API client seeded by
 // archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off
 // `Operator`): it reads every relation the i3X address space is assembled from and writes nothing,
@@ -105,15 +105,16 @@ if (days > MAX_DAYS) {
 // The key the running stack signs with, from the release's own Secret, and the stack's URL and
 // keys: GoTrue says whether ES256 is live, and PostgREST records the issue below.
 const creds = stackCredentials([
-  'SUPABASE_JWT_KEYS', 'SUPABASE_JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY',
+  'SUPABASE_JWT_KEYS', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY',
 ]);
 const supabaseUrl = (creds.SUPABASE_URL || 'http://localhost:54321').replace(/\/+$/, '');
 const signing = await liveSigningKey({
   jwtKeys: creds.SUPABASE_JWT_KEYS, supabaseUrl, apikey: creds.SUPABASE_PUBLISHABLE_KEY,
 });
-if (!signing.key && !creds.SUPABASE_JWT_SECRET) {
-  console.error(missingCredentialAdvice('SUPABASE_JWT_SECRET'));
-  console.error(`It signs HS256 because ES256 is not live: ${signing.why}.`);
+if (!signing.key) {
+  if (!creds.SUPABASE_JWT_KEYS) console.error(missingCredentialAdvice('SUPABASE_JWT_KEYS'));
+  console.error(`It signs ES256 with the key GoTrue signs with, and ES256 is not live: ${signing.why}.`);
+  console.error('No token has been issued.');
   process.exit(1);
 }
 
@@ -121,9 +122,8 @@ const now = Math.floor(Date.now() / 1000);
 const exp = now + Math.round(days * 86400);
 const jti = randomUUID();
 
-// A `kid` under ES256 alone: PostgREST and Realtime pick the public key by it. An HS256 token
-// carries none and matches the JWKS's legacy key, which has none either.
-const { token, alg } = signJwt({
+// The `kid` is what PostgREST and Realtime pick the public key by.
+const { token } = signJwt({
   sub: SUBJECT,
   // `authenticated` is the POSTGRES role PostgREST switches to. The principal's own grant --
   // is not carried in the token at all: it is read from public.user_roles by has_role(), so a
@@ -135,10 +135,10 @@ const { token, alg } = signJwt({
   // The audit row names it too, so a re-mint -- a second live credential, not a replacement -- is
   // told apart from the first.
   jti,
-}, { secret: creds.SUPABASE_JWT_SECRET, signingKey: signing.key });
+}, { signingKey: signing.key });
 
 const until = new Date(exp * 1000).toISOString().slice(0, 10);
-const signedWith = alg === 'ES256' ? `ES256, kid ${signing.key.kid}` : `HS256 (${signing.why})`;
+const signedWith = `ES256, kid ${signing.key.kid}`;
 
 // =================================================================================================
 // RECORD IT, AND ONLY THEN PRINT IT.

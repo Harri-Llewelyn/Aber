@@ -797,9 +797,9 @@ two ways:
   node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
   ```
 
-Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
-the key GoTrue signs with (ES256 with `supabaseAuth.es256Signing`, the HS256 secret without), so
-PostgREST validates it exactly as it validates a GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
+Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT ES256
+with the key GoTrue signs with, so PostgREST validates it exactly as it validates a GoTrue token
+and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
 Read-only API client, seeded by archived migration 0034. The ceiling is
 `service_token_max_days()`, which the database enforces as well as both issuers.
@@ -842,8 +842,8 @@ consults; withdrawing the principal refuses every token that names it. What that
 So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
 after a laptop left the building still reaches them until it expires. **Do not rotate the signing
 key to withdraw one token**: that invalidates every token in the stack, including the stack's own
-keys. An HS256 token stops verifying in 1.8, so one issued before `supabaseAuth.es256Signing` is
-issued again before that upgrade.
+keys. No service accepts an HS256 token from 1.8.0, so one a site issued while it signed HS256 is
+issued again ([upgrading](../help/site/upgrading.md#from-180-every-token-is-signed-es256)).
 
 **The script's closing lines print both halves on purpose.** Until archived migration 0074 made a
 single token revocable, they said there was no revocation short of rotating that secret, which is

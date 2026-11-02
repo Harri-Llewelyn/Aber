@@ -1,6 +1,6 @@
 /**
  * Mint a long-lived JWT for a service principal, and reveal it once. A function and not an RPC,
- * because the signing key (JWT_KEYS' private key, or JWT_SECRET under HS256) is not in the
+ * because the signing key (the ES256 private key in JWT_KEYS) is not in the
  * database and must not be: it signs anything, including a `service_role` token that storage,
  * realtime and the edge runtime accept without consulting the denylist, so storing it in SQL would
  * turn every path to SQL execution into a path to an unrevocable credential. The edge runtime
@@ -60,12 +60,12 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = gatewayKey();
-    const signing = { jwtKeys: Deno.env.get("JWT_KEYS"), jwtSecret: Deno.env.get("JWT_SECRET") };
+    const signing = { jwtKeys: Deno.env.get("JWT_KEYS") };
 
     // 500 WITH NOTHING SPECIFIC, matching every other function here. A response naming the missing
     // variable would tell an unauthenticated caller how this endpoint is wired.
-    if (!signing.jwtKeys && !signing.jwtSecret) {
-      console.error("mint-service-token: neither JWT_KEYS nor JWT_SECRET is set; this worker cannot sign.");
+    if (!signing.jwtKeys) {
+      console.error("mint-service-token: JWT_KEYS is not set; this worker cannot sign.");
       return jsonResponse({ error: "Server misconfiguration" }, 500);
     }
 

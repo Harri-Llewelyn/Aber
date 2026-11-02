@@ -120,6 +120,13 @@ python supabase/test_a_token_s_use_is_recorded.py
 # Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
 # reset and a non-Administrator's are refused. The account's access is removed at the end.
 python supabase/test_a_person_can_enrol_a_second_factor.py
+# No service accepts a token signed with the shared secret. Needs the stack up, with the release
+# Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
+# session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
+# and nodered-userinfo. The same claims signed HS256 with SUPABASE_JWT_SECRET are refused by each,
+# and signed with REALTIME_JWT_SECRET or STORAGE_JWT_SECRET by every service but that one. A
+# service_role token signed with the shared secret is refused by PostgREST and Storage. Writes nothing.
+python supabase/test_no_service_accepts_the_shared_secret.py
 # The load generator's arithmetic. A load run cannot be repeated cheaply -- the stack has moved on
 # by the time anyone reads the figure -- so the reduction from raw counters to a verdict is checked
 # before the run rather than after it. Two of its conclusions are wrong in a believable direction
@@ -359,7 +366,10 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
 # command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
-# repository's branches, never from its pull request head, tag or stash.
+# repository's branches, never from its pull request head, tag or stash. And the signing set
+# (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
+# `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
+# it keeps, and that a second run changes nothing.
 npm run test:lib
 
 # NOTICE.md names every third-party image values.yaml pins, a chart template names or a Dockerfile is
@@ -1193,7 +1203,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
-| **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
+| **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d, twice (`es256`, `hs256`): the last release installed as published, its values completed by the checkout's `setup.mjs`, then `helm upgrade` to the checkout |
 | **secret-scan** | gitleaks over the history of the commit under test and the working tree, on every push (*The secret scans*, below) |
 | **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
@@ -1286,10 +1296,16 @@ a failure leaves it, and prints where its kubeconfig and values are.
   (`--from=<tag>` names another). That tag's own `setup.mjs` writes the values, run from a `git
   worktree` that is removed straight after. The script installs
   `oci://ghcr.io/harri-llewelyn/aber/aber` at that version, with its published images, and waits for
-  it to be healthy. Then it runs `helm upgrade` to the checkout with the same two values files, as
-  [`upgrades.md`](upgrades.md) says. From a release before 1.1.0 (`--from=v1.0.2`) both the install
-  and the upgrade run with NetworkPolicies off: those charts lack the edges their own hooks need
-  under the layer (#755).
+  it to be healthy. Then the checkout's `setup.mjs` completes the values, as the server installer
+  and [`upgrades.md`](upgrades.md) do, and it runs `helm upgrade` to the checkout with the same two
+  values files. From a release before 1.1.0 (`--from=v1.0.2`) both the install and the upgrade run
+  with NetworkPolicies off: those charts lack the edges their own hooks need under the layer (#755).
+- **upgrade --from-signing=hs256** starts from a site still signing HS256: the last release's values
+  with no key pair, `supabaseAuth.es256Signing` false and every JWT signed with `jwtSecret`. It
+  asserts that release takes a token signed with `jwtSecret` before the upgrade, so the site is the
+  HS256 one it rehearses. CI runs the upgrade twice, `es256` (the values as that release's
+  `setup.mjs` wrote them) and `hs256`. From a release that signs ES256 alone (1.8.0 on) the two
+  are the same.
 
 **The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.g<commit>`. The
 checkout's chart is packaged with that as its version and `appVersion`, as `release.yml` packages a
@@ -1305,7 +1321,9 @@ Both end with the same checks:
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
   certificate from the internal CA, using the password in the values file;
-- `admin@aber.local` with `aber123` is refused.
+- `admin@aber.local` with `aber123` is refused;
+- the API serves the session's ES256 token, and answers 401 to the same claims signed HS256 with
+  `jwtSecret`.
 
 **With `--i3x-suite=<dir>`, CESMII's i3X conformance suite runs last**, against
 `https://i3x.rehearsal.aber.test/v1` through Traefik. `<dir>` is the `conformance-tests` folder of a

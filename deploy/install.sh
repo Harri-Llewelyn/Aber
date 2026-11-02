@@ -740,11 +740,52 @@ sets_forge_port() {
   grep -v '^[[:space:]]*#' "$1" 2>/dev/null | grep -Eq "(^|[{,[:space:]])port:[[:space:]]*[\"']?${FORGE_SSH_PORT}[\"']?[[:space:]]*([,}#]|\$)"
 }
 
+# An earlier run's values file, given what this release needs and it lacks: `npm run setup` adds it
+# and keeps every value the file holds (the signing key pair, its tokens signed again, the services'
+# own secrets). The file as it was is kept beside it the first time.
+complete_site_values() {
+  # The values 1.8.0 needs would break an earlier chart: a tree between releases still installs
+  # the last one (ABER_VERSION moves at the release), so it keeps the file as it is.
+  if ! version_at_least "$ABER_VERSION" 1.8; then
+    say "  keeping the passwords and keys in $VALUES"
+    return 0
+  fi
+  cs_keep=$ETC/values-local.before-$ABER_VERSION.yaml
+  cs_made=
+  if [ ! -f "$cs_keep" ]; then
+    install -m 600 "$VALUES" "$cs_keep"
+    cs_made=1
+  fi
+  cs_out=$(node "${SRC}/scripts/setup.mjs" --out="$VALUES" 2>&1) || {
+    printf '%s\n' "$cs_out" >&2
+    die "adding what Aber $ABER_VERSION needs to $VALUES failed, and the file is as it was. The messages above say why."
+  }
+  chmod 600 "$VALUES"
+  case $cs_out in
+    *"Completed "*)
+      say "  completed $VALUES with what Aber $ABER_VERSION needs; every other value is as it was:"
+      printf '%s\n' "$cs_out" | sed -n 's/^   - /    - /p'
+      say "  the file as it was: $cs_keep"
+      case $cs_out in
+        *"HS256 until now"*) warn "this site signed its tokens HS256 until now, and from this release the API refuses every
+token signed that way. After the upgrade, mint each machine identity's token again on Access Control
+(Issue Token). People may need to sign in again." ;;
+      esac
+      ;;
+    *)
+      if [ -n "$cs_made" ]; then rm -f "$cs_keep"; fi
+      say "  keeping the passwords and keys in $VALUES"
+      ;;
+  esac
+}
+
 write_site_files() {
   step "The site's passwords and settings, in $ETC"
   run install -d -m 700 "$ETC"
-  if [ -f "$VALUES" ]; then
-    say "  keeping the passwords and keys in $VALUES"
+  if [ -f "$VALUES" ] && [ "$DRY_RUN" = 1 ]; then
+    say "  would run: node ${SRC}/scripts/setup.mjs --out=$VALUES, which adds any key this release needs"
+  elif [ -f "$VALUES" ]; then
+    complete_site_values
   elif [ "$DRY_RUN" = 1 ]; then
     say "  would run: node ${SRC}/scripts/setup.mjs --domain=$DOMAIN --admin-email=$EMAIL --out=$VALUES"
   else

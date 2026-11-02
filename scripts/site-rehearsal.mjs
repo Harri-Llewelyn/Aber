@@ -9,12 +9,19 @@
  *                                             checkout's chart and images
  *   node scripts/site-rehearsal.mjs upgrade   install the last release as a site would (its own
  *                                             setup.mjs, the published chart and images), then
- *                                             `helm upgrade` it to the checkout with the same values
+ *                                             `helm upgrade` it to the checkout with the same values,
+ *                                             completed first by the checkout's setup.mjs as the
+ *                                             installer and the upgrade guide complete them
  *
  * Options:  --cluster=<name>      the k3d cluster to create, default aber-rehearsal; refused if it exists
  *           --kubeconfig=<file>   where the cluster's kubeconfig is written, default a file in the
  *                                 temporary directory; the default kubeconfig is never touched
  *           --from=<tag>          upgrade from this tag instead of the last release (`upgrade`)
+ *           --from-signing=hs256  start the upgrade from a site still signing HS256: the release's
+ *                                 values with no key pair, supabaseAuth.es256Signing false and their
+ *                                 JWTs signed with jwtSecret. es256 (the default) keeps them as that
+ *                                 release's setup.mjs wrote them. From a release that signs ES256
+ *                                 alone (1.8.0 on) both are the same
  *           --keep                leave the cluster up after a pass (a failure always leaves it)
  *           --i3x-suite=<dir>     then run CESMII's i3X conformance suite from <dir> (the
  *                                 conformance-tests folder of a cesmii/i3X checkout) against
@@ -26,7 +33,9 @@
  * `upgrade` also asserts the upgrade's db-init Job completed, which replays the migration chain
  * onto the last release's database; that every volume claim kept its uid, and a StatefulSet whose
  * claim templates changed was created again and owns its pods; and that the administrator signs in
- * before and after. Both run with NetworkPolicies on and assert the layer is enforced: supabase-db
+ * before and after, and that the API takes the session's ES256 token and refuses the same claims
+ * signed HS256 with jwtSecret (accepted by the release before 1.8.0, refused after). Both run with
+ * NetworkPolicies on and assert the layer is enforced: supabase-db
  * answers a pod labelled as db-init and not a pod no rule admits. `upgrade` keeps them off from a
  * release before 1.1.0, whose chart lacks the edges its own hooks need.
  *
@@ -49,6 +58,8 @@ import {
   importImages, must, preflight, printRestartedContainers, run, sleep, spawnPortForward, step,
 } from './dev-cluster.mjs'
 import { CHART_REF, compareReleases, readChartVersion } from './lib/release-chart.mjs'
+import { algorithmOf, decodeJwt, signJwt } from './lib/service-jwt.mjs'
+import { SIGNED_JWTS, readSecrets, writeSecrets } from './lib/signing-set.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const NS = 'aber'
@@ -63,6 +74,8 @@ const DEMO = { email: 'admin@aber.local', password: 'aber123' }
 // The first release whose chart holds every edge its own hooks need under the policy layer. An
 // upgrade from an earlier one installs it with NetworkPolicies off, and upgrades with them off.
 const POLICY_EDGES_SINCE = '1.1.0'
+// The first release that signs ES256 alone and refuses an HS256 site's values.
+const ES256_ONLY_SINCE = '1.8.0'
 
 const argv = process.argv.slice(2)
 const mode = argv.find(a => !a.startsWith('--'))
@@ -73,6 +86,8 @@ if (!['install', 'upgrade'].includes(mode)) {
   process.exit(mode ? 1 : 0)
 }
 const CLUSTER = option('cluster') || 'aber-rehearsal'
+const FROM_SIGNING = option('from-signing') || 'es256'
+if (!['es256', 'hs256'].includes(FROM_SIGNING)) die(`--from-signing takes es256 or hs256, not ${FROM_SIGNING}`)
 const I3X_SUITE = option('i3x-suite') && path.resolve(option('i3x-suite'))
 if (I3X_SUITE && !existsSync(path.join(I3X_SUITE, 'bin', 'i3x-test.js'))) {
   die(`--i3x-suite=${I3X_SUITE} holds no bin/i3x-test.js: name the conformance-tests folder of a cesmii/i3X checkout`)
@@ -149,6 +164,40 @@ function writeValues (tag) {
     removeWorktree()
   }
   console.log(`  ${VALUES}, from ${tag ? `${tag}'s` : "the checkout's"} setup.mjs`)
+}
+
+/**
+ * The values as a site still signing HS256 holds them: no key pair, supabaseAuth.es256Signing false,
+ * and every JWT signed with jwtSecret, its claims unchanged. A site set up before 1.7.0 and upgraded
+ * without turning ES256 on has exactly these.
+ */
+function makeHs256Site () {
+  const text = readFileSync(VALUES, 'utf8')
+  const secrets = readSecrets(text)
+  if (!secrets?.jwtSecret) die(`${VALUES} has no secrets.jwtSecret to sign with`)
+  const resigned = Object.fromEntries(SIGNED_JWTS.filter(({ valuesKey }) => secrets[valuesKey])
+    .map(({ valuesKey }) => [valuesKey, signJwt(decodeJwt(secrets[valuesKey]), { secret: secrets.jwtSecret }).token]))
+  const hs256 = writeSecrets(text, resigned).split('\n')
+    .filter(line => !/^\s+jwt(Keys|Jwks):/.test(line))
+    .join('\n').replace(/^(\s+)es256Signing:.*$/m, '$1es256Signing: false')
+  if (!/^\s+es256Signing: false$/m.test(hs256)) die(`${VALUES} has no supabaseAuth.es256Signing to turn off`)
+  writeFileSync(VALUES, hs256)
+  console.log(`  ${VALUES}: no key pair, es256Signing false, ${Object.keys(resigned).length} JWTs signed HS256`)
+}
+
+/** The upgrade guide's step for a site set up with `npm run setup`, and the installer's: the checkout's setup.mjs completes the values. */
+function completeValues () {
+  const before = readFileSync(VALUES, 'utf8')
+  const r = capture('node', [path.join(REPO, 'scripts', 'setup.mjs'), `--out=${VALUES}`], { cwd: REPO })
+  if (!r.ok) die(`the checkout's setup.mjs could not complete the values:\n${r.out}\n${r.err}`)
+  console.log(r.out.split('\n').filter(l => /^( {3}- |✅|ℹ)/u.test(l)).map(l => `  ${l.trim()}`).join('\n'))
+  const after = readSecrets(readFileSync(VALUES, 'utf8'))
+  const stillHs256 = SIGNED_JWTS.filter(({ valuesKey }) => after[valuesKey] && algorithmOf(after[valuesKey]) !== 'ES256')
+  if (stillHs256.length) die(`setup.mjs left ${stillHs256.map(k => k.valuesKey).join(', ')} unsigned ES256`)
+  if (/"oct"/.test(after.jwtKeys || '') || !after.realtimeJwtSecret || !after.storageJwtSecret) {
+    die('setup.mjs did not complete the signing set (an oct key left, or a service secret missing)')
+  }
+  if (readFileSync(VALUES, 'utf8') === before) console.log('  nothing to add')
 }
 
 function removeWorktree () {
@@ -239,9 +288,22 @@ function packageChart (version) {
   return chart
 }
 
+/**
+ * A copy of the values as the checkout's setup.mjs completes them, for reading the candidate's
+ * render before the release is installed. The site's own file stays as the release wrote it until
+ * the upgrade guide's step, which completeValues() takes; the candidate refuses it until then.
+ */
+function completedCopy () {
+  const copy = path.join(WORK, 'values-completed-preview.yaml')
+  writeFileSync(copy, readFileSync(VALUES, 'utf8'))
+  const r = capture('node', [path.join(REPO, 'scripts', 'setup.mjs'), `--out=${copy}`], { cwd: REPO })
+  if (!r.ok) die(`the checkout's setup.mjs could not complete a copy of the values:\n${r.out}\n${r.err}`)
+  return copy
+}
+
 /** The built images this site pulls, read off the rendered chart; every one must carry the candidate tag. */
-function imagesToBuild (chart, version) {
-  const r = capture('helm', ['template', RELEASE, chart, '-n', NS, '-f', VALUES, '-f', SITE], { maxBuffer: 64 * 1024 * 1024 })
+function imagesToBuild (chart, version, values = VALUES) {
+  const r = capture('helm', ['template', RELEASE, chart, '-n', NS, '-f', values, '-f', SITE], { maxBuffer: 64 * 1024 * 1024 })
   if (!r.ok) die(`the packaged chart does not render with the site's values:\n${r.err}`)
   const refs = [...new Set([...r.out.matchAll(/image:\s*"?([^"\s]+)"?/g)].map(m => m[1]).filter(i => i.startsWith(`${IMG_NS}/`)))]
   const stray = refs.filter(i => !i.endsWith(`:${version}`))
@@ -495,6 +557,31 @@ async function checkSignIn () {
   forward.close()
 }
 
+/**
+ * The API takes the session's ES256 token, and `hs256` decides whether it takes the same claims
+ * signed HS256 with jwtSecret: true on a release before 1.8.0, false after. null only reports it.
+ */
+async function checkSigning (hs256) {
+  const site = siteCredentials()
+  const secrets = readSecrets(readFileSync(VALUES, 'utf8'))
+  const forward = await forwardTraefik()
+  const tls = await reachApi(forward.port, site.apikey)
+  const admin = await signIn(tls, site.apikey, site)
+  if (admin.status !== 200) die(`${site.email} could not sign in: ${admin.status} ${admin.body.slice(0, 300)}`)
+  const session = JSON.parse(admin.body).access_token
+  const read = token => request({
+    ...tls, urlPath: '/rest/v1/areas?select=id&limit=1', headers: { apikey: site.apikey, Authorization: `Bearer ${token}` },
+  })
+  const es = await read(session)
+  if (es.status !== 200) die(`the API refused the session's own ${algorithmOf(session)} token: ${es.status} ${es.body.slice(0, 200)}`)
+  const forged = signJwt(decodeJwt(session), { secret: secrets.jwtSecret }).token
+  const hs = await read(forged)
+  forward.close()
+  console.log(`  the session's ${algorithmOf(session)} token: ${es.status}; the same claims signed HS256 with jwtSecret: ${hs.status}`)
+  if (hs256 === true && hs.status !== 200) die(`the release before the upgrade refused an HS256 token (${hs.status}): it is not the HS256 site this rehearses`)
+  if (hs256 === false && hs.status !== 401) die(`the API answered ${hs.status} to a token signed with jwtSecret, not 401: ${hs.body.slice(0, 200)}`)
+}
+
 // ---------------------------------------------------------------------------------------------
 // CESMII's i3X conformance suite, the way a site's clients reach i3X
 // ---------------------------------------------------------------------------------------------
@@ -538,12 +625,18 @@ async function rehearse () {
   const hardened = !from || compareReleases(from.version, POLICY_EDGES_SINCE) >= 0
   let before = null
   let hookLog = ''
+  // An HS256 site exists only before the release that ended HS256.
+  const hs256Site = Boolean(from) && FROM_SIGNING === 'hs256' && compareReleases(from.version, ES256_ONLY_SINCE) < 0
   console.log(from
-    ? `Upgrade rehearsal: ${from.tag}, as published, to the checkout as ${candidate}`
+    ? `Upgrade rehearsal: ${from.tag}, as published${hs256Site ? ' and signing HS256' : ''}, to the checkout as ${candidate}`
     : `Install rehearsal: the checkout as ${candidate}, as a new site`)
   if (!hardened) console.log(`  NetworkPolicies off: ${from.tag} predates ${POLICY_EDGES_SINCE}, the first release with the edges its hooks need`)
+  if (from && FROM_SIGNING === 'hs256' && !hs256Site) console.log(`  --from-signing=hs256: ${from.tag} signs ES256 alone, so the site starts as its setup.mjs wrote it`)
 
-  await phase(`values from ${from ? `${from.tag}'s` : "the checkout's"} setup.mjs`, () => writeValues(from?.tag))
+  await phase(`values from ${from ? `${from.tag}'s` : "the checkout's"} setup.mjs`, () => {
+    writeValues(from?.tag)
+    if (hs256Site) makeHs256Site()
+  })
   const nodeAddress = await phase(`cluster ${CLUSTER}`, async () => {
     const address = createCluster()
     await ensureTraefikConfig()
@@ -552,7 +645,7 @@ async function rehearse () {
   })
   writeSiteValues(nodeAddress, hardened)
   const chart = packageChart(candidate)
-  const names = imagesToBuild(chart, candidate)
+  const names = imagesToBuild(chart, candidate, from ? completedCopy() : VALUES)
   await phase(`build the checkout's images as ${candidate}`, () => buildImages(candidate, names))
   await phase('import them into the node', () => {
     importImages(candidate, names, CLUSTER)
@@ -564,9 +657,11 @@ async function rehearse () {
       helm('install', CHART_REF, ['--version', from.version, '--create-namespace']))
     await phase(`${from.tag} rolls out and passes helm test`, () => { rollOut(); helmTest() })
     await phase(`the first administrator signs in to ${from.tag}`, checkSignIn)
+    await phase(`${from.tag} takes the session's token${hs256Site ? ', and one signed HS256' : ''}`, () => checkSigning(hs256Site ? true : null))
+    await phase('the checkout\'s setup.mjs completes the values, as the installer and the upgrade guide do', completeValues)
     before = statefulState()
     const hook = followHookLog()
-    await phase(`helm upgrade to ${candidate}, with the same values`, () => helm('upgrade', chart))
+    await phase(`helm upgrade to ${candidate}, with the completed values`, () => helm('upgrade', chart))
     hookLog = await hook.read()
     await phase('the upgrade\'s db-init replayed the migration chain', () => assertUpgradeMigrated(candidate))
   } else {
@@ -578,6 +673,7 @@ async function rehearse () {
   await phase('helm test', helmTest)
   await phase('every running pod is on the checkout\'s images', () => assertRunningImages(candidate))
   await phase('the first administrator signs in; the demo account is refused', checkSignIn)
+  await phase('the API takes an ES256 token and refuses one signed HS256 with jwtSecret', () => checkSigning(false))
   if (I3X_SUITE) await phase("CESMII's i3X suite through Traefik over HTTPS", checkI3xConformance)
   passed = true
 }

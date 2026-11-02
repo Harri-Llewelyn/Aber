@@ -41,6 +41,8 @@ spec:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
+        # Restarts with a change to the signing set it reads (aber.signingChecksum).
+        checksum/signing-keys: {{ include "aber.signingChecksum" . }}
         # The admin listener (PGRST_ADMIN_SERVER_PORT below) is the only place PostgREST serves /metrics.
         {{- include "aber.scrapeAnnotations" (dict "port" 3001 "path" "/metrics") | nindent 8 }}
     spec:
@@ -87,13 +89,9 @@ spec:
               value: public,storage,graphql_public
             - name: PGRST_DB_ANON_ROLE
               value: anon
-            {{- if .Values.supabaseAuth.es256Signing }}
-            # A JWKS in place of the secret: ES256 by kid, and HS256 by the legacy key, which has
-            # no kid. A value that does not parse as JSON is taken as a plain secret.
+            # A JWKS in place of a secret: ES256 by kid. It holds no `oct` key, so no HS256 token
+            # verifies. A value that does not parse as JSON would be taken as a plain secret.
             {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
-            {{- else }}
-            {{- include "aber.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            {{- end }}
             - name: PGRST_DB_USE_LEGACY_GUCS
               value: "false"
             # The revocation choke point (0074). Run in the caller's role
