@@ -13,6 +13,7 @@ import { ExpandButton } from './ExpandButton'
 import { HelpTip } from './HelpTip'
 import { Modal } from './Modal'
 import { Tooltip } from './Tooltip'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { deviceUrl } from '../../routes'
 
 /** Where an attached model is kept, and so who can read it. */
@@ -33,6 +34,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const [error, setError] = useState(null)
   const [size, setSize] = useState(null)
   const [expanded, setExpanded] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const inputRef = useRef(null)
 
   const path = device?.model_3d_path || null
@@ -102,6 +104,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     }
   }, [deviceId, deviceName, onChange, showToast])
 
+  // Run from the Remove dialog, which closes either way so a failure shows under the model.
   const handleRemove = useCallback(async () => {
     setBusy(true)
     setError(null)
@@ -115,6 +118,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
       showToast?.(err.message, 'error')
     } finally {
       setBusy(false)
+      setConfirmRemove(false)
     }
   }, [deviceId, deviceName, path, onChange, showToast])
 
@@ -154,6 +158,17 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
             <Model3DViewer path={path} name={modelName} expanded />
           </div>
         </Modal>
+      )}
+      {path && confirmRemove && (
+        <ConfirmModal
+          title="Remove 3D model"
+          icon={<IconTrash size={18} />}
+          message={`Remove the 3D model from ${modelName || 'this device'}? The device keeps its other details, and the file is deleted.`}
+          confirmLabel="Remove Model"
+          pendingLabel="Removing…"
+          onConfirm={handleRemove}
+          onCancel={() => setConfirmRemove(false)}
+        />
       )}
 
       {path ? (
@@ -200,7 +215,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
                   className="btn btn-sm btn-ghost"
                   pending={busy}
                   pendingLabel="Removing…"
-                  onClick={handleRemove}
+                  onClick={() => setConfirmRemove(true)}
                   title="Detach this model and delete it from storage"
                 >
                   <IconTrash size={12} /> <span className="model-file-action-word">Remove</span>
