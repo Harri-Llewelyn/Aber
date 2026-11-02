@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -45,7 +45,8 @@ import {
   IconBookOpen,
   IconShieldAlert,
   IconRadio,
-  IconCpu
+  IconCpu,
+  IconMap
 } from '../common/Icons'
 
 /**
@@ -55,7 +56,7 @@ import {
  * that takes a cell out of its area; a cell also leaves its area from its own form on the Cells
  * page. Devices are not filed here: a device's area is its cell's, or its own when it is
  * Area-Wide, which is set on the Devices page. An area's plan is managed from its details panel,
- * whose preview opens the Site Map on the area through `onShowOnSiteMap`.
+ * whose View in Site Map action opens the Site Map on the area through `onShowOnSiteMap`.
  */
 export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, onShowOnSiteMap, hasPermission }) {
   const [areas, setAreas]       = useState([])
@@ -611,6 +612,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             title: 'Open the immutable audit trace for this area'
           },
           {
+            // Every area is drawn there; the address shows archived areas for an archived one.
+            label: 'View in Site Map', icon: <IconMap size={13} />,
+            to: siteMapAreaUrl(selectedArea.area_id),
+            onClick: () => onShowOnSiteMap?.(selectedArea.area_id),
+            title: 'Open the Site Map on this area'
+          },
+          {
             // Attached directly: there is no proposal lane for a link.
             label: 'Attached Links', icon: <IconBookOpen size={13} />,
             onClick: () => setLinksForArea(selectedArea),
@@ -647,7 +655,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             canManage={canManage}
             showToast={showToast}
             onChanged={loadAll}
-            onOpen={onShowOnSiteMap}
           />
         )}
       />

@@ -179,10 +179,14 @@ describe('Turn left and Turn right', () => {
   )
   const actions = () => document.querySelector('.area-plan-panel-actions')
 
-  it('sit beside Replace plan and Remove plan, labelled and described', () => {
+  it('sit beside the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
     panel()
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
-    expect(names).toEqual(['Turn left', 'Turn right', 'Replace plan', 'Remove plan'])
+    expect(names).toEqual(['Turn left', 'Turn right'])
+    // Away from the turns, so a missed Turn right cannot open a file dialog.
+    const fileButtons = document.querySelector('.area-plan-panel-buttons')
+    expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Replace plan', 'Remove plan'])
+    expect(document.querySelector('.plan-card').compareDocumentPosition(fileButtons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(tooltipOf(screen.getByRole('button', { name: 'Turn left' }))).toMatch(/anticlockwise/)
     expect(tooltipOf(screen.getByRole('button', { name: 'Turn right' }))).toMatch(/clockwise/)
     expect(screen.getByRole('button', { name: 'Turn right' }).querySelector('svg')).not.toBeNull()
