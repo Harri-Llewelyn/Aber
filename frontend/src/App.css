@@ -1876,6 +1876,18 @@ td.row-actions, th.row-actions {
 /* The known-CVE count, or "not scanned", after a version. */
 .system-scan { margin-left: 6px; white-space: nowrap; }
 
+/* A figure that is not observed: the same dim words, at the size of the card's other lines. */
+.summary-card-value .system-unobserved { font-size: 12px; font-weight: 400; }
+
+/* Messages lost's three counts over their three names, one column each, so each number stands
+   over its word and none reads as a total. */
+.system-lost {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 8px;
+}
+.system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
   text-decoration: none;
@@ -2624,6 +2636,15 @@ main:focus { outline: none; }
 .summary-card-danger .summary-card-state { color: var(--danger-text); }
 
 .summary-card-opens { cursor: pointer; }
+a.summary-card { text-decoration: none; }
+
+/* A card with two cards' content (the System page's Messages lost) takes two tracks; on a phone,
+   one column, it takes the one. */
+.summary-card-wide { grid-column: span 2; }
+
+@media (max-width: 600px) {
+  .summary-card-wide { grid-column: auto; }
+}
 .summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--text-muted) 18%, transparent); }
 .summary-card-warning.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--warning) 20%, transparent); }
 .summary-card-danger.summary-card-opens:hover { box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 20%, transparent); }

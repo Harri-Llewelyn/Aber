@@ -249,14 +249,15 @@ function dumpSchema(name) {
 // text so it does not depend on physical order, which a fresh insert and a replayed one need not
 // share.
 //
-// THREE TABLES ARE COUNTED BUT NOT DIGESTED, because their rows carry the time they were written
-// -- `audit_trail` stamps recorded_at, and the two liveness tables exist to hold a timestamp.
-// Two databases built a minute apart legitimately differ there, and digesting it would produce a
-// check that fails for the wrong reason every time it is run.
+// FIVE TABLES ARE COUNTED BUT NOT DIGESTED, because their rows carry the time they were written
+// -- `audit_trail` stamps recorded_at, and the two liveness tables, the figures and their probe
+// exist to hold a timestamp. Two databases built a minute apart legitimately differ there, and
+// digesting it would produce a check that fails for the wrong reason every time it is run.
 //
 // THESE ARE PARTITION ROOTS, not table names. `audit_trail` is partitioned by month and its
 // rows live in the partitions, which is what `seedRows` resolves before matching here.
-const VOLATILE = ['audit_trail', 'directory_liveness_probe', 'playback_worker_status'];
+const VOLATILE = ['audit_trail', 'directory_liveness_probe', 'playback_worker_status',
+  'directory_figures', 'directory_figures_probe'];
 
 // ONE TABLE IS NOT COMPARED AT ALL, and the reason is different from the one above. Its rows are
 // not a declaration a chain makes, they are a record of what that chain DID: `one_shot_migrations`

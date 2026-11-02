@@ -1255,8 +1255,9 @@ Three rules matter more than the rest:
   blocking it drops every notification with no error, no queue and no log — the first sign is an
   operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
 - **`supabase-db → prometheus:9090`.** `refresh_directory_liveness()` asks Prometheus which targets
-  are up, through `pg_net` from the database. Blocked, the reply never arrives and the probe sets
-  every Directory row to `UNKNOWN` on each run, which reads as nothing being scraped. CI asserts this
+  are up, and `refresh_directory_figures()` asks for the System page's figures, both through
+  `pg_net` from the database. Blocked, the replies never arrive: each run sets every service row to
+  `UNKNOWN` and every figure to not observed, which reads as nothing being scraped. CI asserts this
   flow too.
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,

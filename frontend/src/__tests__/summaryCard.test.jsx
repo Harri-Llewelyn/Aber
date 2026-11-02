@@ -85,6 +85,27 @@ describe('a summary card', () => {
     expect(screen.queryByRole('button', { name: /^Storage/ })).toBeNull()
   })
 
+  it('is a link to another application\'s page, opened in a new tab and marked by its icon', () => {
+    render(<SummaryCard title="Readings written" testId="linked" value="12" unit="readings/s"
+      tip="Readings per second." href="https://grafana.example/d/aber-platform?viewPanel=2" />)
+    const card = screen.getByRole('link', { name: 'Readings written. Readings per second.' })
+    expect(card).toBe(screen.getByTestId('linked'))
+    expect(card).toHaveAttribute('href', 'https://grafana.example/d/aber-platform?viewPanel=2')
+    expect(card).toHaveAttribute('target', '_blank')
+    expect(card).toHaveAttribute('rel', 'noreferrer')
+    expect(card).toHaveClass('summary-card-opens')
+    expect(card.querySelector('.summary-card-chevron[aria-hidden="true"] svg')).not.toBeNull()
+    fireEvent.focus(card)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Readings per second.')
+  })
+
+  it('takes two cards\' room when it is wide, and one on a phone', () => {
+    render(<SummaryCard title="Messages lost" testId="wide" value="0" tip="Three counts." wide />)
+    expect(screen.getByTestId('wide')).toHaveClass('summary-card-wide')
+    expect(APP_CSS).toMatch(/\.summary-card-wide\s*\{\s*grid-column:\s*span 2;\s*\}/)
+    expect(APP_CSS).toMatch(/@media \(max-width: 600px\)\s*\{\s*\.summary-card-wide\s*\{\s*grid-column:\s*auto;\s*\}/)
+  })
+
   it('carries the whole sentence in its accessible name, after the title', () => {
     render(<Opener onOpen={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Backup runs. The last backup failed, and none has succeeded since.' })).toBeInTheDocument()
