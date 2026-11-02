@@ -48,6 +48,13 @@
       "enabled": false
     },
     {
+      "description": "EVERY IMAGE IS NAMED IN NOTICE.md AT ITS TAG, with its licence read at that tag, and check-image-licences fails a pull request that moves a pin and not the notice. Renovate cannot read a licence, so an image pull request is finished by hand.",
+      "matchDatasources": ["docker"],
+      "prBodyNotes": [
+        "Before merging: read the new image's licence (in the image for NOTICE.md's *Verified from the pinned image* rows, at the upstream tag for the others) and name the tag in `NOTICE.md`, and in `licenses/README.md` where a copied licence was read at it. `node scripts/check-image-licences.mjs` fails until it does. `docs/architecture.md`'s image table names the tag too."
+      ]
+    },
+    {
       "description": "THE COORDINATED SET. One PR or none: these move together upstream and are tested together, and the correct target is usually upstream Supabase's own pin rather than the newest tag. dependencyDashboardApproval means Renovate lists them and waits to be asked, because the decision needs a person to compare against supabase/supabase docker/docker-compose.yml. See issue #49.",
       "minimumReleaseAge": "7 days",
       "groupName": "Supabase component set",
@@ -71,6 +78,13 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["denoland/deno"],
       "matchFileNames": ["supabase/functions/Dockerfile"],
+      "enabled": false
+    },
+    {
+      "description": "The same Deno, in constraints.deno above. The renovate-config manager reads that pin as a dependency of this file and proposes moving it to the newest Deno; it moves with edge-runtime, by hand.",
+      "matchManagers": ["renovate-config"],
+      "matchDepTypes": ["tool-constraint"],
+      "matchDepNames": ["deno"],
       "enabled": false
     },
     {
@@ -104,11 +118,12 @@
       "labels": ["dependencies", "major"]
     },
     {
-      "description": "Security updates outrank everything else in the queue.",
-      "minimumReleaseAge": null,
-      "matchUpdateTypes": ["patch", "minor", "major"],
-      "isVulnerabilityAlert": true,
-      "prPriority": 10
+      "description": "A Python minor is a new interpreter, and is held like a major. Compiled wheels lag its release: on python 3.15, psycopg2-binary had none and the ingestion image's build failed.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["python"],
+      "matchUpdateTypes": ["minor"],
+      "dependencyDashboardApproval": true,
+      "labels": ["dependencies", "major"]
     },
     {
       "description": "Workflow actions: one PR, since they are independent of everything the stack runs.",

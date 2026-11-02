@@ -1410,7 +1410,10 @@ it silently switched off every per-service Prometheus metric while leaving the s
 
 **Renovate is self-hosted**, so no third-party app holds write access to the repository, and it
 needs a `RENOVATE_TOKEN` secret (a PAT with `repo`, or fine-grained with Contents, Pull requests and
-Issues read/write). Without it the workflow fails on its first step by design — a scheduled job that
+Issues read/write and Dependabot alerts read). A token that cannot read Dependabot alerts leaves
+`vulnerabilityAlerts` with nothing to act on, and the run says so only as a warning in its log
+("Cannot access vulnerability alerts"); `osvVulnerabilityAlerts` still works. Without the secret the
+workflow fails on its first step by design — a scheduled job that
 silently does nothing leaves the repository looking as though drift is watched when it is not.
 `GITHUB_TOKEN` cannot be used: pull requests it opens trigger no workflow runs, so every bump would
 arrive with no CI result.
