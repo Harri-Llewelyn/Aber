@@ -32,13 +32,13 @@ switched off with them.
 
 ## Bundled plugins
 
-**Grafana runs only the datasource plugins Aber provisions.** The image bundles thirteen backend
+**Grafana runs only the datasource plugins Aber provisions.** The image bundles fourteen backend
 datasource plugins under `/usr/share/grafana/data/plugins-bundled`. Grafana starts each one it
 loads as a process of its own, from a binary of about 30 MiB. Aber provisions three types:
 Prometheus, Loki and PostgreSQL (the TimescaleDB and Supabase datasources). `disable_plugins` in
-[`grafana.ini`](grafana.ini) names the other ten. Grafana then loads none of them, starts no process
+[`grafana.ini`](grafana.ini) names the other eleven. Grafana then loads none of them, starts no process
 for them and drops them from its preinstall list. The datasources compiled into Grafana itself
-(Azure Monitor, CloudWatch, Graphite and TestData) run inside the server process and start nothing,
+(Azure Monitor, Graphite and TestData) run inside the server process and start nothing,
 so they are not listed here.
 
 **A datasource of a disabled type stops working, and nothing is logged at start.** A site's own
@@ -48,13 +48,14 @@ the chart value `grafana.enablePlugins`, e.g. `[mysql]`, and the datasource answ
 The chart then sets `GF_PLUGINS_DISABLE_PLUGINS` to `disable_plugins` less those ids, read from
 `grafana.ini` so the list is written once, and an id it does not name fails the render. With
 `[mysql]` Grafana runs four plugin processes and MySQL registers again (measured). Grafana ignores
-an empty variable, so keeping all ten renders a lone comma.
+an empty variable, so keeping all eleven renders a lone comma.
 
-The bundled backend datasource plugins of `grafana/grafana:13.2.3`, as the image's `plugin.json`
+The bundled backend datasource plugins of `grafana/grafana:13.3.0`, as the image's `plugin.json`
 files declare them:
 
 | Plugin id | Also answers to type | In Aber |
 | :--- | :--- | :--- |
+| `cloudwatch` | | Disabled |
 | `elasticsearch` | | Disabled |
 | `grafana-postgresql-datasource` | `postgres` | Provisioned |
 | `grafana-pyroscope-datasource` | `phlare` | Disabled |
@@ -80,7 +81,7 @@ other than the one above, so a Renovate pull request that moves `grafana.image.t
 the list is refreshed. Read it from the new image (Docker and Node on the PATH):
 
 ```sh
-TAG=13.2.3   # set to the tag deploy/helm/aber/values.yaml pins
+TAG=13.3.0   # set to the tag deploy/helm/aber/values.yaml pins
 docker run --rm --entrypoint sh "grafana/grafana:$TAG" -c \
   'echo "["; s=; for f in /usr/share/grafana/data/plugins-bundled/*/plugin.json; do echo "$s"; cat "$f"; s=,; done; echo "]"' |
   node -e 'for (const p of JSON.parse(require("fs").readFileSync(0, "utf8")))
