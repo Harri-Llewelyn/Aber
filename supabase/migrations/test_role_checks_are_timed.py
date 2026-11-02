@@ -63,6 +63,8 @@ CASES = [
 
 # user_roles' own policy calls has_role() beside a column comparison, so it shows both halves.
 GUARDED_READ = "SELECT user_id, role_id FROM public.user_roles"
+EXPLAINED = "EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON) SELECT user_id, role_id FROM public.user_roles;"
+READ_ONE = "SELECT count(*) FROM public.user_roles r WHERE r.user_id::text = %s;"
 
 
 def get_connection():
@@ -133,12 +135,11 @@ class TheRoleChecksAreTimed(unittest.TestCase):
     def test_a_guarded_read_is_explained(self):
         executions, plan = [], []
         for _ in range(RUNS):
-            self.cur.execute(f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON) {GUARDED_READ};")
+            self.cur.execute(EXPLAINED)
             plan = [row[0] for row in self.cur.fetchall()]
             executions.append(float(next(line for line in plan if line.startswith("Execution Time"))
                                     .split(":")[1].split()[0]))
-        self.cur.execute(f"SELECT count(*) FROM ({GUARDED_READ}) r WHERE r.user_id::text = %s;",
-                         (OPERATOR_ID,))
+        self.cur.execute(READ_ONE, (OPERATOR_ID,))
         self.assertEqual(self.cur.fetchone()[0], 1, "an Administrator reads everyone's role")
         print(f"\n  EXPLAIN ANALYZE {GUARDED_READ}; as an Administrator, median execution "
               f"{statistics.median(executions):.3f} ms of {RUNS} runs. The last plan:")
