@@ -182,10 +182,14 @@ describe('Turn left and Turn right', () => {
   /** The turn the panel's preview is drawn at. */
   const drawn = () => Number(document.querySelector('.area-plan').dataset.rotation ?? 0)
 
-  it('sit beside the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
+  it('sit in a row of their own under the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
     panel()
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
     expect(names).toEqual(['Turn left', 'Turn right'])
+    // Not in the heading's row, and above the plan's card.
+    expect(actions().closest('.area-plan-panel-header')).toBeNull()
+    expect(document.querySelector('.area-plan-panel-header').compareDocumentPosition(actions()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(actions().compareDocumentPosition(document.querySelector('.plan-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Away from the turns, so a missed Turn right cannot open a file dialog.
     const fileButtons = document.querySelector('.area-plan-panel-buttons')
     expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Replace plan', 'Remove plan'])
@@ -215,10 +219,13 @@ describe('Turn left and Turn right', () => {
     panel()
     expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
+    const [left, right] = within(actions()).getAllByRole('button')
 
     press('Turn right')
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
     expect(names).toEqual(['Turn left', 'Turn right', 'Save Turn', 'Discard'])
+    // The pair is added after the turns, which stay the row's first two, so they do not move.
+    expect(within(actions()).getAllByRole('button').slice(0, 2)).toEqual([left, right])
     expect(screen.getByRole('button', { name: 'Save Turn' })).toHaveClass('btn', 'btn-primary', 'btn-sm')
     expect(screen.getByRole('button', { name: 'Save Turn' }).closest('.setting-actions')).not.toBeNull()
   })

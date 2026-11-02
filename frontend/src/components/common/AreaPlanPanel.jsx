@@ -15,8 +15,8 @@ const TURN_UNSAVED = 'Save or discard the turn first.'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
- * or remove it. A plan is drawn as a preview with every cell on it, Turn left and Turn right beside
- * its heading, Replace and Remove under its card, and Expand on the card, which opens it
+ * or remove it. A plan is drawn as a preview with every cell on it, Turn left and Turn right in a
+ * row under its heading, Replace and Remove under its card, and Expand on the card, which opens it
  * window-sized (PlanViewer). Replace sits away from the turns because a missed turn would open a
  * file dialog. An area with no plan shows the drop zone rather than a button, the same gesture a
  * device's 3D model takes; a reader who may not upload sees the default outline instead.
@@ -143,24 +143,27 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
             size={12}
           />
         </span>
-        {turnable && (
-          <div className="area-plan-panel-actions">
-            <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(-1)}>
-                <IconRotateCcw size={12} /> Turn left
-              </button>
-            </Tooltip>
-            <Tooltip text="A quarter turn clockwise. The cells turn with the plan, and the file is left as it is.">
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(1)}>
-                <IconRotateCw size={12} /> Turn right
-              </button>
-            </Tooltip>
-            <SaveDiscard dirty={turnUnsaved} disabled={busy} saveLabel="Save Turn"
-              onSave={saveTurn}
-              onDiscard={() => setDraft(null)} />
-          </div>
-        )}
       </div>
+
+      {/* A row of its own, the turns first: Save Turn and Discard appear after them, so the turns
+          never move when a draft starts or ends. */}
+      {turnable && (
+        <div className="area-plan-panel-actions">
+          <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(-1)}>
+              <IconRotateCcw size={12} /> Turn left
+            </button>
+          </Tooltip>
+          <Tooltip text="A quarter turn clockwise. The cells turn with the plan, and the file is left as it is.">
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => turnPlan(1)}>
+              <IconRotateCw size={12} /> Turn right
+            </button>
+          </Tooltip>
+          <SaveDiscard dirty={turnUnsaved} disabled={busy} saveLabel="Save Turn"
+            onSave={saveTurn}
+            onDiscard={() => setDraft(null)} />
+        </div>
+      )}
 
       {/* The preview for a plan, and for anyone who may not upload one; Expand is on its card. */}
       {area.plan_path || !canManage ? (

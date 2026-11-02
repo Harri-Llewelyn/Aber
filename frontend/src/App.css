@@ -3437,7 +3437,9 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+/* The turns' row, between the heading and the plan, starting at the left: Save Turn and Discard
+   follow the turns, and wrap below them as a pair in a narrow drawer, so the turns never move. */
+.area-plan-panel-actions { display: flex; align-items: center; justify-content: flex-start; gap: 4px; flex-wrap: wrap; }
 
 /* Save Turn and Discard, while a turn is unsaved: the height of the turns beside them, not of a
    Settings row. */
