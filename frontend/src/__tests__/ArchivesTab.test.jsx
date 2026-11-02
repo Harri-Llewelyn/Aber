@@ -258,11 +258,10 @@ const ARCHIVED_GATEWAY = {
 }
 
 const restoreButton = () => screen.getAllByRole('button', { name: /Restore/i })[0]
-/** The confirming button inside the dialog, which shares its verb with the row's button. */
-const confirmRestoreButton = async () => {
-  const buttons = await screen.findAllByRole('button', { name: /^Restore$/ })
-  return buttons[buttons.length - 1]
-}
+/** The confirming button inside the dialog, which repeats the action with the entity's type. */
+const confirmRestoreButton = async () =>
+  within(await screen.findByRole('dialog', { name: /^Restore / }))
+    .getByRole('button', { name: /^Restore (Area|Cell|Gateway|Device)$/ })
 
 describe('ArchivesTab restore asks first', () => {
   beforeEach(() => { vi.clearAllMocks() })
@@ -282,6 +281,15 @@ describe('ArchivesTab restore asks first', () => {
 
     const prompt = await screen.findByText(/Restore the cell/i)
     expect(prompt.textContent).toContain("'Assembly Line 1'")
+  })
+
+  /** The same dialog as the drawers' Restore, whose confirming button names the type too. */
+  it('confirms with a button that repeats the action and the type', async () => {
+    await showArchives(() => true, [ARCHIVED_GATEWAY])
+    fireEvent.click(restoreButton())
+
+    const dialog = await screen.findByRole('dialog', { name: 'Restore gateway' })
+    expect(within(dialog).getByRole('button', { name: 'Restore Gateway' })).toBeInTheDocument()
   })
 
   it('cancelling restores nothing', async () => {
@@ -323,6 +331,9 @@ describe('ArchivesTab restore asks first', () => {
     fireEvent.click(await confirmRestoreButton())
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('row level security', 'error'))
+    // Closed, so the toast is not left behind the dialog; the row is still there to try again.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
   })
 
   it('is gated on the same permission as delete', async () => {

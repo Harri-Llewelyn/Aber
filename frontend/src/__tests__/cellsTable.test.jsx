@@ -364,6 +364,47 @@ describe('the row and its drawer', () => {
     await waitFor(() => expect(panel()).toBeTruthy())
     expect(within(panel()).queryByText('Retention')).toBeNull()
   })
+
+  /** Restore asks first, in the dialog Archived Entities' Restore uses. */
+  describe('Restore Cell asks first', () => {
+    const openRestore = async () => {
+      renderCells({}, { cells: [{ ...CELL, is_archived: true, auto_delete_at: null }] })
+      await showArchived()
+      fireEvent.click(within(table()).getByText('Assembly Line 1'))
+      await waitFor(() => expect(panel()).toBeTruthy())
+      fireEvent.click(within(panel()).getByRole('button', { name: /Restore Cell/ }))
+      return screen.getByRole('dialog', { name: 'Restore cell' })
+    }
+
+    it('names the cell, and says its retention timer is cleared', async () => {
+      const dialog = await openRestore()
+
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/^Restore the cell 'Assembly Line 1' to active service\?/))
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/fresh retention window/))
+      expect(within(dialog).getByRole('button', { name: 'Restore Cell' })).toHaveClass('btn-primary')
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('restores nothing when cancelled', async () => {
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('restores the cell once, when confirmed', async () => {
+      api.post.mockResolvedValue({})
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Cell' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(api.post).toHaveBeenCalledTimes(1)
+      expect(api.post).toHaveBeenCalledWith('/api/v1/cells/cell-1/restore', {})
+    })
+  })
 })
 
 // The filters

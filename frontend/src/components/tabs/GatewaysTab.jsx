@@ -41,6 +41,7 @@ import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
@@ -84,6 +85,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
+  // The archived gateway whose Restore dialog is open.
+  const [restoreTarget, setRestoreTarget] = useState(null)
   // The drawer holds an id, not the object: resolving it every render keeps it as live as the row.
   // In the address as `?gateway=`.
   const [selectedId, setSelectedId] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.gateway_id) })
@@ -155,9 +158,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Staleness is derived from the clock and a quiet gateway produces no event. Re-renders only.
   useClockTick(STALENESS_TICK_MS)
 
-  // In-flight state for the form's Save and for whichever gateway is restoring.
+  // In-flight state for the form's Save. Restore's is its dialog's.
   const [saving, runSave] = usePendingAction()
-  const [restoringId, runRestore] = usePendingKey()
   // Keyed: a bare boolean would spin the button of whichever gateway is selected when the request settles.
   const [rebirthingId, runRebirth] = usePendingKey()
 
@@ -230,11 +232,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
   const restoreGateway = async (gatewayId, name) => {
     try {
       await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
       load(); showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
     } catch (e) { showToast(e.message, 'error') }
+    finally { setRestoreTarget(null) }
   }
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
@@ -798,6 +802,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         />
       )}
 
+      {restoreTarget && (
+        <RestoreEntityModal
+          type="gateway" name={restoreTarget.gateway_name}
+          credentialRevoked={Boolean(restoreTarget.credential_revoked_at)}
+          forgeArchived={Boolean(restoreTarget.forge_archived_at)}
+          onConfirm={() => restoreGateway(restoreTarget.gateway_id, restoreTarget.gateway_name)}
+          onCancel={() => setRestoreTarget(null)}
+        />
+      )}
+
       {docsForGw && (
         <EntityLinksModal entityType="gateway" entityId={docsForGw.gateway_id} entityName={docsForGw.gateway_name} onClose={() => setDocsForGw(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
@@ -1124,9 +1138,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           // Restore replaces Edit on an archived gateway: editing one is refused anyway.
           selected.is_archived ? {
             label: 'Restore Gateway', icon: <IconRefreshCw size={13} />,
-            onClick: () => runRestore(selected.gateway_id, () => restoreGateway(selected.gateway_id, selected.gateway_name)),
-            pending: restoringId === selected.gateway_id,
-            pendingLabel: 'Restoring…',
+            onClick: () => setRestoreTarget(selected),
             disabled: !canArchive,
             primary: primaryAction === 'restore',
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore gateway back to active service'

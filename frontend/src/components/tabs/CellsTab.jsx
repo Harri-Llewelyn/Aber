@@ -11,7 +11,7 @@ import { groupDevicesByCell, NON_CELL_SOURCES } from '../../utils/cellResolution
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
-import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
+import { usePendingAction } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
@@ -23,6 +23,7 @@ import { useSetting } from '../../hooks/useSettings'
 import { CellPlacementPicker } from '../common/CellPlacementPicker'
 import { ExpandablePlanPreview } from '../common/AreaPlanPreview'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconLayoutDashboard,
@@ -74,6 +75,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const minSpacingSetting = useSetting(MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING)
   const minSpacing = Number.isFinite(Number(minSpacingSetting)) ? Number(minSpacingSetting) : DEFAULT_MIN_PIN_SPACING
   const [archiveTarget, setArchiveTarget] = useState(null)
+  // The archived cell whose Restore dialog is open.
+  const [restoreTarget, setRestoreTarget] = useState(null)
   const [linksForCell, setLinksForCell] = useState(null)
   // Each device's place in the Unified Namespace (utils/unsPath.js): undefined while the bridge is
   // off or before the first read, null when the read failed.
@@ -123,9 +126,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // without touching a `cells` row.
   useRealtimeTable(['cells', 'gateways', 'devices', 'areas'], loadAll, { enabled: REALTIME_ENABLED })
 
-  // In-flight state for the form's Save and for the cell being restored from the drawer.
+  // In-flight state for the form's Save. Restore's is its dialog's.
   const [saving, runSave] = usePendingAction()
-  const [restoringId, runRestore] = usePendingKey()
 
   const save = async () => {
     try {
@@ -169,11 +171,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
   const restoreCell = async (cellId, name) => {
     try {
       await api.post(`/api/v1/cells/${cellId}/restore`, {})
       loadAll(); showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
     } catch (e) { showToast(e.message, 'error') }
+    finally { setRestoreTarget(null) }
   }
 
   // An ID, not the cell object: this page polls, so the selection is resolved against `cells` on
@@ -594,6 +598,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         />
       )}
 
+      {restoreTarget && (
+        <RestoreEntityModal
+          type="cell" name={restoreTarget.cell_name}
+          onConfirm={() => restoreCell(restoreTarget.cell_id, restoreTarget.cell_name)} onCancel={() => setRestoreTarget(null)}
+        />
+      )}
+
       {linksForCell && (
         <EntityLinksModal entityType="cell" entityId={linksForCell.cell_id} entityName={linksForCell.cell_name} onClose={() => setLinksForCell(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
@@ -773,9 +784,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           selectedCell.is_archived ? {
             label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
             primary: true,
-            onClick: () => runRestore(selectedCell.cell_id, () => restoreCell(selectedCell.cell_id, selectedCell.cell_name)),
-            pending: restoringId === selectedCell.cell_id,
-            pendingLabel: 'Restoring…',
+            onClick: () => setRestoreTarget(selectedCell),
             disabled: !canArchive,
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore cell back to active service'
           } : {

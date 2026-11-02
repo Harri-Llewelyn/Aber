@@ -209,6 +209,50 @@ describe('gateway row actions', () => {
     expect(panel.queryByText(/Archive Gateway/i)).not.toBeInTheDocument()
   })
 
+  /** Restore asks first, in the dialog Archived Entities' Restore uses, with the same facts. */
+  describe('Restore Gateway asks first', () => {
+    const openRestore = async (overrides = {}) => {
+      await show([gateway({ is_archived: true, ...overrides })])
+      fireEvent.click(openPanel().getByText('Restore Gateway').closest('button'))
+      return screen.getByRole('dialog', { name: 'Restore gateway' })
+    }
+
+    it('names the gateway, and says its revoked broker credential does not come back', async () => {
+      const dialog = await openRestore({ credential_revoked_at: '2026-07-25T10:00:01Z' })
+
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/^Restore the gateway 'Host_Gateway_NodeRED' to active service\?/))
+      expect(dialog).toHaveAccessibleDescription(expect.stringMatching(/broker credential was revoked/))
+      expect(dialog).toHaveAccessibleDescription(expect.not.stringMatching(/forge/))
+      expect(within(dialog).getByRole('button', { name: 'Restore Gateway' })).toHaveClass('btn-primary')
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('says nothing of a credential the gateway never held', async () => {
+      const dialog = await openRestore({ credential_revoked_at: null })
+      expect(dialog).toHaveAccessibleDescription(expect.not.stringMatching(/broker credential/))
+    })
+
+    it('restores nothing when cancelled', async () => {
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('restores the gateway once, when confirmed', async () => {
+      api.post.mockResolvedValue({})
+      const dialog = await openRestore()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Gateway' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(api.post).toHaveBeenCalledTimes(1)
+      expect(api.post).toHaveBeenCalledWith('/api/v1/gateways/gw-1/restore', {})
+    })
+  })
+
   it('disables the write action for a role that cannot manage gateways', async () => {
     await show([gateway()], () => false)
 
