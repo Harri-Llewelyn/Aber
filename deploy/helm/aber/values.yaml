@@ -670,7 +670,7 @@ supabaseEnvoy:
   image:
     repository: envoyproxy/envoy
     # Minimum 1.34: the oauth2 filter gained PKCE there, and GoTrue requires it.
-    tag: "v1.39.2"
+    tag: "v1.40.2"
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
