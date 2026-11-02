@@ -134,11 +134,11 @@ makes the change.
 An account held by software rather than a person, such as the ingestion service. It cannot sign
 in, and it holds only the permissions it needs ([security model](../../docs/security-model.md#machine-identities)).
 
-### Second factor (MFA)
+### MFA (multi-factor authentication)
 
 A code from an authenticator app on your phone, asked for after your password when you sign in.
-MFA is short for multi-factor authentication. You add one on your Profile page
-([Profile](../pages/profile.md#your-second-factor)), and an Administrator's **Reset MFA** removes it.
+You add an authenticator on your Profile page's **MFA** tab
+([Profile](../pages/profile.md#your-mfa)), and an Administrator's **Reset MFA** removes it.
 
 ## Standards
 

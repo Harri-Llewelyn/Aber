@@ -233,10 +233,10 @@ describe('Profile > Account > Picture', () => {
     fakeCanvas()
   })
 
-  it('sits after Display name, says who sees it, and offers a picture of the allowed types', () => {
+  it('is the first row, says who sees it, and offers a picture of the allowed types', () => {
     renderProfile()
     const labels = [...document.querySelectorAll('.setting-label')].map(l => l.textContent)
-    expect(labels.slice(0, 3)).toEqual(['Email address', 'Display name', 'Picture'])
+    expect(labels.slice(0, 3)).toEqual(['Picture', 'Email address', 'Display name'])
     expect(row()).toHaveTextContent('Nobody else sees it.')
     expect(input()).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp')
     expect(button(/Choose Picture/)).toBeInTheDocument()

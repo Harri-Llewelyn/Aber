@@ -57,10 +57,10 @@ export function qrImageSource(qrCode) {
 const REFUSALS = {
   mfa_verification_failed: 'That code is not right. Enter the code your app shows now.',
   mfa_challenge_expired: 'That took too long. Enter the code your app shows now.',
-  mfa_factor_name_conflict: 'You already have a second factor with that name. Choose another.',
-  too_many_enrolled_mfa_factors: 'You have as many second factors as the sign-in service allows. Remove one first.',
+  mfa_factor_name_conflict: 'You already have an authenticator with that name. Choose another.',
+  too_many_enrolled_mfa_factors: 'You have as many authenticators as the sign-in service allows. Remove one first.',
   insufficient_aal: 'Enter a code from your authenticator app first.',
-  mfa_factor_not_found: 'That second factor is no longer on your account.',
+  mfa_factor_not_found: 'That authenticator is no longer on your account.',
   mfa_totp_enroll_not_enabled: 'This site does not allow authenticator apps. Ask whoever runs it.',
   mfa_totp_verify_not_enabled: 'This site does not allow authenticator apps. Ask whoever runs it.',
   over_request_rate_limit: 'Too many tries. Wait a minute, then try again.',

@@ -1078,7 +1078,7 @@ const apiMethods = {
   /** Every factor the person holds, verified or not: `{ id, friendly_name, factor_type, status, created_at }`. */
   listMyFactors: async () => {
     const { data, error } = await supabase.auth.mfa.listFactors();
-    if (error) throw factorError(error, 'Could not list your second factors');
+    if (error) throw factorError(error, 'Could not list your authenticators');
     return data?.all || [];
   },
 
@@ -1089,12 +1089,12 @@ const apiMethods = {
    */
   startFactorEnrolment: async (friendlyName) => {
     const { data: listed, error: listError } = await supabase.auth.mfa.listFactors();
-    if (listError) throw factorError(listError, 'Could not start adding a second factor');
+    if (listError) throw factorError(listError, 'Could not start adding an authenticator');
     for (const stale of (listed?.all || []).filter(f => f.status !== 'verified')) {
       await supabase.auth.mfa.unenroll({ factorId: stale.id });
     }
     const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName });
-    if (error) throw factorError(error, 'Could not start adding a second factor');
+    if (error) throw factorError(error, 'Could not start adding an authenticator');
     return { id: data.id, friendly_name: data.friendly_name, ...data.totp };
   },
 
@@ -1120,7 +1120,7 @@ const apiMethods = {
    */
   removeFactor: async (factorId) => {
     const { error } = await supabase.auth.mfa.unenroll({ factorId });
-    if (error) throw factorError(error, 'Could not remove the second factor');
+    if (error) throw factorError(error, 'Could not remove the authenticator');
     const { error: refreshError } = await supabase.auth.refreshSession();
     if (refreshError) console.warn('[mfa] could not renew the session after removing a factor:', refreshError.message);
   },

@@ -11,13 +11,24 @@ export const MOVED_PAGES = new Map([
 ])
 
 /**
- * Where `url` moved to: its page's new segment, with the rest of the path (a tab) and the query
- * string as they were. Null for a page that has not moved.
+ * Tabs whose address changed within their page, `page/tab` to `page/tab`, for the same reason.
+ * A tab split in several opens the one listed first: Profile's Security tab became Sessions, MFA
+ * and Allowed Apps.
+ */
+export const MOVED_TABS = new Map([
+  ['profile/security', 'profile/sessions'],
+])
+
+/**
+ * Where `url` moved to: its page's new segment, or its tab's, with the rest of the path and the
+ * query string as they were. Null for an address that has not moved.
  */
 export const movedUrl = (url) => {
   const q = url.indexOf('?')
   const search = q < 0 ? '' : url.slice(q)
   const [page, ...rest] = pathSegments(url)
+  const tab = rest.length ? `${page}/${rest[0]}` : null
+  if (tab && MOVED_TABS.has(tab)) return `/${[MOVED_TABS.get(tab), ...rest.slice(1)].join('/')}${search}`
   if (!MOVED_PAGES.has(page)) return null
   return `/${[MOVED_PAGES.get(page), ...rest].join('/')}${search}`
 }

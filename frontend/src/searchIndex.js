@@ -98,9 +98,11 @@ export const CARDS = [
   { id: 'broker-roles',         ...tabCard('access-control', 'roles'), keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
   { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
 
-  { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['email', 'role', 'password', 'change password', 'my role'] },
+  { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['picture', 'photo', 'avatar', 'email', 'role', 'password', 'change password', 'my role'] },
   { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] },
-  { id: 'profile-security',     ...tabCard('profile', 'security'), keywords: ['sessions', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop', 'second factor', 'mfa', 'two-factor', '2fa', 'authenticator', 'totp', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }
+  { id: 'profile-sessions',     ...tabCard('profile', 'sessions'), keywords: ['security', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop'] },
+  { id: 'profile-mfa',          ...tabCard('profile', 'mfa'), keywords: ['security', 'multi-factor authentication', 'second factor', 'two-factor', '2fa', 'authenticator', 'totp'] },
+  { id: 'profile-allowed-apps', ...tabCard('profile', 'allowed-apps'), keywords: ['security', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }
 ]
 
 /**

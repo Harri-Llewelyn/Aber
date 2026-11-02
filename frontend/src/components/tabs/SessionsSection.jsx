@@ -12,10 +12,10 @@ import { plural } from '../../utils/format'
 import { endSessionQuestion, sessionLabel, sortSessions } from '../../utils/sessions'
 
 /** Where every message about a session links: this list. */
-const SESSIONS_URL = tabUrl('profile', 'security')
+const SESSIONS_URL = tabUrl('profile', 'sessions')
 
 /**
- * The Security tab's Sessions section: every session the signed-in person holds, in every browser
+ * Profile's Sessions tab: every session the signed-in person holds, in every browser
  * and service (`list_my_sessions()`, 0206), the one in use first, in the table a person's drawer
  * on People shares. End ends one other session (`end_my_session()`), and Sign Out of All Other
  * Sessions ends all of them at once (`end_my_other_sessions()`, 0211), each after a dialog that

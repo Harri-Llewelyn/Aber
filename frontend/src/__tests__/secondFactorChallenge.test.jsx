@@ -154,7 +154,7 @@ describe('the sign-in challenge', () => {
   it('tells someone whose factor was reset since they signed in to sign in again', async () => {
     supabase.auth.mfa.listFactors.mockResolvedValue({ data: { all: [], totp: [] }, error: null })
     render(<App />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('Your account has no second factor now.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your account has no MFA now.')
     expect(screen.queryByLabelText('Code')).toBeNull()
     expect(screen.getByRole('button', { name: 'Sign Out' })).toBeInTheDocument()
   })

@@ -2,7 +2,7 @@
 --
 -- A person's drawer on Access Control › People counted their sessions (0207) and ended them all.
 -- For a lost laptop that also ended their other browsers, a wall display and every service. The
--- drawer now lists the sessions, as the person's own Security tab does, and ends one.
+-- drawer now lists the sessions, as the person's own Sessions tab does, and ends one.
 --
 --   * person_sessions() returns a person's sessions with the columns list_my_sessions() (0206)
 --     returns, except is_current: the caller's token names the caller's session, never the
@@ -14,7 +14,7 @@
 --     only, not your own, and a removed person's may be ended.
 --   * end_person_sessions() (0207) is redeclared unchanged but for its refusal of your own
 --     sessions, which named Sign Out. Sign Out ends only the browser in use; Sign Out of All
---     Other Sessions on the Profile page's Security tab is the match.
+--     Other Sessions on the Profile page's Sessions tab is the match.
 --
 -- Reasoning: supabase/README.md, "An Administrator ends one of a person's sessions (0212)".
 -- Idempotent.
@@ -86,7 +86,7 @@ BEGIN
   PERFORM public.check_person_act(p_user_id, 'end a person''s session');
 
   IF p_user_id = auth.uid() THEN
-    RAISE EXCEPTION 'you cannot end your own session here. End it on your Profile page''s Security tab.'
+    RAISE EXCEPTION 'you cannot end your own session here. End it on your Profile page''s Sessions tab.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 
@@ -142,7 +142,7 @@ BEGIN
     PERFORM public.check_person_act(p_user_id, 'end a person''s sessions');
 
     IF p_user_id = auth.uid() THEN
-        RAISE EXCEPTION 'you cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page''s Security tab.'
+        RAISE EXCEPTION 'you cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page''s Sessions tab.'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
 

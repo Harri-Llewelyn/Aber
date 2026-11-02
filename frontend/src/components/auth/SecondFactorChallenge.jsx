@@ -15,7 +15,7 @@ export function SecondFactorScreen({ onSignOut }) {
       theme={theme}
       onToggleTheme={toggleTheme}
       title="Enter your code"
-      subtitle="Your account has a second factor. Open your authenticator app."
+      subtitle="Your account uses MFA. Open your authenticator app."
     >
       <SecondFactorChallenge onSignOut={onSignOut} />
     </AuthShell>
@@ -23,7 +23,7 @@ export function SecondFactorScreen({ onSignOut }) {
 }
 
 /**
- * The code a person with a second factor gives after their password, before the dashboard opens
+ * The code a person with MFA gives after their password, before the dashboard opens
  * (App.jsx) and before a service's sign-in is approved (pages/OAuthConsent.jsx). It lists their
  * verified factors from GoTrue, asks for the six digits their app shows, and has GoTrue check them
  * (challenge, then verify), which raises the session to aal2. Sign Out stays offered throughout.
@@ -97,7 +97,7 @@ export function SecondFactorChallenge({ onVerified, onSignOut }) {
     return (
       <>
         <p role="status" style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
-          Reading your second factor…
+          Reading your authenticators…
         </p>
         {signOutLink}
       </>
@@ -109,7 +109,7 @@ export function SecondFactorChallenge({ onVerified, onSignOut }) {
     return (
       <>
         <div role="alert" style={{ background: 'var(--warning-tint)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px' }}>
-          {error || 'Your account has no second factor now. Sign out, then sign in again with your password.'}
+          {error || 'Your account has no MFA now. Sign out, then sign in again with your password.'}
         </div>
         {signOutLink}
       </>

@@ -1,6 +1,6 @@
 /**
- * Profile > Security: the Second factor section, after Sessions. It lists the person's verified
- * authenticator apps. Add Second Factor names one, shows GoTrue's QR code and the secret as text,
+ * Profile > MFA. It lists the person's verified
+ * authenticator apps. Add Authenticator names one, shows GoTrue's QR code and the secret as text,
  * then takes a code, which GoTrue checks before the factor counts; Cancel removes a half-made one.
  * Remove asks first with a button that repeats its name, and asks for a code when this session has
  * not given one (aal1), as GoTrue requires.
@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProfileTab } from '../components/tabs/ProfileTab'
+import { tabLink } from '../test/tabBar'
 
 vi.mock('../lib/supabaseClient', () => ({
   SUPABASE_URL: 'https://api.site.test',
@@ -47,7 +48,7 @@ const AAL2 = { currentLevel: 'aal2', nextLevel: 'aal2', currentAuthenticationMet
 const AAL1 = { currentLevel: 'aal1', nextLevel: 'aal1', currentAuthenticationMethods: [{ method: 'password' }] }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/profile/security')
+  window.history.replaceState({}, '', '/profile/mfa')
   api.listMySessions.mockReset().mockResolvedValue([])
   api.listMyFactors.mockReset().mockResolvedValue([])
   api.assuranceLevel.mockReset().mockResolvedValue(AAL1)
@@ -62,7 +63,7 @@ afterEach(() => {
   window.history.replaceState({}, '', '/')
 })
 
-const renderSecurity = (props = {}) => {
+const renderMfa = (props = {}) => {
   const showToast = vi.fn()
   render(<ProfileTab email="operator@site.test" userRole="Operator" theme="dark" sidebarMode="hover" showToast={showToast} {...props} />)
   return { showToast }
@@ -70,43 +71,44 @@ const renderSecurity = (props = {}) => {
 
 const factorRows = () => [...document.querySelectorAll('tr[data-factor]')]
 
-describe('the Second factor section', () => {
-  it('follows Sessions, with an About tip, and offers Add Second Factor to every role', async () => {
-    renderSecurity({ userRole: 'Auditor' })
+describe('the MFA tab', () => {
+  it('is a tab of its own, after Sessions, with an About tip, and offers Add Authenticator to every role', async () => {
+    renderMfa({ userRole: 'Auditor' })
     const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
-    expect(headings).toEqual(['Sessions', 'Second factor', 'Apps you have allowed'])
-    expect(screen.getByRole('button', { name: 'About second factors' })).toBeInTheDocument()
-    expect(await screen.findByText('You have no second factor. Your password alone signs you in.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Add Second Factor/ })).toBeEnabled()
+    expect(tabLink('MFA')).toHaveAttribute('aria-current', 'page')
+    expect(headings).toEqual(['Multi-factor authentication (MFA)'])
+    expect(screen.getByRole('button', { name: 'About MFA' })).toBeInTheDocument()
+    expect(await screen.findByText('You have not set up MFA. Your password alone signs you in.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add Authenticator/ })).toBeEnabled()
   })
 
   it('lists verified factors by name, and leaves a half-made one out', async () => {
     api.listMyFactors.mockResolvedValue([PHONE, HALF_MADE, TABLET])
-    renderSecurity()
+    renderMfa()
     await waitFor(() => expect(factorRows()).toHaveLength(2))
     expect(factorRows().map(r => r.cells[0].textContent)).toEqual(['Work phone', 'Tablet'])
-    expect(within(factorRows()[0]).getByRole('button', { name: 'Remove the second factor: Work phone' })).toBeInTheDocument()
+    expect(within(factorRows()[0]).getByRole('button', { name: 'Remove the authenticator: Work phone' })).toBeInTheDocument()
   })
 
   it('has nothing to add for a machine identity', () => {
-    renderSecurity({ email: null })
-    expect(screen.getByText('A machine identity signs in with a token, so it has no second factor.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Add Second Factor/ })).toBeNull()
+    renderMfa({ email: null })
+    expect(screen.getByText('A machine identity signs in with a token, so it has no MFA.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add Authenticator/ })).toBeNull()
     expect(api.listMyFactors).not.toHaveBeenCalled()
   })
 
   it('says why the list could not be read', async () => {
-    api.listMyFactors.mockRejectedValue(new Error('Could not list your second factors'))
-    renderSecurity()
-    expect(await screen.findByText('Could not list your second factors')).toBeInTheDocument()
+    api.listMyFactors.mockRejectedValue(new Error('Could not list your authenticators'))
+    renderMfa()
+    expect(await screen.findByText('Could not list your authenticators')).toBeInTheDocument()
   })
 })
 
 describe('adding one', () => {
   const openAdd = async () => {
-    renderSecurity()
-    await screen.findByText(/You have no second factor/)
-    fireEvent.click(screen.getByRole('button', { name: /Add Second Factor/ }))
+    renderMfa()
+    await screen.findByText(/You have not set up MFA/)
+    fireEvent.click(screen.getByRole('button', { name: /Add Authenticator/ }))
     return screen.findByRole('dialog')
   }
 
@@ -127,32 +129,32 @@ describe('adding one', () => {
 
   it('refuses a name already in use before asking GoTrue', async () => {
     api.listMyFactors.mockResolvedValue([PHONE])
-    renderSecurity()
+    renderMfa()
     await waitFor(() => expect(factorRows()).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: /Add Second Factor/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Add Authenticator/ }))
     const dialog = await screen.findByRole('dialog')
     // The next free name is offered.
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Authenticator app')
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'work phone' } })
-    expect(dialog).toHaveTextContent('You already have a second factor with that name.')
+    expect(dialog).toHaveTextContent('You already have an authenticator with that name.')
     expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeDisabled()
   })
 
   it('confirms it with a code, says so, and reads the list again', async () => {
-    const { showToast } = renderSecurity()
-    await screen.findByText(/You have no second factor/)
-    fireEvent.click(screen.getByRole('button', { name: /Add Second Factor/ }))
+    const { showToast } = renderMfa()
+    await screen.findByText(/You have not set up MFA/)
+    fireEvent.click(screen.getByRole('button', { name: /Add Authenticator/ }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
     const code = await within(dialog).findByLabelText('Code')
 
     api.listMyFactors.mockResolvedValue([{ ...PHONE, id: 'f-new', friendly_name: 'Authenticator app' }])
     fireEvent.change(code, { target: { value: '123 456' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Second Factor' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Authenticator' }))
     await waitFor(() => expect(api.verifyFactorCode).toHaveBeenCalledWith('f-new', '123 456'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      'Second factor added: Authenticator app. You give its code each time you sign in.', 'success',
-      { to: '/profile/security' }))
+      'Authenticator added: Authenticator app. You give its code each time you sign in.', 'success',
+      { to: '/profile/mfa' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(factorRows()).toHaveLength(1))
     expect(api.cancelFactorEnrolment).not.toHaveBeenCalled()
@@ -164,7 +166,7 @@ describe('adding one', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
     const code = await within(dialog).findByLabelText('Code')
     fireEvent.change(code, { target: { value: '000000' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Second Factor' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Authenticator' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('That code is not right.')
     expect(code).toHaveValue('')
   })
@@ -173,7 +175,7 @@ describe('adding one', () => {
     const dialog = await openAdd()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
     fireEvent.change(await within(dialog).findByLabelText('Code'), { target: { value: '12345' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Second Factor' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Authenticator' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter the 6-digit code your app shows.')
     expect(api.verifyFactorCode).not.toHaveBeenCalled()
   })
@@ -192,31 +194,31 @@ describe('removing one', () => {
   it('asks first, then removes it, from a session that gave a code', async () => {
     api.listMyFactors.mockResolvedValue([PHONE])
     api.assuranceLevel.mockResolvedValue(AAL2)
-    const { showToast } = renderSecurity()
+    const { showToast } = renderMfa()
     await waitFor(() => expect(factorRows()).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove the second factor: Work phone' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the authenticator: Work phone' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Remove Work phone')
     expect(dialog).toHaveTextContent('your password alone signs you in')
     expect(within(dialog).queryByLabelText(/Code from/)).toBeNull()
 
     api.listMyFactors.mockResolvedValue([])
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Second Factor' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Authenticator' }))
     await waitFor(() => expect(api.removeFactor).toHaveBeenCalledWith('f-phone'))
     expect(api.verifyFactorCode).not.toHaveBeenCalled()
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Second factor removed: Work phone.', 'success', { to: '/profile/security' }))
-    expect(await screen.findByText(/You have no second factor/)).toBeInTheDocument()
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Authenticator removed: Work phone.', 'success', { to: '/profile/mfa' }))
+    expect(await screen.findByText(/You have not set up MFA/)).toBeInTheDocument()
   })
 
   it('asks for a code first from a session that has not given one', async () => {
     api.listMyFactors.mockResolvedValue([PHONE, TABLET])
     api.assuranceLevel.mockResolvedValue({ ...AAL1, nextLevel: 'aal2' })
-    renderSecurity()
+    renderMfa()
     await waitFor(() => expect(factorRows()).toHaveLength(2))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove the second factor: Tablet' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the authenticator: Tablet' }))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Your other second factor still works.')
-    const remove = within(dialog).getByRole('button', { name: 'Remove Second Factor' })
+    expect(dialog).toHaveTextContent('Your other authenticator still works.')
+    const remove = within(dialog).getByRole('button', { name: 'Remove Authenticator' })
     expect(remove).toBeDisabled()
 
     fireEvent.change(within(dialog).getByLabelText('Code from Tablet'), { target: { value: '654321' } })
@@ -230,11 +232,11 @@ describe('removing one', () => {
     api.listMyFactors.mockResolvedValue([PHONE])
     api.assuranceLevel.mockResolvedValue(AAL2)
     api.removeFactor.mockRejectedValue(new Error('Enter a code from your authenticator app first.'))
-    renderSecurity()
+    renderMfa()
     await waitFor(() => expect(factorRows()).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove the second factor: Work phone' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the authenticator: Work phone' }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Second Factor' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Authenticator' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter a code from your authenticator app first.')
   })
 })

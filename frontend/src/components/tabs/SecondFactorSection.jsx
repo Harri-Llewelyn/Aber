@@ -11,12 +11,12 @@ import { tabUrl } from '../../routes'
 import { formatDateTime } from '../../utils/format'
 import { factorLabel, verifiedFactors } from '../../utils/secondFactor'
 
-/** Where every message about a second factor links: this section. */
-const SECURITY_URL = tabUrl('profile', 'security')
+/** Where every message about an authenticator links: this tab. */
+const MFA_URL = tabUrl('profile', 'mfa')
 
 /**
- * The Security tab's Second factor section: the authenticator apps the signed-in person has added
- * (GoTrue's verified TOTP factors, read through auth-js), with Add Second Factor and a Remove on
+ * Profile's MFA tab: the authenticator apps the signed-in person has added (GoTrue's verified TOTP
+ * factors, read through auth-js), with Add Authenticator and a Remove on
  * each row. Every role may add one. Once one is added, signing in asks for its code after the
  * password (components/auth/SecondFactorChallenge.jsx). Nothing on the site requires one.
  *
@@ -45,13 +45,13 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
   const added = (factor) => {
-    showToast?.(`Second factor added: ${factorLabel(factor)}. You give its code each time you sign in.`, 'success',
-      { to: SECURITY_URL })
+    showToast?.(`Authenticator added: ${factorLabel(factor)}. You give its code each time you sign in.`, 'success',
+      { to: MFA_URL })
     load()
   }
 
   const removed = (factor) => {
-    showToast?.(`Second factor removed: ${factorLabel(factor)}.`, 'success', { to: SECURITY_URL })
+    showToast?.(`Authenticator removed: ${factorLabel(factor)}.`, 'success', { to: MFA_URL })
     setRemoving(null)
     load()
   }
@@ -61,9 +61,9 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
     <>
       <div className="card-body profile-section-head second-factor-head">
         <div className="profile-section-heading">
-          <h4 className="profile-section-title">Second factor</h4>
+          <h4 className="profile-section-title">Multi-factor authentication (MFA)</h4>
           <HelpTip
-            label="About second factors"
+            label="About MFA"
             text="A code from an authenticator app on your phone, asked for after your password each time you sign in. Someone who learns your password cannot sign in without it. Any app that shows 6-digit codes works."
           />
           {isPerson && (
@@ -74,19 +74,19 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
                 disabled={factors === undefined && !error}
                 onClick={() => setAdding(true)}
               >
-                <IconPlus size={13} /> Add Second Factor
+                <IconPlus size={13} /> Add Authenticator
               </button>
             </div>
           )}
         </div>
         <p className="profile-section-note">
-          Optional for every role. With one added, signing in asks for its code after your password,
-          for the dashboard and for the services that sign in through it.
+          Optional for every role. With an authenticator added, signing in asks for its code after
+          your password, for the dashboard and for the services that sign in through it.
         </p>
       </div>
 
       {!isPerson ? (
-        <EmptyState message="A machine identity signs in with a token, so it has no second factor." />
+        <EmptyState message="A machine identity signs in with a token, so it has no MFA." />
       ) : error ? (
         <div className="card-body">
           <div className="callout callout-danger" role="status">
@@ -95,9 +95,9 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
           </div>
         </div>
       ) : factors === undefined ? (
-        <LoadingState label="second factors" />
+        <LoadingState label="authenticators" />
       ) : factors.length === 0 ? (
-        <EmptyState message="You have no second factor. Your password alone signs you in." />
+        <EmptyState message="You have not set up MFA. Your password alone signs you in." />
       ) : (
         <div className="table-wrap second-factor-table">
           <table>
@@ -118,7 +118,7 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       onClick={() => setRemoving(f)}
-                      aria-label={`Remove the second factor: ${factorLabel(f)}`}
+                      aria-label={`Remove the authenticator: ${factorLabel(f)}`}
                     >
                       Remove
                     </button>

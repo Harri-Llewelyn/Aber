@@ -8,7 +8,7 @@ import {
 } from '../../utils/secondFactor'
 
 /**
- * Add Second Factor, from Profile › Security, in two steps. First a name, then GoTrue's enrolment:
+ * Add Authenticator, from Profile › MFA, in two steps. First a name, then GoTrue's enrolment:
  * its QR code, the same secret as text for an app that cannot scan, and a code from the app, which
  * GoTrue checks before the factor counts. Cancel at the second step removes the half-made factor.
  * Verifying raises this session to aal2, and GoTrue ends the person's other aal1 sessions, which
@@ -26,7 +26,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
 
   const trimmed = name.trim()
   const taken = factors.some(f => (f.friendly_name || '').trim().toLowerCase() === trimmed.toLowerCase())
-  const nameProblem = !trimmed ? null : taken ? 'You already have a second factor with that name.' : null
+  const nameProblem = !trimmed ? null : taken ? 'You already have an authenticator with that name.' : null
 
   // The second step's field, once it is drawn: initialFocus is read only as the dialog opens.
   useEffect(() => { if (enrolment) codeRef.current?.focus() }, [enrolment])
@@ -71,7 +71,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
 
   return (
     <Modal
-      title="Add Second Factor"
+      title="Add Authenticator"
       icon={<IconScan size={18} />}
       size="md"
       onClose={busy ? () => {} : cancel}
@@ -92,7 +92,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
               disabled={!normaliseCode(code)}
               title={normaliseCode(code) ? undefined : 'Enter the code your app shows first'}
             >
-              Add Second Factor
+              Add Authenticator
             </ActionButton>
           ) : (
             <ActionButton

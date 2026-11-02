@@ -134,11 +134,11 @@ export function emailChangeBlocked(person, currentUserId) {
 
 /**
  * Why this person's sessions cannot be ended here, or null. A removed person's can be. Your own
- * are ended on Profile's Security tab: Sign Out ends only the browser in use.
+ * are ended on Profile's Sessions tab: Sign Out ends only the browser in use.
  */
 export function sessionsEndBlocked(person, currentUserId) {
   if (person.user_id === currentUserId) {
-    return 'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Security tab.'
+    return 'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Sessions tab.'
   }
   return null
 }

@@ -11,10 +11,10 @@ import { tabUrl } from '../../routes'
 import { appLabel, revokeQuestion } from '../../utils/apps'
 
 /** Where every message about an approval links: this list. */
-const APPS_URL = tabUrl('profile', 'security')
+const APPS_URL = tabUrl('profile', 'allowed-apps')
 
 /**
- * The Security tab's Apps you have allowed: each app the signed-in person let sign them in with
+ * Profile's Allowed Apps tab: each app the signed-in person let sign them in with
  * their Aber account (`list_my_app_approvals()`, 0217), with when and what it may read. Revoke
  * takes one back through the sign-in service's own endpoint (`revokeGrant`), which also ends that
  * app's sessions for them, after a dialog that says so. Recorded in the Audit Trail.

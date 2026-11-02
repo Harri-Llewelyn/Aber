@@ -319,7 +319,7 @@ async function setPassword(req: Request, body: Record<string, unknown>, callerId
  */
 async function resetMfa(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
   const userId = targetOf(body, callerId,
-    "You cannot reset your own second factor here. Remove it on your Profile page's Security tab.");
+    "You cannot reset your own MFA here. Remove your authenticators on your Profile page's MFA tab.");
   if (userId instanceof Response) return userId;
 
   const { error } = await caller.rpc("record_person_mfa_reset", { p_user_id: userId, p_check_only: true });
@@ -349,7 +349,7 @@ async function resetMfa(req: Request, body: Record<string, unknown>, callerId: s
   });
   if (recordError) {
     return serverError(req, FN, recordError, {
-      error: `${removed === 1 ? "One second factor was" : `${removed} second factors were`} removed, but the ` +
+      error: `${removed === 1 ? "One authenticator was" : `${removed} authenticators were`} removed, but the ` +
         "Audit Trail did not record it. The sign-in service's own log has the removal.",
       context: `recording a second-factor reset for ${userId}`,
     });
@@ -357,7 +357,7 @@ async function resetMfa(req: Request, body: Record<string, unknown>, callerId: s
   if (deleteError) {
     return serverError(req, FN, deleteError, {
       status: 502,
-      error: `${removed} of their ${factors.length} second factors were removed, and the sign-in service ` +
+      error: `${removed} of their ${factors.length} authenticators were removed, and the sign-in service ` +
         "failed on the next. Select Reset MFA again to remove the rest.",
       context: `deleting a second factor of ${userId}`,
     });

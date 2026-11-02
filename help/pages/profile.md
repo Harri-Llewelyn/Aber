@@ -1,6 +1,6 @@
 ## What this page is for
 
-This page is yours. It shows the account you are signed in with, how the dashboard looks to you, and where you are signed in. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
+This page is yours. It shows the account you are signed in with, how the dashboard looks to you, where you are signed in, your MFA and the apps you have allowed. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
 
 To open it, select your avatar at the foot of the sidebar, then select **Profile**.
 
@@ -8,9 +8,9 @@ The settings for the whole site are on the **Settings** page, not here.
 
 ## What the controls do
 
-- **Account** shows your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on **Access Control › People**. That is true for an Administrator too: another Administrator changes yours.
+- **Account** shows your picture, your email address and your role. Your email address is how you sign in, and it cannot be changed here. Only an Administrator can change your email address or your role, on **Access Control › People**. That is true for an Administrator too: another Administrator changes yours.
 - **Display name**, on the **Account** tab, is the name other people see you by. Type it, then select **Save**. To remove it, empty the box and select **Save**. **Your display name**, below, says where it shows.
-- **Picture**, on the **Account** tab, puts a picture on your account control at the foot of the sidebar. Select **Choose Picture**, then pick a PNG, JPEG or WebP file of up to 10 MB. The row shows how it will look. Select **Save** to keep it, or **Discard** to drop it. **Remove** takes it off. **Your picture**, below, says who sees it.
+- **Picture**, the first row of the **Account** tab, puts a picture on your account control at the foot of the sidebar and in the account menu. Select **Choose Picture**, then pick a PNG, JPEG or WebP file of up to 10 MB. The row shows how it will look. Select **Save** to keep it, or **Discard** to drop it. **Remove** takes it off. **Your picture**, below, says who sees it.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Copy Token**, on the **Access token** row, copies your access token. The page never shows the token itself. The row shows the time it stops working. **Calling the API as yourself**, below, says where to paste it.
 - **Copy Key**, on the **Publishable key** row, copies the site's publishable key. Some tools ask for it beside your token. It is public: every browser that opens the dashboard is given it.
@@ -18,12 +18,12 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
-- **Security** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
-- **End**, on a row of the **Security** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
-- **Sign Out of All Other Sessions**, on the **Security** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
-- **Second factor**, on the **Security** tab, lists the authenticator apps you have added. **Add Second Factor** adds one, and **Remove** on a row removes it. **Your second factor**, below, says how, and what it changes when you sign in.
-- **Apps you have allowed**, on the **Security** tab, lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
-- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Security** tab.
+- **Sessions** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
+- **End**, on a row of the **Sessions** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
+- **Sign Out of All Other Sessions**, on the **Sessions** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
+- **MFA** (multi-factor authentication) lists the authenticator apps you have added. **Add Authenticator** adds one, and **Remove** on a row removes it. **Your MFA**, below, says how, and what it changes when you sign in.
+- **Allowed Apps** lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
+- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Sessions** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself
@@ -78,7 +78,7 @@ Your display name is shown first wherever you appear. Your email address stays t
 
 Your picture shows at a glance whose session is open. That helps on a shared PC, even with the sidebar collapsed.
 
-- **Only you see it.** It shows on your account control at the foot of the sidebar, and on this page. It does not show on People, Approvals, the Audit Trail or any other page. An Administrator cannot see it either.
+- **Only you see it.** It shows on your account control at the foot of the sidebar, in the account menu, and on this page. It does not show on People, Approvals, the Audit Trail or any other page. An Administrator cannot see it either.
 - **Without a picture,** the control shows the initials of your display name. Without a display name, it shows the person icon.
 - **It is shrunk before it is uploaded.** The page keeps the middle square of the picture and makes it 256 by 256 pixels. A phone photo of several megabytes uploads as a few tens of kilobytes.
 - **Only the picture is uploaded.** A camera or phone stores other details in a photo, such as where it was taken. Those are left behind.
@@ -90,7 +90,7 @@ Your picture shows at a glance whose session is open. That helps on a shared PC,
 
 A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED, Studio and the forge, and any program that signs in as you.
 
-The **Security** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
+The **Sessions** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
 
 - **Where** names the browser and the system, such as "Chrome on Windows". A script or other program shows as "A program". Point at the name to see what the browser reported in full.
 - **A service's session** shows the service, such as "Grafana", marked **Service**. Studio and the forge are listed the same way. The service signed you in from its own server, so the list cannot say which device you used.
@@ -107,22 +107,22 @@ What ending a session does:
 
 **A session nobody uses for 7 days ends by itself.** It can stay listed for about a day after that. The site can set another time, or none.
 
-## Your second factor
+## Your MFA
 
-A second factor is a code from an authenticator app on your phone. With one added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
+MFA (multi-factor authentication) asks for a code from an authenticator app on your phone. With an authenticator added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
 
-Every role can add one. Nothing on this site requires one yet.
+Every role can set up MFA. Nothing on this site requires it yet.
 
 To add one:
 
-1. On the **Security** tab, select **Add Second Factor**.
+1. On the **MFA** tab, select **Add Authenticator**.
 2. Give it a name, such as "Work phone". Select **Continue**.
 3. Scan the QR code with your authenticator app. If the app cannot scan, type in the key shown under the code. If the app asks, choose a time-based key.
-4. Enter the 6-digit code the app shows. Select **Add Second Factor**.
+4. Enter the 6-digit code the app shows. Select **Add Authenticator**.
 
 Adding one signs you out of your other browsers and services, such as Grafana and Node-RED. This browser stays signed in.
 
-To remove one, select **Remove** on its row. A dialog asks first. Select **Remove Second Factor** to remove it. With none left, your password alone signs you in. If the dialog asks for a code, enter one from that app first.
+To remove one, select **Remove** on its row. A dialog asks first. Select **Remove Authenticator** to remove it. With none left, your password alone signs you in. If the dialog asks for a code, enter one from that app first.
 
 What happens when you sign in:
 
@@ -134,13 +134,13 @@ What happens when you sign in:
 - **A password reset link** asks for your code before you choose the new password.
 - **If you remove the app you signed in with** and have another, the dashboard asks for a code from the other one.
 
-**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new second factor here.
+**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new authenticator here.
 
 ## Apps you have allowed
 
 Some apps sign you in with your Aber account: Grafana, Node-RED, Studio and the forge. The first time one does, it asks you to allow it. You answer once, and it remembers.
 
-The **Security** tab lists the apps you have allowed, and nobody else's. The newest comes first.
+The **Allowed Apps** tab lists the apps you have allowed, and nobody else's. The newest comes first.
 
 - **App** names the app, such as "Grafana". Aber's own apps are marked **Aber**.
 - **Allowed** is when you allowed it. Point at it for the date and time.

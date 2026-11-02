@@ -13,7 +13,7 @@ import { signOutOfThisBrowser } from '../utils/signOut'
  * GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH with ?authorization_id=..., and this page POSTs the
  * decision back. Approving requires the user's Supabase access token, so arriving without a session
  * shows a prompt to sign in first; this is not an identity provider login screen. A session that
- * still owes its second factor's code gives it here first, as the dashboard asks for it.
+ * still owes its MFA code gives it here first, as the dashboard asks for it.
  */
 const API_BASE = `${SUPABASE_URL}/auth/v1`
 
@@ -123,7 +123,7 @@ export function OAuthConsent() {
       <>
         <h2 style={{ marginTop: 0 }}>Enter your code</h2>
         <p>
-          Your account has a second factor. Give the code your authenticator app shows before the
+          Your account uses MFA. Give the code your authenticator app shows before the
           application you were connecting signs you in.
         </p>
         <SecondFactorChallenge
