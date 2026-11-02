@@ -44,6 +44,20 @@ FIGURES = {
 }
 AT = 1730539200.5
 
+# Each probe's two statements, written out: (point it at a request id, read what it queued).
+PROBES = {
+    "directory_figures_probe": (
+        "UPDATE public.directory_figures_probe SET request_id = %s WHERE id;",
+        "SELECT p.request_id, q.url FROM public.directory_figures_probe p"
+        " LEFT JOIN net.http_request_queue q ON q.id = p.request_id WHERE p.id;",
+    ),
+    "directory_liveness_probe": (
+        "UPDATE public.directory_liveness_probe SET request_id = %s WHERE id;",
+        "SELECT p.request_id, q.url FROM public.directory_liveness_probe p"
+        " LEFT JOIN net.http_request_queue q ON q.id = p.request_id WHERE p.id;",
+    ),
+}
+
 
 def sample(figure, value, **labels):
     return {"metric": {"figure": figure, **labels}, "value": [AT, value]}
@@ -95,7 +109,7 @@ class FiguresBase(unittest.TestCase):
         """Point `probe`'s request id at a fresh id, and file `content` under it as pg_net would.
         `status=None, content=None` is a request with no answer; `error` a failed one."""
         self.next_id += 1
-        self.cur.execute(f"UPDATE public.{probe} SET request_id = %s WHERE id;", (self.next_id,))
+        self.cur.execute(PROBES[probe][0], (self.next_id,))
         if status is not None or content is not None or error is not None:
             self.cur.execute(
                 "INSERT INTO net._http_response (id, status_code, content, error_msg) VALUES (%s, %s, %s, %s);",
@@ -116,10 +130,7 @@ class FiguresBase(unittest.TestCase):
         return {key: value for key, (value, _, _) in self.figures().items()}
 
     def queued(self, probe):
-        self.cur.execute(
-            f"SELECT p.request_id, q.url FROM public.{probe} p "
-            "LEFT JOIN net.http_request_queue q ON q.id = p.request_id WHERE p.id;"
-        )
+        self.cur.execute(PROBES[probe][1])
         return self.cur.fetchone()
 
     # ---- people ------------------------------------------------------------------------------
@@ -377,14 +388,13 @@ class WhoReadsAndWrites(FiguresBase):
         self.assertEqual(self.values()["readings_per_second"], 340.5)
 
     def test_anon_reads_nothing(self):
-        for relation in ("directory_figures", "directory_figures_probe"):
-            with self.subTest(relation=relation):
+        for sql in ("SELECT * FROM public.directory_figures;",
+                    "SELECT * FROM public.directory_figures_probe;",
+                    "SELECT * FROM public.directory_gateway_counts();",
+                    "SELECT public.directory_devices_reporting();"):
+            with self.subTest(sql=sql):
                 with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-                    self.as_person(NO_ROLE_ID, f"SELECT * FROM public.{relation};", role="anon")
-        for fn in ("directory_gateway_counts()", "directory_devices_reporting()"):
-            with self.subTest(fn=fn):
-                with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-                    self.as_person(NO_ROLE_ID, f"SELECT * FROM public.{fn};", role="anon")
+                    self.as_person(NO_ROLE_ID, sql, role="anon")
 
     def test_no_signed_in_user_reads_the_probe_or_runs_a_collector(self):
         for sql in ("SELECT * FROM public.directory_figures_probe;",
@@ -401,12 +411,13 @@ class TheLiveReads(FiguresBase):
         super().setUp()
         self.person(OPERATOR_ID, "Operator")
 
-    def gateway(self, status, heartbeat="now()", archived=False):
+    def gateway(self, status, heartbeat_age="0 seconds", archived=False):
+        """A gateway of this suite's own; `heartbeat_age=None` is one that has never reported."""
         gid = str(uuid.uuid4())
         self.cur.execute(
-            f"INSERT INTO public.gateways (id, name, status, last_heartbeat, is_archived, deployment)"
-            f" VALUES (%s, %s, %s, {heartbeat}, %s, 'host');",
-            (gid, f"System_Figures_{gid[:8]}", status, archived),
+            "INSERT INTO public.gateways (id, name, status, last_heartbeat, is_archived, deployment)"
+            " VALUES (%s, %s, %s, now() - %s::interval, %s, 'host');",
+            (gid, f"System_Figures_{gid[:8]}", status, heartbeat_age, archived),
         )
 
     def counts(self):
@@ -415,11 +426,11 @@ class TheLiveReads(FiguresBase):
     def test_gateways_online_of_those_enrolled(self):
         online, enrolled = self.counts()
         self.gateway("ONLINE")                                            # online
-        self.gateway("ONLINE", heartbeat="now() - interval '5 minutes'")  # stale: enrolled, not online
-        self.gateway("OFFLINE")                                           # enrolled, not online
-        self.gateway("AWAITING_BIRTH", heartbeat="NULL")                  # enrolled, no data yet
-        self.gateway("PENDING_ENROLLMENT", heartbeat="NULL")              # a bundle not redeemed
-        self.gateway("ONLINE", archived=True)                             # archived
+        self.gateway("ONLINE", heartbeat_age="5 minutes")      # stale: enrolled, not online
+        self.gateway("OFFLINE")                                # enrolled, not online
+        self.gateway("AWAITING_BIRTH", heartbeat_age=None)     # enrolled, no data yet
+        self.gateway("PENDING_ENROLLMENT", heartbeat_age=None)  # a bundle not redeemed
+        self.gateway("ONLINE", archived=True)                  # archived
         self.assertEqual(self.counts(), (online + 1, enrolled + 4))
 
     def test_the_playback_gateway_is_not_counted(self):
