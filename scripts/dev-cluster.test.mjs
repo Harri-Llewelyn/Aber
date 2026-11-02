@@ -9,9 +9,12 @@
 // =================================================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { IMAGES, IMG_NS, dockerBuildArgs, forwardOnFreePort, forwardReady } from './dev-cluster.mjs';
+import { DESCRIBE_ARGS, IMAGES, IMG_NS, dockerBuildArgs, forwardOnFreePort, forwardReady } from './dev-cluster.mjs';
 
 /** A node child standing in for kubectl, running `code`, with both outputs piped as the forwards pipe them. */
 function standIn(code) {
@@ -128,6 +131,30 @@ test('every image that waits for another names one the list builds', () => {
   const waiting = IMAGES.filter((img) => img.after);
   assert.deepEqual(waiting.map((img) => [img.name, img.after]), [['test-runner', 'ingestion']]);
   for (const img of waiting) assert.ok(names.has(img.after), `${img.name} waits for ${img.after}, which IMAGES does not build`);
+});
+
+test('a build names itself after the release tag, not a later GPL source-mirror tag', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'aber-describe-'));
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+    git('init', '-q');
+    const commit = (message) => git('-c', 'user.name=t', '-c', 'user.email=t@example.test', 'commit', '-q', '--allow-empty', '-m', message);
+    commit('release');
+    git('tag', 'v1.7.0');
+    commit('mirror');
+    git('tag', 'gpl-sources-supabase-postgres-17.6.1.175-postgis');
+    commit('after');
+    assert.match(git(...DESCRIBE_ARGS), /^v1\.7\.0-2-g[0-9a-f]+$/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('the frontend build describes itself with the same arguments', () => {
+  const vite = readFileSync(new URL('../frontend/vite.config.js', import.meta.url), 'utf8');
+  const call = vite.match(/execFileSync\('git', (\[.*?\]), \{/);
+  assert.ok(call, 'frontend/vite.config.js no longer calls git describe through execFileSync');
+  assert.deepEqual(JSON.parse(call[1].replace(/'/g, '"')), DESCRIBE_ARGS);
 });
 
 test('the build is given the version in a value and never in a name, and the named contexts before the context', () => {

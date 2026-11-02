@@ -24,4 +24,4 @@ export const versionTitle = () =>
     ? `Running Aber ${APP_VERSION} — the release tag this build came from, `
       + 'plus the commits since it and the commit id, as reported by git describe'
     : 'This build was not given a version at build time, so it cannot name itself. Rebuild with '
-      + 'APP_VERSION=$(git describe --tags --always --dirty) to label it.';
+      + "APP_VERSION=$(git describe --tags --match 'v[0-9]*' --always --dirty) to label it.";

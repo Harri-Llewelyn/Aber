@@ -192,11 +192,17 @@ function appVersion () {
 }
 
 /**
+ * Release tags only: the GPL source-mirror releases are tags too (`gpl-sources-…`), and the nearest
+ * of those names no version. frontend/vite.config.js passes the same list; a test holds them equal.
+ */
+export const DESCRIBE_ARGS = ['describe', '--tags', '--match', 'v[0-9]*', '--always', '--dirty']
+
+/**
  * What this working tree calls itself, for the account menu -- the string `npm run dev` bakes.
  * Empty when git cannot answer, which the frontend renders as "unknown"; never fatal.
  */
 function describeVersion () {
-  return capture('git', ['describe', '--tags', '--always', '--dirty']).out
+  return capture('git', DESCRIBE_ARGS).out
 }
 
 // ---------------------------------------------------------------------------------------------
