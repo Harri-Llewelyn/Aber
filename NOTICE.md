@@ -378,7 +378,7 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | `supabase/edge-runtime:v1.77.0` | MIT | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0` |
 | `supabase/postgres-meta:v0.99.0` | Apache 2.0 | [`supabase/postgres-meta`](https://github.com/supabase/postgres-meta) `v0.99.0` |
 | `supabase/studio:2026.09.28-sha-5e59b60` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
-| `envoyproxy/envoy:v1.39.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.39.2` |
+| `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.33.0` |
 | `grafana/loki:3.7.8` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.8` |
 | `grafana/alloy:v1.20.1` | Apache 2.0 | [`grafana/alloy`](https://github.com/grafana/alloy) `v1.20.1` |
