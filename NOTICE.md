@@ -40,7 +40,7 @@ one.
 
 | Published image | Built on | Licence of the base | The licence text in the published image |
 | :--- | :--- | :--- | :--- |
-| `aber/timescaledb` | `timescale/timescaledb:2.29.2-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
+| `aber/timescaledb` | `timescale/timescaledb:2.31.0-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
 | `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
 | `aber/edge-runtime` | `supabase/edge-runtime:v1.77.0`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.33.0` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
@@ -127,10 +127,10 @@ Upstream: [`github.com/open223/defs.open223.info`](https://github.com/open223/de
 
 ## TimescaleDB — Timescale License
 
-`timescale/timescaledb:2.29.2-pg17` is dual-licensed in a single upstream repository: the core under
+`timescale/timescaledb:2.31.0-pg17` is dual-licensed in a single upstream repository: the core under
 Apache 2.0, and the features under `tsl/` under the Timescale License, which is source-available
 rather than OSI-approved open source. The two build into separate shared objects, and the image
-ships both: `timescaledb-2.29.2.so` and `timescaledb-tsl-2.29.2.so`, with those of every release
+ships both: `timescaledb-2.31.0.so` and `timescaledb-tsl-2.31.0.so`, with those of every release
 back to 2.17.0.
 
 **This deployment runs under the Timescale License.** That is not an inference — the running server
@@ -168,7 +168,7 @@ which is Apache 2.0, but running it as a job is Timescale-Licensed.
 generator and the restore rehearsal call `compress_chunk()`, also Timescale-Licensed, but neither
 runs in a site's install.
 
-**How this was checked**, against upstream at tag `2.29.2`. Each Timescale-Licensed call above reaches
+**How this was checked**, against upstream at tag `2.31.0`. Each Timescale-Licensed call above reaches
 a cross-module function in `src/cross_module_fn.c`. Under the `apache` licence that function raises
 "functionality not supported under the current "apache" license", and `tsl/src/init.c` registers
 its implementation. The Apache 2.0 calls are declared in `sql/` and implemented outside `tsl/`.
@@ -191,9 +191,9 @@ For the ordinary case — running this at your own site, for your own operations
 not — the restriction does not engage.
 
 **The licence text travels with the image.** The upstream image ships no TimescaleDB licence file: a
-full-filesystem search of `timescale/timescaledb:2.29.2-pg17` finds only Python's. So
+full-filesystem search of `timescale/timescaledb:2.31.0-pg17` finds only Python's. So
 `timescaledb/Dockerfile` adds `LICENSE`, `LICENSE-APACHE`, `NOTICE` and `tsl/LICENSE-TIMESCALE` from
-the `2.29.2` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. The source is
+the `2.31.0` tag, at `/usr/share/licenses/timescaledb/` in `aber/timescaledb`. The source is
 [`github.com/timescale/timescaledb`](https://github.com/timescale/timescaledb).
 
 ## Grafana and Loki — AGPL-3.0
@@ -350,7 +350,7 @@ on any row.
 
 | Component | Licence | Evidence |
 | :--- | :--- | :--- |
-| `timescale/timescaledb:2.29.2-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale`. No licence file of its own ([above](#timescaledb--timescale-license)) |
+| `timescale/timescaledb:2.31.0-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale`. No licence file of its own ([above](#timescaledb--timescale-license)) |
 | pgBackRest 2.57.0, added to that image as `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescaledb/Dockerfile`) | MIT | `apk info -a pgbackrest` → `license: MIT` |
 | pgBackRest 2.57.0 and tini 0.19.0, added to `supabase/postgres:17.6.1.175` as `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/db/Dockerfile`) | MIT | `apk info -a pgbackrest`, `apk info -a tini` → `license: MIT` |
 | gosu, added from Alpine to both of those images | Apache 2.0 | `apk info -a gosu` → `license: Apache-2.0` |

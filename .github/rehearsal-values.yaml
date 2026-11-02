@@ -86,7 +86,7 @@ e2e:
 timescaledb:
   image:
     repository: timescale/timescaledb
-    tag: 2.29.2-pg17
+    tag: 2.31.0-pg17
 
 # --- The platform database on its upstream image ---------------------------------------------------
 # The rehearsal restores the platform database from the service's pg_dump too, so it needs no
