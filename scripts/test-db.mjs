@@ -510,9 +510,13 @@ if (filter) suites = suites.filter(f => f.includes(filter))
 if (suites.length === 0) die(`no suites matched ${filter}.`)
 
 const python = process.env.PYTHON || 'python'
+// 127.0.0.1, the address the container publishes on, not `localhost`: where that resolves to ::1
+// first (Windows), every connection waits for the IPv6 refusal before it falls back, which made a
+// full lane take well over an hour.
+const DB_HOST = '127.0.0.1'
 const env = {
   ...process.env,
-  SUPABASE_DB_HOST: 'localhost',
+  SUPABASE_DB_HOST: DB_HOST,
   SUPABASE_DB_PORT: PORT,
   SUPABASE_DB_NAME: 'postgres',
   SUPABASE_DB_USER: 'postgres',
@@ -522,14 +526,14 @@ const env = {
   // shell set up for the stack lane carries DB_PORT=5433 -- the HISTORIAN. Leaving it set sends those suites to a
   // TimescaleDB that has none of this schema, and the failure names a missing table rather than
   // the wrong database.
-  DB_HOST: 'localhost',
+  DB_HOST,
   DB_PORT: PORT,
   DB_NAME: 'postgres',
   DB_USER: 'postgres',
   DB_PASSWORD: PASSWORD
 }
 
-console.log(`\n${c.bold(`Running ${suites.length} database suites`)} against localhost:${PORT}\n`)
+console.log(`\n${c.bold(`Running ${suites.length} database suites`)} against ${DB_HOST}:${PORT}\n`)
 const failed = []
 for (const suite of suites) {
   console.log(c.bold(`── ${suite}`))
