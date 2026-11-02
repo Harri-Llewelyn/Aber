@@ -1592,9 +1592,10 @@ The last part of its output lists those tokens. After the upgrade, mint each one
 **Access Control** → **Issue Token**, or with `scripts/mint-api-token.mjs` for the Read-only API
 client. On a site that signed HS256 until now, that is every token minted before the upgrade.
 
-**Installed with the server installer:** run the 1.8.0 installer again, with the command you
-installed with. It adds what the values file in `/etc/aber` lacks, and keeps a copy of the file as
-it was. Then it upgrades. There is no other step.
+**Installed with the server installer:** run the installer again, from its 1.8.0 address
+(`.../v1.8.0/deploy/install.sh`, as [the install guide](install.md) gives it). It adds what the
+values file in `/etc/aber` lacks, and keeps a copy of the file as it was. Then it upgrades. There
+is no other step.
 
 **Installed with `npm run setup`:**
 
