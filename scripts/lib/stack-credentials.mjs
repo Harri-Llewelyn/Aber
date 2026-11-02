@@ -1,14 +1,14 @@
 /**
  * Where a host-side script gets the stack's credentials: the environment first, then the
  * release's own Secret in the cluster. The Secret's keys are the environment names the
- * containers read (SUPABASE_JWT_SECRET, MQTT_DYNSEC_ADMIN_PASSWORD, ...), so one name serves both.
+ * containers read (SUPABASE_JWT_KEYS, MQTT_DYNSEC_ADMIN_PASSWORD, ...), so one name serves both.
  *
  * The cluster is the source of truth. A values file on disk may be the one the release was
  * installed from or may not, and an externally managed Secret has no file at all; the Secret is
  * what the pods run with, so it is what a script acting on the stack must use.
  *
  *   import { stackCredentials } from './lib/stack-credentials.mjs';
- *   const { SUPABASE_JWT_SECRET } = stackCredentials(['SUPABASE_JWT_SECRET']);
+ *   const { SUPABASE_JWT_KEYS } = stackCredentials(['SUPABASE_JWT_KEYS']);
  *
  * ABER_NAMESPACE and ABER_RELEASE select the release (default aber, aber).
  */
@@ -50,11 +50,10 @@ export function stackCredentials(names) {
 }
 
 /**
- * The ES256 signing key, when the stack verifies ES256: SUPABASE_JWT_KEYS holds it AND GoTrue
- * publishes its kid at /auth/v1/.well-known/jwks.json, which it does only with
- * supabaseAuth.es256Signing on, the release that also gives every verifier the JWKS. Otherwise
- * null, with why: an HS256 token verifies on either path through 1.7, and an ES256 one only on
- * the second, so a script signs ES256 only on evidence.
+ * The ES256 signing key, when the stack verifies with it: SUPABASE_JWT_KEYS holds it AND GoTrue
+ * publishes its kid at /auth/v1/.well-known/jwks.json, which a release from 1.8.0 always does and
+ * an earlier one only with supabaseAuth.es256Signing. Otherwise null, with why: a script signs only
+ * on evidence that the stack takes what it signs.
  *
  * @returns {Promise<{key: object|null, why: string}>}
  */

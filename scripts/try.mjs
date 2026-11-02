@@ -167,6 +167,11 @@ function ensureValues(adminEmail) {
     const { email } = adminFrom(readFileSync(path.join(REPO, VALUES), 'utf8'));
     console.log('  exists: reused, so this run upgrades the trial rather than starting over');
     if (email && email !== adminEmail) console.log(`  its administrator is ${email}; delete the file to use ${adminEmail}`);
+    // Setup completes an existing file with what this release needs, and leaves a complete one alone.
+    const r = spawnSync(process.execPath, ['scripts/setup.mjs', `--out=${VALUES}`],
+      { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    if (r.status !== 0) die(`npm run setup could not complete ${VALUES}:\n${r.stdout}${r.stderr}`);
+    for (const line of r.stdout.split('\n').filter((l) => l.startsWith('   - '))) console.log(`  ${line.trim()}`);
     return;
   }
   // Setup's own closing lines describe a site install; only its failure is shown here.

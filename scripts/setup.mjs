@@ -16,13 +16,15 @@
  *     -n aber --create-namespace \
  *     -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
  *
- * `--out=<path>` writes the values file elsewhere. An existing file is never overwritten.
+ * `--out=<path>` writes the values file elsewhere. An existing file is never overwritten: it is
+ * COMPLETED, its every value kept, with what this release needs and it lacks
+ * (lib/signing-set.mjs: the ES256 key pair, its JWTs signed again ES256, Realtime's and Storage's
+ * own secrets). A complete file is left as it was. The server installer runs this on every run.
  *
  * The JWTs are a set: the anon and service-role keys are ES256 JWTs signed by the EC P-256 key
- * pair minted here (supabaseAuth.es256Signing, which this turns on), the pair carries the JWT
- * secret as its legacy HS256 key, and replacing one without re-minting the rest yields a stack
- * that comes up healthy and rejects every request. Node's built-in `crypto` does ECDSA and
- * HMAC-SHA256, so this stays a zero-install script.
+ * pair minted here, and replacing one without re-minting the rest yields a stack that comes up
+ * healthy and rejects every request. Node's built-in `crypto` does ECDSA, so this stays a
+ * zero-install script.
  *
  * Two questions are asked, on a terminal only. The domain every host is published under, which is
  * what a browser and a Remote gateway both dial: `--domain=<base>` answers it from a script, and
@@ -47,6 +49,7 @@ import { fileURLToPath } from 'url';
 import {
   mintJwt, generateSigningKeys, signingKeyFrom, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
 } from './lib/service-jwt.mjs';
+import { completeValuesText, newServiceSecret } from './lib/signing-set.mjs';
 import { installCommand, readChartVersion } from './lib/release-chart.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,13 +68,36 @@ const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 console.log('🚀 Aber setup: a values file with credentials of its own');
 
 if (fs.existsSync(outPath)) {
-  console.log(`ℹ️  ${path.relative(rootDir, outPath)} already exists — left untouched. Delete it first for fresh credentials.`);
+  let completed;
+  try {
+    completed = completeValuesText(fs.readFileSync(outPath, 'utf8'));
+  } catch (err) {
+    console.error(`❌ ${valuesFile} could not be completed: ${err.message}. It is left as it was.`);
+    process.exit(1);
+  }
+  if (!completed.changed) {
+    console.log(`ℹ️  ${valuesFile} already exists and holds every key this release needs — left untouched.`);
+    console.log('   Delete it first for fresh credentials.');
+    process.exit(0);
+  }
+  fs.writeFileSync(outPath, completed.text, { mode: 0o600 });
+  console.log(`✅ Completed ${valuesFile}, keeping every value it held:`);
+  for (const note of completed.notes) console.log(`   - ${note}`);
+  if (completed.resigned.length) {
+    console.log('');
+    console.log('⚠️  This site signed tokens HS256 until now. After the upgrade, the API refuses every token');
+    console.log('   signed before it: mint each machine identity\'s token again on Access Control, and the');
+    console.log('   Read-only API client\'s with scripts/mint-api-token.mjs. People may need to sign in again.');
+  }
+  console.log('');
+  console.log('   Upgrade with the same values to apply them (help/site/upgrading.md, "From 1.8.0, every token is signed ES256").');
   process.exit(0);
 }
 
+// Read by GoTrue alone, which requires it and signs nothing with it: every token is ES256.
 const jwtSecret = hex(32);
-// GoTrue's signing set and the verifiers' JWKS, both carrying jwtSecret as the legacy key.
-const signingKeys = generateSigningKeys(jwtSecret);
+// GoTrue's signing set (the private key) and the verifiers' JWKS (its public half).
+const signingKeys = generateSigningKeys();
 const signingKey = signingKeyFrom(signingKeys.jwtKeys);
 
 /** Service_Ingestor and Service_Playback, seeded by 0002, and Service_ReleaseCheck, seeded by 0181.
@@ -119,6 +145,10 @@ const secrets = {
   realtimeDbEncKey: hex(8),          // EXACTLY 16 chars
   realtimeSecretKeyBase: hex(32),    // AT LEAST 64 chars
   realtimeMetricsJwtSecret: hex(32),
+  // Realtime's and Storage's own HS256 secrets (their /api routes, their signed URLs): each signs
+  // for its own service and no other accepts it.
+  realtimeJwtSecret: newServiceSecret(),
+  storageJwtSecret: newServiceSecret(),
   // One MQTT password per principal, independently generated: the broker's roles confine each
   // account to a different subtree. The usernames keep the chart's defaults.
   mqttIngestionPassword: hex(24),
@@ -250,8 +280,7 @@ const yamlLines = [
   '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '.' +
     (/^deploy\/helm\/.+\/values-(local|try)\.yaml$/.test(valuesFile) ? ' Not in git: .gitignore ignores it.' : ''),
   '# Every credential below was generated for this file and is shared with nothing;',
-  '# the JWTs are signed ES256 by the key pair in jwtKeys, which carries jwtSecret as its legacy',
-  '# key, so they are a matching set.',
+  '# the JWTs are signed ES256 by the key pair in jwtKeys, so they are a matching set.',
   '#',
   '# Next, write site.yaml (help/site/install.md, step 6 "Describe your site"), then install (step 7):',
   '#',
@@ -264,10 +293,9 @@ const yamlLines = [
 if (domain) {
   yamlLines.push('global:', `  publicBaseDomain: "${domain}"`, '');
 }
-// firstAdministrator comes first under supabaseAuth: scripts/site-rehearsal.mjs reads it there.
-yamlLines.push('supabaseAuth:');
-if (adminEmail) yamlLines.push('  firstAdministrator:', `    email: "${adminEmail}"`);
-yamlLines.push('  # Tokens are signed ES256 with the key pair in secrets.jwtKeys.', '  es256Signing: true', '');
+// firstAdministrator comes first under supabaseAuth: scripts/site-rehearsal.mjs reads it there. No
+// empty `supabaseAuth:`: a null map would replace the chart's.
+if (adminEmail) yamlLines.push('supabaseAuth:', '  firstAdministrator:', `    email: "${adminEmail}"`, '');
 yamlLines.push(
   `# Gateways clone from the forge over SSH on ${FORGE_SSH_PORT}, leaving port 22 to this machine's own SSH.`,
   '# Enrolled gateways keep the port they enrolled with: do not change it once one is enrolled.',
@@ -284,9 +312,8 @@ fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, yamlLines.join('\n'), { mode: 0o600 });
 
 console.log(`✅ Wrote ${valuesFile} with ${Object.keys(secrets).length} freshly generated credentials.`);
-console.log(`   The JWTs are signed ES256 by a new EC P-256 key pair (kid ${signingKeys.kid}), which`);
-console.log('   carries the new jwtSecret as its legacy key, so they are a matching set. A');
-console.log('   publishable/secret key pair was minted too: the keys callers present.');
+console.log(`   The JWTs are signed ES256 by a new EC P-256 key pair (kid ${signingKeys.kid}), so they`);
+console.log('   are a matching set. A publishable/secret key pair was minted too: the keys callers present.');
 console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
 console.log('🔑 The three service keys expire, unlike the anon and service-role keys:');
