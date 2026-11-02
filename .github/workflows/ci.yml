@@ -2126,11 +2126,18 @@ jobs:
 
   # docs/releases.md promises that any 1.x upgrades to any later 1.x with one `helm upgrade`. This
   # installs the last release as a site would (its own setup.mjs, the published chart and images),
-  # then upgrades it to the checkout with the same values, as docs/upgrades.md says.
+  # then upgrades it to the checkout with the same values, completed by the checkout's setup.mjs as
+  # the installer and help/site/upgrading.md complete them. Twice: from the values that release's
+  # setup.mjs writes (es256), and from a site still signing HS256 (hs256), which 1.8.0 refuses until
+  # its values are completed. From a release that signs ES256 alone the two are the same.
   upgrade-rehearsal:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    name: Upgrade From The Last Release (k3d)
+    name: Upgrade From The Last Release (k3d, ${{ matrix.signing }})
+    strategy:
+      fail-fast: false
+      matrix:
+        signing: [es256, hs256]
     runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
@@ -2158,7 +2165,9 @@ jobs:
       # With NetworkPolicies on, as the install rehearsal has them, when the last release is 1.1.0 or
       # later; the enforcement probes run after the upgrade.
       - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
-        run: node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+        run: >-
+          node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+          --from-signing=${{ matrix.signing }}
 
       - name: Diagnostics On Failure
         if: failure()
