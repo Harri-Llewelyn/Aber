@@ -5,10 +5,15 @@
  */
 import { fireEvent, screen, within } from '@testing-library/react'
 
-const escapeRe = (text) => text.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')
+/**
+ * A value's checkbox name, as a matcher: its words, then its count if the list shows counts. A
+ * function rather than a pattern, so a label is compared as text.
+ */
+export const valueName = (words) => (name) =>
+  name === words || (name.startsWith(`${words} `) && /^\d+$/.test(name.slice(words.length + 1)))
 
-/** A value's checkbox name: its words, then its count if the list shows counts. */
-export const valueName = (words) => new RegExp(`^${escapeRe(words)}( \\d+)?$`)
+/** A toolbar list filter's button name, "<label>: <words>", as a matcher. */
+const dropdownName = (label) => (name) => name.startsWith(`${label}: `)
 
 /** The Filters panel, opened if it is shut. */
 export function openFiltersPanel() {
@@ -28,7 +33,7 @@ export function toggleInList(label, words) {
 
 /** The dropdown button for the toolbar list filter `label`: its name is "<label>: <words>". */
 export const dropdownButton = (label) =>
-  screen.getByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) })
+  screen.getByRole('button', { name: dropdownName(label) })
 
 /** The panel of the toolbar list filter `label`, opened if it is shut. */
 export function openDropdown(label) {
@@ -60,7 +65,7 @@ export const closePanel = () => fireEvent.keyDown(document, { key: 'Escape' })
  * left open. No values chooses nothing.
  */
 export function pick(label, ...values) {
-  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const isDropdown = screen.queryAllByRole('button', { name: dropdownName(label) }).length > 0
   const group = isDropdown
     ? within(openDropdown(label)).getByRole('group', { name: label })
     : filterList(label)
@@ -76,7 +81,7 @@ export function pick(label, ...values) {
 
 /** Each value the list filter `label` offers, as it reads with its count ("Online 4"), in order. */
 export function valuesShown(label) {
-  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const isDropdown = screen.queryAllByRole('button', { name: dropdownName(label) }).length > 0
   const group = isDropdown
     ? within(openDropdown(label)).getByRole('group', { name: label })
     : filterList(label)
@@ -87,7 +92,7 @@ export function valuesShown(label) {
 
 /** The values the list filter `label` has chosen, by the values the page keeps. */
 export function picked(label) {
-  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const isDropdown = screen.queryAllByRole('button', { name: dropdownName(label) }).length > 0
   const group = isDropdown
     ? within(openDropdown(label)).getByRole('group', { name: label })
     : filterList(label)

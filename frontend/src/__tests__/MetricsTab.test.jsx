@@ -796,7 +796,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
   const chooseStandard = (label) => {
     const panel = openDropdown('Standard')
     for (const box of within(panel).getAllByRole('checkbox')) {
-      if (box.checked !== valueName(label).test(box.closest('label').textContent)) fireEvent.click(box)
+      if (box.checked !== valueName(label)(box.closest('label').textContent)) fireEvent.click(box)
     }
     fireEvent.click(standardFilter())
   }
