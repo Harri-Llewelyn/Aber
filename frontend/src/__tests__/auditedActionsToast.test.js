@@ -264,8 +264,16 @@ function writesOf(code, text, helpers) {
     if (edgeFunctions.has(name) && !/\bmethod:\s*'GET'/.test(statementAt(text, m.index))) return `the ${name} edge function`
   }
   for (const g of GOTRUE_WRITES) if (text.includes(g.piece) && schema.tables.has(g.table)) return g.table
-  for (const [name, writes] of helpers) if (new RegExp(`(?<![\\w.])${escape(name)}\\(`).test(code)) return writes
+  for (const [name, writes] of helpers) if (callsHelper(code, name)) return writes
   return null
+}
+
+/** Whether `code` calls the top-level function `name`, rather than a method of that name. */
+function callsHelper(code, name) {
+  for (let at = code.indexOf(`${name}(`); at >= 0; at = code.indexOf(`${name}(`, at + 1)) {
+    if (!/[\w.$]/.test(code[at - 1] || '')) return true
+  }
+  return false
 }
 
 /** api.js's top-level helpers that write: a method that calls one writes too. */
