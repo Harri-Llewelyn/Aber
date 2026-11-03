@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { RouteLink } from './RouteLink'
-import { deviceUrl, gatewayUrl, identityUrl } from '../../routes'
+import { alertPage, deviceUrl, gatewayUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -17,9 +17,10 @@ import { Tooltip } from './Tooltip'
  * because whether one thing or twelve is wrong decides whether an operator walks over.
  *
  * A row goes where its subject lives, decided by the rule's `entity_type` label (checked by
- * `platform_alerts_entity_type_valid`), not by the id prefix. A platform alert has no asset and
- * opens the rule in Grafana Alerting. An alert about a machine identity's token opens the identity
- * on Access Control, by the principal id in `entity_id`.
+ * `platform_alerts_entity_type_valid`), not by the id prefix. An alert whose subject has a page in
+ * the dashboard opens it, as alertPage() names it: a machine identity's token opens the identity on
+ * Access Control, and a capture or playback job opens the Capture page. Any other platform alert has
+ * no asset and opens the rule in Grafana Alerting.
  *
  * This is the only place in the dashboard that counts Grafana alerts: their toasts are not recorded
  * in the bell's history. What fired and cleared is in Grafana's alert history, which the footer
@@ -108,9 +109,9 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                 // A row is a button only when it can go somewhere: an alert whose sparkplug_id
                 // matched no row has nothing to navigate to.
                 const navigable = Boolean(onSelect && a.sparkplug_id)
-                // The fleet-wide rules. No asset, so no page here -- Grafana is the subject's home.
-                const external = !a.sparkplug_id && kind === 'platform'
-                const identity = kind === 'service_identity' && Boolean(a.entity_id)
+                const inApp = alertPage(a)
+                // The other fleet-wide rules. No page here, so Grafana is the subject's home.
+                const external = !a.sparkplug_id && kind === 'platform' && !inApp
                 const body = (
                   <>
                     <span className={`alert-pill-dot alert-pill-dot-${a.severity}`} />
@@ -142,12 +143,12 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                       >
                         {body}
                       </RouteLink>
-                    ) : identity ? (
+                    ) : inApp ? (
                       <RouteLink
                         className="alert-pill-item-link"
-                        to={identityUrl(a.entity_id)}
+                        to={inApp.to}
                         onClick={() => setOpen(false)}
-                        title="Show this machine identity on Access Control"
+                        title={inApp.title}
                       >
                         {body}
                       </RouteLink>

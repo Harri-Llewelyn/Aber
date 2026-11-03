@@ -398,6 +398,59 @@ describe('AlertPill', () => {
       expect(onSelectGateway).not.toHaveBeenCalled()
       expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
     })
+
+    /**
+     * The capture and playback rules (0226). Each summary sends the reader to the Capture page, so
+     * the row does too, on the tab of the job's kind, which the `job` label names.
+     */
+    describe('a capture or playback alert', () => {
+      const jobAlert = (ruleUid, job) => platformAlert({
+        fingerprint: `fp-${ruleUid}-${job}`, alert_name: 'Capture or Playback Failed', severity: 'warning',
+        rule_uid: ruleUid, labels: job === undefined ? null : { alertname: 'Capture or Playback Failed', job },
+      })
+      const rowLink = () => document.querySelector('a.alert-pill-item-link')
+
+      it.each([
+        ['aber-job-failed', 'capture job 7d2c0000-0000-4000-8000-000000000001', '/capture/captures', 'capture'],
+        ['aber-job-failed', 'playback job 7d2c0000-0000-4000-8000-000000000002', '/capture/playbacks', 'playback'],
+        ['aber-job-stuck', 'capture job 7d2c0000-0000-4000-8000-000000000003', '/capture/captures', 'capture'],
+        ['aber-job-stuck', 'playback job 7d2c0000-0000-4000-8000-000000000004', '/capture/playbacks', 'playback'],
+      ])('opens %s for a %s on the Capture page, in this tab', (ruleUid, job, href, kind) => {
+        render(<AlertPill alerts={[jobAlert(ruleUid, job)]} />)
+        fireEvent.click(pill())
+        expect(rowLink()).toHaveAttribute('href', href)
+        expect(rowLink()).not.toHaveAttribute('target')
+        expect(tooltipOf(rowLink())).toBe(`Show this ${kind} on the Capture page`)
+        // In the dashboard, so not marked as leaving it.
+        expect(rowLink().querySelector('svg')).toBeNull()
+        fireEvent.click(rowLink())
+        expect(screen.queryByRole('dialog', { name: /Firing alerts/i })).not.toBeInTheDocument()
+      })
+
+      it('opens the playback worker alert on the Playbacks tab', () => {
+        render(<AlertPill alerts={[jobAlert('aber-playback-worker-stale', undefined)]} />)
+        fireEvent.click(pill())
+        expect(rowLink()).toHaveAttribute('href', '/capture/playbacks')
+        expect(tooltipOf(rowLink())).toBe('Show the waiting playback on the Capture page')
+      })
+
+      it.each([
+        ['no labels, as a row written before 0220 has', undefined],
+        ['a job label of another shape', 'backup job 7d2c0000'],
+        ['an empty job label', ''],
+      ])('opens the rule in Grafana when the row has %s', (_, job) => {
+        render(<AlertPill alerts={[jobAlert('aber-job-failed', job)]} />)
+        fireEvent.click(pill())
+        expect(rowLink()).toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-job-failed/view`)
+        expect(rowLink()).toHaveAttribute('target', '_blank')
+      })
+
+      it('reads the job label only for the job rules', () => {
+        render(<AlertPill alerts={[jobAlert('aber-ingestion-silent', 'capture job 7d2c0000')]} />)
+        fireEvent.click(pill())
+        expect(rowLink()).toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-ingestion-silent/view`)
+      })
+    })
   })
 
   /** Dismissal. The panel is a popover in a header, not a dialog: no backdrop, no focus trap. */
