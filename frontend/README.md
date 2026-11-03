@@ -1125,7 +1125,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
 | Archives | `retired` | `sort` |
-| System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, `range` |
+| System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
@@ -1180,7 +1180,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row, and the range picker is `LogRangePicker` alone, so the shared time control can take its place |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1294,10 +1294,15 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
 ```
 
 - **The props.** `value` and `onChange` are the window. `ranges` is the rolling ranges the page
-  offers: `TIME_PRESETS` (15 minutes to 30 days) or some of them. `allTime` adds All time. Pass the
+  offers: `TIME_PRESETS` (15 minutes to 30 days) or some of them. `allTime` adds All time. `spans`
+  is the spans the switch offers: `SPAN_IDS` (all four, the default) or some of them. Pass the
   same to `useTimeWindow`, with `fallback`, the window shown when the address names none. Pass
-  module-level constants, as the window is memoised on them. The Audit Trail offers every range
-  and All time, and falls back to All time.
+  module-level constants, as the window is memoised on them. The Audit Trail offers every range,
+  every span and All time, and falls back to All time. System › Logs offers its own five ranges
+  (Last 6 hours among them), Day and Week, and no All time, since a read covers at most 7 days; it
+  falls back to Last 1 hour.
+- **A span a page does not offer is passed over** in the address, which then falls back, and Jump
+  to lands on Day, or on the first span offered where Day is not.
 - **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
   `SegmentedControl`. Today is in the popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
   not wrap inside itself, so a toolbar that wraps moves it whole.
