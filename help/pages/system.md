@@ -56,18 +56,20 @@ The Logs tab shows the newest lines one service wrote to its log, newest first. 
 1. Pick the service in the **Service** list. It opens on the ingestion service, if it has written anything, because most faults show there first.
 2. Type in the search box to keep only lines that contain that text. The match is exact, capital letters included.
 3. Pick a **level** to keep only errors or warnings, for example.
-4. Pick how far back to look, from the last 15 minutes to the last 7 days.
+4. Choose how far back to look in the **time window**, after the search box. It opens on **Last 1 hour**. Select the words between its arrows to pick a range from the last 15 minutes to the last 7 days, jump to a day, or set a custom range. Choose **Day** or **Week** to see a whole day or week, and **‹** or **›** to step back or forward one at a time.
 5. Select **Refresh** to read again. To read again on its own, pick an interval in the right half of the same button, such as **30 s**.
 
 - **Time** is when the service wrote the line, in your time zone, to the thousandth of a second.
 - **Level** is how serious the service said the line is. Only lines written as JSON, a structured format, name a level. The ingestion and playback services write JSON. A line in any other format shows **none**, and appears only under **Any level**.
 - **Message** is the line. For a JSON line it is the message alone, with the fields **reason**, **device** and **edge_node** under it when the line has them. A traceback stays under its message, as one entry.
 - **The copy button** copies the line exactly as the service wrote it.
-- At most 500 lines are shown. When there are more in the range, the tab says so above the table. Choose a shorter range, or type a filter, to reach older lines.
+- At most 500 lines are shown. When there are more in the window, the tab says so above the table. Choose a shorter window, or type a filter, to reach older lines.
+- A window covers at most 7 days, so the time window has no **Month**, **Year** or **All time**. A custom range longer than that is not read, and the tab says why. The time window otherwise works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time).
+- The address holds the window, so a link to the tab opens the same lines.
 - A line longer than 8 KiB is cut, and ends with **[cut at 8 KiB]**.
 - Everything in a line is shown as plain text. A line can hold text someone else chose, such as a device's name. Nothing in it can act as a link or run in the page.
 
-**Each new read is recorded in the Audit Trail.** The record says who read which service's lines, with the level, the filter and the range. Opening the tab writes one record, and so does each change of service, level, filter or range. Refresh and the interval write none, because they repeat the same read. A filter is read once you stop typing, so a word you type is one record. The records are on the Audit Trail page, under **Service logs**.
+**Each new read is recorded in the Audit Trail.** The record says who read which service's lines, with the level, the filter and the window. A rolling window, such as the last hour, is recorded as its range. A day, a week, a step or a custom range is recorded as its start and end. Opening the tab writes one record, and so does each change of service, level, filter or window. Refresh and the interval write none, because they repeat the same read. A filter is read once you stop typing, so a word you type is one record. The records are on the Audit Trail page, under **Service logs**.
 
 A deployment may run no log store of its own and name none. The tab then says observability is off, and there is nothing to read. Grafana's Explore page reads the same log store, for anything this tab cannot show.
 
