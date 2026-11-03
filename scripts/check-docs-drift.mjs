@@ -3600,10 +3600,10 @@ const OPERATOR_PAIRS = [
 
 // -------------------------------------------------------------------------------------------------
 // 189. The Logs tab's ceilings are stated as service-logs holds them. logs.ts decides: a range of
-// at most 7 days, 500 lines a read (200 by default), 8 KiB a line, 10 seconds for the store, and the
-// level and range keys. The help page, the API reference and supabase/README.md each state them, and
-// a ceiling stated wrong reads as the tab hiding lines. Mirror check 40 holds the code's three
-// copies; this holds the prose.
+// at most 7 days, a fixed window of at most LONGEST_WINDOW_HOURS, 500 lines a read (200 by
+// default), 8 KiB a line, 10 seconds for the store, and the level and range keys. The help page, the
+// API reference and supabase/README.md each state them, and a ceiling stated wrong reads as the tab
+// hiding lines. Mirror check 40 holds the code's three copies; this holds the prose.
 // -------------------------------------------------------------------------------------------------
 {
   const ts = read('supabase/functions/service-logs/logs.ts');
@@ -3612,17 +3612,18 @@ const OPERATOR_PAIRS = [
   const defaultLines = num(/export const DEFAULT_LINES = (\d+)/);
   const lineKiB = num(/export const LINE_BYTES = (\d+) \* 1024/);
   const timeoutS = num(/export const UPSTREAM_TIMEOUT_MS = (\d+)_000/);
+  const windowHours = num(/export const LONGEST_WINDOW_HOURS = (\d+)/);
   const ranges = [...(ts.match(/export const RANGES[^=]*= \{([^}]*)\}/)?.[1] ?? '').matchAll(/"([^"]+)":/g)].map((m) => m[1]);
   const levels = [...(ts.match(/export const LEVELS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   const longest = ranges.at(-1);
   const problems189 = [];
-  if (![maxLines, defaultLines, lineKiB, timeoutS].every(Number.isFinite) || !ranges.length || !levels.length) {
+  if (![maxLines, defaultLines, lineKiB, timeoutS, windowHours].every(Number.isFinite) || !ranges.length || !levels.length) {
     problems189.push('could not read the ceilings out of service-logs/logs.ts; its shape changed');
   } else {
     if (longest !== '7d') problems189.push(`logs.ts's longest range is ${longest}, and every page below says 7 days`);
     const help = read('help/pages/system.md');
     const section = help.slice(help.indexOf('## The Logs tab'), help.indexOf('\n## ', help.indexOf('## The Logs tab') + 1));
-    for (const phrase of [`At most ${maxLines} lines`, `${lineKiB} KiB`, 'last 7 days']) {
+    for (const phrase of [`At most ${maxLines} lines`, `${lineKiB} KiB`, 'last 7 days', 'A window covers at most 7 days']) {
       if (!section.includes(phrase)) problems189.push(`help/pages/system.md's Logs tab section does not say "${phrase}"`);
     }
     const spec = read('docs/openapi.yaml');
@@ -3630,13 +3631,20 @@ const OPERATOR_PAIRS = [
     const entry = at < 0 ? '' : spec.slice(at, spec.indexOf('\n  /', at + 1));
     if (!entry) problems189.push('docs/openapi.yaml has no /functions/v1/service-logs');
     for (const phrase of [`at most ${maxLines} lines`, `${defaultLines} by default`, `${lineKiB} KiB`, `${timeoutS} seconds`,
-      `enum: [${levels.join(', ')}]`, `enum: [${ranges.join(', ')}]`, 'at most 7 days']) {
+      `enum: [${levels.join(', ')}]`, `enum: [${ranges.join(', ')}]`, 'at most 7 days', `at most ${windowHours} hours`,
+      '{ name: from, in: query', '{ name: to, in: query']) {
       if (entry && !entry.includes(phrase)) problems189.push(`docs/openapi.yaml's service-logs entry does not say "${phrase}"`);
     }
     const readme = read('supabase/README.md');
     const from = readme.indexOf("### Reading a service's logs is recorded (0225)");
     const prose = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1)).replace(/\s+/g, ' ');
     if (!prose) problems189.push("supabase/README.md has no section \"Reading a service's logs is recorded (0225)\"");
+    const fixedAt = readme.indexOf("### A read of a service's logs names a range or a fixed window (0230)");
+    const fixed = fixedAt < 0 ? '' : readme.slice(fixedAt, readme.indexOf('\n### ', fixedAt + 1)).replace(/\s+/g, ' ');
+    if (!fixed) problems189.push("supabase/README.md has no section \"A read of a service's logs names a range or a fixed window (0230)\"");
+    else if (!fixed.includes(`at most ${windowHours} hours apart`)) {
+      problems189.push(`supabase/README.md's 0230 section does not say "at most ${windowHours} hours apart"`);
+    }
     for (const phrase of ['at most 7 days', `${maxLines} lines (${defaultLines} by default)`, `${lineKiB} KiB a line`, `${timeoutS} seconds for the store`]) {
       if (prose && !prose.includes(phrase)) problems189.push(`supabase/README.md's 0225 section does not say "${phrase}"`);
     }
@@ -3645,7 +3653,7 @@ const OPERATOR_PAIRS = [
     fail(`the Logs tab's ceilings are stated otherwise than service-logs holds them:\n` +
       problems189.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass(`the help, the API reference and supabase/README.md state service-logs' ceilings: 7 days, ${maxLines} lines (${defaultLines} by default), ${lineKiB} KiB, ${timeoutS} seconds`);
+    pass(`the help, the API reference and supabase/README.md state service-logs' ceilings: 7 days (${windowHours} hours for a fixed window), ${maxLines} lines (${defaultLines} by default), ${lineKiB} KiB, ${timeoutS} seconds`);
   }
 }
 
@@ -8871,6 +8879,124 @@ const OPERATOR_PAIRS = [
       problems199.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`audit_event_class() comes with its ${classes.length} class indexes in 0228, and no later file changes it without rebuilding them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 203. A Filters panel has one scroller, its own. Its lists are sections at full height, so App.css
+// may cap or scroll a list's parts (a `max-height`, or an `overflow` of auto or scroll) only under
+// `.filter-dropdown-panel`, the one-list toolbar dropdown, which FilterDropdown alone draws. The
+// panel finds its lists among its own children, so every list in a FiltersPopover is a FilterList
+// written straight into it: not a FilterChecklist or a FilterDropdown, and not inside a `<div>`.
+// -------------------------------------------------------------------------------------------------
+{
+  const CSS_FILE = 'frontend/src/App.css';
+  const CHECKLIST = 'frontend/src/components/common/FilterChecklist.jsx';
+  const PARTS = ['filter-sections', 'filter-section', 'filter-section-head', 'filter-section-body', 'filter-list',
+    'filter-checklist', 'filter-checklist-options', 'filter-checklist-section'];
+  const css = read(CSS_FILE).replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  /** Every style rule as [selectors, declarations], walking into @media, @supports and the like. */
+  const rules = [];
+  const walkCss = (src) => {
+    let i = 0;
+    while (i < src.length) {
+      const open = src.indexOf('{', i);
+      if (open < 0) return;
+      const head = src.slice(i, open);
+      const selector = head.slice(head.lastIndexOf(';') + 1).trim();
+      let depth = 1;
+      let j = open + 1;
+      for (; j < src.length && depth > 0; j++) {
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}') depth--;
+      }
+      const body = src.slice(open + 1, j - 1);
+      if (!selector.startsWith('@')) rules.push([selector, body]);
+      else if (/^@(media|supports|layer|container)\b/.test(selector)) walkCss(body);
+      i = j;
+    }
+  };
+  walkCss(css);
+  const splitSelectors = (s) => {
+    const out = [];
+    let depth = 0;
+    let from = 0;
+    for (let k = 0; k < s.length; k++) {
+      if (s[k] === '(') depth++;
+      else if (s[k] === ')') depth--;
+      else if (s[k] === ',' && depth === 0) { out.push(s.slice(from, k).trim()); from = k + 1; }
+    }
+    out.push(s.slice(from).trim());
+    return out;
+  };
+  /** Whether `selector` names the class `name` itself, not one it begins (`.filter-list-head`). */
+  const hasClass = (selector, name) => {
+    for (let at = selector.indexOf(`.${name}`); at >= 0; at = selector.indexOf(`.${name}`, at + 1)) {
+      if (!/[\w-]/.test(selector[at + name.length + 1] ?? '')) return true;
+    }
+    return false;
+  };
+  const scrolls = (body) => /(?:^|[;\s])max-height\s*:/.test(body) || /(?:^|[;\s])overflow(?:-y)?\s*:[^;]*\b(?:auto|scroll)\b/.test(body);
+
+  const problems203 = [];
+  let partRules = 0;
+  for (const [selectorList, body] of rules) {
+    for (const selector of splitSelectors(selectorList)) {
+      if (!PARTS.some((p) => hasClass(selector, p))) continue;
+      partRules += 1;
+      if (scrolls(body) && !hasClass(selector, 'filter-dropdown-panel')) {
+        problems203.push(`${CSS_FILE}: "${selector}" caps or scrolls a list's parts outside a toolbar dropdown, a scroller inside the Filters panel's`);
+      }
+    }
+  }
+  if (!rules.some(([s, body]) => splitSelectors(s).includes('.filters-popover-controls') && /overflow-y\s*:\s*auto/.test(body))) {
+    problems203.push(`${CSS_FILE}: .filters-popover-controls no longer scrolls (overflow-y: auto), so a long panel cannot be read to its end`);
+  }
+  if (!rules.some(([s, body]) => splitSelectors(s).includes('.filter-dropdown-panel .filter-checklist-options') && scrolls(body))) {
+    problems203.push(`${CSS_FILE}: a toolbar dropdown's list (.filter-dropdown-panel .filter-checklist-options) no longer scrolls under its search box`);
+  }
+
+  // The dropdown's class is drawn by FilterDropdown and nothing else.
+  const jsx = allFiles.filter((f) => /^frontend\/src\/components\/.+\.jsx$/.test(f));
+  for (const file of jsx) {
+    const src = read(file);
+    let at = src.indexOf('filter-dropdown-panel');
+    while (at >= 0) {
+      const owner = [...src.slice(0, at).matchAll(/export function (\w+)\(/g)].pop()?.[1];
+      if (file !== CHECKLIST || owner !== 'FilterDropdown') {
+        problems203.push(`${file}: ${owner ?? 'its top level'} draws .filter-dropdown-panel, which App.css lets scroll inside a Filters panel`);
+      }
+      at = src.indexOf('filter-dropdown-panel', at + 1);
+    }
+  }
+
+  // Each Filters panel's lists, as the panel finds them.
+  let panels = 0;
+  let lists = 0;
+  for (const file of jsx) {
+    const src = read(file);
+    for (const m of src.matchAll(/<FiltersPopover\b/g)) {
+      const end = src.indexOf('</FiltersPopover>', m.index);
+      // A usage example in a doc comment is not a panel.
+      if (end < 0 || /^\s*(\*|\/\/)/.test(src.slice(src.lastIndexOf('\n', m.index) + 1, m.index))) continue;
+      panels += 1;
+      const block = src.slice(m.index, end);
+      const line = src.slice(0, m.index).split('\n').length;
+      lists += (block.match(/<FilterList\b/g) || []).length;
+      for (const [pattern, what] of [[/<FilterChecklist\b/, 'a bare FilterChecklist'], [/<FilterDropdown\b/, 'a FilterDropdown'], [/<div\b/, 'a <div>']]) {
+        if (pattern.test(block)) {
+          problems203.push(`${file}:${line}'s Filters panel holds ${what}; write each list as a FilterList straight into the panel, which makes it a section`);
+        }
+      }
+    }
+  }
+  if (panels === 0) problems203.push('found no <FiltersPopover> in the components; the shape this check reads has changed');
+  if (partRules === 0) problems203.push(`found no rule on a list's parts in ${CSS_FILE}; the shape this check reads has changed`);
+  if (problems203.length) {
+    fail('a list in a Filters panel scrolls on its own, or the panel cannot make it a section:\n' +
+      problems203.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a Filters panel is its lists' one scroller: ${partRules} App.css rules on their parts cap none, and ${panels} panels hold ${lists} FilterList sections`);
   }
 }
 

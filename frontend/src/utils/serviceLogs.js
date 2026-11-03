@@ -1,19 +1,40 @@
 /**
  * What System › Logs offers, as the service-logs function accepts it (logs.ts): the ranges, the
- * levels and the most lines one read returns. Mirror check 40 holds these to the function's and to
- * 0225's, which refuses a read it cannot record.
+ * spans, the levels and the most lines one read returns. Mirror check 40 holds these to the
+ * function's and to 0225's, which refuses a read it cannot record.
  */
 import { formatDate } from './format'
+import { rollingWindow, windowBounds } from './timeWindow'
 
-/** The rolling ranges, keyed as the Audit Trail keys its own. */
+const MINUTE = 60 * 1000
+
+/** The rolling ranges, keyed as the Audit Trail keys its own, in the time control's shape. */
 export const LOG_RANGES = [
-  { value: '15m', label: 'Last 15 minutes' },
-  { value: '1h', label: 'Last 1 hour' },
-  { value: '6h', label: 'Last 6 hours' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
+  { value: '15m', label: 'Last 15 minutes', ms: 15 * MINUTE },
+  { value: '1h', label: 'Last 1 hour', ms: 60 * MINUTE },
+  { value: '6h', label: 'Last 6 hours', ms: 6 * 60 * MINUTE },
+  { value: '24h', label: 'Last 24 hours', ms: 24 * 60 * MINUTE },
+  { value: '7d', label: 'Last 7 days', ms: 7 * 24 * 60 * MINUTE },
 ]
 export const DEFAULT_LOG_RANGE = '1h'
+
+/** The window the tab opens on, Last 1 hour. */
+export const DEFAULT_LOG_WINDOW = rollingWindow(DEFAULT_LOG_RANGE, LOG_RANGES)
+
+/** The spans the time control offers: a month or a year is wider than the 7 days a read covers. */
+export const LOG_SPANS = ['day', 'week']
+
+/**
+ * The window as service-logs takes it, worked out at fetch time: a rolling window as its `range`,
+ * which the function measures back from now, and any other as its `from` and `to` instants, so
+ * a refresh asks for the same window. A custom window missing an end sends the other alone, and
+ * the function refuses it with the reason.
+ */
+export function logWindowParams(win, now = Date.now()) {
+  if (win.kind === 'rolling') return { range: win.range }
+  const { start, end } = windowBounds(win, now)
+  return { from: start ? start.toISOString() : '', to: end ? end.toISOString() : '' }
+}
 
 /** `any`, or a level a JSON line names in its `level` field. */
 export const LOG_LEVELS = [

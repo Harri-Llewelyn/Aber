@@ -45,9 +45,30 @@ const WRITES_NO_ROW = [
   { name: 'set_own_picture', why: "person_profiles' trigger records a change of display name, and this changes the picture alone" },
 ]
 
-/** Each function's last definition, the triggers left standing, and what writes the trail. */
+/** How many arguments the list starting just inside a `(` at `from` names, or null if it never closes. */
+function arity(sql, from) {
+  let depth = 0
+  let commas = 0
+  let named = false
+  for (let i = from; i < sql.length; i++) {
+    const ch = sql[i]
+    if (ch === ')' && depth === 0) return named ? commas + 1 : 0
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    else if (ch === ',' && depth === 0) commas++
+    else if (!/\s/.test(ch)) named = true
+  }
+  return null
+}
+
+/**
+ * Each function's last definition, the triggers left standing, and what writes the trail. A drop
+ * that names another number of arguments than the last definition drops another form of the name,
+ * which leaves that definition standing.
+ */
 function auditWriters() {
   const bodies = new Map()
+  const arities = new Map()
   const triggers = new Map()
   for (const file of fs.readdirSync(MIGRATIONS).filter(f => /^\d{4}_.*\.sql$/.test(f)).sort()) {
     const sql = read(path.join(MIGRATIONS, file))
@@ -57,8 +78,13 @@ function auditWriters() {
       if (!tag) continue
       const start = m.index + tag.index + tag[0].length
       bodies.set(m[1], sqlWithoutComments(sql.slice(start, sql.indexOf(tag[1], start))))
+      arities.set(m[1], arity(sql, m.index + m[0].length))
     }
-    for (const m of sql.matchAll(/DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?public\.(\w+)/gi)) bodies.delete(m[1])
+    for (const m of sql.matchAll(/DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?public\.(\w+)\s*(\()?/gi)) {
+      const dropped = m[2] ? arity(sql, m.index + m[0].length) : null
+      if (dropped !== null && arities.has(m[1]) && arities.get(m[1]) !== dropped) continue
+      bodies.delete(m[1])
+    }
     for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?TRIGGER\s+(\w+)[^;]*?\sON\s+(\w+\.)?(\w+)[^;]*?EXECUTE\s+(?:FUNCTION|PROCEDURE)\s+(?:public\.)?(\w+)\s*\(/gi)) {
       triggers.set(`${m[2] || 'public.'}${m[3]} ${m[1]}`, m[4])
     }

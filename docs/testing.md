@@ -546,6 +546,12 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # outside the function's rule is refused with no row. An Auditor reads the rows and a Shopfloor
 # Manager does not. Every test rolls back.
 python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
+# A read of a service's logs names a range or a fixed window (0230). A fixed window's row records
+# its two ends in UTC to the millisecond and no range; one row for each new window and none for a
+# repeat, whatever offset or session time zone the ends arrive in; a range or two ends, never both,
+# in order and at most 169 hours apart; one six-argument form, its ends defaulting to NULL, after
+# 0225 and 0230 replay over the four-argument one. Every test rolls back.
+python supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py
 # A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and

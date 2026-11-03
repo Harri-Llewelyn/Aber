@@ -1,12 +1,13 @@
 /**
  * The time window's arithmetic (utils/timeWindow.js), in London's time zone, where 2026's clocks
- * went forward on 29 March and back on 25 October. No other suite pins a zone; the window is
- * local time by design, so this one does, and puts the machine's back afterwards. `now` is
- * passed in, never read from the clock, so nothing here depends on the day it runs.
+ * went forward on 29 March and back on 25 October. The window is local time by design, so this
+ * suite pins a zone, as every suite that reads its words does, and puts the machine's back
+ * afterwards. `now` is passed in, never read from the clock, so nothing here depends on the day
+ * it runs.
  */
 import { describe, it, expect, afterAll } from 'vitest'
 import {
-  ALL_TIME, TIME_PRESETS, calendarTicks, canStep, chooseSpan, holdsNow, jumpTo, parseLocal,
+  ALL_TIME, SPAN_IDS, TIME_PRESETS, calendarTicks, canStep, chooseSpan, holdsNow, jumpTo, parseLocal,
   rollingWindow, stepNames, stepWindow, timeWindow, windowBounds, windowFromQuery, windowToQuery,
   windowWords
 } from '../utils/timeWindow'
@@ -219,6 +220,12 @@ describe('choosing a span or a day', () => {
     expect(jumpTo(week, '2026-02-30', NOW)).toBe(week)
   })
 
+  it('jumps from a rolling window to Day, or to the first span a page offers without Day', () => {
+    expect(jumpTo(rollingWindow('1h'), 'yesterday', NOW, ['day', 'week'])).toEqual(day('2026-11-01'))
+    expect(jumpTo(rollingWindow('1h'), 'yesterday', NOW, ['week', 'month'])).toEqual(span('week', '2026-11-01'))
+    expect(jumpTo(span('week', '2026-11-02'), 'month-ago', NOW, ['week', 'month'])).toEqual(span('week', '2026-10-02'))
+  })
+
   it('cannot step past today, and cannot step at all under All time', () => {
     expect(canStep(day('2026-11-02'), 1, NOW)).toBe(false)
     expect(canStep(day('2026-11-01'), 1, NOW)).toBe(true)
@@ -259,6 +266,16 @@ describe('the window in the address', () => {
     expect(read('range=all', { allTime: true, fallback: rolling24 })).toBe(ALL_TIME)
     expect(read('range=6h')).toBe(ALL_TIME)
     expect(read('range=1h', { ranges: TIME_PRESETS.filter(r => r.value !== '1h') })).toBe(ALL_TIME)
+  })
+
+  it('passes over a span the page does not offer, to the other keys and then the fallback', () => {
+    const spans = ['day', 'week']
+    expect(read('span=week&at=2026-11-02', { spans })).toEqual(span('week', '2026-11-02'))
+    expect(read('span=month&at=2026-11-02', { spans })).toBe(ALL_TIME)
+    expect(read('span=year&range=1h', { spans })).toEqual(rollingWindow('1h'))
+    expect(read('span=month&from=2026-11-02T10:05&to=2026-11-02T14:20', { spans }))
+      .toEqual({ kind: 'custom', from: '2026-11-02T10:05', to: '2026-11-02T14:20' })
+    expect(SPAN_IDS).toEqual(['day', 'week', 'month', 'year'])
   })
 
   it('writes one way, leaving the default out', () => {

@@ -6,7 +6,7 @@ import { api } from '../api'
 import { formatDateTime } from '../utils/format'
 import { deviceUrl, tabUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
-import { pick } from '../test/listFilters'
+import { filterList, pick } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 /**
@@ -276,9 +276,9 @@ describe('the Registered tab', () => {
   it('holds lifecycle, type, schema, gateway and cell in the Filters popover', async () => {
     await show([device()])
 
-    const popover = openFilters()
+    openFilters()
     for (const name of ['Lifecycle', 'Type', 'Schema', 'Gateway', 'Cell']) {
-      expect(popover.getByRole('group', { name })).toBeInTheDocument()
+      expect(filterList(name)).toBeInTheDocument()
     }
   })
 

@@ -1,4 +1,6 @@
-import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import React, {
+  Children, Fragment, cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { Tooltip } from './Tooltip'
 import { IconChevronDown } from './Icons'
@@ -119,13 +121,56 @@ export function ToolbarPopover({ label, button, buttonLabel, buttonClass = 'btn 
 }
 
 /**
+ * Marks a component the Filters panel lays out as a section beside others like it: FilterList.
+ * The panel finds its lists by this, among its children and inside fragments, not deeper.
+ */
+export const PANEL_LIST = Symbol.for('aber.filtersPanelList')
+
+const isPanelList = (child) => isValidElement(child) && child.type?.[PANEL_LIST] === true
+const sectionKey = (list) => (list ? String(list.props.label) : null)
+const sameSet = (a = [], b = []) => a.length === b.length && a.every(v => b.includes(v))
+const flatten = (children) => Children.toArray(children).flatMap(child =>
+  (isValidElement(child) && child.type === Fragment ? flatten(child.props.children) : [child]))
+
+/**
+ * A Filters panel's controls. Two or more lists become sections that open and close, one at a
+ * time, above the panel's other controls (its FilterCheck boxes). As the panel opens, the first
+ * list whose choice differs from its `defaultValue` opens, or else the first list. Which is open
+ * belongs to the open panel: it starts again each time and is not in the address. A lone list
+ * keeps its label and is drawn as it is.
+ */
+function FilterSections({ children }) {
+  const items = flatten(children)
+  const lists = items.filter(isPanelList)
+  const [openKey, setOpenKey] = useState(() =>
+    sectionKey(lists.find(l => !sameSet(l.props.value, l.props.defaultValue)) ?? lists[0]))
+  if (lists.length < 2) return <>{children}</>
+  return (
+    <>
+      <div className="filter-sections">
+        {lists.map(list => {
+          const key = sectionKey(list)
+          return cloneElement(list, {
+            key,
+            section: { open: openKey === key, onToggle: () => setOpenKey(k => (k === key ? null : key)) },
+          })
+        })}
+      </div>
+      {items.filter(item => !isPanelList(item))}
+    </>
+  )
+}
+
+/**
  * A "Filters" button in a toolbar row that opens a panel holding the filters the row has no room
  * for. Search, status and the page's key toggle stay in the row; the rest go in here.
  *
  *   <FiltersPopover activeCount={n} onClear={clearAll}>{controls}</FiltersPopover>
  *
  * The button reads "Filters", or "Filters (n)" while n are set. The panel is a ToolbarPopover named
- * "Filters", with its own Clear button, which calls `onClear` and is disabled at 0.
+ * "Filters", with its own Clear button, which calls `onClear` and is disabled at 0. Its lists
+ * (FilterList) open and close as sections, one at a time (FilterSections), so only the panel
+ * scrolls.
  */
 export function FiltersPopover({ activeCount = 0, onClear, children }) {
   return (
@@ -138,7 +183,7 @@ export function FiltersPopover({ activeCount = 0, onClear, children }) {
         </button>
       )}
     >
-      {children}
+      {({ close }) => <FilterSections>{typeof children === 'function' ? children({ close }) : children}</FilterSections>}
     </ToolbarPopover>
   )
 }

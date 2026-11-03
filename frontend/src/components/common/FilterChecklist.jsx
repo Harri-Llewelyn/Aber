@@ -1,7 +1,9 @@
 import React, { useId, useLayoutEffect, useRef, useState } from 'react'
-import { ToolbarPopover } from './FiltersPopover'
+import { PANEL_LIST, ToolbarPopover } from './FiltersPopover'
 import { SearchInput } from './SearchInput'
 import { HelpTip } from './HelpTip'
+// Renamed here: GroupHeading below is a checklist group's checkbox heading.
+import { GroupHeading as SectionHeading } from './GroupHeading'
 
 /** A list with more values than this has a search box above them. */
 export const SEARCH_AT = 8
@@ -185,26 +187,82 @@ export function FilterDropdown({
   )
 }
 
-/**
- * A list filter inside a Filters panel: its label, then the checklist. The panel's own Clear resets
- * it with the panel's other controls. `tip` is a HelpTip beside the label.
- *
- *   <FilterList label="Gateway" plural="gateways" options={gateways} value={chosen} onChange={set} />
- */
-export function FilterList({ label, options, value = NONE, onChange, counts, plural, tip }) {
-  return (
-    <div className="filter-list">
-      <div className="filter-list-head">
-        <span className="form-label">{label}</span>
-        {tip && <HelpTip text={tip} label={`About ${String(label).toLowerCase()}`} size={12} />}
-      </div>
-      <FilterChecklist label={label} options={options} value={value} onChange={onChange} counts={counts} plural={plural} />
-    </div>
-  )
+/** What a list has chosen, for its section's heading: nothing, the one value's name, or how many. */
+export function chosenWords(value, options) {
+  if (value.length === 0) return null
+  if (value.length > 1) return `${value.length} chosen`
+  const one = options.find(o => o.value === value[0])
+  return String(one?.short ?? one?.label ?? value[0])
+}
+
+/** Scrolls `el`'s scroller back to it when a section closing above has moved it out of view. */
+function keepInView(el) {
+  let scroller = el?.parentElement
+  while (scroller && scroller !== document.body && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) {
+    scroller = scroller.parentElement
+  }
+  if (!scroller || scroller === document.body) return
+  const above = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+  if (above < 0) scroller.scrollTop += above
 }
 
 /**
- * A yes-or-no choice inside a Filters panel, as a checkbox beside the lists: Show deleted entities,
+ * A list filter inside a Filters panel. Beside other lists, FiltersPopover makes it a section
+ * (`section`: `{ open, onToggle }`): a GroupHeading with its name and what is chosen in it
+ * ("Entity · 2 chosen"), over the checklist at full height while open, so only the panel scrolls.
+ * A pressed heading keeps the focus. Alone in its panel, it is its label over the checklist. The
+ * panel's own Clear resets it with the panel's other controls. `tip` is a HelpTip beside the name.
+ * `defaultValue` is the choice the page opens on, which the panel does not count as chosen when it
+ * picks the section to open (Devices' Lifecycle, on Active).
+ *
+ *   <FilterList label="Gateway" plural="gateways" options={gateways} value={chosen} onChange={set} />
+ */
+export function FilterList({ label, options, value = NONE, onChange, counts, plural, tip, section }) {
+  const bodyId = useId()
+  const headRef = useRef(null)
+  const pressed = useRef(false)
+  const open = section?.open
+  useLayoutEffect(() => {
+    if (!pressed.current) return
+    pressed.current = false
+    keepInView(headRef.current)
+  }, [open])
+
+  const help = tip && <HelpTip text={tip} label={`About ${String(label).toLowerCase()}`} size={12} />
+  const checklist = <FilterChecklist label={label} options={options} value={value} onChange={onChange} counts={counts} plural={plural} />
+  if (!section) {
+    return (
+      <div className="filter-list">
+        <div className="filter-list-head">
+          <span className="form-label">{label}</span>
+          {help}
+        </div>
+        {checklist}
+      </div>
+    )
+  }
+  const press = (e) => {
+    pressed.current = true
+    // A click does not focus a button in every browser; the list it leaves may be about to close.
+    e?.currentTarget?.focus()
+    section.onToggle()
+  }
+  return (
+    <div className="filter-section">
+      <div className="filter-section-head" ref={headRef}>
+        <SectionHeading open={open} onToggle={press} label={label} detail={chosenWords(value, options)} controls={bodyId} />
+        {help}
+      </div>
+      <div id={bodyId} className="filter-section-body" hidden={!open}>
+        {open && checklist}
+      </div>
+    </div>
+  )
+}
+FilterList[PANEL_LIST] = true
+
+/**
+ * A yes-or-no choice inside a Filters panel, as a checkbox under the lists: Show deleted entities,
  * Show replay lanes. The count is what turning it on would add.
  */
 export function FilterCheck({ label, checked, onChange, count, tip }) {
