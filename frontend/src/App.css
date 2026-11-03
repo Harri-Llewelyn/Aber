@@ -1396,6 +1396,7 @@ a.tab-strip-tab { text-decoration: none; }
   margin: 0 calc(-1 * var(--inset-tight));
   border-bottom: 1px solid var(--border);
 }
+.filter-section { display: flex; flex-direction: column; }
 .filter-section-head {
   display: flex;
   align-items: center;

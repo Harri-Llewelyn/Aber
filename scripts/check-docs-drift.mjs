@@ -8876,7 +8876,13 @@ const OPERATOR_PAIRS = [
     out.push(s.slice(from).trim());
     return out;
   };
-  const hasClass = (selector, name) => new RegExp(`\\.${name}(?![\\w-])`).test(selector);
+  /** Whether `selector` names the class `name` itself, not one it begins (`.filter-list-head`). */
+  const hasClass = (selector, name) => {
+    for (let at = selector.indexOf(`.${name}`); at >= 0; at = selector.indexOf(`.${name}`, at + 1)) {
+      if (!/[\w-]/.test(selector[at + name.length + 1] ?? '')) return true;
+    }
+    return false;
+  };
   const scrolls = (body) => /(?:^|[;\s])max-height\s*:/.test(body) || /(?:^|[;\s])overflow(?:-y)?\s*:[^;]*\b(?:auto|scroll)\b/.test(body);
 
   const problems203 = [];
