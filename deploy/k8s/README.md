@@ -1683,6 +1683,7 @@ Both stores keep thirty days.
 | Pod | Port | Path | Needs |
 | :--- | :--- | :--- | :--- |
 | `ingestion` | 9108 | `/metrics` | `ingestion.metrics.enabled` (default on) |
+| `playback` | 9109 | `/metrics` | `playback.metrics.enabled` (default on, with `playback.enabled`) |
 | `supabase-envoy` | 9901 | `/stats/prometheus` | `supabaseEnvoy.metrics.enabled` (default on) |
 | `supabase-rest` | 3001 | `/metrics` | nothing — the admin listener is always bound |
 | `grafana` | 3000 | `/metrics` | nothing |

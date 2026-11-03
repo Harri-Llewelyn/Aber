@@ -998,7 +998,8 @@ playback:
   pollIntervalSeconds: 3
   # The worker's Prometheus endpoint, shaped like ingestion.metrics. It serves one series, the jobs
   # the worker ended by outcome (aber_playback_jobs_total). No credential, so a count and nothing
-  # else. Alloy scrapes it through the pod's annotations.
+  # else. Alloy scrapes it through the pod's annotations, and telemetry.serviceMonitor through the
+  # headless playback-metrics Service.
   metrics:
     enabled: true
     port: 9109
