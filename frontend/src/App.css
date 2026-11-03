@@ -4578,6 +4578,16 @@ a.chip { text-decoration: none; }
   flex-shrink: 0;
 }
 
+/* The full-width slot under the header (`nav`), for controls that change what the drawer shows. It
+   continues the header's band and takes its rule, and stays in view while the body scrolls. */
+.context-panel-header-nav { border-bottom: none; padding-bottom: 6px; }
+.context-panel-nav {
+  flex-shrink: 0;
+  padding: 0 var(--inset-tight) 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+}
+
 .context-panel-heading { min-width: 0; }
 
 .context-panel-title-row {
@@ -5720,14 +5730,12 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-badge-governance  { background: var(--warning-tint);     color: var(--warning-text); }
 .trail-badge-critical    { background: var(--danger-tint);      color: var(--danger-text); }
 
-/* Stepping through one asset's history: full width of the subtitle row, stacked, because the
-   position line and the two buttons are three things at three sizes. */
+/* Stepping through one asset's history, in the drawer's nav slot at its full width: stacked,
+   because the position line and the two rows of buttons are three things at three sizes. */
 .trail-drawer-nav {
-  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 2px;
 }
 
 .trail-drawer-nav-pos {
@@ -5758,6 +5766,16 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
+}
+
+/* User ID and Machine identity: the name, a link for a viewer who may open Access Control, then
+   the id's copy chip, beside it where the drawer is wide enough and under it where not. */
+.trail-actor-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
 }
 
 /* The other changes one transaction made. Above the diff in the drawer, with the same top border

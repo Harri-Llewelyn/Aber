@@ -166,18 +166,29 @@ describe('the Same transaction control', () => {
     expect(chip()).toHaveTextContent('2')
   })
 
-  it('says a single-row act wrote nothing else, and offers no control', async () => {
-    /* The case a user asked to go away: the button put the id in the search box and loaded the
-       same single row again. Only the count can tell this act from one whose siblings a filter
-       hides, which is why the button could not simply be hidden when the list was empty. */
+  it('draws no section for an act that wrote nothing else', async () => {
+    /* A heading and a line about nothing, for every single-row act. Only the count can tell this
+       act from one whose siblings a filter hides, so it is the count that takes the section away. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
     stepToSingleRowAct()
 
-    await waitFor(() =>
-      expect(within(group()).getByText('Nothing else was written by this act.')).toBeInTheDocument())
-    expect(control()).toBeNull()
-    expect(chip()).toHaveTextContent('0')
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('event')).toBe('3'))
+    expect(group()).toBeNull()
+    expect(screen.queryByText('Nothing else was written by this act.')).toBeNull()
+    // The id stays in the fields, for a reader who wants to search it anyway.
+    expect(screen.getByRole('button', { name: 'Copy transaction id 4472' })).toBeInTheDocument()
+  })
+
+  it('draws none when the search is the transaction and nothing else came back, count or no count', async () => {
+    // The loaded set IS the act, and it is this row alone.
+    api.get.mockImplementation(serve(UNCOUNTED.filter(e => e.event_id === 3)))
+    window.history.replaceState({}, '', '/audit-trail?search=4472&event=3')
+    render(<AuditTrailTab />)
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
+    expect(group()).toBeNull()
+    window.history.replaceState({}, '', '/audit-trail')
   })
 
   it('steps the drawer across to the sibling, which is a DIFFERENT entity', async () => {
