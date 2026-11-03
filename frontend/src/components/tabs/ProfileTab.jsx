@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { IconUser, IconLock, IconAlertTriangle, IconX, IconCopy, IconCheck } from '../common/Icons'
+import { IconUser, IconLock, IconAlertTriangle, IconCopy, IconCheck } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { copyText } from '../common/CopyableId'
@@ -12,6 +12,7 @@ import { formatClockTime, formatDateTime, NO_VALUE } from '../../utils/format'
 import { supabase } from '../../lib/supabaseClient'
 import { SUPABASE_GATEWAY_KEY } from '../../config'
 import { Tooltip } from '../common/Tooltip'
+import { SaveDiscard } from '../common/SaveDiscard'
 import { SessionsSection } from './SessionsSection'
 import { SecondFactorSection } from './SecondFactorSection'
 import { AccountAvatar } from '../common/AccountAvatar'
@@ -28,24 +29,6 @@ const THEME_OPTIONS = [
 ]
 
 /** One row of the Settings page's table: the name, what it does, its value, and what can be done. */
-/**
- * Save and Discard for a row with an unsaved choice, as the Settings page shows them; nothing
- * otherwise. `disabled` holds both while a save runs, and Save alone while `saveBlocked` says why.
- */
-function SaveDiscard({ dirty, onSave, onDiscard, disabled = false, saveBlocked = null }) {
-  if (!dirty) return null
-  return (
-    <div className="setting-actions">
-      <Tooltip text={saveBlocked}>
-        <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={disabled || !!saveBlocked}>Save</button>
-      </Tooltip>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onDiscard} disabled={disabled}>
-        <IconX size={13} /> Discard
-      </button>
-    </div>
-  )
-}
-
 function ProfileRow({ id, label, description, value, actions }) {
   return (
     <tr className="setting-row" data-profile-setting={id}>

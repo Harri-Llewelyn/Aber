@@ -205,10 +205,12 @@ describe('the Areas panel', () => {
     expect(document.activeElement).toBe(expand)
   })
 
-  it('keeps the turns in the heading, Replace and Remove under the card, and Expand on it, for a plan a manager may change', () => {
+  it('keeps the turns in a row under the heading, Replace and Remove under the card, and Expand on it, for a plan a manager may change', () => {
     panel({ area: OFFICE, cells: [], canManage: true })
     const expand = screen.getByRole('button', { name: 'Expand plan: Office Floor' })
-    expect(screen.getByRole('button', { name: 'Turn right' }).closest('.area-plan-panel-header')).not.toBeNull()
+    const turnRight = screen.getByRole('button', { name: 'Turn right' })
+    expect(turnRight.closest('.area-plan-panel-actions')).not.toBeNull()
+    expect(turnRight.closest('.area-plan-panel-header')).toBeNull()
     for (const name of [/Replace plan/, /Remove plan/]) {
       const button = screen.getByRole('button', { name })
       expect(button.closest('.area-plan-panel-header')).toBeNull()
@@ -217,6 +219,14 @@ describe('the Areas panel', () => {
     }
     expect(expand.closest('.area-plan-panel-header')).toBeNull()
     expect(expand.closest('.plan-card')).not.toBeNull()
+  })
+
+  it('draws an unsaved turn in the expanded plan, as the preview draws it', () => {
+    panel({ area: OFFICE, cells: [], canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Turn right' }))
+    expect(document.querySelector('.plan-card .area-plan').dataset.rotation).toBe('90')
+    press(screen.getByRole('button', { name: 'Expand plan: Office Floor' }))
+    expect(dialog().querySelector('.area-plan').dataset.rotation).toBe('90')
   })
 
   it('offers none where the drop zone stands in for the plan, or the outline has no pin', () => {
