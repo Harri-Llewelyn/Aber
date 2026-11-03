@@ -45,6 +45,8 @@ If a playback completes but loses readings whose timestamps were too old or too 
 
 Each tab shows the newest 20. **Show more**, at the foot of the table, loads the next 20. These two tables have no search, and their columns do not sort.
 
+A failure also raises the Grafana alert **Capture or Playback Failed**, for an hour. A recording or playback that is still queued or running long past its limits raises **Capture or Playback Stuck**. Press **Stop** to end it. A playback waiting for a playback worker that has stopped reporting raises **Playback Worker Not Reporting**. Each reaches the alert counter in the top bar, so nobody has to be watching this page.
+
 ## Who can use it
 
 Any role that can see plant history can read and download captures. Recording, replacing, playing back, uploading, stopping and deleting are for an Administrator or Shopfloor Manager only. Each of these acts, downloads included, is recorded in the Audit Trail with who did it. Other roles see those controls disabled, and each one says who can use it. An Operator has no access to this page at all, so it is hidden from the sidebar rather than shown as an empty table.
