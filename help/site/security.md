@@ -43,9 +43,10 @@ Remove Access first
   reaches the database only, never the broker. Its first token is shown once, so copy it then.
 - **Machines propose, people decide.** A machine identity can file a change for someone to approve.
   It cannot approve one.
-- **A revoked token is refused by the API at once.** Storage, Realtime, the edge functions' runtime
-  and Studio accept it until it expires, at most 90 days later
-  ([Revocation reaches PostgREST and nothing else](../../docs/security-model.md#revocation-reaches-postgrest-and-nothing-else)).
+- **A revoked token is refused at once** by the API, the AAS API and the Factory+ Directory. The
+  i3X server refuses it within 15 seconds. Storage and Realtime accept it until it expires, at most
+  90 days later
+  ([Revocation reaches PostgREST and what checks a token through it](../../docs/security-model.md#revocation-reaches-postgrest-and-what-checks-a-token-through-it)).
 
 ## Gateways
 

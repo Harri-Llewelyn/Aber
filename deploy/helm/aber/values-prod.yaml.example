@@ -516,8 +516,8 @@ supabaseFunctions:
   aas:
     # PERMANENT ONCE A SHELL LEAVES THE SITE. Every globalAssetId and submodel id an AAS export
     # carries is this plus the asset's sparkplug_id, so changing it later gives every asset a new
-    # identity to whoever imported the old one. Set it before the first export, under a domain
-    # your organisation controls; the default, aber.local, belongs to nobody.
+    # identity to whoever imported the old one. Set it before the first export or aas-api read,
+    # under a domain your organisation controls; the default, aber.local, belongs to nobody.
     baseIri: https://aber.example.com/ids/asset/
 frontend:          { replicas: 3 }
 

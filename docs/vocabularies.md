@@ -302,9 +302,10 @@ Values resolve **device-first**, joined on `semantic_id` rather than metric name
 publishes OPC 40001 Machinery `Manufacturer` / `SerialNumber` / `YearOfConstruction`, that is what
 the shell reports, and the table fills the gaps.
 
-**The editor is a modal opened from a device's drawer**, an action beside Asset Config,
-Documents and the two AAS exports — placed directly above the exports because it is the only entry
-there that changes what they contain. It is deliberately *not* on the Schemas page: that page is
+**The editor is a modal opened from a device's drawer**, **Digital Nameplate…**, between
+**Configuration Parameters** and **Export…** (one dialog for AAS JSON, an AASX package and a
+bundle), with **Attached Links** below — placed directly above the export because it is the only
+entry there that changes what it contains. It is deliberately *not* on the Schemas page: that page is
 entirely type-level (what a metric may be named, what a standard defines), and a nameplate is a
 fact about one physical asset.
 

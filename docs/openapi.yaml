@@ -894,9 +894,12 @@ paths:
         That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
-        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime` and the
-        edge runtime each verify the signature for themselves, against `SUPABASE_JWT_JWKS`, and
-        consult no denylist, so a listed token still satisfies those three until it expires.
+        **Revocation reaches PostgREST and what checks a token through it:** the i3X server,
+        within its 15-second cache, and `aas-api` and `fplus-directory`, which call
+        `auth_probe()` as the caller. `supabase-storage` and `supabase-realtime` each verify the
+        signature for themselves, against `SUPABASE_JWT_JWKS`, and consult no denylist, so a
+        listed token still satisfies those two until it expires. The other edge functions check a
+        caller with GoTrue, which refuses every machine identity's token, listed or not.
 
         Read is `Administrator` and `Auditor`; `anon` is granted nothing.
       parameters:
@@ -3948,10 +3951,11 @@ paths:
         would be one nobody could ever withdraw. That is the one case where this endpoint discards
         a valid credential rather than returning it.
 
-        > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
-        > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > and the edge runtime verify the signature independently. For those three the expiry is
-        > still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > **Revocation reaches PostgREST and what checks a token through it.** `revoke_service_token()`
+        > denylists the `jti` and `auth_pre_request()` refuses it on every subsequent API request,
+        > to i3X and to `aas-api` and `fplus-directory` as well — but storage and realtime verify the
+        > signature independently. For those two the expiry is still the only bound, which is why
+        > the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:
@@ -4574,37 +4578,83 @@ paths:
             application/json:
               schema:
                 type: object
+                description: The Environment is under `aas`, beside what was exported and how it went.
+                required: [success, device, stats, aas]
                 properties:
-                  assetAdministrationShells: { type: array, items: { type: object } }
-                  submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
-                  stats: { type: object }
+                  success: { type: boolean, enum: [true] }
+                  device:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                      sparkplug_id: { type: string }
+                  stats: { type: object, description: 'Counts of submodels, attached schemas, telemetry and KPI metrics, unmapped semantic ids and concept descriptions, and `has_3d_model`. `model_url_resolves_only_on_this_host: true` is present when the 3D model reference points at this host.' }
+                  warning: { type: string, description: 'Present only when the shell''s 3D model reference resolves on this host alone, naming `AAS_MODEL_PUBLIC_BASE`. The shell is still valid.' }
+                  aas:
+                    type: object
+                    description: The AAS V3 Environment (IDTA-01001 Part 1).
+                    properties:
+                      assetAdministrationShells: { type: array, items: { type: object } }
+                      submodels: { type: array, items: { type: object } }
+                      conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
             application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
-        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '500':
+          description: |
+            Either the function failed (`FunctionFailure`: a fixed sentence and a request id), or,
+            for `aasx` and `bundle`, it refused to package a device whose 3D model it could not
+            bundle while the fallback URL points at this host. That refusal is `{error, hint}`:
+            `error` names `AAS_MODEL_PUBLIC_BASE` and its value, and `hint` says to bring the model
+            under `AAS_MAX_BUNDLED_MODEL_BYTES` instead. Set `AAS_MODEL_PUBLIC_BASE` to an address
+            other machines reach, or shrink the model, and export again.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    required: [error, hint]
+                    properties:
+                      error: { type: string }
+                      hint: { type: string }
 
   /functions/v1/aas-api:
     get:
       tags: [Edge Functions]
       summary: AAS repository root — the routes this service serves
       description: |
-        The IDTA 02001/02002 **read-only** repository surface, served live from the database over
-        the same mapping `aas-export` uses (`supabase/functions/_shared/aas/shell.ts`). A shipped
-        `.aasx` and this endpoint therefore cannot describe the same machine differently — the
-        agreement is asserted by `test_aas_api.py`.
+        The **read-only** AAS repository surface of IDTA-01002 (AAS Part 2, the API), served live
+        from the database over the same mapping `aas-export` uses
+        (`supabase/functions/_shared/aas/shell.ts`). A shipped `.aasx` and this endpoint therefore
+        cannot describe the same machine differently — the agreement is asserted by
+        `test_aas_api.py`.
+
+        **What a client sends.** A bearer token and nothing else: a person's, from **Profile →
+        Copy Token**, or a machine identity's, from **Access Control**. No `apikey`. On a site the
+        base URL is `https://api.<domain>/functions/v1/aas-api`; on the development stack,
+        `http://api.localhost/functions/v1/aas-api`.
+
+        **Not served:** the Registry and Discovery interfaces, concept descriptions (the JSON
+        export carries them), writes, and the `$metadata`, `$reference` and `$path` modifiers,
+        which answer `404`; only `/$value` is handled. `GET /shells` reads `limit` and
+        `cursor` alone, so a search by `assetIds` or `idShort` gets every shell.
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
-        somebody who found this URL in a config file. Start at `/description`.
+        somebody who found this URL in a config file. Start at `/description`. The root alone
+        still needs the `apikey`: the gateway exempts the paths below it.
 
-        **Reads as the caller and holds no service-role key**, unlike `aas-export`. RLS decides
-        what comes back, which is why it is a separate function: `main/index.ts` forwards only
-        the environment each worker's registry entry names, so the separation is enforced by the
-        runtime rather than by care.
+        **Reads as the caller and holds no service-role key**, unlike `aas-export`, which is why it
+        is a separate function: `main/index.ts` forwards only the environment each worker's
+        registry entry names, so the separation is enforced by the runtime rather than by care.
+        Every relation a shell is read from admits every signed-in caller, so every caller, person
+        or machine identity, sees the same shells.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
         `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
@@ -4625,22 +4675,17 @@ paths:
   /functions/v1/aas-api/description:
     get:
       tags: [Edge Functions]
-      summary: AAS repository self-description (IDTA 02002)
+      security: []
+      summary: AAS repository self-description (IDTA-01002)
       description: |
         The service profiles this deployment implements. It reports profiles and nothing about
         the fleet.
 
-        **The function does not authenticate this route; the gateway does.** IDTA 02002 expects
-        it readable before a client holds a credential — the same argument that keeps the
-        Factory+ Directory's `/ping` open — and this endpoint is written that way. But it falls
-        under the gated `/functions/v1/` catch-all, so **an `apikey` is required in practice**
-        and a client without one gets `401` before the function is reached.
-
-        That gap is recorded, not accidental: making it a fifth `key-auth` exemption widens the
-        gateway's open surface, which is a decision to take on its own rather than as a side
-        effect. See `docs/gateway.md`. Note the asymmetry if it is taken — only
-        `/description` belongs outside the gate; every other `aas-api` route authenticates the
-        caller itself and fails closed.
+        **Open: no `apikey` and no token.** The specification expects it readable before a client
+        holds a credential — the same argument that keeps the Factory+ Directory's `/ping` open.
+        The gateway exempts every `/functions/v1/aas-api/` route from its `apikey` check, because
+        a standard AAS client sends a bearer token and nothing else (`docs/gateway.md`). Every
+        other `aas-api` route authenticates the caller itself and fails closed.
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
@@ -4659,16 +4704,22 @@ paths:
   /functions/v1/aas-api/shells:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List Asset Administration Shells
       description: |
         Every shell this deployment publishes — one per non-archived device — built live from
         the **same mapping `aas-export` uses** (`supabase/functions/_shared/aas/shell.ts`), so a
         shipped `.aasx` and this endpoint cannot describe the same machine differently.
 
-        **Reads as the caller, and holds no service-role key.** RLS decides what comes back. That
-        is the difference from `aas-export`, which composes a document under the service role
-        after checking the caller's role, and it is why these are two functions rather than two
-        routes: `main/index.ts` forwards only the environment each worker's registry entry names.
+        **Reads as the caller, and holds no service-role key.** Every relation a shell is read from
+        admits every signed-in caller, so every caller sees the same shells. That is the
+        difference from `aas-export`, which composes a document under the service role after
+        checking the caller's role, and it is why these are two functions rather than two routes:
+        `main/index.ts` forwards only the environment each worker's registry entry names.
+
+        **`limit` and `cursor` are the only parameters read.** `assetIds` and `idShort` are
+        ignored, so a client searching by asset id gets every shell, a page at a time.
 
         **Pagination.** `limit` (default 20, capped at 100) and an opaque `cursor`. A cursor names
         the next *device*, so a page carries every item belonging to the devices it covers — the
@@ -4678,7 +4729,7 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-          description: Each device on a page costs seven queries and one shell construction.
+          description: Each device on a page costs up to ten queries and one shell construction.
         - name: cursor
           in: query
           schema: { type: string }
@@ -4703,9 +4754,11 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one Asset Administration Shell
       description: |
-        **`aasIdentifier` is base64url-encoded**, as IDTA 02002 requires for every Identifier in
+        **`aasIdentifier` is base64url-encoded**, as IDTA-01002 requires for every Identifier in
         a path. Not plain base64: `/` is legal there and is a path separator, so an identifier
         containing one would split across two segments and the route would silently not match.
         Padding is optional.
@@ -4733,6 +4786,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a shell's submodel references
       parameters:
         - name: aasIdentifier
@@ -4751,6 +4806,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a shell's AssetInformation
       description: |
         `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
@@ -4772,6 +4829,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a submodel through its shell
       description: |
         The same object as `/submodels/{submodelIdentifier}`, with one extra condition: the
@@ -4803,6 +4862,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a submodel's elements
       description: |
         Paginated in the same envelope as every other list, though one submodel's elements always
@@ -4828,17 +4889,21 @@ paths:
   /functions/v1/aas-api/submodels:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List submodels
       description: |
-        Every submodel across every shell. Same pagination as `/shells`.
+        Every submodel across every shell. Same pagination as `/shells`, so **`limit` counts
+        devices, not submodels**: a page holds every submodel of up to `limit` devices.
 
-        Append **`/$value`** for IDTA 02002's ValueOnly serialisation — the metamodel stripped
+        Append **`/$value`** for IDTA-01002's ValueOnly serialisation — the metamodel stripped
         down to values, which is the shape an ERP actually wants: `body.SerialNumber` rather than
         a walk through `submodelElements[]` matching on `idShort`.
       parameters:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: How many devices' submodels a page holds.
         - name: cursor
           in: query
           schema: { type: string }
@@ -4854,6 +4919,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel
       description: |
         base64url-encoded identifier, as above. Also reachable as
@@ -4884,6 +4951,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel element by idShortPath
       description: |
         `idShortPath` is the specification's dotted form — `Metrics.Systems_TEMPERATURE`. A
@@ -5541,11 +5610,13 @@ components:
         identity's token from **Access Control**. Paste it without the word `Bearer`. Your own
         token acts as you and lasts at most an hour; a machine identity's lasts 7 to 90 days.
         A script with no dashboard gets one from `POST /auth/v1/token?grant_type=password`.
+        A machine identity's token works on the `/rest/v1/` paths, `aas-api` and the Factory+
+        Directory. The other edge functions take a person's token only.
     apiKeyAuth:
       type: apiKey
       in: header
       name: apikey
-      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage and userinfo endpoints.
+      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage, userinfo, Factory+ Directory and `aas-api` endpoints.
     AlertWebhookBearer:
       type: http
       scheme: bearer

@@ -27,15 +27,22 @@
  *
  * ---------------------------------------------------------------------------------------------
  * Usage:
- *   node scripts/aas-push-basyx.mjs --device=Sim_CNC_Mill_01
+ *   node scripts/aas-push-basyx.mjs --device=<device name>
  *   node scripts/aas-push-basyx.mjs --file=shell.json --basyx=http://localhost:8081
  *   node scripts/aas-push-basyx.mjs --device=... --dry-run
  *
- *   --basyx=URL     BaSyx AAS Environment base URL (default http://localhost:8081, or $BASYX_URL)
+ *   --basyx=URL     BaSyx's AAS Environment base URL, not its Web UI (default http://localhost:8081,
+ *                   or $BASYX_URL)
  *   --device=NAME   fetch the shell from this stack's aas-export function by device name
  *   --file=PATH     read an already-exported environment from disk instead
  *   --replace       PUT over an existing shell/submodel rather than skipping it
  *   --dry-run       show what would be pushed, send nothing
+ *
+ * --device reads the gateway at SUPABASE_URL, http://127.0.0.1:54321 unless set, so run
+ * `npm run dev:forward` first; on Windows, Node cannot resolve api.localhost. It signs in as
+ * AAS_TEST_EMAIL with AAS_TEST_PASSWORD (the seeded admin@aber.local unless set), who must hold a
+ * role that may export. To see the result, set the BaSyx Web UI's repository addresses to the AAS
+ * Environment, and allow the Web UI's origin in BaSyx's own CORS setting.
  */
 import fs from 'node:fs';
 import path from 'node:path';

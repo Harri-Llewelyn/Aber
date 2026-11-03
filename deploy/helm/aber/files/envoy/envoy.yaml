@@ -89,7 +89,7 @@ static_resources:
                           allow_headers: "*"
                           allow_credentials: true
                       routes:
-                        # Exemption 1 of 4: sign-in must work before a session exists. Not gated, but a bearer that is one
+                        # Exemption 1 of 5: sign-in must work before a session exists. Not gated, but a bearer that is one
                         # of the two keys is translated to its JWT (Studio presents the secret key as the bearer). Both
                         # routes hand GoTrue the client's address alone as X-Forwarded-For, which its own limits key on.
                         #
@@ -165,7 +165,7 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: translate_bearer
 
-                        # Exemption 2 of 4: an AAS File URL must resolve with no session. Before /storage/v1/; the
+                        # Exemption 2 of 5: an AAS File URL must resolve with no session. Before /storage/v1/; the
                         # upstream path keeps /object/public/.
                         - name: storage-v1-public-routes
                           match: { prefix: "/storage/v1/object/public/" }
@@ -204,7 +204,7 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: keyauth_preserve
 
-                        # Exemption 3 of 4: an OAuth client sends client credentials, never a Supabase apikey. Exact
+                        # Exemption 3 of 5: an OAuth client sends client credentials, never a Supabase apikey. Exact
                         # paths, before /functions/v1/, so a function added later is gated by default.
                         - name: functions-v1-grafana-userinfo-route
                           match: { path: "/functions/v1/grafana-userinfo" }
@@ -226,16 +226,30 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               disabled: true
 
+                        # Exemption 5 of 5: aas-api, whose standard clients send a bearer token and never a Supabase apikey.
+                        # Before /functions/v1/, and the rewrite keeps the function's name. /description is open by
+                        # specification; the function refuses every other route without an Authorization header. The cost:
+                        # anyone who reaches the gateway can start an aas-api worker without a key. The publishable key is no
+                        # secret (every browser gets it in /config.js), so the gate kept out only clients unaware of Aber.
+                        - name: functions-v1-aas-api-routes
+                          match: { prefix: "/functions/v1/aas-api/" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/aas-api/"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
                         # The edge runtime boots with VERIFY_JWT=false (each function checks its own role), so this gate is
-                        # what stops an unauthenticated request starting any worker. /aas-api/description is gated too;
-                        # exempting it is a decision of its own, with a matching EXPECTED row in check-gateway-surface.mjs.
+                        # what stops an unauthenticated request starting any other worker.
                         - name: functions-v1-routes
                           match: { prefix: "/functions/v1/" }
                           route:
                             cluster: functions-v1
                             prefix_rewrite: "/"
 
-                        # Exemption 4 of 4: the Factory+ Directory adapter, whose clients hold no apikey. /ping is open by
+                        # Exemption 4 of 5: the Factory+ Directory adapter, whose clients hold no apikey. /ping is open by
                         # specification; /v1/ is authenticated by the function, which queries as the caller.
                         - name: fplus-directory-ping
                           match: { prefix: "/ping" }

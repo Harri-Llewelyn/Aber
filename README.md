@@ -29,9 +29,10 @@ them on dashboards, and records who changed what and when. It runs on your own n
 - **Manages gateways from one place.** Each gateway runs Node-RED. Its flow is kept in Aber's own
   git server, and a change is approved before it reaches the gateway.
 - **Shares data in standard forms.** Export equipment as
-  [Asset Administration Shells](help/guides/glossary.md#asset-administration-shell-aas), let other software
-  read live data through the [i3X](help/guides/glossary.md#i3x) API, and optionally publish every reading
-  to an ISA-95 [Unified Namespace](help/guides/glossary.md#unified-namespace-uns).
+  [Asset Administration Shells](help/guides/glossary.md#asset-administration-shell-aas) or serve them
+  live to AAS clients, let other software read live data through the [i3X](help/guides/glossary.md#i3x)
+  API, and optionally publish every reading to an ISA-95
+  [Unified Namespace](help/guides/glossary.md#unified-namespace-uns).
 
 ## Get started
 

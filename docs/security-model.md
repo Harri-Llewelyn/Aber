@@ -20,7 +20,7 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`mosquitto/README.md`](../mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
-| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
@@ -317,8 +317,9 @@ an oversight: it makes those gates the only route rather than the tidy one.
 **Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
 and refuses a JWT whose `jti` has been revoked, and a whole machine identity can be withdrawn.
 Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
-for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
-verify the signature for themselves and are not reached by a revocation (see
+for the anon and service-role keys, which name nobody. The i3X server, `aas-api` and the Factory+
+Directory check every token through PostgREST, so a revocation reaches them too. Storage and
+Realtime verify the signature for themselves and are not reached by a revocation (see
 [Accepted risks](#accepted-risks)). The **Access Control** tab states what is outstanding.
 
 The mechanism and its limits are in
@@ -368,12 +369,15 @@ evidence of access: a public or partner-facing deployment, a shared cluster, or 
 multi-tenancy. At that point the choice is dropping these tables from the publication and
 polling instead, or waiting for upstream to authenticate before delivering the envelope.
 
-### Revocation reaches PostgREST and nothing else
+### Revocation reaches PostgREST and what checks a token through it
 
 `0074` made a token revocable at the one choke point PostgREST offers (`PGRST_DB_PRE_REQUEST`).
-Storage, Realtime and the edge runtime verify the signature for themselves and consult no table, so
-a revoked token still opens those doors until its own `exp` — at most 90 days for a token naming a
-principal.
+It reaches whatever checks a token with a PostgREST call made as the caller: the i3X server, within
+its 15-second cache, and `aas-api` and the Factory+ Directory, which call `auth_probe()` (`0224`).
+Storage and Realtime verify the signature for themselves and consult no table, so a revoked token
+still opens those doors until its own `exp` — at most 90 days for a token naming a principal. The
+other edge functions check a caller with GoTrue's `getUser()`, which refuses every machine
+identity's token, revoked or not, because it carries no `aud`.
 
 Who can sign one is narrow: GoTrue and `mint-service-token` hold the ES256 private key, and every
 verifier holds the public key, which signs nothing. No service accepts a token signed with the

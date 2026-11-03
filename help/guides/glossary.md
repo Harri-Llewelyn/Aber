@@ -176,7 +176,7 @@ levels. Any program with a broker connection can read it. It is off by default.
 ### Asset Administration Shell (AAS)
 
 A standard digital description of a piece of equipment (IEC 63278). Aber exports devices as AAS
-files.
+files, and serves the same shells live to AAS clients through its AAS API.
 
 ### i3X
 

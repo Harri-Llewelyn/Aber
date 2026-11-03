@@ -641,6 +641,13 @@ python supabase/migrations/test_a_service_token_warns_before_it_expires.py
 # and an Auditor read the table, nobody else does, and nobody writes it directly. A replay of 0209
 # keeps what was recorded. Every test rolls back.
 python supabase/migrations/test_a_service_token_shows_when_it_was_last_used.py
+# aas-api and the Factory+ Directory accept a machine identity's token (0224). auth_probe() is
+# called as PostgREST calls it, the hook and then the probe with the token's claims: a machine
+# identity's token with no aud and a person's session pass, and the hook refuses a revoked token, a
+# withdrawn identity, a removed person and an ended session first. anon and service_role are
+# refused, also through a plan prepared for authenticated; a replay of 0224 keeps the grants.
+# Every test rolls back.
+python supabase/migrations/test_aas_api_and_the_directory_accept_a_machine_identity_s_token.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,

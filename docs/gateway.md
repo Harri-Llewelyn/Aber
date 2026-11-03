@@ -58,18 +58,17 @@ replaces the key, in the header and in the query, with the JWT it stands for.
 The inventory is `EXPECTED` in
 [`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs): a row per route with
 its posture, and a route added to the gateway without a row fails the check. Gated routes are
-refused before their upstream. The four exemptions, and the argument for each, are in the same
-file: sign-in, public storage objects, the two OAuth userinfo endpoints, and the Factory+
-Directory, whose `/v1/` routes authenticate the caller in the function.
+refused before their upstream. The five exemptions, and the argument for each, are in the same
+file: sign-in, public storage objects, the two OAuth userinfo endpoints, the Factory+ Directory,
+whose `/v1/` routes authenticate the caller in the function, and `aas-api`.
 
-**One open decision.** `/functions/v1/aas-api/description` falls under the gated catch-all and
-stays gated. The AAS specification expects it readable before a client holds a credential, the
-same argument that exempts the Directory's `/ping`, which makes it a candidate fifth exemption;
-the route to add is written out in a comment in `supabase/envoy.yaml`. Taking it fails the probe
-until `EXPECTED` gains a row, which is the intended order: the inventory is the review, and the
-gateway follows it. `/description` is meant to be readable with no credential at all, while every
-other `aas-api` route authenticates the caller itself and fails closed; only the first belongs
-outside the gate.
+**`/functions/v1/aas-api/` is the fifth exemption.** A standard AAS client sends a bearer token
+and no `apikey`, and the specification makes `/description` readable before a client holds a
+credential. The function refuses every other route without an `Authorization` header, and reads
+as the caller. The route sits above the gated catch-all, since routes are first-match, and the
+static check fails if it moves below. The cost is the Directory's: anyone who reaches the gateway
+can start an `aas-api` worker without a key. The publishable key was never a secret, since every
+browser receives it in `/config.js`.
 
 Envoy semantics that produce a stack that looks fine and is not are listed in the template's
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant

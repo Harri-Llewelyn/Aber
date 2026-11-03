@@ -16,8 +16,8 @@ spec:
     {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # The gateway routes /functions/v1/ here on port 9000, including the two exact-path
-      # exemptions for grafana-userinfo and nodered-userinfo.
+      # The gateway routes /functions/v1/ here on port 9000, its exemptions included: the two
+      # userinfo paths, /functions/v1/aas-api/, and the Directory's /ping and /v1/.
       port: 9000
       targetPort: http
       protocol: TCP

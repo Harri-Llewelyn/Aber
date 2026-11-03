@@ -205,11 +205,12 @@ given, and stops pulling if the port changes. So:
   is the node's own address. The render refuses broker TLS without it (*MQTTS on 8883* below).
 - `supabaseFunctions.aas.baseIri`, below.
 
-**Set the AAS base IRI before the first export: it is permanent from then on.** Put it under a
-domain your organisation controls, as `values-prod.yaml.example` shows. The default,
+**Set the AAS base IRI before the first export or AAS API read: it is permanent from then on.** Put
+it under a domain your organisation controls, as `values-prod.yaml.example` shows. The default,
 `https://aber.local/ids/asset/`, belongs to nobody. Every `globalAssetId` and submodel id in an
-exported Asset Administration Shell is `supabaseFunctions.aas.baseIri` plus the asset's
-`sparkplug_id`. Once a shell has left the site, whoever imported it holds those identifiers.
+Asset Administration Shell, exported or read from the AAS API, is `supabaseFunctions.aas.baseIri`
+plus the asset's `sparkplug_id`. Once a shell has left the site, whoever imported it holds those
+identifiers.
 Changing the IRI would then give every asset a new identity.
 
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets

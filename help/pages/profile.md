@@ -43,7 +43,7 @@ What the token can do:
 - Signing out of this browser ends it.
 - The dashboard renews its own token before it runs out. It does not renew the copy you made.
 
-A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. An Administrator issues its token on the **Access Control** page.
+A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. Its token works on the API, the i3X server, the AAS API and the Factory+ Directory. An Administrator issues its token on the **Access Control** page.
 
 ## Where your choices are kept
 

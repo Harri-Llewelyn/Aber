@@ -212,7 +212,7 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 | **OPC UA** (40001, 40001-4, 40010, 30050, 40501, 40540) | Companion-specification data points: machinery, energy, robotics, PackML, machine tools, additive. Generated from OPC Foundation NodeSets by [`scripts/generate-opcua-vocabulary.mjs`](../scripts/generate-opcua-vocabulary.mjs) |
 | **ISO 22400** | Computed KPIs, which MTConnect and OPC UA deliberately exclude |
 | **ASHRAE 223P** | Building-system semantics — 640 concepts from the open223 ontology. ⚠ Still in public review |
-| **AAS / IEC 63278** | V3 export as JSON or AASX, validated against the official IDTA schema |
+| **AAS / IEC 63278** | V3 export as JSON or AASX, and a live read-only repository API (`aas-api`, IDTA-01002), validated against the official IDTA schema |
 
 These are **four vocabularies, not four alternatives** — a mixed fleet needs all of them, which is
 why the schema builder offers a choice rather than a migration path. All are built, as is the IDTA

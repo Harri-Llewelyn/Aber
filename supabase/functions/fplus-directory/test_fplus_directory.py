@@ -106,7 +106,7 @@ def get(path: str, token: str | None, send_apikey: bool = True):
 
 
 def sign_in() -> str | None:
-    """A *user* JWT, not the service key: every /v1/ route calls auth.getUser() on the caller."""
+    """A person's session token, not the service key: every /v1/ route reads as its caller."""
     try:
         status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, DEMO_EMAIL, DEMO_PASSWORD)
     except OSError:
@@ -196,6 +196,29 @@ def provision_published(token) -> bool:
 def issued_id(token, device_id) -> str | None:
     status, rows = rest("GET", f"/devices?id=eq.{device_id}&select=sparkplug_id", token)
     return rows[0]["sparkplug_id"] if status == 200 and rows else None
+
+
+# The Read-only API client, the machine identity Access Control issues tokens for. It holds
+# telemetry:read and no role.
+READ_ONLY_CLIENT = "b0000000-0000-4000-8000-000000000001"
+
+
+def issue_machine_token(admin_token: str):
+    """
+    A one-day token for the Read-only API client, issued as the page's Issue Token does and as
+    supabase/test_a_token_s_use_is_recorded.py issues one: (token, jti), or None with the reason.
+    Each issue leaves a TOKEN_MINTED row in the Audit Trail, and each revoke a TOKEN_REVOKED row.
+    """
+    status, body = request("POST", f"{SUPABASE_URL}/functions/v1/mint-service-token", admin_token,
+                           {"principal_id": READ_ONLY_CLIENT, "days": 1})
+    if status != 200:
+        return None, f"could not issue a Read-only API client token as {DEMO_EMAIL} ({status}): {body}"
+    return (body["token"], body["jti"]), None
+
+
+def revoke_machine_token(admin_token: str, jti: str) -> int:
+    status, _ = rest("POST", "/rpc/revoke_service_token", admin_token, {"p_jti": jti})
+    return status
 
 
 def teardown(token):
@@ -322,6 +345,57 @@ class TestFailsClosed(unittest.TestCase):
         # project, not a person, and RLS has nobody to answer for.
         status, _ = get(f"/v1/schema/{SCHEMA_ID}", None)
         self.assertEqual(status, 401)
+
+    def test_the_publishable_key_as_the_bearer_is_refused(self):
+        # A key is not a token: the probe's grant refuses the anon role it stands for.
+        status, body = get(f"/v1/schema/{SCHEMA_ID}", PUBLISHABLE_KEY, send_apikey=False)
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body["error"], "Invalid user token")
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestAMachineIdentityReadsAsAPersonDoes(unittest.TestCase):
+    """
+    The Read-only API client's token, as a Factory+ client holds one: a bearer and no apikey. It
+    carries no `aud`, which GoTrue's getUser() refused; the function now checks it with one
+    PostgREST call made as the caller.
+
+    WHAT IT SEES, PREDICTED FROM THE POLICIES: devices, gateways, schemas, device_submodels behind
+    the device_schemas view and directory_services are each `SELECT TO authenticated USING (true)`,
+    and the token's role is `authenticated`. So every route answers it as it answers a person.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        issued, reason = issue_machine_token(TOKEN)
+        if issued is None:
+            raise unittest.SkipTest(reason)
+        cls.token, cls.jti = issued
+
+    @classmethod
+    def tearDownClass(cls):
+        revoke_machine_token(TOKEN, cls.jti)
+
+    def test_every_route_answers_it_as_it_answers_a_person(self):
+        for path in ("/v1/device", f"/v1/device/{EXPECTED_DEVICE_IDS[0]}", f"/v1/schema/{SCHEMA_ID}",
+                     "/v1/schema", "/v1/service"):
+            with self.subTest(path=path):
+                status, machine = get(path, self.token, send_apikey=False)
+                self.assertEqual(status, 200, machine)
+                self.assertEqual(machine, get(path, TOKEN)[1])
+
+    def test_a_revoked_token_is_refused_from_the_next_request(self):
+        issued, reason = issue_machine_token(TOKEN)
+        if issued is None:
+            self.skipTest(reason)
+        token, jti = issued
+        status, body = get("/v1/device", token, send_apikey=False)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(revoke_machine_token(TOKEN, jti), 200, "the token could not be revoked")
+        status, body = get("/v1/device", token, send_apikey=False)
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body["error"], "Invalid user token")
+        self.assertIn("revoked", body["details"])
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)

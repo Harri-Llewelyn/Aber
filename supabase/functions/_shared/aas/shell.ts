@@ -1,10 +1,10 @@
 /**
  * The AAS mapping layer: rows in this database to an AAS V3 Environment, built once here and
- * presented by `aas-export` (a serialised file) and `aas-api` (the IDTA 02001/02002 REST surface).
- * The client is an argument: aas-export passes a service-role client, aas-api the caller's own, so
- * RLS applies to the live API. Every table read below carries `SELECT TO authenticated USING
- * (true)`; if that stops being true for one, the API's answer changes shape without erroring. AASX
- * packaging stays in aas-export.
+ * presented by `aas-export` (a serialised file) and `aas-api` (the IDTA-01002 REST surface, AAS
+ * Part 2). The client is an argument: aas-export passes a service-role client, aas-api the
+ * caller's own, so RLS applies to the live API. Every table read below carries `SELECT TO
+ * authenticated USING (true)`, so every signed-in caller reads the same shell; if that stops being
+ * true for one, the API's answer changes shape without erroring. AASX packaging stays in aas-export.
  */
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";

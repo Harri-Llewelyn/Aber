@@ -30,7 +30,7 @@ import { PICTURE_BUCKET, picturePath } from './utils/picture';
 // `asset_id` is always the device UUID, including for quarantined devices.
 /**
  * The IDTA Digital Nameplate template the editor and the AAS exporter both work against.
- * Mirrors NAMEPLATE_TEMPLATE_ID in supabase/functions/aas-export/index.ts; the version is part
+ * Mirrors NAMEPLATE_TEMPLATE_ID in supabase/functions/_shared/aas/shell.ts; the version is part
  * of the identifier, so the two must move together.
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';

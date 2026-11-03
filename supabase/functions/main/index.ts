@@ -147,8 +147,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "ASSET_EXPORT_MAX_TRAIL_ROWS",
   ],
 
-  // The IDTA 02001/02002 read surface over the same mapping aas-export uses. No service-role key: a
-  // live API over the whole asset space reads as the caller and lets RLS answer. Two functions
+  // The IDTA-01002 (AAS Part 2) read surface over the same mapping aas-export uses. No service-role
+  // key: a live API over the whole asset space reads as the caller and lets RLS answer. Two functions
   // rather than two routes, because envForFunction() forwards only what an entry names, so one
   // worker cannot hold a key the other is denied. The AAS_* set is duplicated so the identifiers
   // this serves are the identifiers aas-export mints; no STORAGE_MODEL_BUCKET or
