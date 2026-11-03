@@ -98,6 +98,17 @@ describe('every table can be sorted, or says why it keeps one order', () => {
     expect(withTables.map(f => f.file).sort()).toEqual(Object.keys(TABLES).sort())
   })
 
+  it('draws every sortable header\'s arrow at rest, so a header that sorts says so without a pointer', () => {
+    const css = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const arrowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /\.sort-arrow/.test(selector))
+    expect(arrowRules.length).toBeGreaterThan(0)
+    for (const [, selector, body] of arrowRules) {
+      expect(body, `${selector.trim()} hides the sort arrow`).not.toMatch(/visibility\s*:\s*hidden|display\s*:\s*none|opacity\s*:\s*0(?![.\d])/)
+    }
+    const header = code(path.join(SRC, 'components/common/SortHeader.jsx'))
+    expect(header).toMatch(/!active \? IconChevronsUpDown/)
+  })
+
   it.each(Object.entries(TABLES))('%s: its tables are the sortable ones and the listed exceptions', (file, spec) => {
     const text = code(path.join(SRC, file))
     const fixed = spec.fixed || []

@@ -1687,6 +1687,11 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   header that cannot be sorted takes one as a `ColumnHeader`.
   A click sorts ascending, a second descending, and a third returns the table to the order it had,
   which is left as it was: a table nobody sorts reads as before, and no header claims that order.
+  - **Every sortable header shows its arrow at rest**: the sorted column its up or down arrow, the
+    others a double arrow in `--text-dim` that steps up to `--text-primary` on hover or focus. A
+    touch screen has no hover, and the arrow is what tells a sortable header from a plain one, so
+    no rule hides it (`sortableTables.test.js`) and it holds 3:1 on the header's ground
+    (`themeContrast.test.js`). A `ColumnHeader` has no arrow.
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
     order ("Line 9" before "Line 10"), `number`, `time` by instant, and `rank`, a number the column
     works out. A status ranks by its badge's colour, `severityRank(tone)`, so ascending puts red and
