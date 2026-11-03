@@ -1298,6 +1298,12 @@ API with their own token, and the Audit Trail held nothing.
   `storage.objects`. The file's self-check fails the boot if a role arm of the SELECT policy has no
   predicate, or if Auditor's is not the grant. Check 107 of `scripts/check-docs-drift.mjs` holds the
   same in the source, and that no migration states a storage policy.
+- **Only a download the person asks for calls it.** The Capture page's Download is the one caller,
+  so `CAPTURE_DOWNLOAD_ISSUED` means someone downloaded the file. The playback dialog reads a
+  capture's devices from `manifest -> 'device_ids'`, as `ensure_shadow_devices()` does, and never
+  from the file. A capture whose manifest has no list is shown as one the dialog cannot map, with
+  the way to store it again (Download, then Play a file…). `playbackDialogRecordsNoDownload.test.jsx`
+  holds the dialog to that and the page to its one caller.
 
 `capture_downloads` has RLS with no policy and nothing granted to an API role.
 `is_open_capture_download()` is `SECURITY DEFINER` and executable by `authenticated`, because the

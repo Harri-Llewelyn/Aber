@@ -560,6 +560,20 @@ describe('deleting and downloading', () => {
     expect(open).toHaveBeenCalledWith('https://example.test/signed', '_blank', 'noopener')
     open.mockRestore()
   })
+
+  /** Only Download records one: the playback dialog reads the devices from the manifest alone. */
+  it('issues no download when the playback dialog opens on a capture with no device list and is cancelled', async () => {
+    expect(CAPTURE.manifest.device_ids).toBeUndefined()
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    await screen.findByLabelText('Playback gateway')
+    expect(screen.getByText(/stored without the list of devices it holds/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByLabelText('Playback gateway')).toBeNull())
+    expect(api.captureUrl).not.toHaveBeenCalled()
+  })
 })
 
 // =============================================================================================

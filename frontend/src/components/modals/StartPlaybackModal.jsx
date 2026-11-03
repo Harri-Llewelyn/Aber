@@ -47,8 +47,8 @@ function describeWorkerPassword(sources) {
  * off the gateway's devices, only a shadow gateway is offered, and whether it holds a broker
  * credential is shown before the click. None of that is the control: `start_playback_job()`
  * re-checks the credential and the device map, and refuses any gateway that is not a shadow. The
- * captured ids come from the manifest; a capture recorded before the manifest carried them falls
- * back to reading the file.
+ * captured ids come from the manifest alone, as ensure_shadow_devices() reads them. The dialog never
+ * reads the file: only a download the person asks for may, and issue_capture_download() records it.
  */
 export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
@@ -58,7 +58,6 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
   const [targetId, setTargetId] = useState('')
   const [deviceMap, setDeviceMap] = useState({})
   const [speed, setSpeed] = useState(1)
-  const [capturedDevices, setCapturedDevices] = useState(null)
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
   // Its OWN pending flag, not `run`'s. Sharing one would put the Start button into its pending
@@ -83,20 +82,10 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
     return () => { cancelled = true }
   }, [])
 
-  // The device ids the capture publishes under. From the manifest when it has them.
-  useEffect(() => {
-    let cancelled = false
-    const fromManifest = capture?.manifest?.device_ids
-    if (Array.isArray(fromManifest)) { setCapturedDevices(fromManifest); return }
-
-    // Fallback for a capture recorded before the manifest carried these. A failure leaves an empty
-    // map rather than blocking the dialog: a capture with no devices is legitimate.
-    api.captureUrl(capture.storage_path)
-      .then(url => fetch(url).then(r => r.json()))
-      .then(doc => { if (!cancelled) setCapturedDevices(doc?.identities?.devices || []) })
-      .catch(() => { if (!cancelled) setCapturedDevices([]) })
-    return () => { cancelled = true }
-  }, [capture])
+  // The device ids the capture publishes under, from its manifest. Null when the manifest holds no
+  // list: a capture stored before the manifest carried one, or uploaded through the API without it.
+  // Such a capture cannot be mapped here, and ensure_shadow_devices() makes it no lanes.
+  const capturedDevices = Array.isArray(capture?.manifest?.device_ids) ? capture.manifest.device_ids : null
 
   const target = useMemo(
     () => (targets || []).find(t => t.id === targetId) || null,
@@ -160,6 +149,7 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
   // The worker check is not part of `ready` when the status is unknown: a dialog that refuses
   // because it could not read a courtesy row would be worse than the failure it prevents.
   const ready = deployed
+    && capturedDevices !== null
     && !!target
     && target.gateway_has_broker_credential
     && (worker === undefined || !workerLive || workerHoldsCurrent(target))
@@ -198,13 +188,14 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
             // Stated rather than left to a greyed-out button, which explains nothing about why.
             title={ready ? undefined : (
               !deployed ? 'The playback worker is not deployed on this site (playback.enabled)'
-                : !target ? 'Choose the Playback gateway'
-                  : !target.gateway_has_broker_credential ? 'The Playback gateway holds no broker credential'
-                    : (workerLive && !workerHolds(target))
-                      ? 'The playback worker was not given this gateway’s password'
-                      : (workerLive && !workerHoldsCurrent(target))
-                        ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
-                        : `${plural(unmapped.length, 'device')} still to map`
+                : capturedDevices === null ? 'This capture holds no list of its devices. Download it, then play it with Play a file…'
+                  : !target ? 'Choose the Playback gateway'
+                    : !target.gateway_has_broker_credential ? 'The Playback gateway holds no broker credential'
+                      : (workerLive && !workerHolds(target))
+                        ? 'The playback worker was not given this gateway’s password'
+                        : (workerLive && !workerHoldsCurrent(target))
+                          ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
+                          : `${plural(unmapped.length, 'device')} still to map`
             )}
             onClick={submit}
           >
@@ -234,6 +225,19 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
             This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay
             opens with the edge node’s birth certificate. Record it again.
             The recorder asks the edge node for its birth certificate when it starts.
+          </div>
+        </div>
+      )}
+
+      {/* The device list is the manifest's: the dialog does not read the file, which would record a
+          download nobody asked for. Play a file… stores the file again with its list. */}
+      {capturedDevices === null && (
+        <div className="callout callout-warning">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            This capture was stored without the list of devices it holds, so they cannot be mapped
+            here. Download it, then play the file with <strong>Play a file…</strong>. That stores it
+            again with its list of devices.
           </div>
         </div>
       )}

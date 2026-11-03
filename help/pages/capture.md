@@ -27,6 +27,8 @@ If the ingestion service restarts during a recording, it stores what was recorde
 
 A capture with no birth certificate cannot be played back. A playback starts the way a gateway's own session does, with its birth certificate, so it refuses a capture without one. **NO BIRTH** marks such a capture in warning colour. Record it again to replace it: recording asks the gateway to send its birth certificate. A playback also leaves out anything recorded before that birth certificate, and a device's messages before its own.
 
+Some older captures were stored without a list of the devices they hold. The playback dialog cannot map their devices, so it says so and offers no playback. Opening the dialog does not download the file. To play such a capture, **Download** it, then play the file with **Play a file…**. That stores it again with its list of devices.
+
 Playback needs the playback worker, which every install runs. If the playback dialog says the worker is not deployed, set `playback.enabled: true` in the site's Helm values and upgrade the release. Until then a playback cannot start.
 
 Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian. If delivery fails, the credential dialog says how to set the password in the Helm values instead. The worker then uses that password whenever the broker refuses the delivered one, and the playback dialog says which one it uses.
