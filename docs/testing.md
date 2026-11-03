@@ -1317,6 +1317,10 @@ Both end with the same checks:
 
 - every StatefulSet, Deployment and DaemonSet rolls out, one `kubectl rollout status` at a time
   (`helm --wait` deadlocks a first install, see [`help/site/running-the-server.md`](../help/site/running-the-server.md#a-from-the-published-chart-no-image-builds));
+- the historian's TimescaleDB extension is installed at the version its image ships, the one
+  `timescaledb/Dockerfile` is built `FROM`. On `upgrade` from a release with an older TimescaleDB,
+  this shows the maintenance hook waited for the new historian pod before it updated the extension
+  ([`timescaledb/README.md`](../timescaledb/README.md#why-on-every-boot-and-in-this-order));
 - `helm test` passes;
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a

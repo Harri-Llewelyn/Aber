@@ -46,7 +46,8 @@ on the old definitions, until the next upgrade. Seen on the dev cluster when Tim
 2.29.2 to 2.31.0. The dev loop rebuilds images under one tag, so it sets the historian's
 `checksum/image` pod annotation (`timescaledb.podAnnotations`) to the rebuilt image's id. The
 historian then restarts during `helm upgrade`, as a new image tag makes it restart on a real
-upgrade.
+upgrade. The install and upgrade rehearsals (`scripts/site-rehearsal.mjs`) assert the installed
+version equals the one the image ships.
 
 **The order, and what each position protects:**
 
