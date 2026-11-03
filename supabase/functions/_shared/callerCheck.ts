@@ -1,21 +1,18 @@
 /**
- * Whether the data layer accepts the caller's token, for a function that reads as its caller (aas-api,
- * fplus-directory). One PostgREST call made with the caller's own Authorization, to `auth_probe()`,
- * which `authenticated` alone may run: it succeeds only when PostgREST verifies the token and
- * auth_pre_request() finds neither it, its identity nor its session withdrawn. A person's session
- * and a machine identity's token both pass. GoTrue's getUser() is not used: it refuses a token with
- * no `aud` claim, and a machine identity's token carries none.
+ * Whether PostgREST accepts the caller's token, for a function that reads as its caller: one call
+ * with the caller's Authorization to `auth_probe()`, which `authenticated` alone may run, after
+ * auth_pre_request() has refused anything revoked or ended. Not GoTrue's getUser(), which refuses a
+ * machine identity's token because it carries no `aud`.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** The probe's name. supabase/migrations/0224 declares it; check 184 of check-docs-drift.mjs reads it. */
+/** Declared by migration 0224; check 184 of check-docs-drift.mjs reads this line. */
 export const AUTH_PROBE = "auth_probe";
 
 /**
- * `accepted`, or why not. `refused` is a refusal of the token (PostgREST's 401 or 403), which the
- * caller answers with its own 401; otherwise the token could not be checked, which is a server fault
- * and never an acceptance.
+ * `refused` is PostgREST's 401 or 403, which the caller answers with its own 401. Otherwise the
+ * token could not be checked: a server fault, never an acceptance.
  */
 export type CallerCheck =
   | { accepted: true }
