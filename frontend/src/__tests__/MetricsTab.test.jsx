@@ -2414,3 +2414,47 @@ describe('Metrics — sorting by a column (#801)', () => {
     expect(window.location.pathname + window.location.search).toBe('/metrics/deprecated?sort=-superseded_by')
   })
 })
+
+/** #1349: a metric's drawer shows its UUID and opens its Audit Trail, and the search takes a UUID. */
+describe('a metric\'s id', () => {
+  it('is in the drawer, mono and copyable, as a device\'s or a schema\'s is', async () => {
+    renderTab()
+    await waitForCatalog()
+    selectMetric(catalogTable(), 'Controller/EXECUTION')
+    const label = [...drawer().querySelectorAll('.context-panel-fields dt')].find(dt => dt.textContent.trim() === 'Metric UUID')
+    expect(label).toBeTruthy()
+    // CopyableId draws the id in its own mono chip, with a copy button.
+    const value = label.nextElementSibling
+    expect(value).toHaveTextContent('m2')
+    expect(within(value).getByRole('button', { name: /copy/i })).toBeInTheDocument()
+  })
+
+  it('opens the Audit Trail filtered to the metric, on both tabs', async () => {
+    renderTab()
+    await waitForCatalog()
+    selectMetric(catalogTable(), 'Controller/EXECUTION')
+    expect(within(drawer()).getByRole('link', { name: /View Audit Trail/ }))
+      .toHaveAttribute('href', '/audit-trail?search=m2&type=METRIC')
+    selectMetric(cardTable('Deprecated Metrics'), 'temperature')
+    expect(within(drawer()).getByRole('link', { name: /View Audit Trail/ }))
+      .toHaveAttribute('href', '/audit-trail?search=m9&type=METRIC')
+  })
+
+  it('offers no View Audit Trail to a reader who may not open the Audit Trail', async () => {
+    renderTab({ hasPermission: (p) => p !== PERMISSION_UUIDS.AUDIT_TRAIL_READ })
+    await waitForCatalog()
+    selectMetric(catalogTable(), 'Controller/EXECUTION')
+    expect(within(drawer()).queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+  })
+
+  it('finds a metric by its UUID in the catalog\'s search', async () => {
+    renderTab()
+    await waitForCatalog()
+    const search = screen.getByLabelText('Search the metric catalog')
+    expect(search).toHaveAttribute('placeholder', 'Search name or UUID…')
+    fireEvent.change(search, { target: { value: 'M3' } })
+    await waitFor(() => expect(within(catalogTable()).getByText('Controller/FIRMWARE')).toBeInTheDocument())
+    expect(within(catalogTable()).queryByText('Controller/EXECUTION')).toBeNull()
+    expect(within(catalogTable()).queryByText('Axes/DISPLACEMENT')).toBeNull()
+  })
+})

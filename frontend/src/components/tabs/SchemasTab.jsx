@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, devicesForSchemaUrl, schemaUrl } from '../../routes'
+import { deviceUrl, devicesForSchemaUrl, schemaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -24,7 +24,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -212,6 +212,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   // Drafts stay in the working list: opening one is the only way to finish it. See isCurrentSchema().
   const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
   const currentCount = schemas.length - archivedCount
@@ -598,6 +599,12 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             title: selectedSchema.schema_definition
               ? `Save ${selectedSchema.schema_name}.schema.json to open in an editor or JSON Schema tool`
               : 'This version has no definition to download'
+          },
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(selectedSchema.schema_uuid, 'SCHEMA'),
+            title: 'Open the Audit Trail filtered to this schema version'
           },
         ].filter(Boolean) : []}
       />

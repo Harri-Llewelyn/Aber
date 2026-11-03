@@ -87,6 +87,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - The app's sessions for that person end at once. The API refuses them straight away. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within an hour.
 - The app asks them to allow it again the next time it signs them in. Their role and their other sessions do not change.
 - A person can revoke their own approval on their **Profile** page, on the **Allowed Apps** tab.
+- **View Audit Trail**, in the app's drawer, opens the Audit Trail on the app's own history: when it was registered, removed or restored. A person allowing an app, or that approval being revoked, is in that person's history instead.
 - **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
 - **Aber's own four apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
 - Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.

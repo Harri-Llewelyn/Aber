@@ -7,7 +7,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
-import { IconGlobe, IconShieldAlert, IconTrash } from '../common/Icons'
+import { IconGlobe, IconHistory, IconShieldAlert, IconTrash } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
 import { SearchInput } from '../common/SearchInput'
@@ -16,7 +16,7 @@ import { Tooltip } from '../common/Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { appUrl, tabUrl } from '../../routes'
+import { appUrl, tabUrl, trailUrl } from '../../routes'
 import { formatDateTime, plural } from '../../utils/format'
 import { appLabel, appRegistration, clientTypeLabel, removeQuestion, revokeQuestion } from '../../utils/apps'
 
@@ -42,9 +42,10 @@ const personOf = (r) => r.display_name || r.email || r.user_id
  * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own four apps are
  * marked and cannot be removed: they are registered again each time Aber starts.
  *
- * `drawerHost` is the element the drawer is drawn into, beside the page's card.
+ * `drawerHost` is the element the drawer is drawn into, beside the page's card. `canReadTrail` offers
+ * View Audit Trail, the app's own lane.
  */
-export function AppsSection({ showToast, drawerHost = null }) {
+export function AppsSection({ showToast, drawerHost = null, canReadTrail = false }) {
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -194,7 +195,13 @@ export function AppsSection({ showToast, drawerHost = null }) {
               ? 'Aber registers this app each time it starts, so it cannot be removed.'
               : 'Stop it signing anyone in. Every approval of it, and every session it holds, ends.',
           },
-        ] : []}
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(a.id, 'APP'),
+            title: 'Open the Audit Trail filtered to this app: its registration and removal. A person allowing it is in their own history.',
+          },
+        ].filter(Boolean) : []}
       />
     )
   })()
