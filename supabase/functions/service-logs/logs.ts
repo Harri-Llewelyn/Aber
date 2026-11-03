@@ -5,14 +5,17 @@
  *
  *   GET                                  the services that wrote a line in the last 7 days
  *   GET ?service=&level=&filter=&range=&limit=
- *                                        that service's newest lines, newest first
+ *                                        that service's newest lines in the range back from now,
+ *                                        newest first
+ *   GET ?service=&level=&filter=&from=&to=&limit=
+ *                                        the same, between two instants
  *
  * Parameters, never a query: store.ts builds the one query shape from them. Over a ceiling a read is
  * clamped (the line count, the line length) or refused (anything else), and the answer says which.
  *
- * Each read of lines is recorded as the caller by record_service_logs_read() (0225), which writes an
- * Audit Trail row only when the parameters differ from the caller's last recorded read, so a refresh
- * writes nothing. The lines are released only once that call has answered.
+ * Each read of lines is recorded as the caller by record_service_logs_read() (0225, 0230), which
+ * writes an Audit Trail row only when the parameters differ from the caller's last recorded read, so
+ * a refresh writes nothing. The lines are released only once that call has answered.
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -34,6 +37,12 @@ export const RANGES: Record<string, number> = {
 };
 export const DEFAULT_RANGE = "1h";
 
+/**
+ * The widest window `from` and `to` may name, in hours: 7 days, and the hour a calendar week
+ * gains when the clocks go back, so the time control's Week is never refused.
+ */
+export const LONGEST_WINDOW_HOURS = 169;
+
 /** `any`, or a level read from a JSON line's `level` field. A line that is not JSON has none. */
 export const LEVELS = ["any", "error", "warning", "info", "debug"];
 
@@ -48,8 +57,10 @@ export const SERVICE_MAX = 128;
 /** What a line cut at LINE_BYTES ends with. */
 export const CUT_MARKER = " … [cut at 8 KiB]";
 
-const PARAMETERS = ["service", "level", "filter", "range", "limit"];
+const PARAMETERS = ["service", "level", "filter", "range", "from", "to", "limit"];
 const LONGEST_RANGE = Math.max(...Object.values(RANGES));
+const LONGEST_WINDOW = LONGEST_WINDOW_HOURS * 60 * 60_000;
+const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 // deno-lint-ignore no-control-regex -- refusing NUL is the point
 const NUL = /\x00/;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -71,9 +82,28 @@ export interface Read {
   service: string;
   level: string;
   filter: string;
-  range: string;
+  /** A rolling window's key, or null for a fixed window. */
+  range: string | null;
+  /** A fixed window's ends in milliseconds, `to` the first moment outside it; null when rolling. */
+  from: number | null;
+  to: number | null;
   limit: number;
   clamped: { parameter: string; asked: number; used: number; why: string }[];
+}
+
+/**
+ * An ISO 8601 instant with its offset (`2026-11-02T00:00:00Z`, `…+01:00`) in milliseconds, or null.
+ * Date.parse alone rolls 30 February into March and reads 24:00, so each part is checked first. A
+ * time with no offset names no instant, and one before 1970 no log line.
+ */
+export function parseInstant(text: string): number | null {
+  const m = INSTANT.exec(text);
+  if (!m) return null;
+  const [y, mo, d, h, mi, sec = 0, oh = 0, om = 0] = m.slice(1).map((v) => (v === undefined ? 0 : Number(v)));
+  const days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (mo < 1 || mo > 12 || d < 1 || d > days || h > 23 || mi > 59 || sec > 59 || oh > 23 || om > 59) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
 /** The request's parameters checked against the ceilings, or the answer refusing them. */
@@ -92,9 +122,33 @@ export function parseRead(url: URL): Read | Response {
   const level = get("level") || "any";
   if (!LEVELS.includes(level)) return refuse(`level must be one of ${LEVELS.join(", ")}.`);
 
-  const range = get("range") || DEFAULT_RANGE;
-  if (!Object.hasOwn(RANGES, range)) {
-    return refuse(`range must be one of ${Object.keys(RANGES).join(", ")}. A read covers at most 7 days.`);
+  // A rolling window is its range, measured back from now; a fixed one is its two ends.
+  const fixed = url.searchParams.has("from") || url.searchParams.has("to");
+  let range: string | null = null;
+  let from: number | null = null;
+  let to: number | null = null;
+  if (fixed) {
+    if (get("range")) return refuse("Give range, or from and to, not both.");
+    if (!url.searchParams.has("from") || !url.searchParams.has("to")) {
+      return refuse("Give both from and to: a fixed window has two ends.");
+    }
+    from = parseInstant(get("from"));
+    to = parseInstant(get("to"));
+    if (from === null || to === null) {
+      return refuse("from and to are ISO 8601 instants with an offset, such as 2026-11-02T00:00:00Z.");
+    }
+    if (to <= from) return refuse("to must be after from.");
+    if (to - from > LONGEST_WINDOW) {
+      return refuse(
+        "from and to are at most 7 days apart, or 7 days and an hour for a week that holds a clock change. " +
+          "A read covers at most 7 days.",
+      );
+    }
+  } else {
+    range = get("range") || DEFAULT_RANGE;
+    if (!Object.hasOwn(RANGES, range)) {
+      return refuse(`range must be one of ${Object.keys(RANGES).join(", ")}. A read covers at most 7 days.`);
+    }
   }
 
   const filter = get("filter");
@@ -117,7 +171,7 @@ export function parseRead(url: URL): Read | Response {
       limit = MAX_LINES;
     }
   }
-  return { service, level, filter, range, limit, clamped };
+  return { service, level, filter, range, from, to, limit, clamped };
 }
 
 /** `text` cut to LINE_BYTES of UTF-8 at a character boundary, with the marker, and whether it was. */
@@ -246,10 +300,10 @@ export async function handler(req: Request): Promise<Response> {
       });
     }
 
-    const to = Date.now();
+    const now = Date.now();
     let services: string[];
     try {
-      services = await listServices(loki, to - LONGEST_RANGE, to, UPSTREAM_TIMEOUT_MS);
+      services = await listServices(loki, now - LONGEST_RANGE, now, UPSTREAM_TIMEOUT_MS);
     } catch (err) {
       return storeFailure(req, err);
     }
@@ -258,7 +312,7 @@ export async function handler(req: Request): Promise<Response> {
       return refuse(`No service called ${JSON.stringify(read.service)} wrote a line in the last 7 days.`);
     }
 
-    const from = to - RANGES[read.range];
+    const [from, to] = read.range === null ? [read.from!, read.to!] : [now - RANGES[read.range], now];
     let stored: StoredLine[];
     try {
       stored = await readLines(loki, buildQuery(read), from, to, read.limit, UPSTREAM_TIMEOUT_MS);
@@ -266,12 +320,14 @@ export async function handler(req: Request): Promise<Response> {
       return storeFailure(req, err);
     }
 
-    // As sent, never the resolved times, so the same read a minute later is the same read.
+    // What was asked for: a rolling window's key, never the times it resolved to, so the same read
+    // a minute later is the same read; a fixed window's ends, so a repeat of it is too.
     const { data: recorded, error: recordError } = await caller.rpc("record_service_logs_read", {
       p_service: read.service,
       p_level: read.level,
       p_filter: read.filter,
       p_range: read.range,
+      ...(read.range === null ? { p_from: new Date(from).toISOString(), p_to: new Date(to).toISOString() } : {}),
     });
     if (recordError) {
       return serverError(req, FN, recordError, {

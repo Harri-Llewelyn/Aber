@@ -4,7 +4,8 @@
 -- service-logs function, Administrator only. The lines carry failed sign-ins, addresses and emails,
 -- so a read is recorded: record_service_logs_read() writes one SERVICE_LOGS_READ row naming the
 -- Administrator and the read's service, level, text filter and range, as the function was asked
--- for them.
+-- for them. A read names a rolling range or a fixed window's two ends: 0230 added the ends, and
+-- this file declares that form in place (0230 drops the four-argument one).
 --
 -- The function decides when a row is due, never the caller: one is written when the parameters
 -- differ from those of the caller's last recorded read, so a refresh or a poll writes nothing and
@@ -23,10 +24,12 @@
 -- -------------------------------------------------------------------------------------------------
 -- 1. Recording a read
 -- -------------------------------------------------------------------------------------------------
--- The levels and ranges are service-logs' (logs.ts), and the filter's limit too; mirror check 40
--- holds the three lists together with the dashboard's.
+-- The levels and ranges are service-logs' (logs.ts), and the filter's limit and the widest window
+-- too; mirror check 40 holds the lists together with the dashboard's.
 CREATE OR REPLACE FUNCTION public.record_service_logs_read(p_service text, p_level text, p_filter text,
-                                                           p_range text)
+                                                           p_range text,
+                                                           p_from timestamp with time zone DEFAULT NULL,
+                                                           p_to timestamp with time zone DEFAULT NULL)
 RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -49,8 +52,22 @@ BEGIN
     RAISE EXCEPTION 'the level is any, error, warning, info or debug, not %', coalesce(quote_literal(p_level), 'NULL')
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  IF p_range IS NULL OR NOT p_range = ANY (ARRAY['15m', '1h', '6h', '24h', '7d']) THEN
-    RAISE EXCEPTION 'the range is 15m, 1h, 6h, 24h or 7d, not %', coalesce(quote_literal(p_range), 'NULL')
+  -- A rolling window is its range; a fixed one is its two ends, at most 7 days and the hour a week
+  -- gains when the clocks go back apart.
+  IF p_range IS NOT NULL OR (p_from IS NULL AND p_to IS NULL) THEN
+    IF p_from IS NOT NULL OR p_to IS NOT NULL THEN
+      RAISE EXCEPTION 'a read names a range or a window''s two ends, not both'
+        USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+    IF p_range IS NULL OR NOT p_range = ANY (ARRAY['15m', '1h', '6h', '24h', '7d']) THEN
+      RAISE EXCEPTION 'the range is 15m, 1h, 6h, 24h or 7d, not %', coalesce(quote_literal(p_range), 'NULL')
+        USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+  ELSIF p_from IS NULL OR p_to IS NULL OR p_to <= p_from THEN
+    RAISE EXCEPTION 'a fixed window names both its ends, the second after the first'
+      USING ERRCODE = 'invalid_parameter_value';
+  ELSIF p_to - p_from > interval '169 hours' THEN
+    RAISE EXCEPTION 'a window is at most 7 days and an hour long, not %', p_to - p_from
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
   IF char_length(coalesce(p_filter, '')) > 200 THEN
@@ -58,9 +75,14 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- `name` is the service, so the Audit Trail names the lane as it names every other.
-  v_read := jsonb_build_object('name', p_service, 'level', p_level, 'filter', nullif(p_filter, ''),
-                               'range', p_range);
+  -- `name` is the service, so the Audit Trail names the lane as it names every other. The ends are
+  -- written in UTC to the millisecond, as service-logs sends them, whatever the session's zone.
+  v_read := jsonb_build_object('name', p_service, 'level', p_level, 'filter', nullif(p_filter, ''))
+            || CASE WHEN p_range IS NOT NULL THEN jsonb_build_object('range', p_range)
+                    ELSE jsonb_build_object(
+                           'from', to_char(p_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                           'to', to_char(p_to AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+               END;
 
   -- One read at a time per person, so two identical requests that arrive together write one row.
   PERFORM pg_advisory_xact_lock(hashtextextended('record_service_logs_read:' || v_uid::text, 0));
@@ -91,18 +113,24 @@ BEGIN
 END
 $$;
 
-ALTER FUNCTION public.record_service_logs_read(p_service text, p_level text, p_filter text, p_range text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.record_service_logs_read(text, text, text, text) FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.record_service_logs_read(text, text, text, text) TO authenticated;
+ALTER FUNCTION public.record_service_logs_read(text, text, text, text, timestamp with time zone,
+                                               timestamp with time zone) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.record_service_logs_read(text, text, text, text, timestamp with time zone,
+                                                       timestamp with time zone) FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.record_service_logs_read(text, text, text, text, timestamp with time zone,
+                                                          timestamp with time zone) TO authenticated;
 
-COMMENT ON FUNCTION public.record_service_logs_read(p_service text, p_level text, p_filter text, p_range text) IS
+COMMENT ON FUNCTION public.record_service_logs_read(text, text, text, text, timestamp with time zone,
+                                                    timestamp with time zone) IS
   'Administrator only. Records that the service-logs function read a service''s log lines: one '
   'SERVICE_LOGS_READ row in the service_logs lane of the security domain, with the service (as '
-  'name), the level, the text filter and the range key, and the Administrator in changed_by. '
-  'Writes nothing and returns NULL when those are the caller''s last recorded read of the last 24 '
-  'hours, so a refresh is not recorded twice; otherwise returns the row''s id. Refuses a level, a '
-  'range, a service name or a filter outside the function''s rule (22023). The entity id is the '
-  'md5 of service_logs: and the service, one lane per service (0225).';
+  'name), the level, the text filter, and the range key for a rolling window or the two ends (from '
+  'and to, UTC to the millisecond) for a fixed one, and the Administrator in changed_by. Writes '
+  'nothing and returns NULL when those are the caller''s last recorded read of the last 24 hours, '
+  'so a refresh is not recorded twice; otherwise returns the row''s id. Refuses a level, a range, '
+  'a service name, a filter or a window outside the function''s rule (22023): a range or two ends, '
+  'not both, the ends in order and at most 169 hours apart. The entity id is the md5 of '
+  'service_logs: and the service, one lane per service (0225, 0230).';
 
 COMMENT ON FUNCTION public.audit_actor_source() IS
   'The actor_source a function writing its own audit_trail row records: user for a person, '
@@ -119,7 +147,8 @@ COMMENT ON FUNCTION public.audit_actor_source() IS
 -- -------------------------------------------------------------------------------------------------
 DO $check$
 DECLARE
-  f      text := 'public.record_service_logs_read(text, text, text, text)';
+  f      text := 'public.record_service_logs_read(text, text, text, text, timestamp with time zone, '
+                   'timestamp with time zone)';
   v_role text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = f::regprocedure
@@ -144,7 +173,7 @@ BEGIN
   -- A request with no person behind it is refused before anything is written.
   PERFORM set_config('request.jwt.claims', '', true);
   BEGIN
-    PERFORM public.record_service_logs_read('ingestion', 'any', '', '1h');
+    PERFORM public.record_service_logs_read('ingestion', 'any', '', '1h', NULL, NULL);
     RAISE EXCEPTION '0225: record_service_logs_read() answered a caller with no identity';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
