@@ -52,6 +52,7 @@ GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 # The reason this suite drives. One of the ten in ingestion.py, chosen because it is reachable
 # with a single publish and needs no fixture: an unregistered device is refused by definition.
 REASON = "quarantined_or_unregistered"
+DROPPED = f'aber_ingestion_messages_dropped_total{{reason="{REASON}"}}'
 
 # How long to wait for a line to travel daemon -> Docker -> Alloy -> Loki. Alloy's discovery
 # refresh is 15s and its batch wait is a few seconds on top, so this is deliberately generous:
@@ -134,6 +135,17 @@ def prom_scalar(expr, default=0.0):
 def prom_by_pod(expr):
     """{pod: value} for a query whose answer keeps the `pod` label."""
     return {r["metric"].get("pod", ""): float(r["value"][1]) for r in prom_query(expr)}
+
+
+def prom_by_series(selector):
+    """{(pod, instance): value} for each series a selector matches, unsummed."""
+    return {(r["metric"].get("pod", ""), r["metric"].get("instance", "")): float(r["value"][1])
+            for r in prom_query(selector)}
+
+
+def series_that_rose(before, after):
+    """The series in `after` above their own value in `before`, or absent from it and at least 1."""
+    return {s: v for s, v in after.items() if (v > before[s] if s in before else v >= 1)}
 
 
 def fresh(selector):
@@ -359,8 +371,7 @@ class DropPairTestCase(unittest.TestCase):
         # run and drops nothing, so the suite would pass while testing nothing.
         cls.device = "dev" + secrets.token_hex(11)[:21]
 
-        cls.before = prom_scalar(
-            f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+        cls.before = prom_by_series(DROPPED)
 
         client = mqtt.Client(protocol=mqtt.MQTTv5)
         client.username_pw_set(user or "", password)
@@ -383,19 +394,23 @@ class DropPairTestCase(unittest.TestCase):
     def test_the_drop_was_counted_in_prometheus(self):
         """Half one of the pair. Without this the log assertion below proves nothing about the
         counter, and the two halves are only interesting together."""
+        # Per series, never summed. The capture-lifecycle suite evicts the ingestion pod earlier in
+        # the lane, and the old pod's series stays visible for the five-minute lookback beside the
+        # new pod's: a sum can stay flat if the old one ages out as the new one counts the drop.
         deadline = time.time() + 60
         after = self.before
         while time.time() < deadline:
-            after = prom_scalar(
-                f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
-            if after > self.before:
+            after = prom_by_series(DROPPED)
+            if series_that_rose(self.before, after):
                 return
             time.sleep(5)
         self.fail(
-            f"the drop counter for reason={REASON} did not increase "
-            f"({self.before} -> {after}) after publishing DDATA for an unregistered device. "
+            f"no series of the drop counter for reason={REASON} rose after publishing DDATA for an "
+            f"unregistered device.\n  before, by (pod, instance): {self.before}\n"
+            f"  after,  by (pod, instance): {after}\n"
             f"Either the broker refused the publish (check the credential), or the daemon did "
-            f"not take the drop arm."
+            f"not take the drop arm. If the log-store half of this pair passes, the drop happened "
+            f"and the values above show where its count went."
         )
 
     def test_the_same_drop_is_readable_in_the_log_store_naming_the_device(self):
