@@ -164,7 +164,7 @@ describe('where a notification links to', () => {
     ['components/tabs/MetricsTab.jsx', ["useUrlState('metric'"], 'deprecated'],
     ['components/tabs/CaptureTab.jsx', ["useUrlState('subject'"], 'device'],
     ['components/tabs/BackupsTab.jsx', ["useUrlState('run'"], null],
-    ['components/tabs/DevicesTab.jsx', ["useUrlState('gateway'", "useUrlState('replay'"], null],
+    ['components/tabs/DevicesTab.jsx', ["useUrlList('gateway'", "useUrlState('replay'"], null],
     ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'", "useUrlState('person'"], null],
     ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
   ])('%s reads what its link writes', (file, needles, tab) => {

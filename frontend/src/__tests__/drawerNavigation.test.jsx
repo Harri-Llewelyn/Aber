@@ -428,7 +428,7 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     window.history.replaceState(null, '', deviceUrl('dev-1'))
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
     await waitFor(() => expect(list().getByText('Sim_CNC_Mill_01')).toBeInTheDocument())
   })
 
@@ -437,7 +437,7 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     window.history.replaceState(null, '', gatewayUrl('gw-1'))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
     await waitFor(() => expect(list().getByText('Sim_Gateway_CNC')).toBeInTheDocument())
   })
 

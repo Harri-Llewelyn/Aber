@@ -24,7 +24,9 @@ import { HelpLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_TABS } from '../../navigation'
 import { PERMISSION_UUIDS } from '../../constants'
 import { useSortableRows } from '../../hooks/useTableSort'
@@ -113,6 +115,9 @@ export const APPS_SECTION = ACCESS_CONTROL_APPS_TAB
 /** The page's other tabs, in order. The id is the tab's path segment; the description is its tooltip. */
 export const SECTIONS = ACCESS_CONTROL_TABS
 
+/** No list filter chosen. */
+const NO_STATES = Object.freeze([])
+
 /**
  * Access Control: people, broker credentials and machine identities, as tabs of one card.
  *
@@ -160,8 +165,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   // Archived gateways are left off Broker credentials until this is on, as removed people and
   // withdrawn identities are on their tabs.
   const [showArchived, setShowArchived] = useUrlState('archived', false)
-  // A credential state, or the archive while archived gateways are shown; '' is any state.
-  const [credentialFilter, setCredentialFilter] = useUrlState('state', '', {
+  // Credential states, and the archive while archived gateways are shown; none is any state.
+  const [credentialFilter, setCredentialFilter] = useUrlList('state', NO_STATES, {
     allowed: [...Object.values(CREDENTIAL_STATES), ...(showArchived ? ['archived'] : [])]
   })
   const [showWithdrawn, setShowWithdrawn] = useUrlState('withdrawn', false)
@@ -254,32 +259,20 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   // The drawer belongs to Broker roles; a tab change drops it from the address with the filters.
   const selectSection = useCallback((id) => setSection(id), [setSection])
 
-  // Counts per filter value, over the whole list, so the dropdown answers "is there any?" without
-  // being selected. Archived rows count only under Archived: archiving rotated their credential to
-  // a password nobody holds, so their state is not one of the four.
-  const filterCounts = useMemo(() => {
-    const counts = { active: 0, archived: 0 }
-    for (const s of Object.values(CREDENTIAL_STATES)) counts[s] = 0
-    for (const r of rows) {
-      if (r.is_archived) { counts.archived += 1; continue }
-      counts.active += 1
-      counts[credentialState(r, r.issued_at)] += 1
-    }
-    return counts
-  }, [rows])
+  // How many gateways are archived, over the whole list, for Show archived. Archived rows count only
+  // there: archiving rotated their credential to a password nobody holds, so their state is not one
+  // of the four.
+  const filterCounts = useMemo(() => ({ archived: rows.filter(r => r.is_archived).length }), [rows])
 
   const query = search.trim().toLowerCase()
-  const visible = useMemo(() => rows.filter(r => {
-    if (r.is_archived) {
-      if (!showArchived || (credentialFilter && credentialFilter !== 'archived')) return false
-    } else if (credentialFilter === 'archived') {
-      return false
-    } else if (credentialFilter && credentialState(r, r.issued_at) !== credentialFilter) {
-      return false
-    }
+  // State is any of its values; an archived gateway's is Archived, and it is listed only while
+  // archived gateways are shown. Each value's count is over what the search lets through.
+  const { rows: visible, counts: stateCounts } = useMemo(() => applyFacets(rows, [
+    { key: 'state', chosen: credentialFilter, values: r => [r.is_archived ? 'archived' : credentialState(r, r.issued_at)] },
+  ], r => (!r.is_archived || showArchived)
     // The two columns a gateway is known by: its name and the username it connects as.
-    return !query || [r.name, r.sparkplug_id].some(v => String(v || '').toLowerCase().includes(query))
-  }), [rows, credentialFilter, showArchived, query])
+    && (!query || [r.name, r.sparkplug_id].some(v => String(v || '').toLowerCase().includes(query)))),
+  [rows, credentialFilter, showArchived, query])
 
   // The toggle shows only while a gateway is archived, so an address that turns it on with none
   // archived is tidied once the list is in.
@@ -439,8 +432,8 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   </span>)
 
   // What each tab's Clear filters counts and resets.
-  const filterCount = (credentialFilter ? 1 : 0) + (query ? 1 : 0) + (showArchived ? 1 : 0)
-  const clearCredentialFilters = () => { setCredentialFilter(''); setSearch(''); setShowArchived(false) }
+  const filterCount = (credentialFilter.length ? 1 : 0) + (query ? 1 : 0) + (showArchived ? 1 : 0)
+  const clearCredentialFilters = () => { setCredentialFilter(NO_STATES); setSearch(''); setShowArchived(false) }
   const identityFilterCount = (query ? 1 : 0) + (showWithdrawn ? 1 : 0)
   const clearIdentityFilters = () => { setSearch(''); setShowWithdrawn(false) }
 
@@ -487,19 +480,24 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               placeholder="Search gateway or MQTT username…"
               ariaLabel="Search credentials by gateway name or MQTT username"
             />
-            <select
-              className="form-control control-lg"
+            <FilterDropdown
+              label="State"
+              noun="state"
+              plural="states"
+              options={[
+                { value: CREDENTIAL_STATES.ISSUED, label: 'Issued' },
+                { value: CREDENTIAL_STATES.AWAITING_ENROLMENT, label: 'Setup outstanding' },
+                { value: CREDENTIAL_STATES.REVOKED, label: 'Revoked' },
+                { value: CREDENTIAL_STATES.UNRECORDED, label: 'No platform record' },
+                // Offered only while archived gateways are shown.
+                ...(showArchived ? [{ value: 'archived', label: 'Archived' }] : []),
+              ]}
               value={credentialFilter}
-              onChange={e => setCredentialFilter(e.target.value)}
-              aria-label="Filter gateways by credential state"
-            >
-              <option value="">Any state ({filterCounts.active + (showArchived ? filterCounts.archived : 0)})</option>
-              <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
-              <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
-              <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
-              <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
-              {showArchived && <option value="archived">Archived ({filterCounts.archived})</option>}
-            </select>
+              onChange={setCredentialFilter}
+              counts={stateCounts.state}
+              width="lg"
+              tip="Where each gateway's broker credential stands"
+            />
             {/* Offered only while a gateway is archived; the count is what it would list. */}
             {filterCounts.archived > 0 && (
               <Tooltip text="Archived gateways are left off the list. Their credential was rotated to a password nobody holds until it is restored.">

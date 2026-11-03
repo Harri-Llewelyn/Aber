@@ -2565,7 +2565,9 @@ one person or machine identity had changed.
   shows the account's current address for them where the viewer may read it (an Administrator,
   through `list_user_accounts()`), and the id where not, as before.
 - **`audit_trail_page()` takes `p_changed_by uuid`**, its eleventh and last argument, and keeps the
-  rows whose `changed_by` is that id. It is `SECURITY INVOKER`, so `audit_trail`'s policies still
+  rows whose `changed_by` is that id. (`0227` makes it a list, with the kind and the action:
+  [An Audit Trail filter takes several values](#an-audit-trail-filter-takes-several-values-0227).)
+  It is `SECURITY INVOKER`, so `audit_trail`'s policies still
   decide the rows: a Shopfloor Manager filtering by an Administrator sees that person's asset-lane
   rows and none of their security-lane ones. Whoever can read the Audit Trail can filter it; no
   policy changed. The predicate is one equality in the scan `matching` already makes, so it costs
@@ -2796,6 +2798,48 @@ holds the rows, when one is due, the refusals and who reads them. `logs_test.ts`
 hold the role check, the parameters, the query and its escaping, the ceilings and the order: the
 store, then the row, then the lines. `test-harness/test_log_pipeline.py` reads a dropped device's line
 back through the function on a running stack.
+
+### An Audit Trail filter takes several values (0227)
+
+The Audit Trail's filters took one kind, one action and one person each, so "gateways and devices"
+or "what these two people changed" could not be asked. Every list filter in the dashboard now takes
+several values, and the trail's three are filtered on the server, before the row limit, as one
+value was: filtering a page after the fact would show whatever fraction of it matched.
+
+- **`audit_trail_page()` takes `p_entity_type text[]`, `p_action text[]` and `p_changed_by uuid[]`**,
+  in the places the single `text`, `text` and `uuid` were, under the same names. Each list keeps the
+  rows that match any of its values, and the three are combined with AND, as before.
+- **NULL or an empty list is no constraint, and a one-element list is the single value.** So a page
+  filtered on one kind, one action or one person returns what it did. A value no row holds matches
+  nothing; beside a value that does match, it takes nothing away. `p_entity_ids` keeps its own
+  rule, where an empty list matches nothing, since "these ids, of which there are none" is a
+  question about no entity.
+- **Nothing else changes.** The keyset paging, `total_matching`, `purged_assets`, the purged rule,
+  the search, `transaction_rows`, `SECURITY INVOKER` and the pinned `search_path` are as they were,
+  and `audit_trail`'s policies still decide the rows. The dashboard sends each list as an array, or
+  null when nothing is chosen (`frontend/src/api.js`).
+- **The old call is refused, not widened.** A client still sending one string for one of the three
+  gets PostgREST's error for a value that is not an array, rather than every row.
+
+**A changed argument type is a new signature**, so the rule `0222` followed applies. `0001` and
+`0168` declare the list form in place, and `0001`'s sweep of stale overloads names it. On the first
+boot of an upgrade, `0001` creates the list form beside the single-value one, and the sweep drops the
+single-value form at the end of the same file; `0227` drops it too if it is still there. Between the
+two, PostgREST cannot choose between the forms, so the Audit Trail fails for the seconds `0001` takes
+on that one boot. No later boot holds two. `0227` holds no third copy of the body: a third copy
+would only be something to keep in step, and `0001` and `0168` replay before it on every boot
+anyway. It states the grants by name, `authenticated` and `service_role` and not `anon`, since
+`0001`'s ACL section revokes from `PUBLIC` only. `0222`'s self-check now asserts only that
+`p_changed_by` is last, whatever its type.
+
+The file's self-check asserts one `audit_trail_page`, each of the three list arguments by name and
+type (not their places, so a later argument passes), `SECURITY INVOKER`, the pinned `search_path`
+and who may execute it. Check 195 (`scripts/check-docs-drift.mjs`) holds the three as arrays in
+`0001`, `0168`, the sweep, `0227`'s drop, the API reference and `api.js`.
+`test_an_audit_trail_filter_takes_several_values.py` holds two values of each list, the AND across
+them, the one-element list against the single value, NULL and the empty list, a value nothing
+holds, the cursor, the totals, the purged rule, the search and the caller's policies under lists,
+and one list form after `0001`, `0168`, `0222` and `0227` replay over the single-value form.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

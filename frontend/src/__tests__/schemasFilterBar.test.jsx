@@ -3,13 +3,14 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
+import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { schemaUrl } from '../routes'
 
 /**
  * The schema registry's filter bar and its scroll cap. The registry gains a row per publish, so it
  * is the fastest-growing list on the page and needs a filter bar and a bounded height. Archived
- * versions are an option in the status select rather than a separate toggle: isCurrentSchema() is
- * `status !== archived`, and two controls on one axis could contradict each other.
+ * versions are a value of the status filter rather than a separate toggle: Current is Active and
+ * Draft, and two controls on one axis could contradict each other.
  */
 
 vi.mock('../api', async () => {
@@ -73,7 +74,10 @@ const registryRows = () => [...(registryCard()?.querySelectorAll('tbody tr') || 
 const registryNames = () => registryRows().map(r => r.querySelector('td')?.textContent.trim())
 
 const searchBox = () => screen.getByLabelText('Search the schema registry')
-const statusSelect = () => screen.getByLabelText('Filter schemas by lifecycle state')
+/** The status filter: a dropdown whose button says what is chosen. */
+const statusSelect = () => dropdownButton('Status')
+/** A status value's checkbox in the open dropdown, by its words and count. */
+const statusValue = (name) => within(openDropdown('Status')).getByRole('checkbox', { name })
 
 const ready = async () => {
   await waitFor(() => expect(registryCard()).toBeTruthy())
@@ -98,9 +102,11 @@ describe('schema registry default view', () => {
     renderTab()
     await ready()
 
-    // The count survived losing the toggle's badge by moving into the option label.
-    expect(within(statusSelect()).getByText('Archived (1)')).toBeInTheDocument()
-    expect(within(statusSelect()).getByText('All versions (3)')).toBeInTheDocument()
+    // The count survived losing the toggle's badge by moving beside the value.
+    expect(statusSelect()).toHaveTextContent('Current')
+    expect(statusValue('Archived 1').checked).toBe(false)
+    expect(statusValue('Active 1').checked).toBe(true)
+    expect(statusValue('Draft 1').checked).toBe(true)
   })
 
   it('scrolls inside its card, which fills the page', async () => {
@@ -166,31 +172,57 @@ describe('schema registry search', () => {
 // The status filter
 
 describe('schema registry status filter', () => {
-  it('shows only drafts when Draft is selected', async () => {
+  it('shows only drafts when Draft is the one chosen', async () => {
     renderTab()
     await ready()
 
-    fireEvent.change(statusSelect(), { target: { value: 'draft' } })
+    pick('Status', 'draft')
 
     expect(registryNames()).toEqual(['Robot_Arm_Profile'])
   })
 
-  it('reveals superseded versions when Archived is selected', async () => {
+  it('reveals superseded versions when Archived is the one chosen', async () => {
     renderTab()
     await ready()
 
-    fireEvent.change(statusSelect(), { target: { value: 'archived' } })
+    pick('Status', 'archived')
 
     expect(registryNames()).toEqual(['CNC_Mill_Profile_v1'])
   })
 
-  it('shows every version, history included, under All versions', async () => {
+  it('shows every version, history included, with every status chosen', async () => {
     renderTab()
     await ready()
 
-    fireEvent.change(statusSelect(), { target: { value: 'all' } })
+    pick('Status', 'active', 'draft', 'archived')
 
     expect(registryNames()).toHaveLength(3)
+    expect(statusSelect()).toHaveTextContent('Any status')
+  })
+
+  it('takes two statuses, and keeps them in the address', async () => {
+    renderTab()
+    await ready()
+
+    pick('Status', 'draft', 'archived')
+
+    expect(registryNames().sort()).toEqual(['CNC_Mill_Profile_v1', 'Robot_Arm_Profile'])
+    expect(statusSelect()).toHaveTextContent('2 statuses')
+    expect(new URLSearchParams(window.location.search).get('status')).toBe('draft,archived')
+  })
+
+  it('opens a link written with one status, or with an old Current or All', async () => {
+    window.history.replaceState(null, '', '/schemas?status=archived')
+    const first = renderTab()
+    await ready()
+    expect(registryNames()).toEqual(['CNC_Mill_Profile_v1'])
+    first.unmount()
+
+    window.history.replaceState(null, '', '/schemas?status=all')
+    renderTab()
+    await ready()
+    expect(registryNames()).toHaveLength(3)
+    expect(new URLSearchParams(window.location.search).get('status')).toBe('active,draft,archived')
   })
 })
 
@@ -206,19 +238,19 @@ describe('clearing schema filters', () => {
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
 
     fireEvent.change(searchBox(), { target: { value: 'profile' } })
-    fireEvent.change(statusSelect(), { target: { value: 'all' } })
+    pick('Status', 'active', 'draft', 'archived')
     expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (2)')
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
 
     expect(searchBox()).toHaveValue('')
-    expect(statusSelect()).toHaveValue('current')
+    expect(statusSelect()).toHaveTextContent('Current')
     expect(registryNames()).not.toContain('CNC_Mill_Profile_v1')
   })
 
-  /* No count on the card heading, resting or searching: the status options say how many versions
-     each view holds. */
-  it('puts no count on the card heading, while the status options keep theirs', async () => {
+  /* No count on the card heading, resting or searching: the status values say how many versions
+     each holds. */
+  it('puts no count on the card heading, while the status values keep theirs', async () => {
     renderTab()
     await ready()
 
@@ -227,7 +259,9 @@ describe('clearing schema filters', () => {
 
     fireEvent.change(searchBox(), { target: { value: 'robot' } })
     expect(count()).toBeNull()
-    expect(within(statusSelect()).getByText('Current (2)')).toBeInTheDocument()
+    // Counted among what the search leaves: the draft Robot_Arm_Profile alone.
+    expect(statusValue('Draft 1')).toBeInTheDocument()
+    expect(statusValue('Active 0')).toBeInTheDocument()
   })
 })
 
@@ -242,9 +276,9 @@ describe('arriving on a schema that a filter would hide', () => {
     await ready()
 
     await waitFor(() => expect(registryNames()).toContain('CNC_Mill_Profile_v1'))
-    // Widened, NOT reset: resetting would restore `current`, which is the very filter that hides
-    // the archived version the operator just navigated to.
-    expect(statusSelect()).toHaveValue('all')
+    // Widened, NOT reset: resetting would restore Current, which is the very filter that hides
+    // the archived version the operator just navigated to. Every status chosen reads Any status.
+    expect(statusSelect()).toHaveTextContent('Any status')
     expect(registryCard().querySelector('.row-selected')).toBeTruthy()
   })
 
@@ -255,7 +289,7 @@ describe('arriving on a schema that a filter would hide', () => {
 
     // A draft is `current`, so nothing needs widening and history stays out of the working list.
     await waitFor(() => expect(registryCard().querySelector('.row-selected')).toBeTruthy())
-    expect(statusSelect()).toHaveValue('current')
+    expect(statusSelect()).toHaveTextContent('Current')
     expect(registryNames()).not.toContain('CNC_Mill_Profile_v1')
   })
 })

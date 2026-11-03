@@ -4,10 +4,11 @@
  * by the machine it recorded with its own id in the name's tooltip, and the drawer words each act.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, classifyEvent, diffFields, shortId } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS } from '../constants'
+import { filterList, offered } from '../test/listFilters'
 import { api } from '../api'
 import { tooltipOf } from '../test/tooltips'
 
@@ -103,10 +104,8 @@ describe('the capture lane', () => {
 
   it('offers the three kinds to a Shopfloor_Manager, who reads the asset lane', async () => {
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const kinds = [...screen.getByRole('combobox', { name: 'Entity' }).querySelectorAll('option')]
-      .map(o => o.textContent)
-    expect(kinds).toEqual(expect.arrayContaining(['Recordings', 'Captures', 'Playbacks']))
+    const capture = within(filterList('Entity')).getByRole('group', { name: 'Capture' })
+    expect(offered(capture)).toEqual(['Recordings', 'Captures', 'Playbacks'])
   })
 
   it('words a download in the drawer as the act it records', async () => {

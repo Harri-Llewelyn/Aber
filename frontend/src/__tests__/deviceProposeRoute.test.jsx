@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { PERMISSION_UUIDS } from '../constants'
+import { pick } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -71,7 +72,7 @@ const show = async (hasPermission, rows = [device()], proposals = []) => {
   // Filters popover.
   if (rows.some(r => r.is_archived)) {
     fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
+    await waitFor(() => pick('Lifecycle', 'active', 'archived'))
   }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
   return { onViewApprovals }

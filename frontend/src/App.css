@@ -1345,6 +1345,53 @@ a.tab-strip-tab { text-decoration: none; }
   border-top: 1px solid var(--border);
 }
 
+/* A list filter (FilterChecklist): the values as checkboxes under their group headings, a search
+   box above a long list, and each value's count at the right. The values scroll; the search box
+   stays. A dropdown's panel gives them more height than a list sharing the Filters panel. */
+.filter-checklist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.filter-checklist .search-input,
+.filter-checklist .search-input.control-lg { width: 100%; }
+.filter-checklist .search-input-field { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 13px; }
+.filter-checklist-options {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.filter-dropdown-panel .filter-checklist-options { max-height: min(50vh, 360px); }
+.filter-checklist-section + .filter-checklist-section { margin-top: 6px; }
+.filter-checklist-option,
+.filter-checklist-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.filter-checklist-group { font-weight: 600; }
+.filter-checklist-section .filter-checklist-option { padding-left: 24px; }
+.filter-checklist-option input,
+.filter-checklist-group input { margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.filter-checklist-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.filter-checklist-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.filter-checklist-empty { padding: 4px 2px; font-size: 12px; color: var(--text-muted); }
+/* In a Filters panel: the list's label, as the time control's popover labels its groups. */
+.filter-list { display: flex; flex-direction: column; gap: 6px; }
+.filter-list-head { display: flex; align-items: center; gap: 6px; }
+.filter-list-head .form-label { margin-bottom: 0; }
+.filter-check { flex: 1; }
+/* A list filter in the toolbar keeps the width of the select it replaced, so the row keeps its shape:
+   the words are cut at the edge, the chevron sits at the right. */
+.filter-dropdown { justify-content: space-between; min-width: 0; }
+.filter-dropdown-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
 .search-input { position: relative; display: inline-flex; align-items: center; }

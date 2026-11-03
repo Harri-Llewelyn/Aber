@@ -1168,7 +1168,7 @@ function edgeFunctionNames() {
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
-    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one',
+    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one. Both take p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195)',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
@@ -3839,6 +3839,209 @@ const OPERATOR_PAIRS = [
     fail(`service-logs does not read the Loki Grafana reads:\n` + problems190.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`service-logs alone holds LOKI_URL, set from the helper Grafana's datasource derives from, and reaches loki:${lokiPort} through its own edge`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 193. Every list filter is the shared one, as frontend/README.md says. A `<select>` in a page's
+// toolbar (`.filter-bar`, the Filters panel inside it included) takes one value, which is what the
+// shared FilterChecklist replaced; System › Logs' Service and Level are the two left, each a value
+// service-logs takes one of and records. The README's search threshold is the component's.
+// -------------------------------------------------------------------------------------------------
+{
+  /** file -> the aria-label of each select its toolbar may keep, and why. */
+  const KEPT_SELECTS = {
+    'frontend/src/components/tabs/SystemLogs.jsx': {
+      Service: 'the one service whose lines are read, a source rather than a filter over a list',
+      Level: 'one level, which service-logs takes and 0225 records with each read',
+    },
+  };
+  /** The end of the JSX tag that opens at `from`, past attribute braces and quotes. */
+  const tagEnd = (src, from) => {
+    let depth = 0;
+    let quote = null;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (quote) { if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'" || c === '`') quote = c;
+      else if (c === '{') depth++;
+      else if (c === '}') depth--;
+      else if (c === '>' && depth === 0) return i;
+    }
+    return -1;
+  };
+  /** The source of the element `<div` opening at `from` up to its matching `</div>`. */
+  const divBlock = (src, from) => {
+    let depth = 0;
+    let i = from;
+    while (i < src.length) {
+      const open = src.indexOf('<div', i);
+      const close = src.indexOf('</div>', i);
+      if (close < 0) return src.slice(from);
+      if (open >= 0 && open < close && /[\s>]/.test(src[open + 4])) {
+        const end = tagEnd(src, open);
+        if (end < 0) return src.slice(from);
+        if (src[end - 1] !== '/') depth++;
+        i = end + 1;
+      } else {
+        depth--;
+        i = close + 6;
+        if (depth === 0) return src.slice(from, i);
+      }
+    }
+    return src.slice(from);
+  };
+
+  const problems193 = [];
+  const files = allFiles.filter((f) => /^frontend\/src\/components\/(tabs|common)\/[^/]+\.jsx$/.test(f));
+  let bars = 0;
+  for (const file of files) {
+    const src = read(file);
+    for (const m of src.matchAll(/<div className="filter-bar"/g)) {
+      bars += 1;
+      const block = divBlock(src, m.index);
+      for (const sel of block.matchAll(/<select\b/g)) {
+        const end = tagEnd(block, sel.index);
+        const label = block.slice(sel.index, end).match(/aria-label="([^"]+)"/)?.[1] ?? '(no aria-label)';
+        if (!KEPT_SELECTS[file]?.[label]) {
+          const line = src.slice(0, m.index + sel.index).split('\n').length;
+          problems193.push(`${file}:${line} has a select "${label}" in its toolbar; use FilterDropdown or FilterList (common/FilterChecklist.jsx)`);
+        }
+      }
+    }
+  }
+  const checklist = read('frontend/src/components/common/FilterChecklist.jsx');
+  const searchAt = Number(checklist.match(/export const SEARCH_AT = (\d+)/)?.[1]);
+  const WORDS = { 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten', 12: 'twelve' };
+  const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+  if (!Number.isFinite(searchAt)) {
+    problems193.push('could not read SEARCH_AT out of frontend/src/components/common/FilterChecklist.jsx');
+  } else if (!readme.includes(`Over ${WORDS[searchAt] ?? searchAt} values it has a search box`)) {
+    problems193.push(`frontend/README.md does not say "Over ${WORDS[searchAt] ?? searchAt} values it has a search box", the threshold SEARCH_AT holds`);
+  }
+  for (const phrase of ['common/FilterChecklist.jsx', 'never a `<select>`', '`useUrlList`']) {
+    if (!readme.includes(phrase)) problems193.push(`frontend/README.md's toolbar rules do not name ${phrase}`);
+  }
+  if (bars === 0) problems193.push('found no `.filter-bar` in the components; the shape this check reads has changed');
+  if (problems193.length) {
+    fail('a list filter is not the shared one, or the README states it otherwise:\n'
+      + problems193.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`no toolbar among ${bars} holds a select but System › Logs' Service and Level, and the README states the shared filter's search at ${searchAt} values`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 194. The Audit Trail's help names its filters' groups as constants.js holds them. The kind
+// filter's groups are AUDIT_TRAIL_ENTITY_GROUPS, each named on the page; the action groups the
+// page gives as examples are AUDIT_TRAIL_ACTION_GROUPS labels. A group renamed in the code and not
+// in the help sends a reader looking for a heading that is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const constants = read('frontend/src/constants.js');
+  const block = (name) => {
+    const at = constants.indexOf(`export const ${name} = [`);
+    return at < 0 ? '' : constants.slice(at, constants.indexOf('];', at));
+  };
+  const entityGroups = [...block('AUDIT_TRAIL_ENTITY_GROUPS').matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const actionGroups = [...block('AUDIT_TRAIL_ACTION_GROUPS').matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const help = read('help/pages/audit-trail.md');
+  const kindLine = help.split('\n').find((l) => l.startsWith('- **The kind filter**')) || '';
+  const actionLine = help.split('\n').find((l) => l.startsWith('- **The action filter**')) || '';
+  const problems194 = [];
+  if (!entityGroups.length || !actionGroups.length) {
+    problems194.push('could not read AUDIT_TRAIL_ENTITY_GROUPS or AUDIT_TRAIL_ACTION_GROUPS out of frontend/src/constants.js');
+  }
+  if (!kindLine || !actionLine) {
+    problems194.push('help/pages/audit-trail.md has no "The kind filter" or "The action filter" bullet');
+  }
+  for (const g of entityGroups) {
+    if (kindLine && !kindLine.toLowerCase().includes(g.toLowerCase())) {
+      problems194.push(`help/pages/audit-trail.md's kind filter bullet does not name the group "${g}"`);
+    }
+  }
+  // The examples after "such as", lower-cased as the prose writes them.
+  const examples = (actionLine.match(/grouped by what the act is about, such as ([^.]+)\./)?.[1] ?? '')
+    .split(/, (?:or |and )?| or /).map((e) => e.trim()).filter(Boolean);
+  if (actionLine && examples.length === 0) problems194.push('help/pages/audit-trail.md\'s action filter bullet gives no group "such as" an example');
+  for (const e of examples) {
+    if (!actionGroups.some((g) => g.toLowerCase() === e.toLowerCase())) {
+      problems194.push(`help/pages/audit-trail.md names an action group "${e}" that AUDIT_TRAIL_ACTION_GROUPS does not hold`);
+    }
+  }
+  if (problems194.length) {
+    fail('the Audit Trail help names its filter groups otherwise than constants.js:\n'
+      + problems194.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Audit Trail help names the ${entityGroups.length} kind groups and gives ${examples.length} real action groups as examples`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 195. The Audit Trail's three list filters are arrays in every place that states them (0227).
+// 0001 and 0168 declare audit_trail_page() with p_entity_type text[], p_action text[] and
+// p_changed_by uuid[], each matched with = ANY; 0001's sweep of stale overloads names that form,
+// or it would drop it on every boot; 0227 drops the single-value form; the API reference documents
+// the three as arrays; and api.js sends each as an array from listParam() or null. A copy left on
+// one value either brings a second form back or sends a string the function refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const LISTS = { p_entity_type: 'text[]', p_action: 'text[]', p_changed_by: 'uuid[]' };
+  const COLUMN = { p_entity_type: 't.entity_type', p_action: 't.action', p_changed_by: 't.changed_by' };
+  const LIST_IDENT = 'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
+    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[])';
+  const problems195 = [];
+
+  const declaring = ['0001_baseline_schema.sql', '0168_every_schema_attached_to_a_device_counts.sql'];
+  for (const name of declaring) {
+    const sql = read(`supabase/migrations/${name}`);
+    const at = sql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_page(');
+    const body = at < 0 ? '' : sql.slice(at, sql.indexOf('$_$;', at));
+    if (!body) { problems195.push(`${name} no longer declares audit_trail_page`); continue; }
+    const args = body.slice(0, body.indexOf(') RETURNS'));
+    for (const [arg, type] of Object.entries(LISTS)) {
+      if (!args.includes(`${arg} ${type} DEFAULT NULL::${type}`)) {
+        problems195.push(`${name} declares audit_trail_page without ${arg} ${type}`);
+      }
+      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(body)) {
+        problems195.push(`${name}'s audit_trail_page does not match ${COLUMN[arg]} against any value of ${arg}`);
+      }
+    }
+  }
+  if (!read('supabase/migrations/0001_baseline_schema.sql').includes(`'${LIST_IDENT}'`)) {
+    problems195.push("0001's sweep of stale overloads does not name the list form, so it drops it on every boot");
+  }
+  const m0227 = 'supabase/migrations/0227_an_audit_trail_filter_takes_several_values.sql';
+  const migration = allFiles.includes(m0227) ? read(m0227) : '';
+  if (!/DROP FUNCTION public\.audit_trail_page\(integer, boolean, text, text, uuid\[\],[^)]*bigint, text, uuid\)/.test(migration)) {
+    problems195.push(`${m0227} does not drop the single-value form`);
+  }
+
+  const spec = read('docs/openapi.yaml');
+  const specAt = spec.indexOf('\n  /rest/v1/rpc/audit_trail_page:');
+  const entry = specAt < 0 ? '' : spec.slice(specAt, spec.indexOf('\n  /', specAt + 1));
+  for (const arg of Object.keys(LISTS)) {
+    if (!new RegExp(`\\n\\s+${arg}: \\{ type: array, nullable: true, items: \\{ type: string`).test(entry)) {
+      problems195.push(`docs/openapi.yaml's audit_trail_page entry does not document ${arg} as an array`);
+    }
+  }
+
+  const api = read('frontend/src/api.js');
+  const apiAt = api.indexOf("supabase.rpc('audit_trail_page'");
+  const branch = apiAt < 0 ? '' : api.slice(api.lastIndexOf("path.includes('/audit-trail')", apiAt), apiAt + 2000);
+  for (const arg of Object.keys(LISTS)) {
+    const sent = branch.match(new RegExp(`\\n\\s+${arg}: (\\w+)\\.length\\s*\\?[\\s\\S]*?: null,`));
+    if (!sent) {
+      problems195.push(`frontend/src/api.js does not send ${arg} as an array or null`);
+    } else if (!new RegExp(`const ${sent[1]} = listParam\\('`).test(branch)) {
+      problems195.push(`frontend/src/api.js sends ${arg} from ${sent[1]}, which listParam() does not make`);
+    }
+  }
+
+  if (problems195.length) {
+    fail(`the Audit Trail's list filters are not arrays everywhere:\n` + problems195.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("audit_trail_page()'s kinds, actions and people are arrays in 0001, 0168, the sweep, 0227, the API reference and api.js");
   }
 }
 

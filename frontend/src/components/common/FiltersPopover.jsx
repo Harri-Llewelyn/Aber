@@ -25,10 +25,12 @@ const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([di
  *     {({ close }) => <Choices onChoose={(w) => { onChange(w); close() }} />}
  *   </ToolbarPopover>
  *
- * `children` and `foot` may be functions of `{ close }`. `buttonClass` styles the button, and `tip`
- * is its tooltip.
+ * `children` and `foot` may be functions of `{ close }`. `buttonClass` styles the button, `tip`
+ * is its tooltip, and `buttonLabel` its accessible name where the words alone do not say what it
+ * filters (a list filter's "Any status"). An Escape a control inside has already used, such as a
+ * search box clearing its text, does not close the panel.
  */
-export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-ghost', tip, foot, children }) {
+export function ToolbarPopover({ label, button, buttonLabel, buttonClass = 'btn btn-sm btn-ghost', tip, foot, children }) {
   const id = useId()
   const buttonRef = useRef(null)
   const panelRef = useRef(null)
@@ -58,7 +60,7 @@ export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-gh
 
   useEffect(() => {
     if (!open) return undefined
-    const onKey = (e) => { if (e.key === 'Escape') close() }
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) close() }
     const onDown = (e) => {
       if (panelRef.current?.contains(e.target) || buttonRef.current?.contains(e.target)) return
       close()
@@ -85,6 +87,7 @@ export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-gh
           ref={buttonRef}
           type="button"
           className={buttonClass}
+          aria-label={buttonLabel}
           aria-expanded={open}
           aria-haspopup="dialog"
           aria-controls={id}

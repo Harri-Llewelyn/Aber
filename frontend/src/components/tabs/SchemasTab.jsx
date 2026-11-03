@@ -12,14 +12,13 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
-  canForkSchema, nextVersion, isCurrentSchema, schemaVersion, SCHEMA_STATUS
+  canForkSchema, nextVersion, schemaVersion, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ActionButton } from '../common/ActionButton'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
-import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -28,7 +27,9 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
@@ -41,6 +42,25 @@ import { isShadowDevice } from '../../utils/fleetCounts'
  * Quarantine tab.
  */
 const countsTowards = (d) => isDeviceInService(d) && !d.is_quarantined
+
+/**
+ * The Status filter's values. It opens on Current, the active and draft versions, so superseded
+ * ones stay out of the working list until asked for, and a draft stays in, since opening one is the
+ * only way to finish it. A link from before reads `current` and `all` as the statuses each meant.
+ */
+const STATUS_OPTIONS = [
+  { value: SCHEMA_STATUS.ACTIVE, label: 'Active' },
+  { value: SCHEMA_STATUS.DRAFT, label: 'Draft' },
+  { value: SCHEMA_STATUS.ARCHIVED, label: 'Archived' },
+]
+const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
+const CURRENT = Object.freeze([SCHEMA_STATUS.ACTIVE, SCHEMA_STATUS.DRAFT])
+const STATUS_ALIASES = Object.freeze({ current: CURRENT, all: STATUS_VALUES })
+const sameSet = (a, b) => a.length === b.length && a.every(v => b.includes(v))
+/** The status a schema is filtered under; one the filter does not name is Active, as a missing one is. */
+const statusValueOf = (sc) => (STATUS_VALUES.includes(schemaStatus(sc)) ? schemaStatus(sc) : SCHEMA_STATUS.ACTIVE)
+/** The button says Current for the default. */
+const statusWords = (value) => (sameSet(value, CURRENT) ? 'Current' : null)
 
 /**
  * @param {Function} onSelectSchema Opens the Devices page filtered to a schema.
@@ -67,10 +87,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // The draft awaiting a discard confirmation. Held as the OBJECT so the dialog can name the
   // version it is about -- "discard the draft" is not a sentence somebody should have to trust.
   const [discardTarget, setDiscardTarget] = useState(null)
-  // `current` is the default status, so superseded versions stay out of the working list until
-  // asked for.
-  const [statusFilter, setStatusFilter] = useUrlState('status', 'current', {
-    allowed: ['current', SCHEMA_STATUS.ACTIVE, SCHEMA_STATUS.DRAFT, SCHEMA_STATUS.ARCHIVED, 'all']
+  // Current, the active and draft versions, is the default, so superseded versions stay out of the
+  // working list until asked for.
+  const [statusFilter, setStatusFilter] = useUrlList('status', CURRENT, {
+    allowed: STATUS_VALUES, aliases: STATUS_ALIASES
   })
   const [schemaSearch, setSchemaSearch] = useUrlState('search')
 
@@ -213,17 +233,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
   const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
-  // Drafts stay in the working list: opening one is the only way to finish it. See isCurrentSchema().
-  const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
-  const currentCount = schemas.length - archivedCount
-  const draftCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.DRAFT).length
-  const activeCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.ACTIVE).length
-
-  const matchesStatusFilter = (s) => {
-    if (statusFilter === 'all') return true
-    if (statusFilter === 'current') return isCurrentSchema(s)
-    return schemaStatus(s) === statusFilter
-  }
 
   /**
    * Narrows the registry by name, UUID and change description, all columns of this table, so a hit
@@ -234,8 +243,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     !schemaSearchTerm || [s.schema_name, s.schema_uuid, s.change_description]
       .some(field => String(field || '').toLowerCase().includes(schemaSearchTerm))
 
-  const inStatusView = schemas.filter(matchesStatusFilter)
-  const matchingSchemas = inStatusView.filter(matchesSchemaSearch)
+  // Status is any of its values; each value's count is over what the search lets through.
+  const { rows: matchingSchemas, counts: facetCounts } = applyFacets(schemas, [
+    { key: 'status', chosen: statusFilter, values: sc => [statusValueOf(sc)] },
+  ], matchesSchemaSearch)
 
   // Version sorts by its number. The device count is what the Devices column shows.
   const sortColumns = useMemo(() => {
@@ -253,8 +264,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }, [devices])
   const [visibleSchemas, sort] = useSortableRows(matchingSchemas, sortColumns)
   // Drives the Clear button and its count. `current` is the resting state, not a filter.
-  const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
-  const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
+  const schemaFilterCount = (sameSet(statusFilter, CURRENT) ? 0 : 1) + (schemaSearchTerm ? 1 : 0)
+  const clearSchemaFilters = () => { setStatusFilter(CURRENT); setSchemaSearch('') }
 
   /**
    * Arriving from a device drawer's Schema chip, as the search: an exact uuid opens that schema's
@@ -268,11 +279,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     (s, term) => s.schema_uuid === term,
     (s) => {
       setSelectedId(s.schema_uuid)
-      setStatusFilter(prev => {
-        const shown = prev === 'all'
-          || (prev === 'current' ? isCurrentSchema(s) : schemaStatus(s) === prev)
-        return shown ? prev : 'all'
-      })
+      setStatusFilter(prev => (prev.length === 0 || prev.includes(schemaStatus(s)) ? prev : [...prev, schemaStatus(s)]))
     }
   )
 
@@ -306,21 +313,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ariaLabel="Search the schema registry"
             />
 
-            <Tooltip text="Current hides superseded versions.">
-              <select
-                className="form-control control-md"
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                aria-label="Filter schemas by lifecycle state"
-              >
-                {/* Counts in the labels: they answer "is there any history at all?" without selecting. */}
-                <option value="current">Current ({currentCount})</option>
-                <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
-                <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
-                <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
-                <option value="all">All versions ({schemas.length})</option>
-              </select>
-            </Tooltip>
+            <FilterDropdown
+              label="Status"
+              noun="status"
+              plural="statuses"
+              options={STATUS_OPTIONS}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              counts={facetCounts.status}
+              defaultValue={CURRENT}
+              words={statusWords}
+              everyIsAny
+              width="md"
+              tip="Current is the active and draft versions: it hides superseded ones."
+            />
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />

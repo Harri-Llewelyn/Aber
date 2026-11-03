@@ -123,12 +123,13 @@ class AuditTrailPaging(unittest.TestCase):
                 p_limit              => %s,
                 p_include_purged     => true,
                 p_entity_ids         => %s::uuid[],
-                p_action             => %s,
+                p_action             => %s::text[],
                 p_before_recorded_at => %s,
                 p_before_id          => %s
             )
             """,
-            (limit, self.entities, kwargs.get("action"),
+            # A one-element list: the single action, as the filter sends one (0227).
+            (limit, self.entities, [kwargs["action"]] if kwargs.get("action") else None,
              (cursor or {}).get("recorded_at"), (cursor or {}).get("id")),
         )
         payload = self.cur.fetchone()[0]
@@ -984,11 +985,11 @@ class HowManyRowsATransactionWrote(unittest.TestCase):
         self.cur.execute(
             """
             SELECT public.audit_trail_page(
-                p_limit => 1000, p_include_purged => %s, p_entity_type => %s,
+                p_limit => 1000, p_include_purged => %s, p_entity_type => %s::text[],
                 p_entity_ids => %s::uuid[]
             ) -> 'events'
             """,
-            (include_purged, entity_type, ids),
+            (include_purged, [entity_type] if entity_type else None, ids),
         )
         return self.cur.fetchone()[0]
 

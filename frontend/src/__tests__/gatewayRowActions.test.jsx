@@ -5,6 +5,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
+import { dropdownButton, openDropdown, pick, valueName } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
@@ -41,7 +42,7 @@ const show = async (rows, hasPermission = () => true) => {
   /* The list opens on Active, so a fixture holding an archived row has to reveal it first. The
      lifecycle filter has its own test. */
   if (rows.some(r => r.is_archived)) {
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
+    await waitFor(() => pick('Lifecycle', 'active', 'archived'))
   }
   await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
 }
@@ -74,7 +75,7 @@ describe('the gateways card header', () => {
   it('starts the toolbar with the search box, then the lifecycle', async () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
     const lifecycle = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
-    expect(lifecycle).toHaveAccessibleName('Lifecycle')
+    expect(lifecycle).toHaveAccessibleName('Lifecycle: Active')
   })
 })
 
@@ -417,9 +418,8 @@ describe('the playback gateway is listed', () => {
     await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
   }
   const listed = () => [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
-  const lifecycle = () => screen.getByRole('combobox', { name: 'Lifecycle' })
-  const lifecycleOption = (value) => lifecycle().querySelector(`option[value="${value}"]`).textContent
-  const typeFilter = () => screen.getByRole('combobox', { name: 'Type' })
+  /** A lifecycle value's name in the open list: its words and its count. */
+  const lifecycleOption = (words) => within(openDropdown('Lifecycle')).getByRole('checkbox', { name: valueName(words) }).closest('label').textContent
 
   it('lists it by default, with no toggle to show it', async () => {
     await open([gateway(), playbackRow()])
@@ -432,23 +432,24 @@ describe('the playback gateway is listed', () => {
   it('counts the same rows in the lifecycle filter as the list shows', async () => {
     await open([gateway(), playbackRow(), retired()])
 
-    expect(lifecycleOption('active')).toBe('Active (2)')
+    expect(lifecycleOption('Active')).toBe('Active 2')
+    expect(lifecycleOption('Archived')).toBe('Archived 1')
     expect(listed()).toHaveLength(2)
 
-    fireEvent.change(lifecycle(), { target: { value: 'archived' } })
-    expect(lifecycleOption('archived')).toBe('Archived (1)')
+    pick('Lifecycle', 'archived')
     expect(listed()).toHaveLength(1)
 
-    fireEvent.change(lifecycle(), { target: { value: 'all' } })
-    expect(lifecycleOption('all')).toBe('All (3)')
+    pick('Lifecycle', 'active', 'archived')
+    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
     expect(listed()).toHaveLength(3)
   })
 
   it('offers every type in the Type filter, Playback included', async () => {
     await open([gateway(), playbackRow()])
 
-    expect([...typeFilter().options].map(o => o.value)).toEqual(['', 'remote', 'third_party', 'host', 'simulated', 'playback'])
-    fireEvent.change(typeFilter(), { target: { value: 'playback' } })
+    expect([...openDropdown('Type').querySelectorAll('input[type="checkbox"]')].map(o => o.value))
+      .toEqual(['remote', 'third_party', 'host', 'simulated', 'playback'])
+    pick('Type', 'playback')
     expect(listed()).toEqual(['Playback'])
   })
 
@@ -456,13 +457,13 @@ describe('the playback gateway is listed', () => {
     /* The regression this guards: the Playback gateway is simulated too, so a Type filter that
        matched on the flag rather than the derived type would list it under "Simulated". */
     await open([gateway(), playbackRow()])
-    fireEvent.change(typeFilter(), { target: { value: 'simulated' } })
+    pick('Type', 'simulated')
     expect(listed()).not.toContain('Playback')
   })
 
   it('is not listed under the Offline status filter while idle', async () => {
     await open([gateway(), playbackRow()])
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'OFFLINE' } })
+    pick('Status', 'OFFLINE')
     expect(listed()).not.toContain('Playback')
   })
 
@@ -496,7 +497,7 @@ describe('the Gateways list', () => {
     expect(screen.queryByText('Retired_Gateway')).toBeNull()
     expect(screen.queryByText(/Clear filters/)).toBeNull()
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+    pick('Lifecycle', 'archived')
     expect(screen.getByText('Retired_Gateway')).toBeInTheDocument()
     expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
 

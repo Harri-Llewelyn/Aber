@@ -893,6 +893,15 @@ python supabase/migrations/test_an_area_plan_can_be_turned.py
 # after 0168 and 0222 replay, and after 0222 replays over the ten-argument form; 0222's self-check
 # refuses two. Every test rolls back.
 python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.py
+# An Audit Trail filter takes several values (0227). audit_trail_page() keeps the rows matching any
+# value of p_entity_type, p_action and p_changed_by, and combines the three with AND. A
+# one-element list returns what the single value did; NULL or an empty list is no constraint; a
+# value no row holds matches nothing. The cursor, total_matching, the purged rule, the search and
+# the caller's own policies hold under lists. One list form is declared, with its grants: after
+# the chain, after 0001's declaration and sweep, 0168, 0222 and 0227 replay over the single-value
+# form, and after 0227 alone does. Its self-check refuses two forms and a single-value argument.
+# Every test rolls back.
+python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

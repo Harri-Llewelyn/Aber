@@ -10,6 +10,7 @@ import { requiresRolesTitle } from '../hooks/usePermissions'
 import { metricUrl, unmappedMetricsUrl } from '../routes'
 import { navigate } from '../hooks/useUrlState'
 import { queryTabLink, tabBar, tabLink, tabLinks } from '../test/tabBar'
+import { dropdownButton, openDropdown, pick, valueName } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
@@ -777,15 +778,27 @@ const FILTER_CATALOG = [
   { metric_uuid: 'f10', name: 'Controller/OLD_EXECUTION', metric_group: 'Controller', datatype: 12, category: 'EVENT', standard: 'MTConnect', semantic_id: null, deprecated: true }
 ]
 
+/** The Standard filter's value for Local extension, as MetricsTab keeps it. */
+const LOCAL_FILTER = '__local__'
+
 describe('Metric Catalog — Standard and Unmapped filters', () => {
-  const standardFilter = () => screen.getByRole('combobox', { name: 'Filter the catalog by standard' })
+  /** The Standard filter: a dropdown in the toolbar, whose button says what is chosen. */
+  const standardFilter = () => dropdownButton('Standard')
   const unmappedButton = () => screen.getByRole('button', { name: /^Unmapped \(\d+\)$/ })
   const search = () => screen.getByLabelText('Search the metric catalog')
-  const optionTexts = () => [...standardFilter().querySelectorAll('option')].map(o => o.textContent)
-  /** Chooses the option whose label starts with `label`, so the test does not know its value. */
+  /** Each value the Standard filter offers, with its count, read from its open panel. */
+  const optionTexts = () => {
+    const texts = [...openDropdown('Standard').querySelectorAll('.filter-checklist-option')].map(o => o.textContent)
+    fireEvent.click(standardFilter())
+    return texts
+  }
+  /** Chooses the one standard whose words are `label`, so the test does not know its value. */
   const chooseStandard = (label) => {
-    const option = [...standardFilter().querySelectorAll('option')].find(o => o.textContent.startsWith(`${label} (`))
-    fireEvent.change(standardFilter(), { target: { value: option.value } })
+    const panel = openDropdown('Standard')
+    for (const box of within(panel).getAllByRole('checkbox')) {
+      if (box.checked !== valueName(label)(box.closest('label').textContent)) fireEvent.click(box)
+    }
+    fireEvent.click(standardFilter())
   }
   /** The metric names the catalog table shows, in order; none while it renders no table. */
   const listed = () => {
@@ -793,7 +806,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     return table ? [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')].map(el => el.textContent) : []
   }
   const ALL_OPTIONS = [
-    'All standards (8)', 'MTConnect (3)', 'ISO 22400 (2)', 'OPC UA (1)', 'ASHRAE 223P (0)', 'Local extension (2)'
+    'MTConnect 3', 'ISO 22400 2', 'OPC UA 1', 'ASHRAE 223P 0', 'Local extension 2'
   ]
 
   const mockFilterCatalog = () => api.get.mockImplementation((path) =>
@@ -816,14 +829,14 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     expect(at(standardFilter())).toBe(at(search()) + 1)
     expect(at(unmappedButton())).toBe(at(search()) + 2)
     expect(at(screen.getByRole('button', { name: 'Expand all' }))).toBe(at(search()) + 3)
-    expect(standardFilter()).toHaveClass('form-control')
+    expect(standardFilter()).toHaveClass('filter-dropdown')
   })
 
-  it('offers All standards, each standard the form offers, and Local extension, each with its active count', async () => {
+  it('offers each standard the form offers, and Local extension, each with its active count', async () => {
     await setup()
 
     expect(optionTexts()).toEqual(ALL_OPTIONS)
-    expect(standardFilter().value).toBe('')
+    expect(standardFilter()).toHaveTextContent('Any standard')
     // The deprecated MTConnect metric is in no count; its tab is not filtered.
     expect(unmappedButton().textContent).toBe('Unmapped (4)')
     expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
@@ -880,15 +893,33 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     expect(listed()).toEqual(['Controller/FIRMWARE'])
   })
 
-  it('keeps every count while the search and the other filter narrow the list', async () => {
+  it('counts each standard among what the search and Unmapped let through, and keeps Unmapped\'s whole', async () => {
     await setup()
 
     fireEvent.change(search(), { target: { value: 'OEE' } })
     fireEvent.click(unmappedButton())
-    expect(optionTexts()).toEqual(ALL_OPTIONS)
+    // Of the OEE metrics, only MTBF has no semantic id.
+    expect(optionTexts()).toEqual(['MTConnect 0', 'ISO 22400 1', 'OPC UA 0', 'ASHRAE 223P 0', 'Local extension 0'])
 
     chooseStandard('OPC UA')
     expect(unmappedButton().textContent).toBe('Unmapped (4)')
+  })
+
+  it('opens a link written with one standard', async () => {
+    mockFilterCatalog()
+    window.history.replaceState(null, '', '/metrics?standard=OPC%20UA')
+    renderTab()
+    await waitFor(() => expect(listed()).toEqual(['Machine/SpeedOverride']))
+    expect(standardFilter()).toHaveTextContent('OPC UA')
+  })
+
+  it('takes several standards, any of which a metric may be under, in the address', async () => {
+    await setup()
+
+    pick('Standard', 'ISO 22400', LOCAL_FILTER)
+    expect(listed()).toEqual(['Hydraulic/PRESSURE', 'OEE/AVAILABILITY', 'OEE/MTBF', 'safety_interlock'])
+    expect(standardFilter()).toHaveTextContent('2 standards')
+    expect(new URLSearchParams(window.location.search).get('standard')).toBe(`ISO 22400,${LOCAL_FILTER}`)
   })
 
   it('says so when nothing matches, in the page’s empty state', async () => {
@@ -916,7 +947,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
     expect(within(deprecated).getByText('temperature')).toBeTruthy()
     expect(within(deprecated).getByText('Controller/OLD_EXECUTION')).toBeTruthy()
-    expect(screen.queryByRole('combobox', { name: 'Filter the catalog by standard' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Standard: / })).toBeNull()
   })
 
   it('lets Collapse all close the groups the filters opened, and keeps the filters', async () => {
@@ -941,7 +972,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(3\)/ }))
     expect(search().value).toBe('')
-    expect(standardFilter().value).toBe('')
+    expect(standardFilter()).toHaveTextContent('Any standard')
     expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
     // Back to the collapsed catalog, with every group listed.
     expect(listed()).toEqual([])
@@ -962,7 +993,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
       expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
       expect(unmappedButton()).toHaveClass('btn-primary')
-      expect(standardFilter().value).toBe('')
+      expect(standardFilter()).toHaveTextContent('Any standard')
       expect(search().value).toBe('')
     })
 
@@ -980,7 +1011,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
       await waitFor(() => expect(tab('Metric Catalog').getAttribute('aria-current')).toBe('page'))
       expect(search().value).toBe('')
-      expect(standardFilter().value).toBe('')
+      expect(standardFilter()).toHaveTextContent('Any standard')
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
       expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
     })
@@ -1005,7 +1036,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
       await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
-      expect(standardFilter().value).toBe('')
+      expect(standardFilter()).toHaveTextContent('Any standard')
       expect(listed()).toEqual([])
       expect(window.location.search).toBe('')
     })

@@ -6,6 +6,7 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { SESSION_REFUSED } from '../lib/connectionState'
 import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
+import { dropdownButton, pick, valuesShown } from '../test/listFilters'
 import { getAllByTooltip, getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
@@ -367,15 +368,14 @@ describe('AccessControlTab', () => {
     // Archived is a toggle, as removed people and withdrawn identities are on their tabs. The empty
     // message says the list is filtered, not that nothing is registered.
     await waitFor(() => expect(screen.getByText(/No gateway matches these filters/i)).toBeTruthy())
-    const filter = screen.getByLabelText('Filter gateways by credential state')
-    expect(within(filter).getByText('Any state (0)')).toBeTruthy()
-    expect(within(filter).queryByText(/Archived/)).toBeNull()
+    expect(dropdownButton('State')).toHaveTextContent('Any state')
+    expect(valuesShown('State').some(t => t.startsWith('Archived'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Show archived (1)' }))
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()
     // While they are shown, the state filter can narrow to them.
-    expect(within(filter).getByText('Archived (1)')).toBeTruthy()
+    expect(valuesShown('State')).toContain('Archived 1')
   })
 
   /** The filter's values are the Credential column's states, with a count on each. */
@@ -388,12 +388,10 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
-    const filter = screen.getByLabelText('Filter gateways by credential state')
-    expect(within(filter).getByText('Any state (2)')).toBeTruthy()
-    expect(within(filter).getByText('Setup outstanding (1)')).toBeTruthy()
-    expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
+    expect(dropdownButton('State')).toHaveTextContent('Any state')
+    expect(valuesShown('State')).toEqual(expect.arrayContaining(['Setup outstanding 1', 'No platform record 1']))
 
-    fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })
+    pick('State', 'awaiting-enrolment')
     await waitFor(() => expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
     // No summary pills under the table and no count on the heading: the filter carries the counts.
@@ -1287,8 +1285,8 @@ describe('AccessControlTab card composition', () => {
     expect(bar).toBeTruthy()
     expect(bar.querySelector('.help-tip')).toBeNull()
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search credentials by gateway name or MQTT username')
-    expect(within(bar).getByLabelText('Filter gateways by credential state').closest('.filter-bar-actions')).toBeNull()
-    fireEvent.change(within(bar).getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
+    expect(within(bar).getByRole('button', { name: /^State: / }).closest('.filter-bar-actions')).toBeNull()
+    pick('State', 'issued')
     expect(within(bar).getByRole('button', { name: /Clear filters/ }).closest('.filter-bar-actions')).toBeTruthy()
     // No Refresh: every action reads the list again, and F5 now returns to this tab and filter.
     expect(within(bar).queryByRole('button', { name: /Refresh/ })).toBeNull()
@@ -1303,9 +1301,9 @@ describe('AccessControlTab card composition', () => {
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
-    fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
+    pick('State', 'issued')
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
-    expect(screen.getByLabelText('Filter gateways by credential state').value).toBe('')
+    expect(dropdownButton('State')).toHaveTextContent('Any state')
   })
 
   it('puts no count on the heading or the tabs; the filter options keep theirs', async () => {
@@ -1323,7 +1321,7 @@ describe('AccessControlTab card composition', () => {
       expect(tabLink(label).textContent).toBe(label)
     }
     fireEvent.click(tabLink('Broker credentials'))
-    expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Any state (1)')).toBeTruthy()
+    expect(valuesShown('State')).toContain('No platform record 1')
   })
 
   it('explains each tab in a tooltip of its own, with no "?" in the bar and no paragraph', async () => {
@@ -1417,12 +1415,34 @@ describe('AccessControlTab card composition', () => {
     expect(screen.queryByText(/Gateways tab/)).toBeNull()
   })
 
+  it('takes two states in the address, and opens a link written with one', async () => {
+    api.listGatewayCredentials.mockResolvedValue([
+      provisioned,
+      { ...enrolled, id: '2b000000-0000-4000-8000-000000000001', name: 'Cell 5 Press Line', sparkplug_id: 'gwy2b0000000000400080000', enrolled_at: null, status: 'PENDING_ENROLLMENT' },
+    ])
+    window.history.replaceState(null, '', '/access-control/credentials?state=awaiting-enrolment')
+    const first = render(<AccessControlTab showToast={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Cell 5 Press Line')).toBeTruthy())
+    expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull()
+    first.unmount()
+
+    window.history.replaceState(null, '', '/access-control/credentials')
+    render(<AccessControlTab showToast={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Cell 5 Press Line')).toBeTruthy())
+    const states = valuesShown('State').map(t => t.replace(/ \d+$/, ''))
+    pick('State', 'awaiting-enrolment', 'unrecorded')
+    expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
+    expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy()
+    expect(new URLSearchParams(window.location.search).get('state')).toBe('awaiting-enrolment,unrecorded')
+    expect(states).toContain('No platform record')
+  })
+
   it('tells none registered from none matching', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
-    fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'revoked' } })
+    pick('State', 'revoked')
     expect(screen.getByText('No gateway matches these filters.')).toBeTruthy()
     expect(screen.queryByText(/No gateways registered/)).toBeNull()
   })

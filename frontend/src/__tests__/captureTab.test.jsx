@@ -47,6 +47,7 @@ vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 
 import { api } from '../api'
 import { useRealtimeTable } from '../hooks/useRealtimeTable'
+import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 
 const GATEWAY = {
@@ -239,11 +240,12 @@ describe('the playback lane', () => {
     renderTab()
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
     fireEvent.click(tabLink(/devices/i))
-    const filter = await screen.findByLabelText('Gateway filter')
+    const filter = await screen.findByRole('button', { name: /^Gateway: / })
+    expect(filter).toHaveTextContent('Any gateway')
     // Its own count is the same question one level down: the shadow device does not belong to a
     // gateway that can be captured, so it is not in anybody's total.
-    expect([...filter.options].map(o => o.textContent.trim()))
-      .toEqual(['All gateways', 'Line 1 Gateway (1)'])
+    expect([...openDropdown('Gateway').querySelectorAll('.filter-checklist-option')].map(o => o.textContent))
+      .toEqual(['Line 1 Gateway 1'])
   })
 
   it('will not file an uploaded capture against the playback lane', async () => {
@@ -1260,7 +1262,7 @@ describe('the filter bar', () => {
     await screen.findByText('Line 1 Gateway')
     expect(screen.getByText('Playback Target')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'with' } })
+    pick('Capture', 'with')
     expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
     expect(screen.queryByText('Playback Target')).not.toBeInTheDocument()
   })
@@ -1269,7 +1271,7 @@ describe('the filter bar', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'without' } })
+    pick('Capture', 'without')
     expect(screen.queryByText('Line 1 Gateway')).not.toBeInTheDocument()
     expect(screen.getByText('Playback Target')).toBeInTheDocument()
   })
@@ -1312,11 +1314,11 @@ describe('the filter bar', () => {
     const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
     expect(bar.querySelector('.help-tip')).toBeNull()
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
-    expect(bar.firstElementChild.nextElementSibling).toBe(screen.getByLabelText('Stored capture filter'))
+    expect(bar.firstElementChild.nextElementSibling).toBe(dropdownButton('Capture'))
     fireEvent.click(tabLink('Devices'))
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
-    expect(screen.getByLabelText('Stored capture filter').nextElementSibling).toBe(screen.getByLabelText('Gateway filter'))
+    expect(dropdownButton('Capture').nextElementSibling).toBe(dropdownButton('Gateway'))
     expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
   })
 
@@ -1350,7 +1352,7 @@ describe('the filter bar', () => {
     expect(screen.queryByRole('button', { name: /Clear filters/ })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
-    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'with' } })
+    pick('Capture', 'with')
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(2\)/ }))
 
     expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
@@ -1614,10 +1616,10 @@ describe('the gateway filter', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     // On Gateways it would filter a list of gateways by gateway.
-    expect(screen.queryByLabelText('Gateway filter')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Gateway: / })).not.toBeInTheDocument()
 
     fireEvent.click(tabLink(/Devices/))
-    expect(await screen.findByLabelText('Gateway filter')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^Gateway: / })).toBeInTheDocument()
   })
 
   it('narrows the devices to one gateway', async () => {
@@ -1630,9 +1632,44 @@ describe('the gateway filter', () => {
     fireEvent.click(tabLink(/Devices/))
     expect(await screen.findByText('Other Device')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Gateway filter'), { target: { value: 'gw-1' } })
+    pick('Gateway', 'gw-1')
     expect(screen.getByText('CNC Spindle')).toBeInTheDocument()
     expect(screen.queryByText('Other Device')).not.toBeInTheDocument()
+  })
+
+  it('takes two gateways in the address, and opens a link written with one', async () => {
+    const SECOND = { ...GATEWAY, id: 'gw-3', name: 'Line 3 Gateway', sparkplug_id: 'gwy300000000000400080000' }
+    api.get.mockImplementation(path =>
+      Promise.resolve(path.includes('gateways')
+        ? [GATEWAY, SECOND, SIM_GATEWAY]
+        : [DEVICE, { ...DEVICE, id: 'dev-3', name: 'Other Device', gateway_id: 'gw-3' },
+          { ...DEVICE, id: 'dev-4', name: 'Sim Device', gateway_id: 'gw-2' }]))
+    window.history.replaceState(null, '', '/capture/device?gateway=gw-3')
+    const first = renderTab()
+    expect(await screen.findByText('Other Device')).toBeInTheDocument()
+    expect(screen.queryByText('CNC Spindle')).not.toBeInTheDocument()
+    first.unmount()
+
+    window.history.replaceState(null, '', '/capture/device')
+    renderTab()
+    expect(await screen.findByText('Other Device')).toBeInTheDocument()
+    pick('Gateway', 'gw-1', 'gw-3')
+    expect(screen.getByText('CNC Spindle')).toBeInTheDocument()
+    expect(screen.getByText('Other Device')).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('gateway')).toBe('gw-1,gw-3')
+    expect(dropdownButton('Gateway')).toHaveTextContent('2 gateways')
+  })
+
+  it('reads an older stored=all as every subject, and both values as every subject', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    window.history.replaceState(null, '', '/capture?stored=all')
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(window.location.search).toBe('')
+    pick('Capture', 'with', 'without')
+    expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(screen.getByText('Playback Target')).toBeInTheDocument()
+    expect(dropdownButton('Capture')).toHaveTextContent('Any subject')
   })
 })
 
@@ -2180,7 +2217,7 @@ describe('every tab of the page', () => {
     await waitFor(() => expect(api.listCaptures).toHaveBeenCalled())
     const bar = document.querySelector('.card.card-fill > .tab-strip + .filter-bar')
     expect(!!within(bar).queryByLabelText('Search subjects')).toBe(shown)
-    expect(!!within(bar).queryByLabelText('Stored capture filter')).toBe(shown)
+    expect(!!within(bar).queryByRole('button', { name: /^Capture: / })).toBe(shown)
   })
 
   it('carries the search and Stored filter between Gateways and Devices only, and counts none on Captures', async () => {

@@ -8,6 +8,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
+import { filterList } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -104,13 +105,12 @@ describe('the arrow keys step the drawer', () => {
     expect(position()).toMatch(/^Event 1 of 3/)
   })
 
-  it('stands down inside a select, where the key changes the value', async () => {
-    /* A focused select would otherwise both change its value and step the drawer on one press. */
+  it('stands down inside the Filters panel, where the arrow keys move between its checkboxes', async () => {
+    /* A focused list would otherwise both move its focus and step the drawer on one press. */
     await show()
     await selectOldest()
 
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const kind = screen.getByRole('combobox', { name: 'Entity' })
+    const kind = within(filterList('Entity')).getAllByRole('checkbox')[0]
     kind.focus()
     press('ArrowRight', kind)
     await new Promise(r => setTimeout(r, 20))

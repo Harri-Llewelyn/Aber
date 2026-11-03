@@ -6,6 +6,7 @@ import { api } from '../api'
 import { formatDateTime } from '../utils/format'
 import { deviceUrl, tabUrl } from '../routes'
 import { tabLink } from '../test/tabBar'
+import { pick } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 /**
@@ -265,11 +266,11 @@ describe('the Registered tab', () => {
     expect(card().querySelector('.filter-bar .help-tip, .tab-strip .help-tip')).toBeNull()
     expect(tab('Registered')).toHaveAccessibleDescription(/Devices admitted to Aber/)
     expect(bar.getByRole('searchbox', { name: 'Search devices' })).toBeInTheDocument()
-    expect(bar.getByRole('combobox', { name: 'Status' })).toBeInTheDocument()
+    expect(bar.getByRole('button', { name: 'Status: Any status' })).toBeInTheDocument()
     expect(bar.getByRole('button', { name: /Needs attention/ })).toBeInTheDocument()
     expect(within(card().querySelector('.filter-bar-actions')).getByRole('button', { name: /New Device/ })).toBeInTheDocument()
     // The rest wait in the popover.
-    expect(screen.queryByRole('combobox', { name: 'Gateway' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Gateway' })).toBeNull()
   })
 
   it('holds lifecycle, type, schema, gateway and cell in the Filters popover', async () => {
@@ -277,7 +278,7 @@ describe('the Registered tab', () => {
 
     const popover = openFilters()
     for (const name of ['Lifecycle', 'Type', 'Schema', 'Gateway', 'Cell']) {
-      expect(popover.getByRole('combobox', { name })).toBeInTheDocument()
+      expect(popover.getByRole('group', { name })).toBeInTheDocument()
     }
   })
 
@@ -287,15 +288,16 @@ describe('the Registered tab', () => {
     expect(within(card()).queryByText('Old_Lathe')).toBeNull()
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
     const popover = openFilters()
-    expect(popover.getByRole('combobox', { name: 'Lifecycle' })).toHaveValue('active')
-    expect(popover.getByRole('option', { name: 'Archived (1)' })).toBeInTheDocument()
+    expect(popover.getByRole('checkbox', { name: 'Active 1' }).checked).toBe(true)
+    expect(popover.getByRole('checkbox', { name: 'Archived 1' }).checked).toBe(false)
     // Active is the default, so it is not a filter to clear.
     expect(within(card()).queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 
   it('shows archived rows one filter away, tinted and badged, and counts the filter', async () => {
     await show([device(), archived])
-    fireEvent.change(openFilters().getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+    openFilters()
+    pick('Lifecycle', 'archived')
 
     const row = within(card()).getByText('Old_Lathe').closest('tr')
     expect(row).toHaveClass('row-archived')
@@ -308,7 +310,7 @@ describe('the Registered tab', () => {
     await show([device(), archived])
     fireEvent.change(within(card()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'CNC' } })
     const popover = openFilters()
-    fireEvent.change(popover.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-1' } })
+    pick('Gateway', 'gw-1')
     expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument()
     expect(within(card()).getByRole('button', { name: /Clear filters \(2\)/ })).toBeInTheDocument()
 

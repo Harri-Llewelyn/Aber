@@ -17,6 +17,7 @@ import { formatDateTime } from '../utils/format'
 import { approvalsForUrl } from '../routes'
 import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
 import { tabLink, tabLinks } from '../test/tabBar'
+import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { helpTipText, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', () => ({
@@ -427,9 +428,7 @@ describe('finding a decision again', () => {
     showDecided()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByLabelText('Filter decided proposals by kind'), {
-      target: { value: 'device_nameplate' }
-    })
+    pick('Kind', 'device_nameplate')
     const rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText('Press_02')).toBeInTheDocument()
@@ -480,12 +479,12 @@ describe('finding a decision again', () => {
     showDecided()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByLabelText('Filter decided proposals by kind'), { target: { value: 'schemas' } })
+    pick('Kind', 'device_nameplate')
     showAwaiting()
     const rows = screen.getAllByTestId('proposal-row')
     // The open device proposal survives; only the decided table narrowed.
     expect(rows.some(r => within(r).queryByText('Waiting_Device'))).toBe(true)
-    expect(screen.getByLabelText('Filter open proposals by kind')).toHaveValue('all')
+    expect(dropdownButton('Kind')).toHaveTextContent('Any kind')
   })
 })
 
@@ -809,12 +808,48 @@ describe('the queue that is waiting can be filtered too', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), {
-      target: { value: 'device_nameplate' }
-    })
+    pick('Kind', 'device_nameplate')
     const rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText('Press_02')).toBeInTheDocument()
+  })
+
+  it('takes several kinds, each with its count, and keeps them in the address', async () => {
+    mockLoad([
+      deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
+      deviceProposal({ id: 'o2', target_label: 'Press_02', entity_type: 'device_nameplate' }),
+      deviceProposal({ id: 'o3', target_label: 'Bay_3', entity_type: 'cells' }),
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(within(openDropdown('Kind')).getByRole('checkbox', { name: 'Cell details 1' })).toBeInTheDocument()
+    fireEvent.click(dropdownButton('Kind'))
+
+    pick('Kind', 'devices', 'cells')
+    const labels = screen.getAllByTestId('proposal-row').map(r => r.textContent)
+    expect(labels.some(t => t.includes('Lathe_01'))).toBe(true)
+    expect(labels.some(t => t.includes('Bay_3'))).toBe(true)
+    expect(labels.some(t => t.includes('Press_02'))).toBe(false)
+    expect(dropdownButton('Kind')).toHaveTextContent('2 kinds')
+    expect(new URLSearchParams(window.location.search).get('kind')).toBe('devices,cells')
+  })
+
+  it('opens a link written with one kind, and reads an old kind=all as every kind', async () => {
+    mockLoad([
+      deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
+      deviceProposal({ id: 'o3', target_label: 'Bay_3', entity_type: 'cells' }),
+    ])
+    window.history.replaceState(null, '', '/approvals?kind=cells')
+    const first = renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
+    first.unmount()
+
+    window.history.replaceState(null, '', '/approvals?kind=all')
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(screen.getAllByTestId('proposal-row')).toHaveLength(2)
+    expect(window.location.search).toBe('')
   })
 
   it('says when a filter emptied the queue, not that nothing is waiting', async () => {
@@ -856,9 +891,7 @@ describe('the queue that is waiting can be filtered too', () => {
 
     expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), {
-      target: { value: 'device_nameplate' }
-    })
+    pick('Kind', 'device_nameplate')
     expect(screen.getByRole('button', { name: /clear filters/i })).toHaveTextContent('Clear filters (1)')
 
     fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), { target: { value: 'Press' } })
@@ -1179,13 +1212,13 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     renderTab()
     await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
     const search = expectSearchFirst('Filter open proposals by what they are about')
-    expect(search.nextElementSibling).toBe(screen.getByLabelText('Filter open proposals by kind'))
+    expect(search.nextElementSibling).toBe(dropdownButton('Kind'))
     fireEvent.change(within(search).getByRole('searchbox'), { target: { value: 'pump' } })
     expect(screen.getByRole('button', { name: /Clear filters \(1\)/ }).parentElement).toHaveClass('filter-bar-actions')
 
     fireEvent.click(tabLink('Decided'))
     expect(expectSearchFirst('Filter decided proposals by what they are about').nextElementSibling)
-      .toBe(screen.getByLabelText('Filter decided proposals by kind'))
+      .toBe(dropdownButton('Kind'))
   })
 
   it('counts nothing on the heading or the tabs, and flags nothing while nothing waits', async () => {
@@ -1209,7 +1242,7 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     const awaiting = tabLink('Awaiting a decision, 2 waiting')
     expect(awaiting.querySelector('.tab-strip-attention')).toHaveTextContent('2')
     // A filter narrows the list, not the work waiting.
-    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), { target: { value: 'cells' } })
+    pick('Kind', 'cells')
     expect(tabLink('Awaiting a decision, 2 waiting')).toBeInTheDocument()
   })
 

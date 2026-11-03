@@ -58,7 +58,7 @@ describe('the schemas card header', () => {
     renderTab()
     await waitForRegistry()
     expect(expectSearchFirst('Search the schema registry').nextElementSibling)
-      .toBe(screen.getByLabelText('Filter schemas by lifecycle state'))
+      .toBe(screen.getByRole('button', { name: /^Status: / }))
   })
 })
 

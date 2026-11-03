@@ -161,7 +161,7 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
     expect(listed()).toEqual(['Press_Alarm', 'Lathe_Overdue', 'Mill_Offline', 'Drill_Online', 'Old_Saw'])
     expect(header('Status')).toHaveAttribute('aria-sort', 'ascending')
     expect(sortInAddress()).toBe('status')
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
   })
 
   it('reverses Status on a second click, the archived device still last, since it has no lifecycle state', async () => {

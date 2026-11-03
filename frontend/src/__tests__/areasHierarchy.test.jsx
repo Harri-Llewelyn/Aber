@@ -11,6 +11,7 @@ import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton, pageToolbar } from '../test/cardHeading'
+import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
@@ -670,7 +671,7 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     // Every list opens on Active.
     expect(screen.queryByText('Press Hall')).toBeNull()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+    pick('Lifecycle', 'archived')
     const row = rowFor('Press Hall')
     expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Press Hall'))
@@ -691,7 +692,7 @@ describe('AreasTab files cells into areas', () => {
   it('restores nothing when its Restore dialog is cancelled', async () => {
     api.get.mockImplementation(routeGet({ areas: [areaA, { ...areaB, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }] }))
     await renderAreas()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+    pick('Lifecycle', 'archived')
     fireEvent.click(screen.getByText('Press Hall'))
     fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Restore area' })).getByRole('button', { name: 'Cancel' }))
@@ -892,12 +893,13 @@ describe('AreasTab is the house list card', () => {
 
   it('starts the toolbar with the search box, then the lifecycle', async () => {
     await renderAreas()
-    expect(expectSearchFirst('Search areas').nextElementSibling).toBe(screen.getByLabelText('Lifecycle'))
+    expect(expectSearchFirst('Search areas').nextElementSibling).toBe(dropdownButton('Lifecycle'))
   })
 
-  it('narrows the list under a search, and keeps the counts in the lifecycle options', async () => {
+  it('narrows the list under a search, and keeps the counts beside the lifecycle values', async () => {
     await renderAreas()
-    expect(within(screen.getByLabelText('Lifecycle')).getByRole('option', { name: 'Active (2)' })).toBeInTheDocument()
+    expect(within(openDropdown('Lifecycle')).getByRole('checkbox', { name: 'Active 2' })).toBeInTheDocument()
+    fireEvent.click(dropdownButton('Lifecycle'))
     fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'North Shop' } })
     expect(screen.queryByText('Press Hall')).toBeNull()
     expect(document.querySelector('.card-header .section-count')).toBeNull()
@@ -1082,18 +1084,34 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('counts the lifecycle select and resets it to Active', async () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
-    const lifecycle = screen.getByRole('combobox', { name: 'Lifecycle' })
-    expect(lifecycle).toHaveValue('active')
+    const lifecycle = dropdownButton('Lifecycle')
+    expect(lifecycle).toHaveTextContent('Active')
 
-    fireEvent.change(lifecycle, { target: { value: 'archived' } })
+    pick('Lifecycle', 'archived')
+    expect(lifecycle).toHaveTextContent('Archived')
     expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (1)')
 
     fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'x' } })
     expect(screen.getByRole('button', { name: /Clear filters/ })).toHaveTextContent('Clear filters (2)')
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
-    expect(lifecycle).toHaveValue('active')
+    expect(lifecycle).toHaveTextContent('Active')
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
+  })
+
+  it('takes Active and Archived at once in the address, and opens an older lifecycle=all', async () => {
+    window.history.replaceState(null, '', '/areas?lifecycle=all')
+    const first = render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
+    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
+    first.unmount()
+
+    window.history.replaceState(null, '', '/areas')
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
+    pick('Lifecycle', 'archived', 'active')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
   })
 })
 
