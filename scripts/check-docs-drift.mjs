@@ -2734,8 +2734,8 @@ const OPERATOR_PAIRS = [
 // or the Audit Trail and drops it. db-init replays every file on every boot, so another migration
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
-// CellWrite, and no code reads it but the Audit Trail's configuration fields, which past rows
-// carry: audit_event_class() (0228) reads it out of a snapshot, as `-> 'grafana_url'` and no other way.
+// CellWrite, and no code reads it. The Audit Trail's configuration fields, which past rows carry,
+// are audit_event_class()'s (0228), which reads it out of a snapshot as `-> 'grafana_url'` alone.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
@@ -2774,8 +2774,7 @@ const OPERATOR_PAIRS = [
 
   const READERS = /^(?:frontend\/src|supabase\/functions|i3x|ingestion)\/.*\.(?:js|jsx|ts|mjs|py)$/;
   const TESTS = /(?:^|\/)(?:__tests__\/|test_[^/]*\.py$|[^/]*\.test\.[jt]sx?$|[^/]*_test\.ts$)/;
-  const GOVERNANCE = 'frontend/src/components/tabs/AuditTrailTab.jsx';
-  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p) && p !== GOVERNANCE)) {
+  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p))) {
     if (/\bgrafana_url\b/.test(read(f))) offences.push(`${f} names grafana_url`);
   }
 

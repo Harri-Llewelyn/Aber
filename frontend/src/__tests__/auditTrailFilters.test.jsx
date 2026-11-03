@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, MARKERS, CLUSTER_GAP_PX
+  AuditTrailTab, tickFormatter, shortId, MARKERS, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
@@ -42,13 +42,15 @@ const EVENTS = [
     timestamp: '2026-08-02T12:00:00Z', description: 'Action UPDATE on devices [dev-1]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'OFFLINE', last_heartbeat: '2026-08-02T11:59:00Z' },
-    new_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'ONLINE',  last_heartbeat: '2026-08-02T12:00:00Z' }
+    new_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'ONLINE',  last_heartbeat: '2026-08-02T12:00:00Z' },
+    class: 'operational'
   },
   {
     event_id: 2, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'INSERT',
     timestamp: '2026-08-02T11:00:00Z', description: 'Action INSERT on gateways [gw-1]',
     changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
-    old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' }
+    old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' },
+    class: 'created'
   },
   // A cell that no longer exists, which is what a DELETE means: absent from CELLS because
   // /api/v1/cells cannot return a deleted row, so only its final snapshot can name it.
@@ -56,7 +58,8 @@ const EVENTS = [
     event_id: 3, entity_type: 'cells', entity_id: 'cell-gone', event_type: 'DELETE',
     timestamp: '2026-08-02T10:00:00Z', description: 'Action DELETE on cells [cell-gone]',
     changed_by: null, actor_source: null,
-    old_data: { id: 'cell-gone', name: 'Decommissioned Line' }, new_data: null
+    old_data: { id: 'cell-gone', name: 'Decommissioned Line' }, new_data: null,
+    class: 'lifecycle'
   },
   // A schema rebinding, which separates the amber class from the blue one. There is no SCHEMA
   // action in the database; it is an UPDATE that touched `schema_id`.
@@ -65,7 +68,8 @@ const EVENTS = [
     timestamp: '2026-08-02T09:00:00Z', description: 'Action UPDATE on devices [dev-2]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-2', name: 'Press_02', schema_id: null },
-    new_data: { id: 'dev-2', name: 'Press_02', schema_id: 'schema-9' }
+    new_data: { id: 'dev-2', name: 'Press_02', schema_id: 'schema-9' },
+    class: 'configuration'
   },
   // Archiving is likewise an UPDATE, distinguished only by a boolean that rose to true.
   {
@@ -73,14 +77,16 @@ const EVENTS = [
     timestamp: '2026-08-02T08:00:00Z', description: 'Action UPDATE on devices [dev-2]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-2', name: 'Press_02', is_archived: false },
-    new_data: { id: 'dev-2', name: 'Press_02', is_archived: true }
+    new_data: { id: 'dev-2', name: 'Press_02', is_archived: true },
+    class: 'lifecycle'
   },
   // Nameable from nowhere: absent from DEVICES, and carrying no snapshot to recover a name from.
   // The third fall -- a truncated id -- exists for exactly this row.
   {
     event_id: 6, entity_type: 'devices', entity_id: '99999999-8888-7777-6666-555555555555',
     event_type: 'UPDATE', timestamp: '2026-08-02T07:00:00Z', description: 'Action UPDATE',
-    changed_by: 'service-principal-1', actor_source: 'service', old_data: null, new_data: null
+    changed_by: 'service-principal-1', actor_source: 'service', old_data: null, new_data: null,
+    class: 'operational'
   }
 ]
 const ENTITY_COUNT = new Set(EVENTS.map(e => e.entity_id)).size
@@ -662,29 +668,50 @@ describe('Audit Trail marker shapes', () => {
   const shapeOf = (el) => el.querySelector('.trail-node-mark')?.getAttribute('data-shape')
   const pathOf = (el) => el.querySelector('.trail-node-shape')?.getAttribute('d')
 
-  it('gives each class its own shape', async () => {
+  /* The fixture with a read added, so every class is on the track. */
+  const READ = {
+    event_id: 7, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'CREDENTIAL_SHOWN',
+    timestamp: '2026-08-02T06:00:00Z', description: 'Action CREDENTIAL_SHOWN on gateways [gw-1]',
+    changed_by: 'user-uuid-1', actor_source: 'user', old_data: null,
+    new_data: { name: 'Host_Gateway_NodeRED', sparkplug_id: 'gw1' }, class: 'read'
+  }
+  const withRead = () => api.get.mockImplementation((path) => {
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([...EVENTS, READ])
+    if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+    if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+    if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+    return Promise.resolve([])
+  })
+
+  it('gives each class its own shape, Read an eye', async () => {
+    withRead()
     await showAll()
     const byKind = {}
     for (const n of nodes()) {
       const kind = Object.keys(MARKERS).find(k => n.classList.contains(`trail-node-${k}`))
       byKind[kind] = { shape: shapeOf(n), path: pathOf(n) }
     }
-    // The fixture holds all four classes.
+    // The fixture holds all five classes.
     expect(Object.keys(byKind).sort()).toEqual(Object.keys(MARKERS).sort())
     expect(byKind).toMatchObject({
-      operational: { shape: 'circle' },
-      creation:    { shape: 'square' },
-      governance:  { shape: 'diamond' },
-      critical:    { shape: 'triangle' },
+      operational:   { shape: 'circle' },
+      created:       { shape: 'square' },
+      configuration: { shape: 'diamond' },
+      lifecycle:     { shape: 'triangle' },
+      read:          { shape: 'eye' },
     })
-    expect(new Set(Object.values(byKind).map(v => v.path)).size).toBe(4)
+    expect(new Set(Object.values(byKind).map(v => v.path)).size).toBe(5)
+  })
+
+  it('lists the classes in the legend in the server\'s order, Read after Lifecycle', () => {
+    expect(Object.keys(MARKERS)).toEqual(['created', 'operational', 'configuration', 'lifecycle', 'read'])
   })
 
   it('draws the legend with the same marker the track draws', async () => {
+    withRead()
     await showAll()
-    const items = [...document.querySelectorAll('.trail-legend .trail-legend-item')]
-      .filter(i => i.querySelector('.trail-node-mark'))
-    expect(items).toHaveLength(4)
+    const items = [...document.querySelectorAll('.trail-legend .trail-legend-toggle')]
+    expect(items).toHaveLength(5)
     for (const item of items) {
       const kind = Object.keys(MARKERS).find(k => item.textContent === MARKERS[k].label)
       const onTrack = nodes().find(n => n.classList.contains(`trail-node-${kind}`))
@@ -722,21 +749,21 @@ describe('Audit Trail marker shapes', () => {
 })
 
 /**
- * The derived marker taxonomy. `audit_trail.action` holds only INSERT / UPDATE / DELETE;
- * archiving, quarantining and schema rebinding are all UPDATEs distinguished by what the diff
- * touched, so the classifier is the only thing that tells them apart.
+ * The marker taxonomy. The server names each event's class (audit_event_class(), 0228); the rules
+ * that tell an archival from a schema rebinding, both UPDATEs, are held in SQL against
+ * test-harness/fixtures/audit-event-classes.json. The page draws the class it is given.
  */
 describe('Audit Trail event classification', () => {
   const classOf = (pattern) => nodeFor(pattern).className
 
-  it('paints an INSERT as creation', async () => {
+  it('paints an INSERT the server calls created as created', async () => {
     await show()
-    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('trail-node-creation')
+    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('trail-node-created')
   })
 
-  it('paints a DELETE as lifecycle-critical', async () => {
+  it('paints a DELETE the server calls lifecycle as lifecycle', async () => {
     await showAll()
-    expect(classOf(/DELETE on Decommissioned Line/)).toContain('trail-node-critical')
+    expect(classOf(/DELETE on Decommissioned Line/)).toContain('trail-node-lifecycle')
   })
 
   it('paints an ordinary status change as operational', async () => {
@@ -744,90 +771,25 @@ describe('Audit Trail event classification', () => {
     expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('trail-node-operational')
   })
 
-  it('paints a schema rebinding as governance, though its action is only UPDATE', async () => {
+  it('paints a schema rebinding as configuration, though its action is only UPDATE', async () => {
     await show()
-    const governance = nodes().filter(n => n.className.includes('trail-node-governance'))
-    expect(governance.length).toBe(1)
+    const configuration = nodes().filter(n => n.className.includes('trail-node-configuration'))
+    expect(configuration.length).toBe(1)
   })
 
-  it('paints an archival as critical, though its action is only UPDATE', async () => {
+  it('paints an archival as lifecycle, though its action is only UPDATE', async () => {
     await showAll()
-    // Two UPDATEs on Press_02; exactly one of them flipped is_archived to true.
-    const critical = nodes().filter(n => n.className.includes('trail-node-critical'))
+    const lifecycle = nodes().filter(n => n.className.includes('trail-node-lifecycle'))
     // The DELETE, plus the archival.
-    expect(critical.length).toBe(2)
+    expect(lifecycle.length).toBe(2)
   })
 
-  it('paints a metric deprecation as critical and its restore as operational', () => {
-    // Both are UPDATEs on metric_catalog; `deprecated` rising is a retirement, as `is_archived` is.
-    const deprecate = {
-      event_type: 'UPDATE',
-      old_data: { name: 'Controller/EXECUTION', deprecated: false, superseded_by: null },
-      new_data: { name: 'Controller/EXECUTION', deprecated: true, superseded_by: 'm2' }
-    }
-    const restore = { event_type: 'UPDATE', old_data: deprecate.new_data, new_data: deprecate.old_data }
-    expect(classifyEvent(deprecate, diffFields(deprecate.old_data, deprecate.new_data))).toBe('critical')
-    expect(classifyEvent(restore, diffFields(restore.old_data, restore.new_data))).toBe('operational')
-  })
-
-  /* Shapes taken from a reseeded stack: the commonest event is a device's first DBIRTH, which
-     arrives as one update touching three columns at once, and classifying on any one in isolation
-     gets it wrong. */
-  it('calls a real first DBIRTH operational, not governance', () => {
-    const event = {
-      event_type: 'UPDATE',
-      old_data: { status: 'OFFLINE', first_dbirth_at: null, identity_source: null },
-      new_data: { status: 'ONLINE', first_dbirth_at: '2026-08-17T15:11:20Z', identity_source: 'sparkplug' }
-    }
-    // `identity_source` is provenance the ingestion daemon writes, not configuration an operator
-    // declared, and it never moves on its own -- so it must not drag the whole event amber.
-    expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
-  })
-
-  it('calls a real cell relocation operational', () => {
-    const event = {
-      event_type: 'UPDATE',
-      old_data: { cell_id: null }, new_data: { cell_id: 'cell-a' }
-    }
-    expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
-  })
-
-  /* The database's judgement, read from the row: `audit_domain` is stamped at insert time by one
-     closed classifier, so the browser does not re-derive "is this about who may do what". */
-  it('calls any security-domain row governance, whatever its verb', () => {
-    // A service principal's INSERT is the case that used to come out green. Nothing was created
-    // on the shopfloor; somebody was given a way to reach the stack.
-    const event = {
-      event_type: 'INSERT',
-      audit_domain: 'security',
-      new_data: { roles: ['Administrator'], can_sign_in: false }
-    }
-    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
-  })
-
-  it('still derives a marker for a row that carries no domain', () => {
-    // Rows reach this function from fixtures and from older page state without the column. An
-    // absent domain must fall through to the derivation rather than default to anything.
-    const event = { event_type: 'INSERT', new_data: { asset_name: 'CNC-01' } }
-    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('creation')
-  })
-
-  it('calls a role grant and a role revocation governance, not creation or lifecycle', () => {
-    // Asserted on the ACTION alone, without a domain, because the two arms are independent: the
-    // action arm is what a row reaching the page from an older cache would be classified by.
-    for (const action of ['ROLE_GRANTED', 'ROLE_REVOKED']) {
-      const event = { event_type: action, new_data: { role: 'Administrator' } }
-      expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
-    }
-  })
-
-  it('calls attaching or detaching a device schema governance, not creation or lifecycle', () => {
-    // A device_submodels row is a schema binding: attaching one is a governance act.
-    const row = { device_id: 'dev-1', schema_id: 'sch-1', submodel_key: null }
-    const attach = { event_type: 'INSERT', entity_type: 'device_submodels', new_data: row }
-    const detach = { event_type: 'DELETE', entity_type: 'device_submodels', old_data: row }
-    expect(classifyEvent(attach, diffFields(null, attach.new_data))).toBe('governance')
-    expect(classifyEvent(detach, diffFields(detach.old_data, null))).toBe('governance')
+  it('draws a class it has no marker for as operational, rather than nothing', async () => {
+    api.get.mockImplementation((path) => (path.startsWith('/api/v1/audit-trail')
+      ? Promise.resolve([{ ...EVENTS[0], class: 'unheard_of' }])
+      : Promise.resolve(path.startsWith('/api/v1/devices') ? DEVICES : [])))
+    await show()
+    expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('trail-node-operational')
   })
 
   it('carries a legend, because nothing else in the UI says what amber means', async () => {

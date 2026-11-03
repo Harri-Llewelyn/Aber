@@ -1,8 +1,8 @@
 /**
  * Audit Trail: the action filter, and the two vocabularies this page speaks.
  * `audit_trail.action` is what the database did (INSERT / UPDATE / DELETE plus the
- * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, derived
- * client-side and colouring the timeline. The filter must use the first vocabulary. The allow-list
+ * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, the class the
+ * server names and the legend's toggles choose, colouring the timeline. The filter must use the first vocabulary. The allow-list
  * in api.js must refuse an unknown action rather than apply no predicate, because "returns
  * everything" is a failure a caller cannot see.
  */
@@ -126,11 +126,13 @@ describe('the two vocabularies are kept apart', () => {
     expect(screen.queryByRole('group', { name: /event/i })).toBeNull()
   })
 
-  it('the legend still describes the derived classification', async () => {
-    // Both vocabularies remain on screen; the fix is that they no longer share words.
+  it('the legend still describes the classes', async () => {
+    // Both vocabularies remain on screen; the fix is that they no longer share words. A toggle's
+    // tooltip opens with its class's hint and goes on to say what selecting it does.
     await show()
+    const opening = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\. `)
     for (const marker of Object.values(MARKERS)) {
-      expect(getAllByTooltip(marker.hint).length).toBeGreaterThan(0)
+      expect(getAllByTooltip(opening(marker.hint)).length).toBeGreaterThan(0)
     }
   })
 })

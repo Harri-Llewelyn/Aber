@@ -11,8 +11,8 @@
     "every case below. A case is one audit row as the trail stores it; `class` is the answer.",
     "",
     "`browser` is what the dashboard's own classifier answered before the rules moved to the",
-    "server, where that differs. Only the four reads differ, and on purpose: before the Read class",
-    "a read was drawn as a configuration change or an operational one."
+    "server (0228), where that differs: only the four reads, which it drew as a configuration change or",
+    "an operational one. A dashboard suite held that classifier to these cases until it was removed."
   ],
   "cases": [
     { "name": "a setting changed is configuration: the security lane",
@@ -195,6 +195,15 @@
       "old_data": { "name": "Press 4", "grafana_url": "" },
       "new_data": { "name": "Press 4" },
       "class": "configuration" },
+    { "name": "a device's first DBIRTH is operational: its identity source is provenance, not configuration",
+      "action": "UPDATE", "entity_type": "devices", "audit_domain": "asset",
+      "old_data": { "status": "OFFLINE", "first_dbirth_at": null, "identity_source": null },
+      "new_data": { "status": "ONLINE", "first_dbirth_at": "2026-08-17T15:11:20Z", "identity_source": "sparkplug" },
+      "class": "operational" },
+    { "name": "a device moved to a cell is operational",
+      "action": "UPDATE", "entity_type": "devices", "audit_domain": "asset",
+      "old_data": { "cell_id": null }, "new_data": { "cell_id": "a0d17280-0000-4000-8000-0000000000c1" },
+      "class": "operational" },
     { "name": "a device's status is operational",
       "action": "UPDATE", "entity_type": "devices", "audit_domain": "asset",
       "old_data": { "name": "Press 4", "status": "ONLINE" },

@@ -1,5 +1,7 @@
 /**
- * Audit Trail: naming an entity the live lookups cannot, and the SCHEMA_REJECTION event class.
+ * Audit Trail: naming an entity the live lookups cannot, and a SCHEMA_REJECTION row's snapshot. Its
+ * class, Configuration, is the server's (audit_event_class(), 0228), held by the fixture in
+ * test-harness/fixtures/audit-event-classes.json.
  * `audit_trail` holds only `entity_id`, so the page joins client-side against the live lists,
  * and that join cannot resolve a hard-purged entity -- nor one of a kind nothing fetches at all.
  * The fallback reads an ordered list of identity fields out of the audit payload, SHARED WITH
@@ -12,7 +14,6 @@ import { describe, it, expect } from 'vitest'
 import {
   snapshotIdentity,
   resolveLaneName,
-  classifyEvent,
   diffFields,
 } from '../components/tabs/AuditTrailTab'
 
@@ -169,19 +170,6 @@ describe('SCHEMA_REJECTION events', () => {
       truncated: false,
     },
   }
-
-  it('classifies as governance rather than operational', () => {
-    // A rejection says the asset is publishing something its declared model does not account for,
-    // the same category as a schema rebinding. Falling through to `operational` would paint a
-    // conformance breach the colour of a routine status change.
-    expect(classifyEvent(rejection, diffFields(null, rejection.new_data))).toBe('governance')
-  })
-
-  it('is not classified as a lifecycle event', () => {
-    // `critical` is reserved for deleted / archived / quarantined. A non-conforming payload is a
-    // finding about what a running device sends, not a change to whether it exists.
-    expect(classifyEvent(rejection, diffFields(null, rejection.new_data))).not.toBe('critical')
-  })
 
   it('renders as a one-sided snapshot carrying the violation detail', () => {
     const diff = diffFields(rejection.old_data, rejection.new_data)
