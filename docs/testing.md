@@ -915,7 +915,7 @@ python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
 # A million-row Audit Trail answers a class-filtered page in under a second (0228). Attaches ten
 # months of 2001, a hundred thousand rows each, filled as tables of their own and attached so their
-# indexes are built as a stack has them (40 to 50 s), and drops them afterwards. As an Administrator,
+# indexes are built as a stack has them (25 to 50 s), and drops them afterwards. As an Administrator,
 # the first page with Lifecycle chosen and its counts, the same with two classes, and the next page
 # each answer in under a second, the median of three warm calls; the totals, the deleted count and
 # the counts are exact. Every time is printed. NEVER POINT IT AT A STACK ANYBODY USES.

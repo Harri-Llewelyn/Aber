@@ -2943,7 +2943,7 @@ policies on, the median of three warm calls:
 
 | Call | Time |
 | --- | --- |
-| Seeding the million rows, their indexes and `VACUUM ANALYZE` | 40 to 50 s |
+| Seeding the million rows, their indexes and `VACUUM ANALYZE` | 25 to 50 s |
 | All time, Lifecycle, the page with its total and its counts | 0.55 s |
 | All time, Read and Lifecycle, the same | 0.6 s |
 | All time, Lifecycle, the next page, without the counts | 0.1 s |
