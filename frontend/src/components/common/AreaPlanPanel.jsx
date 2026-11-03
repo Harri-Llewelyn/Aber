@@ -86,6 +86,8 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     setBusy(true)
     try {
       await api.setAreaPlanRotation(area, rotation)
+      showToast?.(rotation ? `Plan of ${area.area_name} turned ${rotation}° clockwise` : `Plan of ${area.area_name} turned back to how it was drawn`,
+        'success', { to: areaUrl(area.area_id) })
       try { await onChanged?.() } finally { setDraft(null) }
     } catch (e) { showToast?.(e.message, 'error') }
     finally { setBusy(false) }

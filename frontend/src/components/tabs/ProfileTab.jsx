@@ -19,9 +19,13 @@ import { AccountAvatar } from '../common/AccountAvatar'
 import { IconUpload, IconTrash } from '../common/Icons'
 import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
 import { AllowedAppsSection } from './AllowedAppsSection'
+import { tabUrl } from '../../routes'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = PROFILE_TABS
+
+/** The Account tab, which holds the display name's row. */
+const ACCOUNT_URL = tabUrl('profile', 'account')
 
 const THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
@@ -146,9 +150,10 @@ function AccessTokenRow() {
 /**
  * The person's own display name (0203): shown first wherever they appear, with their email beside it
  * where trust matters. Held as a draft until Save, as the other rows are; an empty name clears it.
- * `displayName` is undefined while it is read. A machine identity has none.
+ * `displayName` is undefined while it is read. A machine identity has none. `onSave` resolves to the
+ * name now held, which the toast says, as Change Name's on People does.
  */
-function DisplayNameRow({ displayName, onSave, isPerson }) {
+function DisplayNameRow({ displayName, onSave, isPerson, showToast }) {
   // null while the row shows what is saved.
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -162,8 +167,9 @@ function DisplayNameRow({ displayName, onSave, isPerson }) {
     setSaving(true)
     setError(null)
     try {
-      await onSave?.(normaliseDisplayName(draft))
+      const held = await onSave?.(normaliseDisplayName(draft))
       setDraft(null)
+      showToast?.(held ? `You are now shown as ${held}` : 'You are now shown by email alone', 'success', { to: ACCOUNT_URL })
     } catch (err) {
       setError(err.message || 'Your display name was not saved.')
     } finally {
@@ -348,7 +354,7 @@ function ProfileTable({ children }) {
  * saves it and rejects with the database's sentence.
  * `pictureUrl` is their own picture's blob URL, or null; `onSavePicture(blob)` and
  * `onRemovePicture()` change it and reject with the sentence to show.
- * `showToast` is App's; the Sessions tab says through it what was ended.
+ * `showToast` is App's; the display name's Save and the Sessions tab say through it what was done.
  * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
@@ -404,7 +410,7 @@ export function ProfileTab({
                 value={email || 'None: this identity signs in with a token'}
                 actions={email ? <span className="setting-fixed">{whoChangesThis}</span> : undefined}
               />
-              <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} />
+              <DisplayNameRow displayName={displayName} onSave={onSaveDisplayName} isPerson={!!email} showToast={showToast} />
               <ProfileRow
                 id="role"
                 label="Role"

@@ -7,6 +7,7 @@ import { Modal } from '../common/Modal'
 import { IconPlay, IconShieldAlert } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
+import { replayLanesUrl } from '../../routes'
 
 /**
  * Speeds offered, rather than a free number. Speed divides both the send schedule and the timestamp
@@ -49,8 +50,9 @@ function describeWorkerPassword(sources) {
  * re-checks the credential and the device map, and refuses any gateway that is not a shadow. The
  * captured ids come from the manifest alone, as ensure_shadow_devices() reads them. The dialog never
  * reads the file: only a download the person asks for may, and issue_capture_download() records it.
+ * `subjectName` names what was recorded, in the toast Prepare replay lanes ends with.
  */
-export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, onCancel }) {
+export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null, onConfirm, onCancel, showToast }) {
   const [targets, setTargets] = useState(null)
   const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   // sparkplug_ids whose credential was re-issued after the worker last picked one up (#217).
@@ -134,12 +136,14 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
   /**
    * Mint the replay lanes and fill the map from what came back. The target list is refreshed
    * afterwards, because `target.devices` is what the dropdowns render and was read before these
-   * lanes existed.
+   * lanes existed. The toast counts lanes, not captured ids: two ids of one device share a lane.
    */
   const prepareLanes = () => runPrepare(async () => {
     setError(null)
     try {
       const map = await api.ensureShadowLanes(capture.id)
+      showToast?.(`${plural(new Set(Object.values(map)).size, 'replay lane')} ready for ${subjectName || capture.subject_sparkplug_id}.`,
+        'success', { to: replayLanesUrl(target.id) })
       setTargets(await api.playbackTargets())
       setDeviceMap(m => ({ ...m, ...map }))
     } catch (err) {

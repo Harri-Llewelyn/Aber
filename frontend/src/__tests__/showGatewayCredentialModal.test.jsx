@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ShowGatewayCredentialModal } from '../components/modals/ShowGatewayCredentialModal'
 import { api } from '../api'
+import { gatewayUrl } from '../routes'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -12,8 +13,8 @@ vi.mock('../api', async () => {
 const GATEWAY = { gateway_id: 'gw-1', gateway_name: 'Host_Gateway_NodeRED' }
 const KEPT = { mqtt_username: 'gwy100000000000400080000', password: 'kept-password', issued_at: '2026-10-06T12:00:00Z' }
 
-const renderModal = () =>
-  render(<ShowGatewayCredentialModal gateway={GATEWAY} onClose={vi.fn()} showToast={vi.fn()} />)
+const renderModal = (showToast = vi.fn()) =>
+  render(<ShowGatewayCredentialModal gateway={GATEWAY} onClose={vi.fn()} showToast={showToast} />)
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -38,13 +39,27 @@ describe('ShowGatewayCredentialModal', () => {
     expect(screen.getByText('Security')).toBeInTheDocument()
   })
 
+  /** The showing is a CREDENTIAL_SHOWN row, so it ends with a toast, as issuing one does. */
+  it('says the credential was shown, naming the gateway and linking to it', async () => {
+    api.showGatewayCredential.mockResolvedValue(KEPT)
+    const showToast = vi.fn()
+    renderModal(showToast)
+    fireEvent.click(screen.getByRole('button', { name: /Show Credential/i }))
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      "Broker credential shown for 'Host_Gateway_NodeRED'", 'success', { to: gatewayUrl('gw-1') }))
+    expect(showToast).toHaveBeenCalledTimes(1)
+  })
+
   it('says what to do when no copy is kept', async () => {
     api.showGatewayCredential.mockRejectedValue(new Error(
       "no copy of gateway Host_Gateway_NodeRED's credential is kept; issue a new one to be able to show it again"))
-    renderModal()
+    const showToast = vi.fn()
+    renderModal(showToast)
     fireEvent.click(screen.getByRole('button', { name: /Show Credential/i }))
 
     await waitFor(() => expect(screen.getByText(/issue a new one/i)).toBeInTheDocument())
     expect(screen.queryByText(/Use it in Node-RED/i)).toBeNull()
+    expect(showToast).not.toHaveBeenCalled()
   })
 })

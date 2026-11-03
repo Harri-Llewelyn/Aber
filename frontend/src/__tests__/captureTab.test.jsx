@@ -549,15 +549,32 @@ describe('deleting and downloading', () => {
     await waitFor(() => expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURE))
   })
 
-  it('opens a signed URL to download', async () => {
+  it('opens a signed URL to download, and says so, naming what was recorded', async () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     api.captureUrl.mockResolvedValue('https://example.test/signed')
     const open = vi.spyOn(window, 'open').mockImplementation(() => {})
-    renderTab()
+    const { props } = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Download/))
     await waitFor(() => expect(api.captureUrl).toHaveBeenCalledWith(CAPTURE.storage_path))
     expect(open).toHaveBeenCalledWith('https://example.test/signed', '_blank', 'noopener')
+    // issue_capture_download() wrote an Audit Trail row, so the download ends with a toast. A file
+    // in the downloads is nothing to link to.
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith('Downloading the capture of Line 1 Gateway…', 'success'))
+    expect(props.showToast).toHaveBeenCalledTimes(1)
+    open.mockRestore()
+  })
+
+  it('says why a download was refused, with no success toast', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    api.captureUrl.mockRejectedValue(new Error('Only a person who may read captures can download one.'))
+    const open = vi.spyOn(window, 'open').mockImplementation(() => {})
+    const { props } = renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row); fireEvent.click(panelAction(/Download/))
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith('Only a person who may read captures can download one.', 'error'))
+    expect(props.showToast).toHaveBeenCalledTimes(1)
+    expect(open).not.toHaveBeenCalled()
     open.mockRestore()
   })
 
@@ -780,7 +797,7 @@ describe('playing a capture back', () => {
       sparkplug_id: 'dev990000000000400080000', is_archived: false, shadow_of: 'dev-27' }
     api.ensureShadowLanes.mockResolvedValue({ dev270000000000400080000: 'dev990000000000400080000' })
 
-    await open()
+    const { props } = await open()
     fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
 
@@ -794,6 +811,11 @@ describe('playing a capture back', () => {
       screen.getByLabelText('Target device for dev270000000000400080000')
     ).toHaveValue('dev990000000000400080000'))
     expect(screen.getByRole('button', { name: 'Play back' })).toBeEnabled()
+    // A lane is a device row with an Audit Trail row of its own: the toast names what was recorded
+    // and opens the lanes on the Devices page, which hides them by default.
+    expect(props.showToast).toHaveBeenCalledWith('1 replay lane ready for Line 1 Gateway.', 'success',
+      { to: '/devices?gateway=gw-sim&replay=1' })
+    expect(props.showToast).toHaveBeenCalledTimes(1)
   })
 
   it('does not prepare lanes until asked', async () => {
