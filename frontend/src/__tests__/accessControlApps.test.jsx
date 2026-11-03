@@ -80,8 +80,8 @@ beforeEach(() => {
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
-function renderApps(showToast = vi.fn()) {
-  render(<AccessControlTab showToast={showToast} userRole="Administrator" currentUserId={ME} />)
+function renderApps(showToast = vi.fn(), hasPermission = undefined) {
+  render(<AccessControlTab showToast={showToast} userRole="Administrator" currentUserId={ME} hasPermission={hasPermission} />)
   return showToast
 }
 
@@ -164,6 +164,19 @@ describe("an app's drawer", () => {
     expect(drawer.getByText('other@site.test')).toBeInTheDocument()
     expect(drawer.getByText('openid email profile')).toBeInTheDocument()
     expect(drawer.getByText('PART OF ABER')).toBeInTheDocument()
+  })
+
+  it('opens the Audit Trail filtered to the app, for a reader who may open it (#1349)', async () => {
+    renderApps(vi.fn(), () => true)
+    const drawer = await openDrawer('Grafana')
+    expect(drawer.getByRole('link', { name: /View Audit Trail/ }))
+      .toHaveAttribute('href', `/audit-trail?search=${GRAFANA}&type=APP`)
+  })
+
+  it('offers no View Audit Trail without the permission', async () => {
+    renderApps(vi.fn(), () => false)
+    const drawer = await openDrawer('Grafana')
+    expect(drawer.queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
   })
 
   it("refuses to remove Aber's own, and says why", async () => {

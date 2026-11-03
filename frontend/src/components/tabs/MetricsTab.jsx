@@ -37,7 +37,7 @@ import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, metricUrl } from '../../routes'
+import { deviceUrl, metricUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -48,7 +48,7 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck
+  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -570,6 +570,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // metric_catalog's INSERT and UPDATE policies (has_role('Administrator')), so this disables the
   // control and decides nothing.
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   // Deprecate, Restore and Edit write metric_catalog too, so they share Add Metric's gate: a
   // permission a Shopfloor_Manager holds, such as archive:manage, would offer a button the database
   // refuses.
@@ -577,11 +578,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const canEditMetric = canManageSchema
 
   /**
-   * Narrows the catalog by metric name only: matching description or units would return rows whose
-   * reason for matching is invisible in the table.
+   * Narrows the catalog by metric name or UUID, as Areas and Cells search theirs: the UUID is what a
+   * link, a log line or the Audit Trail's drawer carries. Not by description or units, which would
+   * return rows whose reason for matching is invisible in the table.
    */
-  const matchesCatalogSearch = (m) =>
-    !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
+  const matchesCatalogSearch = (m) => {
+    const q = catalogSearch.trim().toLowerCase()
+    return !q || (m.name || '').toLowerCase().includes(q) || String(m.metric_uuid || '').toLowerCase().includes(q)
+  }
 
   const matchesCatalogFilters = (m) =>
     matchesCatalogSearch(m) &&
@@ -775,8 +779,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         title: !canDeprecateMetric
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
           : 'Retire this metric from the schema builder'
-      }
-  ]
+      },
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    canReadTrail && {
+      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      to: trailUrl(m.metric_uuid, 'METRIC'),
+      title: 'Open the Audit Trail filtered to this metric'
+    }
+  ].filter(Boolean)
 
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
@@ -880,7 +890,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <SearchInput
                   value={catalogSearch}
                   onChange={setCatalogSearch}
-                  placeholder="Search metrics…"
+                  placeholder="Search name or UUID…"
                   ariaLabel="Search the metric catalog"
                 />
                 <select
@@ -1144,6 +1154,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         subtitle={selected?.deprecated && <Badge tone="warning" size="sm">Deprecated</Badge>}
         fields={selected ? [
           { label: 'Name', value: selected.name, mono: true, copyable: true },
+          { label: 'Metric UUID', value: selected.metric_uuid, mono: true, copyable: true },
           { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
           { label: 'Category', value: selected.category || null },
           { label: 'Units', value: selected.units || null },

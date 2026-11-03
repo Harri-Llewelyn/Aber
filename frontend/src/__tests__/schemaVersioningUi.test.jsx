@@ -302,10 +302,12 @@ describe('Downloading a version definition', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
     await clickRowDownload('Robot_Arm_Schema_v2')
 
-    await waitFor(() => expect(anchors.length).toBe(1))
+    // The download's own anchor: the drawer draws links of its own, View Audit Trail among them.
+    const downloads = () => anchors.filter(a => a.hasAttribute('download'))
+    await waitFor(() => expect(downloads().length).toBe(1))
     // `.schema.json`, so editors and JSON Schema tooling recognise it -- the whole point of
     // opening the file elsewhere.
-    expect(anchors[0].getAttribute('download')).toBe('Robot_Arm_Schema_v2.schema.json')
+    expect(downloads()[0].getAttribute('download')).toBe('Robot_Arm_Schema_v2.schema.json')
   })
 
   it('downloads an archived version too — reading history is not a privileged act', async () => {
