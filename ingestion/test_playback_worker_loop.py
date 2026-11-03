@@ -397,7 +397,10 @@ class MainLoopTests(ClockedCase):
         super().setUp()
         self._saved_main = (playback_worker._supabase, playback_worker._storage,
                             playback_worker._start_heartbeat, playback_worker._run_job,
-                            playback_worker._credential_sources, playback_worker.SUPABASE_PLAYBACK_KEY)
+                            playback_worker._credential_sources, playback_worker.SUPABASE_PLAYBACK_KEY,
+                            playback_worker.start_metrics_endpoint)
+        # No port is bound here; test_playback_metrics.py serves the endpoint.
+        playback_worker.start_metrics_endpoint = lambda: None
         playback_worker._storage = lambda: None
         playback_worker._start_heartbeat = lambda holdings: self.heartbeats.append(holdings)
         playback_worker._credential_sources = lambda: {GW: [("delivered", "a-password")]}
@@ -413,7 +416,7 @@ class MainLoopTests(ClockedCase):
     def tearDown(self):
         (playback_worker._supabase, playback_worker._storage, playback_worker._start_heartbeat,
          playback_worker._run_job, playback_worker._credential_sources,
-         playback_worker.SUPABASE_PLAYBACK_KEY) = self._saved_main
+         playback_worker.SUPABASE_PLAYBACK_KEY, playback_worker.start_metrics_endpoint) = self._saved_main
         super().tearDown()
 
     def main(self, **answers):

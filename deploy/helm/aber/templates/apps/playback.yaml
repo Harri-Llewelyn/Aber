@@ -19,10 +19,14 @@ keep in step.
 values key would let a deployment run the two from different builds, which is a way to get a worker
 whose capture.py disagrees with the daemon's about the file format.
 
-NO SERVICE, AND NO PROBE. It is a pure producer: nothing calls it and it serves no HTTP endpoint,
-unlike ingestion. Inventing an endpoint so a probe has something to read is the wrong order. What a
-restart costs is bounded and visible -- `playback_reconcile_jobs()` fails whatever was in flight
-with a message saying the worker restarted, and the row stops blocking further playbacks.
+ONE PORT, FOR ITS METRICS, AND NO SERVICE OR PROBE. It is a producer: nothing calls it. Its one
+HTTP endpoint is Prometheus `/metrics` on `playback.metrics.port`, which serves the jobs it ended by
+outcome (`aber_playback_jobs_total`) and nothing else, as it has no credential. Alloy finds it by
+the pod's scrape annotations, so no Service is needed. No probe reads it: the endpoint answers from
+its own thread, so it would say the process is alive, which the kubelet already knows, and not that
+the worker's loop is moving. What a restart costs is bounded and visible --
+`playback_reconcile_jobs()` fails whatever was in flight with a message saying the worker
+restarted, and the row stops blocking further playbacks.
 =================================================================================================
 */}}
 apiVersion: apps/v1
@@ -57,6 +61,9 @@ spec:
         # Roll the worker when its Helm-value credentials change: env from a Secret is read at
         # start. Under existingSecret the chart renders no value, so this stays constant.
         checksum/playback-credentials: {{ $helmCredentials | sha256sum }}
+        {{- if .Values.playback.metrics.enabled }}
+        {{- include "aber.scrapeAnnotations" (dict "port" .Values.playback.metrics.port "path" "/metrics") | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -116,6 +123,10 @@ spec:
               value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: PLAYBACK_POLL_INTERVAL_SECONDS
               value: {{ .Values.playback.pollIntervalSeconds | quote }}
+            {{- /* The Prometheus endpoint. 0 disables it in playback_worker.py, as
+                   INGESTION_METRICS_PORT does for the daemon. */}}
+            - name: PLAYBACK_METRICS_PORT
+              value: {{ ternary (.Values.playback.metrics.port | toString) "0" .Values.playback.metrics.enabled | quote }}
             {{- /* The bound the daemon applies to is_historical readings (values.yaml), so the
                    check before a replay judges them as the daemon will. */}}
             - name: TELEMETRY_MAX_HISTORICAL_AGE_SECONDS
@@ -131,6 +142,12 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          {{- if .Values.playback.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.playback.metrics.port }}
+              protocol: TCP
+          {{- end }}
           resources:
             {{- toYaml .Values.playback.resources | nindent 12 }}
           volumeMounts:

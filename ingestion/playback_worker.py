@@ -9,6 +9,9 @@ Sparkplug sessions: it subscribes to the node's NCMD and answers a rebirth reque
 primary host's STATE before each NBIRTH and ends the job when it goes offline, counts only what paho
 accepted, and ends every session with its NDEATH.
 
+It serves one HTTP endpoint, Prometheus `/metrics`, and one series on it: the jobs it ended, by
+outcome (start_metrics_endpoint()).
+
 README.md -> "Playback from the dashboard" and the sections after it hold the reasons.
 """
 
@@ -24,10 +27,13 @@ import urllib.request
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
+import prometheus_client
+from prometheus_client import CollectorRegistry, Counter, generate_latest
 
 import capture
 import sparkplug_b_pb2
 from logging_config import get_logger
+from metrics import start_metrics_server
 
 # `get_logger`, not `logging.getLogger(__name__)`: this stack configures NAMED loggers with
 # `propagate = False`, so a module logger made the standard-library way has no handler and its INFO
@@ -84,6 +90,27 @@ CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
     os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
 )
 
+# The Prometheus endpoint; 0 disables it. No credential, so it serves the outcome count and nothing
+# else: no job, capture or gateway id.
+PLAYBACK_METRICS_PORT = int(os.getenv("PLAYBACK_METRICS_PORT", "9109"))
+
+# What playback_finish() records a job as, in its order: an error, then a stop, then the rest. The
+# outcome label takes these values only.
+OUTCOMES = ("failed", "cancelled", "completed")
+
+# No `_created` series, as the ingestion daemon's registry has none (registry.py).
+prometheus_client.disable_created_metrics()
+METRICS = CollectorRegistry()
+JOBS = Counter(
+    "aber_playback_jobs_total",
+    "Playback jobs this worker ended, by outcome: failed (an error, including the jobs its startup "
+    "sweep failed after a restart), cancelled (stopped by the operator) or completed. Counted once "
+    "the database has recorded the end. A failure is also listed on the Capture page, and raises "
+    "the Capture or Playback Failed alert for an hour.",
+    ["outcome"], registry=METRICS)
+# Every outcome is present at zero from startup, so rate() sees the first one.
+for _outcome in OUTCOMES:
+    JOBS.labels(outcome=_outcome)
 
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
@@ -1017,6 +1044,28 @@ def _start_heartbeat(holdings):
     return thread
 
 
+def count_outcome(outcome, n=1):
+    """Count `n` jobs ended with `outcome`, one of OUTCOMES."""
+    if outcome not in OUTCOMES:
+        raise ValueError("%r is not a playback outcome; the label takes %s only" % (outcome, OUTCOMES))
+    if n > 0:
+        JOBS.labels(outcome=outcome).inc(n)
+
+
+def render_metrics():
+    """The exposition, for the HTTP handler in metrics.py."""
+    return generate_latest(METRICS).decode("utf-8")
+
+
+def start_metrics_endpoint():
+    """Serve METRICS on PLAYBACK_METRICS_PORT, unless it is 0. A port that cannot be bound is logged
+    and survived (metrics.start_metrics_server())."""
+    if PLAYBACK_METRICS_PORT <= 0:
+        logger.info("Metrics endpoint disabled (PLAYBACK_METRICS_PORT=%s).", PLAYBACK_METRICS_PORT)
+        return None
+    return start_metrics_server(PLAYBACK_METRICS_PORT, render_metrics, logger)
+
+
 def _sweep(supabase):
     """
     Fail the jobs a previous run left in flight. Returns whether the sweep ran. Nothing is claimed
@@ -1030,6 +1079,8 @@ def _sweep(supabase):
                      "retrying every %.0fs.", err, POLL_INTERVAL_SECONDS)
         return False
     if swept:
+        # Failed by this sweep, and counted here: the run that left them cannot.
+        count_outcome("failed", swept)
         logger.warning("%d playback job(s) were left in flight by a previous run and have been "
                        "failed. Whatever they had published is already in the historian.", swept)
     return True
@@ -1081,6 +1132,7 @@ def main():
         )
         raise SystemExit(1)
 
+    start_metrics_endpoint()
     supabase = _supabase()
     storage = _storage()
     holdings = _Holdings()
@@ -1145,11 +1197,14 @@ def main():
             continue
 
         if error:
+            count_outcome("failed")
             logger.warning("Playback %s failed after %d message(s): %s", job["id"], sent, error)
         elif outcome.get("stopped"):
+            count_outcome("cancelled")
             logger.info("Playback %s stopped by the operator: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])
         else:
+            count_outcome("completed")
             logger.info("Playback %s complete: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])
 
