@@ -1173,11 +1173,11 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   same to `useTimeWindow`, with `fallback`, the window shown when the address names none. Pass
   module-level constants, as the window is memoised on them. The Audit Trail offers every range
   and All time, and falls back to All time.
-- **Left to right**: ‹, the window in words, ›, Today, then the Day | Week | Month | Year
-  `SegmentedControl`. It goes after the search box, which stays first. It is one unit that does
+- **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
+  `SegmentedControl`. Today is in the popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
   not wrap inside itself, so a toolbar that wraps moves it whole.
 - **The words open a `ToolbarPopover`**, the frame `FiltersPopover` is drawn in: the same place,
-  arrow, Escape and click-outside rules. Focus moves to the panel's first control as it opens,
+  arrow, Escape and click-outside rules, and the chevron every popover's button ends in. Focus moves to the panel's first control as it opens,
   in the Filters panel too. The groups are Jump to (Today, Yesterday, A week ago, A month ago,
   Start of the year, and a date field), Rolling, and Custom range (two `datetime-local` boxes and
   Show range).

@@ -43,18 +43,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('what the control is called', () => {
-  it('is one group: the arrows by the span, the window in words, Today and the span switch', () => {
+  it('is one group: the arrows by the span, the window in words and the span switch', () => {
     show('?span=day&at=2026-11-02')
 
     expect(arrow('Previous day')).toBeInTheDocument()
     expect(arrow('Next day')).toBeInTheDocument()
     expect(words()).toHaveTextContent('Today, Mon 2 Nov')
     expect(words()).toHaveAttribute('aria-haspopup', 'dialog')
-    expect(within(group()).getByRole('button', { name: 'Today' })).toBeInTheDocument()
+    // A chevron says the words open a panel; Today is in it, not beside it.
+    expect(words().querySelector('.popover-chevron')).not.toBeNull()
+    expect(within(group()).queryByRole('button', { name: 'Today' })).toBeNull()
     expect(span('Day')).toHaveAttribute('aria-checked', 'true')
     // In that order, left to right.
     const order = [...group().querySelectorAll('button')].map(b => b.getAttribute('aria-label') || b.textContent)
-    expect(order).toEqual(['Previous day', 'Today, Mon 2 Nov', 'Next day', 'Today', 'Day', 'Week', 'Month', 'Year'])
+    expect(order).toEqual(['Previous day', 'Today, Mon 2 Nov', 'Next day', 'Day', 'Week', 'Month', 'Year'])
   })
 
   it('names the arrows Earlier and Later, and selects no span, under a rolling or custom window', () => {
@@ -112,8 +114,10 @@ describe('a step', () => {
     expect(status()).toHaveTextContent('Showing Sun 1 Nov')
     fireEvent.click(span('Week'))
     expect(status()).toHaveTextContent('Showing Mon 26 Oct – Sun 1 Nov')
-    fireEvent.click(within(group()).getByRole('button', { name: 'Today' }))
-    expect(status()).toHaveTextContent('Showing Mon 2 Nov – Sun 8 Nov')
+    // Today is in the popover's Jump to; choosing it gives focus back to the words, which say it.
+    fireEvent.click(words())
+    fireEvent.click(within(choices()).getByRole('button', { name: 'Today' }))
+    expect(words()).toHaveTextContent('Mon 2 Nov – Sun 8 Nov')
     expect(window.location.search).toBe('?span=week&at=2026-11-02')
   })
 

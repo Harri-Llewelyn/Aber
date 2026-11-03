@@ -30,8 +30,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 
 1. Choose **Day**, **Week**, **Month** or **Year** in the bar. The timeline shows the whole of that span, around the date shown.
 2. Select **‹** or **›** to step back or forward one span at a time.
-3. Select **Today** to come back to the span that holds now.
-4. To go further, select the date between the arrows. Under **Jump to**, choose a day such as **A month ago**. Or pick any date and select **Jump**.
+3. To go further, select the date between the arrows. Under **Jump to**, choose **Today** to come back to now, or a day such as **A month ago**. Or pick any date and select **Jump**.
 
 The span stays as it was when you jump. In **Week**, **A month ago** shows the week that holds that day. Weeks start on Monday.
 
@@ -44,7 +43,7 @@ Under a rolling or custom range, no span is chosen. The arrows are called **Earl
 
 **›** is greyed out while the window reaches now, and both arrows are greyed out under **All time**. Point at an arrow, or move to it with Tab, to see why.
 
-When the window runs on past now, as **Today** does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**. When a window holds more events than are loaded, its start is hatched and says **Older events not loaded**. **Show more** at the foot loads them.
+When the window runs on past now, as today's does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**. When a window holds more events than are loaded, its start is hatched and says **Older events not loaded**. **Show more** at the foot loads them.
 
 The address keeps the window, so a link you share opens the same one.
 

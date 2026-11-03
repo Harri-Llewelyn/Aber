@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Tooltip } from './Tooltip'
+import { IconChevronDown } from './Icons'
 
 /** The gap under the button, the same as the top bar's panels: room for the arrow. */
 const GAP = 8
@@ -90,6 +91,8 @@ export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-gh
           onClick={() => setOpen(o => !o)}
         >
           {button}
+          {/* Says the button opens a panel, as a select's arrow does; turned while it is open. */}
+          <IconChevronDown size={12} className="popover-chevron" aria-hidden="true" />
         </button>
       </Tooltip>
       {open && createPortal(

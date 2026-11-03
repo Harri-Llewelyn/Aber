@@ -1313,6 +1313,10 @@ a.tab-strip-tab { text-decoration: none; }
 .filter-bar-clear { margin-left: auto; }
 
 /* The Filters popover: fixed under its button (see FiltersPopover), on the popover rung. */
+/* A popover's trigger ends in a chevron, turned while its panel is open (ToolbarPopover). */
+.popover-chevron { flex-shrink: 0; transition: transform 0.15s ease; }
+[aria-expanded="true"] > .popover-chevron { transform: rotate(180deg); }
+
 .filters-popover {
   position: fixed;
   z-index: 200;

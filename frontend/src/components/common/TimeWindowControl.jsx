@@ -9,16 +9,9 @@ import {
   parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds, windowWords
 } from '../../utils/timeWindow'
 
-/** How often the control looks at the clock, so Today and the › arrow follow it. */
+/** How often the control looks at the clock, so the words and the › arrow follow it. */
 const CLOCK_MS = 60 * 1000
 
-/** What Today shows at each span, said in its tooltip. */
-const TODAY_TIPS = {
-  day: 'Show today',
-  week: 'Show this week',
-  month: 'Show this month',
-  year: 'Show this year',
-}
 
 /**
  * One arrow. At an end it is `aria-disabled`, not `disabled`, as the Audit Trail drawer's step
@@ -123,9 +116,9 @@ function WindowChoices({ value, ranges, allTime, now, onChoose }) {
 }
 
 /**
- * One time control for every page that shows a period: ‹ the window in words ›, Today, and the
+ * One time control for every page that shows a period: ‹ the window in words › and the
  * Day | Week | Month | Year switch. The words open a popover (ToolbarPopover, the Filters frame)
- * to jump to a day or choose a rolling or custom range. It sits in the toolbar after the search box.
+ * to jump to a day, Today among them, or choose a rolling or custom range. It sits in the toolbar after the search box.
  *
  *   const [win, setWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true })
  *   <TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime />
@@ -158,7 +151,7 @@ export function TimeWindowControl({ value, onChange, ranges = TIME_PRESETS, allT
 
   return (
     <div className="time-window" role="group" aria-label={label}>
-      {/* The arrows never part from the words; Today and the switch may wrap under them. */}
+      {/* The arrows never part from the words; the switch may wrap under them. */}
       <span className="time-window-nav">
         <StepArrow
           name={names.earlier}
@@ -195,12 +188,6 @@ export function TimeWindowControl({ value, onChange, ranges = TIME_PRESETS, allT
           <IconChevronRight size={15} aria-hidden="true" />
         </StepArrow>
       </span>
-
-      <Tooltip text={TODAY_TIPS[span] || TODAY_TIPS.day}>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={() => show(jumpTo(value, 'today', now))}>
-          Today
-        </button>
-      </Tooltip>
 
       <SegmentedControl
         label="Span"
