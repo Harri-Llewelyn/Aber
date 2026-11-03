@@ -1988,11 +1988,14 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Badges ===== */
+/* A badge is one line: its pill radius would round a wrapped badge into an oval. A long label in a
+   narrow cell widens the column instead, so a long summary is split into one badge per figure. */
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
+  white-space: nowrap;
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
@@ -2198,6 +2201,14 @@ td.row-actions, th.row-actions {
 .badge-drive      { --badge-brand-color: var(--brand-drive); }
 
 /* ===== Collapsed tag list ===== */
+/* An entry drawn as several badges (a devices column's summary): one item of the list, wrapping
+   between its badges, never inside one. */
+.tag-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .tag-overflow {
   font-size: 11px;
   color: var(--text-muted);
@@ -6319,14 +6330,13 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .cell-tag { margin-left: 8px; }
 
 /* Two badges side by side in a cell, the second dropping under the first when the column is
-   narrow. Each stays on one line: a pill broken over two lines reads as two badges. */
+   narrow. Each stays on one line, as every badge does. */
 .badge-pair {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
-.badge-pair > .badge { white-space: nowrap; }
 
 /* Badges stacked in a cell: the status badge over the alert badge. */
 .badge-col {

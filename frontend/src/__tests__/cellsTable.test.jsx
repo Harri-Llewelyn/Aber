@@ -5,6 +5,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { tooltipOf } from '../test/tooltips'
+import { deviceSummaries } from '../test/deviceSummary'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -122,7 +123,7 @@ describe('assigned gateways and devices', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    expect(within(row).getByText('1 Online / 1 Offline')).toBeTruthy()
+    expect(deviceSummaries(row)).toContain('1 Online / 1 Offline')
     expect(within(row).getByText('CNC_Mill_01')).toBeTruthy()
   })
 
@@ -144,7 +145,7 @@ describe('assigned gateways and devices', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(deviceSummaries(row)).toContain('1 Online / 0 Offline')
     expect(within(row).getByText('CNC_Old (archived)')).toBeTruthy()
 
     // Line 1 holds three device rows but one device in service, so it sorts before Line 2's two.
@@ -172,7 +173,7 @@ describe('assigned gateways and devices', () => {
       ]
     })
     await ready()
-    expect(within(rowFor('Assembly Line 1')).getByText('1 Online / 1 Offline / 1 Awaiting first birth')).toBeTruthy()
+    expect(deviceSummaries(rowFor('Assembly Line 1'))).toContain('1 Online / 1 Offline / 1 Awaiting first birth')
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())

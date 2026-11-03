@@ -1690,6 +1690,10 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
   set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
   line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
+- **A badge is one line** (`.badge`, `white-space: nowrap`). Its pill radius rounds a badge that
+  wraps into an oval. A long label widens its column instead, or is split into several badges that
+  wrap between them: a devices column's summary is one badge per figure, a `TagList` entry with
+  `parts`, which still counts once toward the list's limit (`badgeOneLine.test.js`).
 - **A row that opens a side panel has `row-selectable` and shows a chevron.** The CSS draws it on
   the row's last cell as a mask, reserving space on the right; a row without the class shows none.
   Row click opens the panel; a click on a button, link or input inside the row does not
