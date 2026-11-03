@@ -7,7 +7,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { AuditTrailTab, shortId } from '../components/tabs/AuditTrailTab'
+import { AuditTrailTab, actStartedAt, shortId, startedWords } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { tooltipOf } from '../test/tooltips'
 
@@ -71,11 +71,13 @@ describe('a lane label', () => {
     expect(tooltipOf(line)).toBe(`Line 1 — ${LINE}`)
   })
 
-  it('names a recording by its machine, with no short id beside the name', async () => {
+  it('names a recording by its machine and when it began, with no short id', async () => {
     await show()
-    const recording = label('Press_02')
-    expect(recording).toHaveTextContent(/^Press_02$/)
-    expect(recording.querySelector('.trail-lane-qualifier')).toBeNull()
+    const began = startedWords(Date.parse(at('06:00')))
+    const recording = label(`Press_02 ${began}`)
+    expect(recording.querySelector('.trail-lane-name')).toHaveTextContent(/^Press_02$/)
+    expect(recording.querySelector('.trail-lane-qualifier')).toHaveTextContent(began)
+    expect(recording).not.toHaveTextContent(shortId(RECORDING))
     expect(tooltipOf(recording)).toContain(RECORDING)
   })
 
@@ -91,6 +93,60 @@ describe('a lane label', () => {
     const name = label(LONG).querySelector('.trail-lane-name')
     expect(name).toHaveClass('overflow-text')
     expect(name).toHaveTextContent(LONG)
+  })
+})
+
+/**
+ * Recordings, captures and playbacks are named by their subject, which every act on it shares, so
+ * each lane also says when its act began.
+ */
+describe('an act\'s lane says when it began', () => {
+  const started = (id, hhmmss, name = 'Press_02') => ({
+    event_id: id, entity_type: 'capture_jobs', entity_id: `5d1f0c2a-7b6e-4c1d-9f00-0000000000${id}`,
+    event_type: 'CAPTURE_STARTED', timestamp: `2026-08-21T${hhmmss}Z`, description: 'Recording started',
+    changed_by: 'user-1', actor_source: 'user', old_data: null, new_data: { name, max_seconds: 60 },
+  })
+  const showActs = async (events, path = '/audit-trail') => {
+    window.history.replaceState({}, '', path)
+    api.get.mockImplementation((p) => Promise.resolve(p.startsWith('/api/v1/audit-trail') ? events : []))
+    render(<AuditTrailTab userRole="Administrator" />)
+    await waitFor(() => expect(document.querySelectorAll('.trail-lane-open').length).toBe(events.length))
+    return [...document.querySelectorAll('.trail-lane-open')].map(b => b.querySelector('.trail-lane-qualifier')?.textContent)
+  }
+
+  it('tells two recordings of one machine apart by their start', async () => {
+    const words = await showActs([started(41, '06:00:00'), started(42, '09:30:00')])
+    expect(words).toEqual([
+      startedWords(Date.parse('2026-08-21T06:00:00Z')),
+      startedWords(Date.parse('2026-08-21T09:30:00Z')),
+    ])
+  })
+
+  it('adds the seconds only when two of one machine began in the same minute', async () => {
+    const words = await showActs([started(43, '06:00:05'), started(44, '06:00:40'), started(45, '07:00:00', 'Lathe_01')])
+    expect(words).toContain(startedWords(Date.parse('2026-08-21T06:00:05Z'), { seconds: true }))
+    expect(words).toContain(startedWords(Date.parse('2026-08-21T06:00:40Z'), { seconds: true }))
+    expect(words).toContain(startedWords(Date.parse('2026-08-21T07:00:00Z')))
+  })
+
+  it('gives the clock alone within a window of one day', async () => {
+    const words = await showActs([started(46, '06:00:00')], '/audit-trail?span=day&at=2026-08-21')
+    expect(words).toEqual([startedWords(Date.parse('2026-08-21T06:00:00Z'), { withinDay: true })])
+    expect(words[0]).not.toMatch(/Aug/)
+  })
+
+  it('reads a stored capture\'s recorded_at before its events', () => {
+    const recorded = '2026-08-20T23:10:00Z'
+    expect(actStartedAt([
+      { timestamp: '2026-08-21T06:00:00Z', new_data: { name: 'Press_02', recorded_at: recorded } },
+    ])).toBe(Date.parse(recorded))
+    expect(actStartedAt([
+      { timestamp: '2026-08-21T09:00:00Z', new_data: {} }, { timestamp: '2026-08-21T06:00:00Z', new_data: {} },
+    ])).toBe(Date.parse('2026-08-21T06:00:00Z'))
+  })
+
+  it('words a start outside this year with its year', () => {
+    expect(startedWords(Date.parse('2019-03-04T10:00:00Z'))).toMatch(/2019/)
   })
 })
 

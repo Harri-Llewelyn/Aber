@@ -588,6 +588,39 @@ const CATEGORY_IDENTITY_FIELDS = new Set(['origin'])
 const ORIGIN_LABELS = { requested: 'On request', scheduled: 'Scheduled' }
 
 /**
+ * The kinds whose entity is one act, named by its subject: a machine is recorded and played back
+ * many times, so each lane's qualifier says when that one began.
+ */
+const ACT_TABLES = new Set(['capture_jobs', 'captures', 'playback_jobs'])
+
+/**
+ * When an act began: a stored capture's `recorded_at`, else its lane's first event. A recording or
+ * a playback starts with its own event (Recording started, Playback started), so that is its start
+ * unless the window began after it.
+ */
+export function actStartedAt(laneEvents) {
+  for (const e of laneEvents) {
+    const recorded = Date.parse(e?.new_data?.recorded_at ?? e?.old_data?.recorded_at ?? '')
+    if (Number.isFinite(recorded)) return recorded
+  }
+  const stamps = laneEvents.map(e => Date.parse(e.timestamp)).filter(Number.isFinite)
+  return stamps.length ? Math.min(...stamps) : null
+}
+
+/**
+ * An act's start as its lane shows it: the clock alone within a window of a day or less, else the
+ * date and the clock, with the year when it is not this one's. `seconds` for two acts of one
+ * subject that began in the same minute.
+ */
+export function startedWords(ms, { withinDay = false, seconds = false } = {}) {
+  const d = new Date(ms)
+  const clock = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
+  if (withinDay) return clock
+  const thisYear = d.getFullYear() === new Date().getFullYear()
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(thisYear ? {} : { year: 'numeric' }) })} ${clock}`
+}
+
+/**
  * The identity an audit row carries in its payload, for an entity the lookups cannot name -- one
  * deleted, or of a kind nothing looks up. Both snapshots are checked because an INSERT has only
  * `new_data` and a DELETE only `old_data`.
@@ -1415,7 +1448,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       }
       byEntity.get(key).events.push(e)
     }
-    return [...byEntity.values()]
+    const named = [...byEntity.values()]
       .map(lane => ({
         ...lane,
         ...resolveLaneName(lane.entityId, lane.events, entityIdentities, {
@@ -1424,10 +1457,32 @@ export function AuditTrailTab({ userRole, showToast }) {
           canTellDeleted: loadedKinds.has(lane.kind),
         }),
       }))
-      .sort((a, b) =>
-        b.events.length - a.events.length ||
-        String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
-  }, [events, entityIdentities, loadedKinds])
+
+    // An act's lane shares its subject's name with every other act on that subject, so it says
+    // when it began. To the second only where two acts of one subject began in the same minute.
+    // A window's length does not move with the clock, so now is as good as when it was asked for.
+    // 25 hours, so a day that ends summer time still counts as one.
+    const { start, end } = windowBounds(timeWin, Date.now())
+    const withinDay = Boolean(start && end && end - start <= 25 * 60 * 60 * 1000)
+    const acts = named.filter(lane => lane.name && !lane.qualifier &&
+      ACT_TABLES.has(String(lane.events[0]?.entity_type || '').toLowerCase()))
+    const minuteOf = new Map(acts.map(lane => [lane, actStartedAt(lane.events)]).filter(([, ms]) => ms !== null))
+    const sameMinute = new Map()
+    for (const [lane, ms] of minuteOf) {
+      const key = `${lane.events[0].entity_type}|${lane.name}|${startedWords(ms, { withinDay })}`
+      sameMinute.set(key, (sameMinute.get(key) || 0) + 1)
+    }
+    for (const [lane, ms] of minuteOf) {
+      const key = `${lane.events[0].entity_type}|${lane.name}|${startedWords(ms, { withinDay })}`
+      lane.qualifier = startedWords(ms, { withinDay, seconds: sameMinute.get(key) > 1 })
+      lane.startedAt = ms
+    }
+
+    return named.sort((a, b) =>
+      b.events.length - a.events.length ||
+      String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)) ||
+      (a.startedAt ?? 0) - (b.startedAt ?? 0))
+  }, [events, entityIdentities, loadedKinds, timeWin])
 
   /** The kinds whose sections this viewer closed, remembered in this browser. */
   const [closedSections, setClosedSections] = useState(readClosedSections)

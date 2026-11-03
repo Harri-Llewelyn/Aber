@@ -84,12 +84,16 @@ describe('the capture lane', () => {
     }
   })
 
-  it('names each lane by its machine alone, with its own id in the label\'s tooltip', async () => {
+  it('names each lane by its machine and when it began, with its own id in the label\'s tooltip', async () => {
     await show()
-    // Two captures of one press are two lanes. The id that tells them apart is one point away,
-    // rather than taking half the label from the name.
-    const names = screen.getAllByRole('button', { name: 'Open the latest change to Press_02' })
+    // Two captures of one press are two lanes. When each began tells them apart at a glance; the
+    // id is one point away, rather than taking half the label from the name.
+    const names = screen.getAllByRole('button', { name: /^Open the latest change to Press_02 / })
     expect(names).toHaveLength(4)
+    for (const name of names) {
+      expect(name.querySelector('.trail-lane-name')).toHaveTextContent(/^Press_02$/)
+      expect(name.querySelector('.trail-lane-qualifier')?.textContent).toMatch(/\d{2}:\d{2}/)
+    }
     const tips = names.map(tooltipOf)
     for (const id of [JOB, CAPTURE, OLDER, PLAYBACK]) {
       expect(screen.queryByText(shortId(id))).toBeNull()
