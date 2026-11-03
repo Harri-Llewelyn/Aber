@@ -146,7 +146,7 @@ spec:
               PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "aber.timescale.host" . }} -p {{ include "aber.timescale.port" . }} -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }}"
 
               {{/*
-                FIRST, THE HISTORIAN ON THE CHART'S IMAGE. `helm upgrade` runs without --wait, so
+                BEFORE ANY SQL, THE HISTORIAN ON THE CHART'S IMAGE. `helm upgrade` runs without --wait, so
                 this hook can start while the old historian pod still answers, and an update there
                 takes the old binaries' version and passes extension.sql's check. So it waits until
                 the historian offers this chart's TimescaleDB or later, for initJobs.waitTimeout:
