@@ -32,6 +32,7 @@ import time
 import unittest
 
 import psycopg2
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", os.getenv("DB_PORT", "54322"))
@@ -202,17 +203,21 @@ class AMillionRows(unittest.TestCase):
         started = time.perf_counter()
         for m, table in enumerate(partitions(), start=1):
             start, end = month(m)
-            cur.execute(f"CREATE TABLE public.{table} (LIKE public.audit_trail INCLUDING DEFAULTS INCLUDING CONSTRAINTS);")
+            name = sql.Identifier(table)
+            bound = sql.Identifier(f"{table}_bound")
+            cur.execute(sql.SQL("CREATE TABLE public.{} (LIKE public.audit_trail INCLUDING DEFAULTS INCLUDING CONSTRAINTS);")
+                        .format(name))
             # The partition's own bound as a CHECK, so attaching it needs no scan to prove it.
-            cur.execute(f"ALTER TABLE public.{table} ADD CONSTRAINT {table}_bound"
-                        f" CHECK (recorded_at >= %s::timestamptz AND recorded_at < %s::timestamptz);", (start, end))
-            cur.execute(SEED.format(table=table),
+            cur.execute(sql.SQL("ALTER TABLE public.{} ADD CONSTRAINT {}"
+                                " CHECK (recorded_at >= %s::timestamptz AND recorded_at < %s::timestamptz);")
+                        .format(name, bound), (start, end))
+            cur.execute(sql.SQL(SEED).format(table=name),
                         {"start": start, "end": end, "rows": PER_MONTH, "offset": (m - 1) * PER_MONTH})
-            cur.execute(f"ALTER TABLE public.audit_trail ATTACH PARTITION public.{table}"
-                        f" FOR VALUES FROM (%s) TO (%s);", (start, end))
-            cur.execute(f"ALTER TABLE public.{table} DROP CONSTRAINT {table}_bound;")
+            cur.execute(sql.SQL("ALTER TABLE public.audit_trail ATTACH PARTITION public.{} FOR VALUES FROM (%s) TO (%s);")
+                        .format(name), (start, end))
+            cur.execute(sql.SQL("ALTER TABLE public.{} DROP CONSTRAINT {};").format(name, bound))
         for table in partitions():
-            cur.execute(f"VACUUM ANALYZE public.{table};")
+            cur.execute(sql.SQL("VACUUM ANALYZE public.{};").format(sql.Identifier(table)))
         cls.seed_seconds = time.perf_counter() - started
         print(f"\n  seeded {MONTHS * PER_MONTH:,} rows in {MONTHS} months in {cls.seed_seconds:.1f} s", flush=True)
         cls.expected, cls.hidden = expected_counts()
@@ -225,7 +230,7 @@ class AMillionRows(unittest.TestCase):
     @staticmethod
     def drop_partitions(cur):
         for table in partitions():
-            cur.execute(f"DROP TABLE IF EXISTS public.{table};")
+            cur.execute(sql.SQL("DROP TABLE IF EXISTS public.{};").format(sql.Identifier(table)))
 
     def setUp(self):
         self.conn = get_connection()
@@ -313,8 +318,10 @@ class AMillionRows(unittest.TestCase):
         self.assertEqual(payload["total_matching"], self.expected["class"]["lifecycle"])
         self.assertEqual(payload["counts"]["class"], self.expected["class"])
         # The deleted devices the chosen class's rows name: device j appears in bucket j % 100.
-        gone = lambda cls: len({j for j in range(LIVE_DEVICES, 2000)
-                                if BUCKETS[j % 100][0] in DEVICE_KEYED and cls in (None, BUCKETS[j % 100][2])})
+        def gone(cls):
+            return len({j for j in range(LIVE_DEVICES, 2000)
+                        if BUCKETS[j % 100][0] in DEVICE_KEYED and cls in (None, BUCKETS[j % 100][2])})
+
         self.assertEqual(payload["purged_assets"], gone("lifecycle"))
         lifecycle = [b for b in BUCKETS if b[2] == "lifecycle"]
         self.assertEqual(set(payload["counts"]["action"]), {b[1] for b in lifecycle})

@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, MARKERS } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS } from '../constants'
 import { api } from '../api'
-import { getAllByTooltip } from '../test/tooltips'
+import { tooltipOf } from '../test/tooltips'
 import { filterList, offered, toggleInList } from '../test/listFilters'
 
 vi.mock('../api', async () => {
@@ -130,9 +130,9 @@ describe('the two vocabularies are kept apart', () => {
     // Both vocabularies remain on screen; the fix is that they no longer share words. A toggle's
     // tooltip opens with its class's hint and goes on to say what selecting it does.
     await show()
-    const opening = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\. `)
+    const tips = within(screen.getByRole('group', { name: 'Classes' })).getAllByRole('button').map(tooltipOf)
     for (const marker of Object.values(MARKERS)) {
-      expect(getAllByTooltip(opening(marker.hint)).length).toBeGreaterThan(0)
+      expect(tips.some(t => t?.startsWith(`${marker.hint}. `)), marker.label).toBe(true)
     }
   })
 })

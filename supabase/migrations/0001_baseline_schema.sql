@@ -1126,7 +1126,7 @@ DECLARE
   v_id_term   bigint;
   -- Ids the search matches by something not in the row: a person, a backup job's note or stamp,
   -- and the backups a job took.
-  v_also      uuid[] := '{}';
+  v_also      uuid[] := '{}'::uuid[];
   -- Every entity the purged rule can find, so a row's test is one lookup.
   v_live      uuid[];
   v_limit     integer := greatest(1, least(coalesce(p_limit, 200), 1000));

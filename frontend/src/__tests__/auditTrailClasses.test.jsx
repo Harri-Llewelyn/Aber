@@ -65,7 +65,10 @@ const show = async (userRole = 'Administrator') => {
   await waitFor(() => expect(screen.getAllByText('Line One').length).toBeGreaterThan(0))
 }
 
-const toggle = (label) => screen.getByRole('button', { name: new RegExp(`^${label}( \\(\\d+\\))?$`) })
+/** A class's toggle, by its label with or without its count. */
+const toggle = (label) => screen.getByRole('button', {
+  name: (name) => name === label || (name.startsWith(`${label} (`) && /^\d+\)$/.test(name.slice(label.length + 2))),
+})
 
 describe('the legend is the class filter', () => {
   it('draws each class as a toggle, Read after Lifecycle, each with its count', async () => {

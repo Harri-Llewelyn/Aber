@@ -125,10 +125,13 @@ class TheColumnIsGone(Base):
         self.assertFalse(self._has_column())
 
     def test_no_function_body_names_it(self):
+        # Past rows carry it, so audit_event_class() (0228) reads it out of a snapshot, as a JSON key
+        # and in no other way.
         self.cur.execute(
             "SELECT p.oid::regprocedure::text FROM pg_proc p "
             "  JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname = 'public' AND p.prosrc ~ '\\mgrafana_url\\M' ORDER BY 1;"
+            " WHERE n.nspname = 'public'"
+            "   AND replace(p.prosrc, '-> ''grafana_url''', '') ~ '\\mgrafana_url\\M' ORDER BY 1;"
         )
         self.assertEqual(self.cur.fetchall(), [])
 

@@ -95,6 +95,12 @@ def expected(classes=None, kinds=None, actions=None, rows=ROWS):
                    and (not actions or r[2] in actions)), reverse=True)
 
 
+def selected(classes, kinds, actions):
+    """The seeded rows the three lists select; a list that is None is no constraint."""
+    return [r for r in ROWS if (not classes or r[5] in classes) and (not kinds or r[1] in kinds)
+            and (not actions or r[2] in actions)]
+
+
 def tally(rows, key):
     out = {}
     for r in rows:
@@ -314,11 +320,9 @@ class TheSeededTrail(Base):
             with self.subTest(classes=classes, kinds=kinds, actions=actions):
                 payload = self.page(classes, kinds, actions, counts=True)
                 self.assertSelects(payload, expected(classes, kinds, actions))
-                rows = lambda c, k, a: [r for r in ROWS if (not c or r[5] in c) and (not k or r[1] in k)
-                                        and (not a or r[2] in a)]
-                self.assertEqual(payload["counts"]["class"], tally(rows(None, kinds, actions), 5))
-                self.assertEqual(payload["counts"]["entity_type"], tally(rows(classes, None, actions), 1))
-                self.assertEqual(payload["counts"]["action"], tally(rows(classes, kinds, None), 2))
+                self.assertEqual(payload["counts"]["class"], tally(selected(None, kinds, actions), 5))
+                self.assertEqual(payload["counts"]["entity_type"], tally(selected(classes, None, actions), 1))
+                self.assertEqual(payload["counts"]["action"], tally(selected(classes, kinds, None), 2))
 
     def test_the_counts_follow_the_search_and_the_policies(self):
         counts = self.page(search="Class", counts=True)["counts"]
