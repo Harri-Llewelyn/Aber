@@ -127,7 +127,7 @@ Answers, asked on the terminal when a flag does not give them:
   --admin-email=EMAIL    the first administrator's email
   --site-name=NAME       a short name for the site, such as plant1; it can never change
   --address=IPV4         this machine's address on the site network, which gateways connect to
-  --base-iri=URL         the start of every asset id; permanent once an asset shell is exported
+  --base-iri=URL         the start of every asset id; permanent once an asset shell is exported or read
 
 Other flags:
   --yes, -y              accept the suggested address and base IRI, and do not ask to continue
@@ -490,7 +490,8 @@ certificate names it."
   Q_FLAG=--base-iri Q_GIVEN=$F_IRI Q_SAVED=$S_IRI Q_SAVED_IN=$SITE_SAVED Q_DEFAULT=$dq_iri Q_CHECK=check_base_iri
   Q_PROMPT="Base IRI for asset ids"
   Q_TEXT="Every asset's id starts with this web address, so it should be under a domain your
-organisation controls. It is permanent once an asset shell has been exported."
+organisation controls. It is permanent once an asset shell has been exported or read through
+the AAS API."
   resolve
   BASE_IRI=$VALUE
 
