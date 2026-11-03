@@ -854,13 +854,15 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
   going at its longest interval instead of stopping, so a token the auth client refreshes a moment
   later gets through and clears the strip. The strip lives in the signed-in shell, so it never
   shows over the sign-in page, and the state is reset when the shell mounts and unmounts.
-- **An edge function's refusal shows at once and stays.** Each function asks the auth server about
-  its caller (`auth.getUser()`), so it is the first to learn that a session ended elsewhere, while
-  PostgREST goes on answering on the dead token. Every function call's error in `api.js` passes
-  through `functionFailure()`. A 401 whose body says the session no longer exists
-  (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with the auth server's `/user`
-  (`authServerRefusesSession()`). The functions answer the same "Invalid user token" when they
-  could not reach the auth server at all, and the strip stays until the next sign-in, so the label
+- **An edge function's refusal shows at once and stays.** Each function checks its caller as it is
+  called: most ask the auth server (`auth.getUser()`), and aas-api and the Factory+ Directory ask
+  PostgREST (`auth_pre_request()`, which refuses an ended session with `session_not_found` since
+  0205). So a function call can be the first request to meet a session that ended elsewhere. Every
+  function call's error in `api.js` passes through `functionFailure()`. A 401 whose body says the
+  session no longer exists (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with
+  the auth server's `/user` (`authServerRefusesSession()`). The functions that ask the auth server
+  answer the same "Invalid user token" when they could not reach it at all, and the strip stays
+  until the next sign-in, so the label
   alone is not enough. Only a 401 or 403 from `/user` calls `reportSessionRefused()` and gives the
   error the code `SESSION_REFUSED`. A live session, an unreachable server or no answer within 10
   seconds leaves the error as it was. Refusals that arrive together share one check. The check is a

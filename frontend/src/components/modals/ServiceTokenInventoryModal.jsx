@@ -12,6 +12,7 @@ import { severityRank } from '../../utils/tableSort'
 import { NO_VALUE, formatDate, formatDateTime } from '../../utils/format'
 import { lastUseIsRecorded } from '../../utils/serviceIdentities'
 import { identityUrl } from '../../routes'
+import { REVOCATION_REACHES, SIGNATURE_ONLY } from '../../utils/revocationScope'
 
 const LAST_USED_HELP = 'When a client last presented this token to the i3X server, to the hour. '
   + 'Calls straight to the REST API are not recorded, so Never does not prove a token is unused.'
@@ -35,8 +36,8 @@ function lastUse(t) {
  * One machine identity's tokens, and the only place a token can be revoked. An identity has N
  * tokens because a re-mint adds a credential, so the row shows the count and this dialog the list;
  * revocation is per jti, which is what `revoke_service_token()` takes. A revoked token is not a
- * deleted one: `auth_pre_request()` is a PostgREST hook, so a revoked jti still works at storage,
- * realtime, the edge runtime and Studio until its own expiry, which is why the scope is stated at
+ * deleted one: `auth_pre_request()` is a PostgREST hook, so a revoked jti still works at storage
+ * and realtime until its own expiry (`utils/revocationScope.js`), which is why the scope is stated at
  * the top and the expiry stays visible on every revoked row. Revoke asks first, in a dialog over
  * this one; no type-to-confirm, and no undo.
  *
@@ -113,9 +114,9 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
       <div className="callout callout-warning">
         <IconShieldAlert size={14} className="callout-icon" />
         <div>
-          Revoking stops a token reaching <strong>the API</strong>. Storage, realtime, the edge
-          functions and Studio verify the signature independently and keep accepting it until it
-          expires. Revocation <strong>cannot be undone</strong>.
+          Revoking stops a token at <strong>{REVOCATION_REACHES}</strong>. {SIGNATURE_ONLY}
+          {' '}verify the signature themselves and keep accepting it until it expires. Revocation
+          {' '}<strong>cannot be undone</strong>.
         </div>
       </div>
 
@@ -189,8 +190,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
           message={<>
             Revoke the token <span className="mono">{confirming.jti}</span>
             {confirming.issued_at ? `, issued ${formatDate(confirming.issued_at)},` : ''} for
-            “{principalName}”? The API refuses it from its next request. Storage, realtime, the edge
-            functions and Studio accept it until it expires on {formatDate(confirming.expiresAtMs)}.
+            “{principalName}”? {REVOCATION_REACHES[0].toUpperCase() + REVOCATION_REACHES.slice(1)} refuse
+            it from its next request. {SIGNATURE_ONLY} accept it until it expires on {formatDate(confirming.expiresAtMs)}.
             This cannot be undone.
           </>}
           confirmLabel="Revoke Token"

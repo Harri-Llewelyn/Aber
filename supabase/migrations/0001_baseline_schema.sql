@@ -7013,8 +7013,8 @@ BEGIN
   IF v_ttl_days > public.service_token_max_days() THEN
     RAISE EXCEPTION
       'record_service_token_issued: a token may not outlive % days (asked for %). A token can be '
-      'revoked against the API (0074), but storage, realtime and the edge functions verify the '
-      'signature only -- so the expiry is still the only bound that reaches every service.',
+      'revoked against the API (0074), but storage and realtime verify the signature only -- so '
+      'the expiry is still the only bound that reaches every service.',
       public.service_token_max_days(), round(v_ttl_days, 1)
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
@@ -8650,7 +8650,7 @@ ALTER FUNCTION public.revoke_service_token(p_jti text) OWNER TO postgres;
 --
 
 -- FUNCTION revoke_service_token(p_jti text) :: COMMENT
-COMMENT ON FUNCTION public.revoke_service_token(p_jti text) IS 'Administrator-only. Adds a minted token''s jti to the denylist auth_pre_request() consults, and records a TOKEN_REVOKED row. Refuses a jti with no TOKEN_MINTED record and one that has already expired. Reaches PostgREST only -- storage, realtime, the edge runtime and Studio verify the JWT secret independently.';
+COMMENT ON FUNCTION public.revoke_service_token(p_jti text) IS 'Administrator-only. Adds a minted token''s jti to the denylist auth_pre_request() consults, and records a TOKEN_REVOKED row. Refuses a jti with no TOKEN_MINTED record and one that has already expired. Reaches PostgREST, and through it i3X, aas-api and the Factory+ Directory, which check each caller there; storage and realtime verify the signature independently.';
 
 --
 
@@ -8737,7 +8737,7 @@ ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
-COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
+COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST and at what checks a caller through it; storage and realtime verify the signature alone, so the expiry is the only bound that reaches every service.';
 
 --
 
