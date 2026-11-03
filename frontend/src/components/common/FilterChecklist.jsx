@@ -257,7 +257,7 @@ export function FilterList({ label, options, value = NONE, onChange, counts, plu
 FilterList[PANEL_LIST] = true
 
 /**
- * A yes-or-no choice inside a Filters panel, as a checkbox beside the lists: Show deleted entities,
+ * A yes-or-no choice inside a Filters panel, as a checkbox under the lists: Show deleted entities,
  * Show replay lanes. The count is what turning it on would add.
  */
 export function FilterCheck({ label, checked, onChange, count, tip }) {
