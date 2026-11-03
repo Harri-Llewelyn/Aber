@@ -26,6 +26,9 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
+                # Dot segments (../, %2e%2e) are resolved before a route is chosen. The edge runtime resolves them
+                # itself after routing, so a raw ../ would carry a request out of an exempt prefix past the key check.
+                normalize_path: true
                 # The client's address, read from X-Forwarded-For past the trusted proxies (Traefik is one); a caller
                 # with no forwarded header is its connection's address. The sign-in limits key on it.
                 use_remote_address: true
