@@ -193,8 +193,9 @@ describe('a chosen value no event can have with the others', () => {
     expect(taken.checked).toBe(true)
     const cells = within(filterList('Entity')).getByRole('checkbox', { name: 'Cells not with Backup taken 0' })
     expect(cells.checked).toBe(true)
-    // Not cleared by itself, and undone by unticking.
-    fireEvent.click(taken)
+    // Not cleared by itself, and undone by unticking. Opening Entity closed Action's section, so the
+    // box is found again in its reopened section.
+    fireEvent.click(within(filterList('Action')).getByRole('checkbox', { name: 'Backup taken not with Cells 0' }))
     await waitFor(() => expect(lastParams().has('action')).toBe(false))
   })
 
