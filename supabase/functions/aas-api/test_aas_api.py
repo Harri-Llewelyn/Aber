@@ -58,10 +58,12 @@ def b64url(value: str) -> str:
     return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
 
 
-def request(method: str, url: str, token: str | None, payload: dict | None = None):
+def request(method: str, url: str, token: str | None, payload: dict | None = None,
+            send_apikey: bool = True):
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("apikey", PUBLISHABLE_KEY)
+    if send_apikey:
+        req.add_header("apikey", PUBLISHABLE_KEY)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     if payload is not None:
@@ -80,8 +82,8 @@ def request(method: str, url: str, token: str | None, payload: dict | None = Non
         return 0, {}
 
 
-def get(path: str, token: str | None):
-    return request("GET", f"{API_BASE}{path}", token)
+def get(path: str, token: str | None, send_apikey: bool = True):
+    return request("GET", f"{API_BASE}{path}", token, send_apikey=send_apikey)
 
 
 def sign_in() -> str | None:
@@ -311,6 +313,27 @@ class TestDescription(unittest.TestCase):
         joined = " ".join(body["profiles"])
         self.assertIn("AssetAdministrationShellRepositoryServiceSpecification/SSP-002", joined)
         self.assertIn("SubmodelRepositoryServiceSpecification/SSP-002", joined)
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestAStandardClientSendsNoApikey(unittest.TestCase):
+    """
+    The gateway exempts /functions/v1/aas-api/ from its apikey check, because a standard AAS client
+    sends a bearer token and nothing else. The function's own check is then the whole boundary.
+    """
+
+    def test_the_description_answers_with_no_apikey(self):
+        status, body = get("/description", None, send_apikey=False)
+        self.assertEqual(status, 200, body)
+        self.assertIn("profiles", body)
+
+    def test_the_function_refuses_a_request_with_no_token_itself(self):
+        # The function's 401, in the specification's shape, not the gateway's "No API key found
+        # in request": the request reached the function, and the function failed closed.
+        status, body = get("/shells", None, send_apikey=False)
+        self.assertEqual(status, 401, body)
+        self.assertNotIn("No API key found in request", json.dumps(body))
+        self.assertEqual(body["messages"][0]["text"], "Missing Authorization header")
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)

@@ -5,8 +5,8 @@
  * nobody wrote, and a gateway change that quietly widened an exemption would pass every other
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
  * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to the substituter, every
- * API route has a row in EXPECTED, and the API listener keeps its sign-in limit, response headers
- * and access log. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
+ * API route has a row in EXPECTED, each exemption sits above the gate it is carved out of, and the
+ * API listener keeps its sign-in limit, response headers and access log. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
  * gated routes refused before their upstream and open ones through, the response headers present,
  * and a burst of password grants from one client address refused with 429 while another address
  * and a token refresh pass. The burst names its addresses in X-Forwarded-For, which the gateway
@@ -41,13 +41,16 @@ const pass = (m) => ok.push(m);
 // route is meant to exist with this posture, and a route added to the gateway without a row here
 // fails.
 
-/** The four recorded exemptions, and what each one is for. Open routes must name one of these. */
+/** The five recorded exemptions, and what each one is for. Open routes must name one of these. */
 const EXEMPTIONS = {
   'sign-in': 'sign-in must work before a session exists; GoTrue authenticates its own callers',
   'public-objects': 'an AAS File URL must resolve with no session',
   'oauth-userinfo': 'an OAuth client sends client credentials, never a Supabase apikey',
   'fplus-directory':
     '`/ping` is open by specification; `/v1/` is authenticated by the FUNCTION, not the gateway',
+  'aas-api':
+    'a standard AAS client sends a bearer token and no apikey; `/description` is open by '
+    + 'specification, and every other route is authenticated by the FUNCTION, not the gateway',
 };
 
 const EXPECTED = [
@@ -93,6 +96,12 @@ const EXPECTED = [
     auth: 'open', exemption: 'oauth-userinfo',
     probe: '/functions/v1/nodered-userinfo', marker: '"error"' },
 
+  // A prefix, before the catch-all; the rewrite keeps `/aas-api/` so the runtime picks the worker.
+  { service: 'functions-v1-aas-api', route: 'functions-v1-aas-api-routes',
+    paths: ['/functions/v1/aas-api/'], strip: true,
+    auth: 'open', exemption: 'aas-api',
+    probe: '/functions/v1/aas-api/description', marker: '"profiles"' },
+
   // strip_path false on both, unlike every other route: the function reads the first path segment
   // to pick a worker, so the matched prefix has to survive.
   { service: 'fplus-directory', route: 'fplus-directory-ping', paths: ['/ping'], strip: false,
@@ -104,10 +113,11 @@ const EXPECTED = [
 
   // The catch-all, and the most important of the four gates: the edge runtime boots with
   // VERIFY_JWT="false", so without this plugin an unauthenticated request can start any worker.
+  // Probed through the Directory's /ping, which answers without a token once the gate admits it.
   { service: 'functions-v1', route: 'functions-v1-routes', paths: ['/functions/v1/'], strip: true,
     auth: 'key-auth',
-    probe: '/functions/v1/aas-api/description', marker: '"profiles"' ,
-    authMarker: 'profiles', hides: true},
+    probe: '/functions/v1/fplus-directory/ping', marker: '"service":"fplus-directory"' ,
+    authMarker: 'fplus-directory', hides: true},
 ];
 
 // Runtime mode: `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`. What survives a
@@ -668,6 +678,21 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
     );
   } else {
     pass(`each of the ${routeNames.length} API routes has its row in EXPECTED`);
+  }
+
+  // Routes are first-match, so an exemption inside a gated prefix works only above that gate.
+  const inside = EXPECTED.filter((r) => r.auth === 'open').flatMap((open) => EXPECTED
+    .filter((gated) => gated.auth === 'key-auth'
+      && open.paths.some((p) => gated.paths.some((g) => p.startsWith(g))))
+    .map((gated) => [open.route, gated.route]));
+  const below = inside.filter(([open, gated]) => routeNames.indexOf(open) > routeNames.indexOf(gated));
+  if (below.length) {
+    fail(
+      `${ENVOY_TEMPLATE}: ${below.map(([open, gated]) => `${open} comes after ${gated}`).join('; ')}. `
+      + 'Routes are first-match, so the gate answers first and the exemption never applies.'
+    );
+  } else if (inside.length) {
+    pass(`each of the ${inside.length} exemption(s) inside a gated prefix comes before its gate`);
   }
 }
 

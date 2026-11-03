@@ -4599,7 +4599,8 @@ paths:
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
-        somebody who found this URL in a config file. Start at `/description`.
+        somebody who found this URL in a config file. Start at `/description`. The root alone
+        still needs the `apikey`: the gateway exempts the paths below it.
 
         **Reads as the caller and holds no service-role key**, unlike `aas-export`. RLS decides
         what comes back, which is why it is a separate function: `main/index.ts` forwards only
@@ -4625,22 +4626,17 @@ paths:
   /functions/v1/aas-api/description:
     get:
       tags: [Edge Functions]
+      security: []
       summary: AAS repository self-description (IDTA 02002)
       description: |
         The service profiles this deployment implements. It reports profiles and nothing about
         the fleet.
 
-        **The function does not authenticate this route; the gateway does.** IDTA 02002 expects
-        it readable before a client holds a credential — the same argument that keeps the
-        Factory+ Directory's `/ping` open — and this endpoint is written that way. But it falls
-        under the gated `/functions/v1/` catch-all, so **an `apikey` is required in practice**
-        and a client without one gets `401` before the function is reached.
-
-        That gap is recorded, not accidental: making it a fifth `key-auth` exemption widens the
-        gateway's open surface, which is a decision to take on its own rather than as a side
-        effect. See `docs/gateway.md`. Note the asymmetry if it is taken — only
-        `/description` belongs outside the gate; every other `aas-api` route authenticates the
-        caller itself and fails closed.
+        **Open: no `apikey` and no token.** The specification expects it readable before a client
+        holds a credential — the same argument that keeps the Factory+ Directory's `/ping` open.
+        The gateway exempts every `/functions/v1/aas-api/` route from its `apikey` check, because
+        a standard AAS client sends a bearer token and nothing else (`docs/gateway.md`). Every
+        other `aas-api` route authenticates the caller itself and fails closed.
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
@@ -4659,6 +4655,8 @@ paths:
   /functions/v1/aas-api/shells:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List Asset Administration Shells
       description: |
         Every shell this deployment publishes — one per non-archived device — built live from
@@ -4703,6 +4701,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one Asset Administration Shell
       description: |
         **`aasIdentifier` is base64url-encoded**, as IDTA 02002 requires for every Identifier in
@@ -4733,6 +4733,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a shell's submodel references
       parameters:
         - name: aasIdentifier
@@ -4751,6 +4753,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a shell's AssetInformation
       description: |
         `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
@@ -4772,6 +4776,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a submodel through its shell
       description: |
         The same object as `/submodels/{submodelIdentifier}`, with one extra condition: the
@@ -4803,6 +4809,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a submodel's elements
       description: |
         Paginated in the same envelope as every other list, though one submodel's elements always
@@ -4828,6 +4836,8 @@ paths:
   /functions/v1/aas-api/submodels:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List submodels
       description: |
         Every submodel across every shell. Same pagination as `/shells`.
@@ -4854,6 +4864,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel
       description: |
         base64url-encoded identifier, as above. Also reachable as
@@ -4884,6 +4896,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel element by idShortPath
       description: |
         `idShortPath` is the specification's dotted form — `Metrics.Systems_TEMPERATURE`. A
@@ -5545,7 +5559,7 @@ components:
       type: apiKey
       in: header
       name: apikey
-      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage and userinfo endpoints.
+      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage, userinfo, Factory+ Directory and `aas-api` endpoints.
     AlertWebhookBearer:
       type: http
       scheme: bearer

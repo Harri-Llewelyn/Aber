@@ -6184,7 +6184,7 @@ begin `realtime-dev`.
 
 The `apikey` check gates `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`, and
 accepts the `sb_publishable_*` / `sb_secret_*` keys
-([`docs/gateway.md`](../docs/gateway.md)). **Six routes are open, across four
+([`docs/gateway.md`](../docs/gateway.md)). **Seven routes are open, across five
 exemptions:**
 
 | Route(s) | Exemption | Why |
@@ -6193,6 +6193,7 @@ exemptions:**
 | `/storage/v1/object/public/` | public objects | An AAS `File` URL must resolve for a viewer holding no session. Routed before `/storage/v1/`, with `/object/public/` preserved in the upstream path |
 | `/functions/v1/grafana-userinfo`, `/functions/v1/nodered-userinfo` | OAuth userinfo | An OAuth client presents client credentials, never a Supabase apikey. Exact paths, before `/functions/v1/`, so a function added later is gated by default |
 | `/ping`, `/v1/` | Factory+ Directory | A Factory+ client has no apikey. `/ping` is open by specification; `/v1/` is authenticated by the **function**, which refuses a request with no bearer and queries as the caller, so RLS applies |
+| `/functions/v1/aas-api/` | AAS API | A standard AAS client sends a bearer token and no apikey. `/description` is open by specification; every other route is authenticated by the **function**, as the Directory's are. Before `/functions/v1/`, rewritten to `/aas-api/` so the runtime picks the worker |
 
 **The table is asserted, not maintained by hand.** `check-gateway-surface.mjs` compares the whole
 routing and authentication surface against a reviewed inventory, because `validate.py` asserts the
@@ -6208,7 +6209,8 @@ The template's own comments state each route and filter; the semantics they depe
 because each one produces a stack that looks fine and is not when it is forgotten.
 
 - **Route order is first-match.** `/storage/v1/object/public/` precedes `/storage/v1/`, and the
-  userinfo paths precede `/functions/v1/`, so an exemption is a route placed before the gate.
+  userinfo paths and `/functions/v1/aas-api/` precede `/functions/v1/`, so an exemption is a route
+  placed before the gate. `check-gateway-surface.mjs` fails one placed after it.
 - **Realtime keeps its key and rewrites its Host.** The Realtime client puts the key in the
   WebSocket URL's query string, so a header-only check leaves Realtime permanently 401; it also
   parses the key, so the gateway replaces it with the JWT it stands for rather than stripping it.
