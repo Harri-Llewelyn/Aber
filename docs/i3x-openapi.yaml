@@ -19,7 +19,7 @@ info:
 
     | | Platform API (`openapi.yaml`) | i3X (this document) |
     | :--- | :--- | :--- |
-    | Origin | the gateway, `:54321` | i3X service, `:8090` |
+    | Origin | the gateway: `api.localhost` on the dev cluster, or `:54321` through `npm run dev:forward` | the i3X service: `i3x.localhost`, or `:8090` through the forward |
     | Headers | `apikey` **and** `Authorization` | `Authorization` only |
     | Shape | one path per table/view | one address space, browsed by relationship |
 
@@ -27,7 +27,10 @@ info:
 
     Every path below is served under `/v1`, and the server returns **404 for anything
     outside it** — including `/info`. Clients that take a base URL (i3X Explorer, the
-    CESMII MCP server) must be given `http://localhost:8090/v1`, not `http://localhost:8090`.
+    CESMII MCP server) must be given `http://i3x.localhost/v1` on the dev cluster, or
+    `http://localhost:8090/v1` while `npm run dev:forward` runs, never the bare host. Node and
+    Python clients, the MCP server among them, resolve `i3x.localhost` only where the system's
+    resolver answers it, so they take the forward.
     A client pointed at the bare host fails its version probe and silently falls back to
     treating the server as pre-1.0.
 
@@ -99,8 +102,9 @@ info:
     [`i3x/README.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/i3x/README.md#availability).
 
     > ℹ️ **"Try it out" works from this page.** Click **Authorize** and paste a user access
-    > token. Then pick a server below: the first needs `npm run dev:forward` running, and the
-    > second takes your site's i3X URL, ending `/v1`. The i3X server answers this page's CORS
+    > token. Then pick a server below: the first is the dev cluster's Ingress and needs nothing,
+    > the second needs `npm run dev:forward` running, and the third takes your site's i3X URL,
+    > ending `/v1`. The i3X server answers this page's CORS
     > preflight because the chart gives it Swagger UI's origin, the same list the gateway uses.
     > A page on any other origin is refused until that origin is in `global.corsExtraOrigins`.
 
@@ -109,6 +113,8 @@ info:
     url: https://github.com/Harri-Llewelyn/Aber
 
 servers:
+  - url: http://i3x.localhost/v1
+    description: The dev cluster's i3X server through its Ingress — note the /v1 suffix is part of the base URL
   - url: http://localhost:8090/v1
     description: The i3X server through `npm run dev:forward` — note the /v1 suffix is part of the base URL
   - url: "{base}"
