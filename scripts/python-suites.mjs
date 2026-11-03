@@ -1159,6 +1159,13 @@ export const SUITES = {
       'and its five class indexes, however 0001, 0168, 0222, 0227 and 0228 replay over the form ' +
       'from before.',
   },
+  'supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py': {
+    lanes: ['db'],
+    why:
+      "0229 -- that audit_trail_action_kinds() names every (action, kind) pair the trail's writers " +
+      'can produce, read from the catalog, and no other, and that each pair carries the classes ' +
+      'audit_event_class() answers for it. The Audit Trail narrows its filters by its mirror.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

@@ -913,6 +913,12 @@ python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 # and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
 # before. Every test rolls back.
 python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
+# The Audit Trail knows which kinds each action is written for (0229). audit_trail_action_kinds()
+# names every (action, kind) pair the trail's writers can produce, read from the catalog (the audit
+# trigger's tables and operations, and each function that inserts an audit row), and no other; a
+# writer whose kind or action cannot be read fails it. Each pair's classes are audit_event_class()'s.
+# Read-only.
+python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

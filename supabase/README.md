@@ -2953,6 +2953,39 @@ valid and on its class, and one answer per kind of rule.
 filter and the class on each event, the counts, the backup search, the grants and the indexes, and
 one form after `0001`, `0168`, `0222`, `0227` and `0228` replay over the list form.
 
+### The Audit Trail knows which kinds each action is written for (0229)
+
+The Audit Trail's Entity and Action filters offered every kind and every action, whatever else was
+chosen, so Cells with Backup taken could be chosen and always showed nothing. Nothing said which
+actions go with which kind: each action is written by its own function, across some thirty
+migrations, and `audit_domain_for()` says which lane a pair is in, not whether it can occur.
+
+**`audit_trail_action_kinds()`** is the declared map: one row per action and kind a writer can
+produce, with the classes `audit_event_class()` can put such a row in. It is an `IMMUTABLE` SQL
+function over a `VALUES` list rather than a table, so a replay states the whole map again and no
+row can be left behind. `frontend/src/constants.js` mirrors it row for row as
+`AUDIT_TRAIL_ACTION_KINDS`, and mirror check 43 (`scripts/check-mirror-drift.mjs`) holds the two to
+the same (action, kind, class) triples. Nothing in the database reads it: the dashboard narrows by
+the mirror.
+
+- **The classes come from the rules.** A pair whose action or lane decides its class has that one
+  class. A pair the snapshots decide (an `UPDATE`, or a named act on an asset row) has
+  `operational`, `configuration` and `lifecycle`, whether or not its table has a column that would
+  make it the second or the third: the map says what the rules allow, so it can show an action that
+  never happens in a class, and never hides one that can.
+- **A writer that records a new action, or an action on a new kind, adds its rows** here and to the
+  mirror. The database suite reads the writers out of the catalog and fails until it does.
+
+`test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py` reads every writer: the audit
+trigger on each table it is attached to, for the operations it fires on, and each function whose
+body inserts into `audit_trail`, with its kind and action read from the `INSERT`. A kind written as
+`NEW.entity_type` or a record's field is read from that table's `CHECK`; an action written as a
+variable, from the literals it is assigned. Any other shape fails the suite. It asserts the map names
+every pair those writers produce and no other, and that each pair's classes are the ones
+`audit_event_class()` answers over snapshots that reach each of its rules. The file's self-check
+asserts who may run it and that no pair is listed twice or with a class the classifier does not
+answer.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
