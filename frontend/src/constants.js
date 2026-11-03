@@ -186,19 +186,20 @@ export const AUDIT_TRAIL_ENTITY_GROUPS = [
 
 /**
  * The groups the Audit Trail's action filter draws AUDIT_TRAIL_ACTIONS under, by what each act is
- * about. Every action is in exactly one (`auditTrailFilterGroups.test.js`). Not the legend's
- * categories, which classify an event rather than name its action.
+ * about, and the reads together: the acts that record access and change nothing, the legend's Read
+ * class (0228). Every action is in exactly one (`auditTrailFilterGroups.test.js`). Otherwise not the
+ * legend's classes, which classify an event rather than name its action.
  */
 export const AUDIT_TRAIL_ACTION_GROUPS = [
   { label: 'Row changes', actions: ['INSERT', 'UPDATE', 'DELETE'] },
   {
     label: 'The plant and the model',
-    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'EXPORTED', 'FLOW_DEPLOYED'],
+    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
   },
   {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
-      'CAPTURE_DOWNLOAD_ISSUED', 'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
+      'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
   },
   {
     label: 'People and access',
@@ -212,14 +213,14 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
   {
     label: 'Machine identities and credentials',
     actions: ['PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN'],
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED'],
   },
   {
     label: 'Backups',
     actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED'],
   },
-  { label: 'System', actions: ['SERVICE_LOGS_READ'] },
+  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'] },
 ];
 
 /**
