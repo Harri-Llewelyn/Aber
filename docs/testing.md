@@ -904,7 +904,14 @@ python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_t
 python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 # The Audit Trail sorts events into classes in the database (0228). audit_event_class() answers
 # every case in test-harness/fixtures/audit-event-classes.json, the four reads included, and stays
-# an IMMUTABLE SQL function the planner inlines. Every test rolls back.
+# an IMMUTABLE SQL function the planner inlines. audit_trail_page(p_class) keeps the rows of any of
+# its classes, combined with the other lists by AND, and labels each event; the cursor, the totals
+# and the caller's policies hold. p_counts gives each class, kind and action its events under every
+# filter but its own, the search, the people and the purged rule included. A backup request's id
+# finds the backup it took, released and pruned; a cancelled request's, its own lane; another id,
+# what it did. One form is declared, with its grants and its five class indexes, after the chain
+# and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
+# before. Every test rolls back.
 python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate

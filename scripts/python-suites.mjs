@@ -1153,7 +1153,11 @@ export const SUITES = {
     why:
       '0228 -- that audit_event_class() answers every case in test-harness/fixtures/' +
       'audit-event-classes.json, the four reads included, and stays an IMMUTABLE SQL function ' +
-      'the planner inlines.',
+      "the planner inlines; that audit_trail_page(p_class) keeps those classes' rows and labels " +
+      "each event; that p_counts leaves each filter's own choice out of its own counts; that a " +
+      "backup request's id finds the backup it took; and that one form is left, with its grants " +
+      'and its five class indexes, however 0001, 0168, 0222, 0227 and 0228 replay over the form ' +
+      'from before.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],

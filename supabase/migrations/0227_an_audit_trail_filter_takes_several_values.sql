@@ -33,13 +33,21 @@ $drop$;
 -- -------------------------------------------------------------------------------------------------
 -- 2. Who may call the list form
 -- -------------------------------------------------------------------------------------------------
--- Every role that reads the Audit Trail calls it; audit_trail's policies decide the rows.
-REVOKE ALL ON FUNCTION public.audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone,
-                                               timestamp with time zone, timestamp with time zone, bigint, text,
-                                               uuid[]) FROM PUBLIC, anon;
-GRANT ALL ON FUNCTION public.audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone,
-                                              timestamp with time zone, timestamp with time zone, bigint, text,
-                                              uuid[]) TO authenticated, service_role;
+-- Every role that reads the Audit Trail calls it; audit_trail's policies decide the rows. Only while
+-- this form is the one declared: 0228 adds p_class and p_counts, and states the grants of that form.
+DO $grant$
+BEGIN
+  IF to_regprocedure('public.audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
+                     'timestamp with time zone, timestamp with time zone, bigint, text, uuid[])') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone,
+                                                   timestamp with time zone, timestamp with time zone, bigint, text,
+                                                   uuid[]) FROM PUBLIC, anon;
+    GRANT ALL ON FUNCTION public.audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone,
+                                                  timestamp with time zone, timestamp with time zone, bigint, text,
+                                                  uuid[]) TO authenticated, service_role;
+  END IF;
+END
+$grant$;
 
 -- -------------------------------------------------------------------------------------------------
 -- What this file, 0001 and 0168 did, and nothing wider.

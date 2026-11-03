@@ -8,7 +8,7 @@ import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYT
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
-import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
+import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
@@ -2706,6 +2706,11 @@ const apiMethods = {
       const until = (url.searchParams.get('until') || '').trim();
       // Whose changes: `changed_by` ids, people's or machine identities' (0222).
       const changedBy = listParam('changed_by');
+      // The classes audit_event_class() sorts events into (0228), lower-case words.
+      const classes = listParam('class').map(c => c.toLowerCase());
+      // Each class's, kind's and action's events, under every filter but its own. Asked for with
+      // the first page; a later page leaves them out, as they cannot have changed.
+      const withCounts = url.searchParams.get('counts') === 'true';
 
       // The keyset cursor: both halves or neither. `recorded_at` is not unique (one transaction's rows
       // share one `now()`), so the id is what makes the position exact. The RPC ignores a half-cursor.
@@ -2724,9 +2729,11 @@ const apiMethods = {
       // returns the purged count, which drives the control that reveals them.
       const includePurged = url.searchParams.get('include_purged') === 'true';
 
-      if (actions.some(a => !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, a))) {
-        // An action the client does not know about. Refusing beats widening: returning every row
-        // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
+      if (actions.some(a => !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, a))
+        || classes.some(c => !AUDIT_TRAIL_CLASSES.includes(c))) {
+        // An action or class the client does not know about. Refusing beats widening: returning
+        // every row for an unrecognised filter is how a caller ends up believing it has seen a
+        // filtered set.
         return [];
       }
 
@@ -2747,6 +2754,8 @@ const apiMethods = {
         p_since: since || null,
         p_until: until || null,
         p_changed_by: changedBy.length ? changedBy : null,
+        p_class: classes.length ? classes : null,
+        p_counts: withCounts,
         // Sent only with a cursor, both halves or neither.
         ...(hasCursor
           ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }
@@ -2773,6 +2782,9 @@ const apiMethods = {
       // to be the last one is ordinary, so "fewer rows than I asked for" is not a reliable test and
       // callers must not invent one.
       rows.nextCursor = payload.next_cursor || null;
+      // Null when not asked for: `{ class, entity_type, action }`, each a map of value to events,
+      // holding only the values that occur. Kinds are the stored table names.
+      rows.counts = payload.counts && typeof payload.counts === 'object' ? payload.counts : null;
       return rows;
     }
 

@@ -1168,7 +1168,7 @@ function edgeFunctionNames() {
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
-    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one. Both take p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195)',
+    'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
@@ -3983,16 +3983,22 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 195. The Audit Trail's three list filters are arrays in every place that states them (0227).
 // 0001 and 0168 declare audit_trail_page() with p_entity_type text[], p_action text[] and
-// p_changed_by uuid[], each matched with = ANY; 0001's sweep of stale overloads names that form,
-// or it would drop it on every boot; 0227 drops the single-value form; the API reference documents
-// the three as arrays; and api.js sends each as an array from listParam() or null. A copy left on
-// one value either brings a second form back or sends a string the function refuses.
+// p_changed_by uuid[], and audit_trail_matching() (0228) matches each with = ANY; 0001's sweep of
+// stale overloads names that form, or it would drop it on every boot; 0227 drops the single-value
+// form; the API reference documents the three as arrays; and api.js sends each as an array from
+// listParam() or null. A copy left on one value either brings a second form back or sends a string
+// the function refuses.
 // -------------------------------------------------------------------------------------------------
 {
   const LISTS = { p_entity_type: 'text[]', p_action: 'text[]', p_changed_by: 'uuid[]' };
   const COLUMN = { p_entity_type: 't.entity_type', p_action: 't.action', p_changed_by: 't.changed_by' };
   const LIST_IDENT = 'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
-    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[])';
+    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean)';
+  // The rows the lists select are audit_trail_matching()'s, which the page calls once per class.
+  const m0228 = 'supabase/migrations/0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
+  const helperSql = allFiles.includes(m0228) ? read(m0228) : '';
+  const helperAt = helperSql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_matching(');
+  const helper = helperAt < 0 ? '' : helperSql.slice(helperAt, helperSql.indexOf('$$;', helperSql.indexOf('AS $$', helperAt)));
   const problems195 = [];
 
   const declaring = ['0001_baseline_schema.sql', '0168_every_schema_attached_to_a_device_counts.sql'];
@@ -4006,8 +4012,8 @@ const OPERATOR_PAIRS = [
       if (!args.includes(`${arg} ${type} DEFAULT NULL::${type}`)) {
         problems195.push(`${name} declares audit_trail_page without ${arg} ${type}`);
       }
-      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(body)) {
-        problems195.push(`${name}'s audit_trail_page does not match ${COLUMN[arg]} against any value of ${arg}`);
+      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(helper)) {
+        problems195.push(`audit_trail_matching() does not match ${COLUMN[arg]} against any value of ${arg}`);
       }
     }
   }

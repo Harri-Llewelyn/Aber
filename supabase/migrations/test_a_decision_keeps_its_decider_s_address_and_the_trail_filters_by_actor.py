@@ -16,7 +16,7 @@ What is held here:
     reject or withdraw, and stays what it was when their account's address changes later. An expiry,
     a decision made by somebody other than the caller, and a decision made before 0222 keep NULL.
     No client writes it, on insert or on update.
-  * audit_trail_page() is declared once, with p_changed_by last: after the chain, after 0168 and
+  * audit_trail_page() is declared once, with p_changed_by after p_search: after the chain, after 0168 and
     0222 replay over it, and after 0222 replays over a database that still holds the ten-argument
     form. No applied migration declares the ten-argument form, and 0222's self-check refuses two.
 
@@ -51,12 +51,13 @@ HERE = Path(__file__).resolve().parent
 MIGRATION = HERE / "0222_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.sql"
 SCHEMA_FILE = HERE / "0168_every_schema_attached_to_a_device_counts.sql"
 
-# Eleven arguments, the three filters lists since 0227.
-ELEVEN = (
+# The form declared now: p_changed_by after p_search, the three filters lists since 0227, and
+# 0228's p_class and p_counts after them.
+CURRENT = (
     "p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], "
     "p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, "
     "p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, "
-    "p_changed_by uuid[]"
+    "p_changed_by uuid[], p_class text[], p_counts boolean"
 )
 TEN_TYPES = (
     "integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, "
@@ -383,19 +384,19 @@ class OneSignature(Base):
             " SET search_path TO 'public' AS $$ SELECT '{}'::jsonb $$;"
         )
 
-    def test_the_chain_leaves_the_eleven_argument_form_alone(self):
-        self.assertEqual(self.forms(), [ELEVEN])
+    def test_the_chain_leaves_one_form_alone(self):
+        self.assertEqual(self.forms(), [CURRENT])
 
     def test_replaying_0168_and_0222_brings_no_second_form_back(self):
         self.cur.execute(SCHEMA_FILE.read_text(encoding="utf-8"))
         self.cur.execute(MIGRATION.read_text(encoding="utf-8"))
-        self.assertEqual(self.forms(), [ELEVEN])
+        self.assertEqual(self.forms(), [CURRENT])
 
     def test_0222_drops_the_ten_argument_form_a_database_from_before_still_holds(self):
         self.create_ten_argument_form()
         self.assertEqual(len(self.forms()), 2)
         self.cur.execute(MIGRATION.read_text(encoding="utf-8"))
-        self.assertEqual(self.forms(), [ELEVEN])
+        self.assertEqual(self.forms(), [CURRENT])
         # A call by name, as PostgREST makes it, is no longer ambiguous.
         self.cur.execute("SELECT public.audit_trail_page(p_limit => 1) ? 'events';")
         self.assertTrue(self.cur.fetchone()[0])
@@ -413,8 +414,8 @@ class OneSignature(Base):
         for path in sorted(HERE.glob("[0-9][0-9][0-9][0-9]_*.sql")):
             for m in declared.finditer(path.read_text(encoding="utf-8")):
                 found.append(path.name)
-                self.assertTrue(m.group(1).rstrip().endswith("p_changed_by uuid[] DEFAULT NULL::uuid[]"),
-                                f"{path.name} declares audit_trail_page without p_changed_by last")
+                self.assertIn("p_search text DEFAULT NULL::text, p_changed_by uuid[] DEFAULT NULL::uuid[]", m.group(1),
+                              f"{path.name} declares audit_trail_page without p_changed_by after p_search")
         self.assertEqual(sorted(found), ["0001_baseline_schema.sql",
                                          "0168_every_schema_attached_to_a_device_counts.sql"])
 

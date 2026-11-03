@@ -854,6 +854,13 @@ paths:
         `p_changed_by` keeps the rows those people or machine identities wrote, matched on
         `changed_by` (`0222`). Any role that reads the trail may filter by any id; the same
         policies decide which of those actors' rows come back.
+
+        `p_class` is an array of the classes `audit_event_class()` sorts events into: `created`,
+        `operational`, `configuration`, `lifecycle` and `read` (`0228`). It is combined with the
+        other lists by AND, and each event carries its `class`. With `p_counts`, the answer's
+        `counts` gives each class, kind and action its events under every filter but its own, so
+        choosing an action does not empty the action counts. A search for a backup request's id also
+        finds the backup it took.
       requestBody:
         content:
           application/json:
@@ -871,6 +878,8 @@ paths:
                 p_before_id: { type: integer, format: int64 }
                 p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
                 p_changed_by: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'Only the rows these people or machine identities wrote: any of these `changed_by` ids. Null or empty is no constraint.' }
+                p_class: { type: array, nullable: true, items: { type: string, enum: [created, operational, configuration, lifecycle, read] }, description: 'Any of these classes. Null or empty is no constraint.' }
+                p_counts: { type: boolean, default: false, description: 'Also answer `counts`.' }
       responses:
         '200':
           description: One page, and facts about the whole match.
@@ -884,6 +893,14 @@ paths:
                   purged_assets: { type: integer, description: 'Deleted entities the filters cover.' }
                   truncated: { type: boolean, description: 'There is a next page.' }
                   next_cursor: { type: object, nullable: true, properties: { recorded_at: { type: string, format: date-time }, id: { type: integer, format: int64 } } }
+                  counts:
+                    type: object
+                    nullable: true
+                    description: 'With `p_counts` only: events per class, per `entity_type` and per `action`, each under every filter but its own. A value with no events is absent.'
+                    properties:
+                      class: { type: object, additionalProperties: { type: integer } }
+                      entity_type: { type: object, additionalProperties: { type: integer } }
+                      action: { type: object, additionalProperties: { type: integer } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/revoked_service_tokens:
@@ -6346,6 +6363,13 @@ components:
             The lane, which decides who may read the row: `asset` is readable by Administrator,
             Shopfloor_Manager and Auditor, `security` by Administrator and Auditor. Stamped by a
             trigger from `audit_domain_for()`; a writer cannot supply it.
+        class:
+          type: string
+          enum: [created, operational, configuration, lifecycle, read]
+          description: >-
+            In `audit_trail_page()`'s answer only, not a column: the class `audit_event_class()`
+            sorts the row into (0228), which the Audit Trail's legend draws. `read` is a row that
+            records access and changes nothing.
         recorded_at: { type: string, format: date-time }
 
     DirectoryService:

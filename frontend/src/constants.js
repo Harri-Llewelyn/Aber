@@ -223,6 +223,14 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
 ];
 
 /**
+ * The classes `audit_event_class()` (0228) sorts Audit Trail events into, in the legend's order.
+ * The words are the server's, and the address's (`?class=lifecycle,read`). Mirror check 44 holds
+ * them to the function and its indexes.
+ */
+export const AUDIT_TRAIL_CLASSES = ['created', 'operational', 'configuration', 'lifecycle', 'read'];
+
+
+/**
  * The roles the `audit_trail_select_security` policy admits to the security domain. The asset
  * domain is readable by every role that holds `audit_trail:read`.
  */
