@@ -814,7 +814,8 @@ paths:
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
         `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
         the asset lane, and `user_roles`, `service_principals`, `broker_accounts` (a read-only broker
-        account, 0218), `system_settings`, `backup_jobs` and `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
+        account, 0218), `system_settings`, `backup_jobs`, `backups` and `service_logs` (a read of a
+        service's logs, 0225) in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -1899,6 +1900,41 @@ paths:
             application/json:
               schema: { type: integer }
         '400': { description: 'A username outside the subscriber scheme (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/record_service_logs_read:
+    post:
+      tags: [Auth]
+      summary: Record a read of a service's logs
+      description: |
+        Called by `/functions/v1/service-logs` in the caller's session (`0225`), before it returns
+        the lines it read. Writes one `SERVICE_LOGS_READ` row in the `service_logs` lane of the
+        security domain: the service (as `name`), the level, the text filter (null when none) and
+        the range key, with you in `changed_by`. The entity id is the md5 of `service_logs:` and
+        the service, so every read of one service is one lane.
+
+        Writes nothing and returns null when those four are your last recorded read of the last 24
+        hours: the database decides when a row is due, so a refresh is never recorded twice and a
+        read with new parameters always is. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_service, p_level, p_filter, p_range]
+              properties:
+                p_service: { type: string, description: '1-128 characters on one line.' }
+                p_level:   { type: string, enum: [any, error, warning, info, debug] }
+                p_filter:  { type: string, maxLength: 200, description: 'As sent; empty for none.' }
+                p_range:   { type: string, enum: [15m, 1h, 6h, 24h, 7d] }
+      responses:
+        '200':
+          description: The audit row's id, or null when the read repeats your last.
+          content:
+            application/json:
+              schema: { type: integer, nullable: true }
+        '400': { description: 'A level, range, service name or filter outside the rule (`22023`).' }
         '403': { description: 'Not an Administrator (`42501`).' }
 
   # ------------------------------------------------------------ Registry ----
@@ -4359,6 +4395,114 @@ paths:
                     properties: { error: { type: string }, details: { type: string } }
         '503': { description: 'The credential service is unreachable or refused. For `create` nothing the page can use was made; retry.' }
 
+  /functions/v1/service-logs:
+    get:
+      tags: [Edge Functions]
+      summary: A service's newest log lines
+      description: |
+        The System page's Logs tab. Without `service`, the services that wrote a line to the log
+        store in the last 7 days; with one, that service's newest lines, newest first.
+
+        **Parameters, never a query.** The function builds the one query shape from these:
+        `service`'s stream, then `filter` as a quoted line filter, then `level` read from each
+        line's JSON `level` field. Any other parameter is refused (400), so no caller value reaches
+        the store as anything but a quoted string. A line that is not JSON names no level, and
+        shows only under `level=any`.
+
+        **Ceilings.** A read covers at most 7 days (`range`), returns at most 500 lines (`limit`,
+        200 by default), and waits 10 seconds for the store. A `limit` over 500 is clamped, and
+        `clamped` says so and why; any other value outside the rules is refused. A line longer
+        than 8 KiB is cut at a character, ending ` … [cut at 8 KiB]`, and `cut` is true.
+
+        **Each new read is recorded.** `record_service_logs_read()` (0225) writes a
+        `SERVICE_LOGS_READ` row in the Audit Trail as the caller, when `service`, `level`,
+        `filter` or `range` differs from the caller's last recorded read, so a refresh writes
+        nothing (`audit: unchanged`). The lines are returned only once that call has answered.
+        Listing the services records nothing.
+
+        The store is the Loki Grafana reads: the chart's own, or `grafana.lokiUrl`. With neither
+        the answer is `observability: false`. Requires `Administrator`: the lines carry failed
+        sign-ins, addresses and emails. A machine identity's token is refused (401). No
+        service-role key.
+      parameters:
+        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists. Without it, the answer is the list alone.' }
+        - { name: level, in: query, schema: { type: string, enum: [any, error, warning, info, debug], default: any } }
+        - { name: filter, in: query, schema: { type: string, maxLength: 200 }, description: 'Text a line must contain, matched exactly, case and all.' }
+        - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s.' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, default: 200 }, description: 'Lines to return; over 500 is clamped to 500.' }
+      responses:
+        '200':
+          description: 'The list, or the lines. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  observability: { type: boolean, description: 'False when the deployment has no log store; `details` says so.' }
+                  details:  { type: string }
+                  services: { type: array, items: { type: string } }
+                  service:  { type: string }
+                  level:    { type: string }
+                  filter:   { type: string }
+                  range:    { type: string }
+                  limit:    { type: integer }
+                  from:     { type: string, format: date-time }
+                  to:       { type: string, format: date-time }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        time:    { type: string, format: date-time }
+                        ns:      { type: string, description: 'When the line was written, in nanoseconds since the epoch.' }
+                        level:   { type: string, nullable: true, description: "A JSON line's `level`; null for any other line." }
+                        message: { type: string, nullable: true, description: "A JSON line's `msg`, with its traceback (`exc`) after it; null for any other line." }
+                        fields:
+                          type: object
+                          description: "A JSON line's `reason`, `device` and `edge_node`, where it has them."
+                          additionalProperties: { type: string }
+                        line:    { type: string, description: 'The line as the service wrote it.' }
+                        cut:     { type: boolean }
+                  more:    { type: boolean, description: 'The read stopped at `limit`: older lines in the range were left out.' }
+                  clamped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        parameter: { type: string }
+                        asked:     { type: integer }
+                        used:      { type: integer }
+                        why:       { type: string }
+                  audit: { type: string, enum: [recorded, unchanged] }
+        '400': { description: 'A parameter that is not one, a value outside the rules, or a service the store has not listed in the last 7 days. Nothing was read or recorded.' }
+        '401': { description: Missing or invalid Authorization header, or a token GoTrue does not take for a person. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '405': { description: Method not allowed. }
+        '500':
+          description: >-
+            SUPABASE_URL or the publishable key is not set on this deployment (`details` names it).
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    properties: { error: { type: string }, details: { type: string } }
+        '503':
+          description: 'The log store could not be read, or the read could not be recorded in the Audit Trail, so no lines are returned.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionError' }
+        '504':
+          description: 'The log store did not answer within 10 seconds. A shorter range or a filter asks less of it.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionError' }
+
   /functions/v1/enroll-gateway:
     post:
       tags: [Edge Functions]
@@ -6135,7 +6279,7 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6150,7 +6294,8 @@ components:
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
-                 APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED]
+                 APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
+                 SERVICE_LOGS_READ]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6171,7 +6316,10 @@ components:
             the person's `user_roles` lane, so an act inside GoTrue is recorded too. A read-only
             broker account's creation and deletion are an `INSERT` and a `DELETE` in the
             `broker_accounts` lane, written by `record_broker_account_created()` and
-            `record_broker_account_deleted()` (0218).
+            `record_broker_account_deleted()` (0218). `SERVICE_LOGS_READ` (0225) is an
+            Administrator reading a service's log lines on the System page, in that service's
+            `service_logs` lane, written by `record_service_logs_read()` when the read differs
+            from their last.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

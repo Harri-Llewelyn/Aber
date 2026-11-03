@@ -81,7 +81,10 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept. Where observability.alloy.logForward is on,
 # it also checks the forward: pointed at the in-cluster Loki with an external label, a line arrives
-# twice; pointed at an address nothing answers, lines still reach the in-cluster store.
+# twice; pointed at an address nothing answers, lines still reach the in-cluster store. The same
+# drop is read back through service-logs, as the System page's Logs tab reads it: an
+# Administrator's read finds the device's line with its reason and device, an Operator's is
+# refused, and the read is one Audit Trail row however often it repeats.
 python test-harness/test_log_pipeline.py
 # Sign-in is limited per client, through Traefik and the gateway. Needs the stack up. A probe pod
 # spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if
@@ -530,6 +533,14 @@ python supabase/migrations/test_release_check.py
 # role writes them, anon reads nothing; the gateway count is online of enrolled, and stands when the
 # historian is out. Every test rolls back.
 python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
+# Reading a service's logs is recorded (0225). record_service_logs_read() writes one
+# SERVICE_LOGS_READ row in the service's lane of the security domain, naming the Administrator and
+# the read's service, level, filter and range. The database decides a row is due: one on the first
+# load and on each change, none on a refresh or a repeated direct call, and another person's reads
+# are not the caller's. Only an Administrator may write one; a level, range, service or filter
+# outside the function's rule is refused with no row. An Auditor reads the rows and a Shopfloor
+# Manager does not. Every test rolls back.
+python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
 # A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and

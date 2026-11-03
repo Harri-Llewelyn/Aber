@@ -637,6 +637,16 @@ export const SUITES = {
       'and liveness sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the ' +
       'figures and no role writes them; the gateway count stands when the historian is out.',
   },
+  'supabase/migrations/test_reading_a_service_s_logs_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0225 -- that a read of a service's logs on the System page writes one SERVICE_LOGS_READ row " +
+      "in the service's lane of the security domain, naming the Administrator and the read's " +
+      'service, level, filter and range; that the database, not the caller, decides a row is due: ' +
+      "one on the first load and on each change, none on a refresh or a repeated direct call, and " +
+      "another person's reads are not the caller's; that only an Administrator may write one; and " +
+      'that a parameter outside the function\'s rule is refused with no row.',
+  },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
     why:
@@ -1466,7 +1476,10 @@ export const SUITES = {
       'collected at all -- while the container stayed healthy, `alloy validate` passed and every ' +
       'static check in this repository reported PASS. Where observability.alloy.logForward is on, ' +
       'it also checks that a forward to the in-cluster Loki delivers a second, labelled copy, and ' +
-      'that a forward nothing answers does not stop lines reaching the in-cluster store.',
+      'that a forward nothing answers does not stop lines reaching the in-cluster store. The same ' +
+      "drop is read back through service-logs, as the System page's Logs tab reads it: an " +
+      "Administrator's read finds the device's line with its fields, an Operator's is refused, and " +
+      'the read is one Audit Trail row however often it repeats.',
   },
   'supabase/test_auth_rate_limit.py': {
     lanes: ['stack'],

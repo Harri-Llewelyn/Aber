@@ -46,6 +46,11 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // the audit rows (0218) are written as the caller.
   "broker-subscriber": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
+  // A service's recent log lines for the System page's Logs tab, Administrator only. LOKI_URL is the
+  // log store Grafana reads, which has no access control of its own; unset, the function answers
+  // that observability is off. No service-role key: the audit row (0225) is written as the caller.
+  "service-logs": ["LOKI_URL"],
+
   // Signs a long-lived JWT for a service principal and reveals it once. Its signing key, JWT_KEYS
   // (the ES256 private key GoTrue signs with), is the widest secret in this map: it signs anything, including a `service_role` token that storage,
   // realtime and the edge runtime accept without consulting the denylist. It is signed here rather

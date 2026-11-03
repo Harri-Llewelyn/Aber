@@ -42,12 +42,18 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingestion"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import stack_exec  # noqa: E402  -- the probe pod
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
 MQTT_HOST = os.getenv("MQTT_TEST_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_TEST_PORT", "1883"))
 GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
+
+# The gateway, for the System page's Logs tab: service-logs reads the same store for a person.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+DEMO_PASSWORD = os.getenv("ABER_DEMO_PASSWORD", "aber123")
 
 # The reason this suite drives. One of the ten in ingestion.py, chosen because it is reachable
 # with a single publish and needs no fixture: an unregistered device is refused by definition.
@@ -120,6 +126,31 @@ def parse_record(stream, value):
             f"a Loki entry is not one JSON record ({exc}).\n  labels: {stream.get('stream')}\n"
             f"  time:   {ts}\n  entry:  {line!r}"
         ) from None
+
+
+def sign_in(testcase, email):
+    """A seeded person's access token and id, or a skip (a failure under REQUIRE) naming why not."""
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, DEMO_PASSWORD)
+    if status != 200:
+        skip_or_fail(testcase, stack_sign_in.describe(email, status, body))
+    return body["access_token"], body["user"]["id"]
+
+
+def gateway_get(path, bearer):
+    """(status, parsed JSON) for a GET through the gateway as `bearer`."""
+    req = urllib.request.Request(f"{SUPABASE_URL}{path}",
+                                 headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {bearer}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode()
+        return err.code, (json.loads(raw) if raw.strip() else None)
+
+
+def service_logs(bearer, **params):
+    """The System page's Logs tab's read: GET /functions/v1/service-logs with these parameters."""
+    return gateway_get(f"/functions/v1/service-logs?{urllib.parse.urlencode(params)}", bearer)
 
 
 def prom_query(expr):
@@ -489,6 +520,54 @@ class DropPairTestCase(unittest.TestCase):
             f"the store holds reasons Prometheus does not export: {sorted(fields - labels)}. "
             f"A panel filtered on one of those would link to logs that exist and never resolve.",
         )
+
+    def test_the_same_drop_reads_back_on_the_system_page_s_logs_tab(self):
+        """
+        THE LOGS TAB'S READ, through the gateway, the function and the store. An Administrator's
+        read of ingestion's lines, filtered by the dropped device's id, returns the drop's line
+        with its reason and device as fields; an Operator's is refused; the read is one Audit
+        Trail row, and the same read again writes none.
+
+        The filter is the device id, which is random per run, so the line is the one this run
+        caused, and the read's parameters are new to the Administrator: the first answer is a row.
+        """
+        if not PUBLISHABLE_KEY:
+            skip_or_fail(self, "SUPABASE_PUBLISHABLE_KEY is not set, so nobody can sign in to read the logs")
+        operator, _ = sign_in(self, "operator@aber.local")
+        status, body = service_logs(operator, service="ingestion", filter=self.device, range="15m")
+        self.assertEqual(403, status, f"an Operator read the logs: {body}")
+
+        admin, admin_id = sign_in(self, "admin@aber.local")
+        audits, lines, body = [], [], None
+        deadline = time.time() + PROPAGATION_TIMEOUT
+        while time.time() < deadline:
+            status, body = service_logs(admin, service="ingestion", filter=self.device, range="15m")
+            self.assertEqual(200, status, body)
+            self.assertTrue(body["observability"], f"service-logs says observability is off: {body}")
+            audits.append(body["audit"])
+            lines = [entry for entry in body["lines"] if self.device in entry["line"]]
+            if lines:
+                break
+            time.sleep(5)
+        self.assertTrue(lines, f"service-logs returned no line naming {self.device} within "
+                               f"{PROPAGATION_TIMEOUT}s, though Loki holds it (the test above): {body}")
+        self.assertEqual(REASON, lines[0]["fields"].get("reason"))
+        self.assertEqual(self.device, lines[0]["fields"].get("device"))
+        self.assertEqual("WARNING", lines[0]["level"])
+
+        # A refresh: the same read, recorded once however often it was polled above.
+        status, again = service_logs(admin, service="ingestion", filter=self.device, range="15m")
+        self.assertEqual((200, "unchanged"), (status, again["audit"]), again)
+        self.assertEqual(["recorded"] + ["unchanged"] * (len(audits) - 1), audits)
+        query = urllib.parse.urlencode({
+            "action": "eq.SERVICE_LOGS_READ", "entity_type": "eq.service_logs",
+            "changed_by": f"eq.{admin_id}", "new_data->>filter": f"eq.{self.device}",
+            "select": "new_data",
+        })
+        status, rows = gateway_get(f"/rest/v1/audit_trail?{query}", admin)
+        self.assertEqual(200, status, rows)
+        self.assertEqual([{"name": "ingestion", "level": "any", "filter": self.device, "range": "15m"}],
+                         [r["new_data"] for r in rows])
 
 
 class MultilineTestCase(unittest.TestCase):

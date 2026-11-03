@@ -115,6 +115,10 @@ export const AUDIT_TRAIL_ACTIONS = {
   CAPTURE_DELETED:         'Capture deleted',
   PLAYBACK_STARTED:        'Playback started',
   PLAYBACK_STOPPED:        'Playback stopped',
+  // An Administrator reading a service's log lines on the System page (0225). The database writes
+  // one when the read's service, level, filter or range differs from their last, so a refresh
+  // writes none.
+  SERVICE_LOGS_READ:       'Logs read',
 };
 
 /**
@@ -144,6 +148,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
   // The apps that sign people in (0217): the sign-in service's OAuth clients.
   { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
+  // Reads of a service's log lines (0225), one lane per service, filed under security by
+  // audit_domain_for()'s fail-closed default: the lines carry sign-ins and addresses.
+  { kind: 'SERVICE LOGS',     table: 'service_logs',       label: 'Service logs',       domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
