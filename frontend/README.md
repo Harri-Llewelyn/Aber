@@ -1605,6 +1605,20 @@ passes `{ record: false }`, as a Grafana alert does.
   a failure of what was just tried, since the person is still on the form; a failure whose fix is
   elsewhere still links there. `__tests__/notificationLinks.test.js` reads every `showToast` call:
   one that is not an error passes `to`, or is in its `NO_LINK` list with the reason.
+- **Every action that writes an Audit Trail row ends with a success toast** (#1316), so the bell
+  lists it as well as the trail. Save Turn, Show Credential, a capture's Download, Prepare replay
+  lanes and your own display name's Save each toast, as every other audited action does. It is one
+  toast for each action, however many rows it writes: Add Person writes two and toasts once, and
+  publishing a schema toasts once for all its devices. The type is `success`; one chosen at run
+  time may be `info` when nothing changed, as Cancel's is for a backup the service already took.
+  `__tests__/auditedActionsToast.test.js` reads what writes the trail from the migrations: the
+  functions that insert into `audit_trail`, the tables whose triggers do, and the functions and
+  edge functions that write those. It finds each `api.js` method and route that reaches one, and
+  requires each call of it under `src/` to reach a success `showToast` after it, in its own
+  function and outside a `catch`. `TOASTED_BY` names a call whose toast is made by the code it
+  hands over to, such as the Profile row a hook returns to, and `NO_TOAST` an exception with its
+  reason: OAuth consent's Allow, which leaves the dashboard. Rows nobody writes from the dashboard
+  (the backup service, the cron, ingestion, a machine's edge function) have nobody to toast to.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
   it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
   count drops when the list is opened. One badge cannot follow both: if opening the list cleared

@@ -344,13 +344,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   })
 
-  const onDownload = async (capture) => {
+  const onDownload = async (capture, subject) => {
     setBusyId(capture.id)
     try {
       const url = await api.captureUrl(capture.storage_path)
       // A signed URL in a new tab rather than a fetch-and-blob: the bucket is private, the link is
       // short-lived, and the browser's own download handling is what an operator expects.
       window.open(url, '_blank', 'noopener')
+      showToast(`Downloading the capture of ${subject.name}…`, 'success')
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -851,7 +852,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             pending: busyId === capture.id,
             pendingLabel: 'Preparing…',
             title: 'Download the capture file',
-            onClick: () => onDownload(capture)
+            onClick: () => onDownload(capture, selected)
           },
           capture && {
             label: 'Delete capture',
@@ -943,9 +944,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       {playFor && (
         <StartPlaybackModal
           capture={playFor}
+          subjectName={subjectName(playFor.subject_sparkplug_id) || playFor.subject_sparkplug_id}
           knownDeviceIds={knownDeviceIds}
           onConfirm={onPlay}
           onCancel={() => setPlayFor(null)}
+          showToast={showToast}
         />
       )}
 

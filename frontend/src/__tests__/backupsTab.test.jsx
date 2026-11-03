@@ -503,15 +503,17 @@ describe('the off-site copy', () => {
     expect(screen.getByLabelText('Secret access key').value).toBe('rotated')
   })
 
-  it('removes the destination after asking', async () => {
+  it('removes the destination after asking, and says so as a success, as Save does', async () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.clearBackupOffsiteDestination.mockResolvedValue(true)
-    renderTab()
+    const { props } = renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove the destination' }))
     expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(api.clearBackupOffsiteDestination).toHaveBeenCalled())
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Off-site destination removed. Copies already made stay in the bucket.', 'success', { to: backupUrl() }))
   })
 })
 
