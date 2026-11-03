@@ -571,6 +571,20 @@ export const IconChevronRight = ({ size = 14, className = "", style = {}, ...res
   </svg>
 )
 
+export const IconChevronLeft = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+)
+
+// The time window's button, which opens the jump-to, rolling and custom choices.
+export const IconCalendar = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <rect width={18} height={18} x={3} y={4} rx={2} />
+    <path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />
+  </svg>
+)
+
 // The marker for the row Enter will take in the search palette.
 export const IconCornerDownLeft = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>

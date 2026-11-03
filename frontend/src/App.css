@@ -5015,6 +5015,71 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border: 0;
 }
 
+/* ===== Time window control ===== */
+/* ‹ the window in words ›, Today and the span switch (common/TimeWindowControl.jsx), in a toolbar
+   after the search box. One flex item, so a toolbar that wraps moves it to a line of its own whole;
+   only on a line narrower than itself do Today and the switch go under the arrows, which never
+   part from the words. The words keep a minimum width, so › stays put under the pointer while a
+   week or a day is stepped. */
+.time-window {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.time-window-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time-window-step { padding-left: 7px; padding-right: 7px; }
+
+.time-window-pick {
+  min-width: 12.5rem;
+  justify-content: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.time-window-words { white-space: nowrap; }
+
+/* Inside the popover: the three groups, their buttons wrapping, and the labelled fields. */
+.time-window-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.time-window-group .form-label { margin-bottom: 0; }
+/* Show range ends its group at the right, as Clear ends the Filters panel, rather than spanning it. */
+.time-window-group > .btn { align-self: flex-end; }
+.time-window-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.time-window-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.time-window-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A toolbar control's height, as in .filter-bar, so the three groups fit the panel at 800px. */
+.time-window-field .form-control {
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 13px;
+}
+
 /* Audit Trail swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
