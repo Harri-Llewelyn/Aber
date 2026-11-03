@@ -182,6 +182,11 @@ python ingestion/test_playback_credentials.py
 # has not dropped: a replay whose credential was re-issued partway used to end COMPLETED with every
 # message counted. A capture is read from a temporary file a message at a time, in flat memory.
 python ingestion/test_playback_worker_loop.py
+# The playback worker's metrics endpoint: one series, aber_playback_jobs_total{outcome}, with
+# failed, cancelled and completed at zero from startup and no other label value. Each outcome is
+# counted once the finish is recorded, as playback_finish() ranks them, and the startup sweep
+# counts the jobs it failed. Port 0 disables the endpoint, and any path but /metrics is a 404.
+python ingestion/test_playback_metrics.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
 python ingestion/test_playback_session.py
@@ -701,6 +706,13 @@ python supabase/migrations/test_only_the_seed_makes_a_playback_gateway.py
 # replay. Its replay lanes are never counted in expected_publishers, and a real device that has
 # published, or sits behind a gateway that has reported, still is (0185).
 python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
+# A failed or stuck capture or playback, and a silent playback worker, are platform conditions
+# (0226), each read through its Grafana rule's own query. A failed job gives a row for an hour and
+# then none. A job stuck five minutes past its own limits gives one, and one just inside gives none.
+# A silent worker gives one only while a playback is queued or running, so nothing queued is silent,
+# the seeded 'epoch' row included. The failure gates write no Audit Trail row, and grafana_reader
+# runs each rule and reads no table behind it. Every test rolls back.
+python supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py
 # A shadow gateway holds no health (0186): the chain leaves the Playback gateway no reading, the
 # migration clears what a replay left and nothing else and changes nothing on a second boot, a
 # heartbeat with no health records none and no FLOW_DEPLOYED row, and the daemon's role reads the

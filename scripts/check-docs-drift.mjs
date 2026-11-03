@@ -1172,7 +1172,7 @@ function edgeFunctionNames() {
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
-    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
+    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -1874,6 +1874,55 @@ const OPERATOR_PAIRS = [
   }
   if (held.length === Object.keys(why).length) {
     pass(`platform_health_rows()'s last declaration (${last.name}) keeps shadow gateways out of ${held.join(' and ')}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 191. A failed or stuck capture or playback, and a silent playback worker, reach someone. The last
+// declaration of platform_health_rows() has the three arms 0226 added, and each has a Platform
+// Conditions rule that reads it from platform_health as a platform alert. The stale-worker arm is
+// gated on a queued or running playback: its row is seeded at the epoch, and a site that runs no
+// worker would alert for ever on the age alone. Comments are stripped, so only the SQL counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const declaration = /CREATE OR REPLACE FUNCTION\s+public\.platform_health_rows\s*\(\)[\s\S]*?\bAS\s+(\$[a-z_]*\$)([\s\S]*?)\1/gi;
+  let last = null;
+  for (const name of files) {
+    for (const m of read(`${dir}/${name}`).matchAll(declaration)) last = { name, body: m[2] };
+  }
+  const sql = last ? last.body.replace(/--[^\n]*/g, '') : '';
+  const rules = Object.fromEntries(read('grafana/provisioning/alerting/alert-rules.yaml')
+    .split(/^ {6}- uid: /m).slice(1).map((block) => [block.split('\n')[0].trim(), block]));
+  const ARMS = { job_failed: 'aber-job-failed', job_stuck: 'aber-job-stuck', playback_worker_stale: 'aber-playback-worker-stale' };
+
+  const wrong = [];
+  for (const [condition, uid] of Object.entries(ARMS)) {
+    if (!sql.includes(`'${condition}'::text`)) {
+      wrong.push(`platform_health_rows() has no ${condition} arm${last ? ` (last declared in ${last.name})` : ''}`);
+    }
+    const rule = rules[uid];
+    if (!rule) {
+      wrong.push(`no rule ${uid} reads ${condition}`);
+    } else if (!/FROM public\.platform_health\b/.test(rule) || !rule.includes(`WHERE condition = '${condition}'`)) {
+      wrong.push(`${uid} does not read platform_health's ${condition} rows`);
+    } else if (!/^ {10}entity_type: platform$/m.test(rule)) {
+      wrong.push(`${uid} is not entity_type: platform, so the webhook would look for an asset it names`);
+    }
+  }
+  const staleArm = sql.slice(sql.indexOf("'playback_worker_stale'::text"));
+  if (sql.includes("'playback_worker_stale'::text")
+      && !/EXISTS\s*\(\s*SELECT 1 FROM public\.playback_jobs p WHERE p\.status IN \('PENDING', 'RUNNING'\)\s*\)/.test(staleArm)) {
+    wrong.push(`${last.name}'s playback_worker_stale arm is not gated on a queued or running playback. Its heartbeat row is `
+      + 'seeded at the epoch, so a site with playback.enabled: false would raise Playback Worker Not Reporting for ever');
+  }
+
+  if (wrong.length) {
+    fail(`a failed or stuck job, or a silent playback worker, would reach no one:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`platform_health_rows()'s last declaration (${last.name}) reports failed and stuck jobs and a silent playback `
+      + 'worker, only while a playback waits, and a Platform Conditions rule reads each');
   }
 }
 
@@ -6580,6 +6629,42 @@ const OPERATOR_PAIRS = [
   }
   if (!missing.length && workerReads) {
     pass('the playback worker and the ingestion daemon take the same primary host id from aber.primaryHostId');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 192. The playback worker's metrics endpoint is scraped. The worker serves PLAYBACK_METRICS_PORT,
+// whose default is values.yaml's playback.metrics.port; playback.yaml passes the port, or 0 when
+// playback.metrics.enabled is false, and annotates the pod for Alloy's scrape on it; and the network
+// policy admits alloy to playback on it. Any one missing and the outcome count is never collected,
+// with the endpoint answering and nothing failing.
+// -------------------------------------------------------------------------------------------------
+{
+  const worker = read('ingestion/playback_worker.py');
+  const template = read('deploy/helm/aber/templates/apps/playback.yaml');
+  const policy = read('deploy/helm/aber/templates/networkpolicy.yaml');
+  const values = read('deploy/helm/aber/values.yaml');
+  const defaultPort = worker.match(/^PLAYBACK_METRICS_PORT = int\(os\.getenv\("PLAYBACK_METRICS_PORT", "(\d+)"\)\)/m)?.[1];
+  const valuesPort = values.slice(values.indexOf('\nplayback:\n')).match(/\n {2}metrics:\n {4}enabled: \w+\n {4}port: (\d+)\n/)?.[1];
+  const wrong = [];
+  if (!defaultPort) wrong.push('ingestion/playback_worker.py does not read PLAYBACK_METRICS_PORT');
+  if (!valuesPort) wrong.push('values.yaml declares no playback.metrics.enabled and playback.metrics.port');
+  if (defaultPort && valuesPort && defaultPort !== valuesPort) {
+    wrong.push(`the worker's default port is ${defaultPort} and the chart's is ${valuesPort}`);
+  }
+  if (!/- name: PLAYBACK_METRICS_PORT\n\s+value: \{\{ ternary \(\.Values\.playback\.metrics\.port \| toString\) "0" \.Values\.playback\.metrics\.enabled \| quote \}\}/.test(template)) {
+    wrong.push('playback.yaml does not pass PLAYBACK_METRICS_PORT from playback.metrics, 0 when it is disabled');
+  }
+  if (!/\{\{- if \.Values\.playback\.metrics\.enabled \}\}\n\s+\{\{- include "aber\.scrapeAnnotations" \(dict "port" \.Values\.playback\.metrics\.port "path" "\/metrics"\)/.test(template)) {
+    wrong.push("playback.yaml does not annotate the pod for Alloy's scrape on playback.metrics.port");
+  }
+  if (!/\(dict "from" "alloy"\s+"to" "playback"\s+"port" \(int \.Values\.playback\.metrics\.port\)/.test(policy)) {
+    wrong.push('networkpolicy.yaml has no alloy -> playback edge on playback.metrics.port, so under default-deny the scrape is dropped');
+  }
+  if (wrong.length) {
+    fail(`the playback worker's outcome count would not be collected:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`the playback worker serves :${defaultPort}/metrics, and the chart passes the port, annotates the pod and admits alloy to it`);
   }
 }
 
