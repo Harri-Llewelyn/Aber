@@ -402,7 +402,11 @@ class OneListForm(Base):
 
     def test_the_self_check_refuses_a_single_value_argument(self):
         check = self.block(MIGRATION, r"DO \$check\$.*?\$check\$;")
-        self.cur.execute(f"DROP FUNCTION public.audit_trail_page({LIST_TYPES});")
+        # The list form's signature is bound as a parameter, so no SQL is built from text here.
+        self.cur.execute(
+            "DO $d$ BEGIN EXECUTE format('DROP FUNCTION %%s', to_regprocedure(%s)); END $d$;",
+            (f"public.audit_trail_page({LIST_TYPES})",),
+        )
         self.create_single_value_form()
         with self.assertRaises(psycopg2.errors.RaiseException) as raised:
             self.cur.execute(check)
