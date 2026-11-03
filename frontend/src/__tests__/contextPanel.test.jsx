@@ -11,6 +11,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 import { declaration } from '../test/themeColours'
+import { deviceSummaries } from '../test/deviceSummary'
 
 /**
  * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
@@ -886,7 +887,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    expect(within(cellsTable()).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(deviceSummaries(cellsTable())).toContain('1 Online / 0 Offline')
     expect(within(cellsTable()).getByText('Host_Gateway_NodeRED')).toBeTruthy()
   })
 

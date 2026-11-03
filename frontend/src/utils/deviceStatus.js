@@ -147,10 +147,22 @@ export function deviceSummaryCounts(devices = []) {
   return counts
 }
 
-/** The summary's words: Online and Offline always, Awaiting first birth only while a device is. */
-export function deviceSummaryText(devices = []) {
+/**
+ * The summary's figures: Online and Offline always, Awaiting first birth only while a device is.
+ * Each is drawn as a badge of its own, so the summary wraps between them.
+ */
+export function deviceSummaryParts(devices = []) {
   const { online, offline, awaitingBirth } = deviceSummaryCounts(devices)
-  return `${online} Online / ${offline} Offline${awaitingBirth ? ` / ${awaitingBirth} Awaiting first birth` : ''}`
+  return [
+    { key: 'online', content: `${online} Online` },
+    { key: 'offline', content: `${offline} Offline` },
+    awaitingBirth && { key: 'awaitingBirth', content: `${awaitingBirth} Awaiting first birth` }
+  ].filter(Boolean)
+}
+
+/** The summary in one line of words: the figures, joined. */
+export function deviceSummaryText(devices = []) {
+  return deviceSummaryParts(devices).map(p => p.content).join(' / ')
 }
 
 /**
@@ -179,8 +191,8 @@ export function deviceColumnTags(devices = [], counted = devices) {
     {
       key: '__summary__',
       priority: true,
-      className: 'badge badge-sm badge-neutral',
-      content: deviceSummaryText(counted)
+      label: deviceSummaryText(counted),
+      parts: deviceSummaryParts(counted).map(p => ({ ...p, className: 'badge badge-sm badge-neutral' }))
     },
     ...devices.map(d => ({
       key: d.asset_id,

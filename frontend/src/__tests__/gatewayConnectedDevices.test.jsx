@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { tooltipOf } from '../test/tooltips'
+import { deviceSummaries } from '../test/deviceSummary'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -52,7 +53,7 @@ describe('the gateway devices column', () => {
   it('shows every device when the fleet is small', async () => {
     await show([device(1), device(2)])
 
-    expect(screen.getByText('2 Online / 0 Offline')).toBeInTheDocument()
+    expect(deviceSummaries()).toEqual(['2 Online / 0 Offline'])
     expect(screen.getByText('CNC_01')).toBeInTheDocument()
     expect(screen.getByText('CNC_02')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^\+/ })).not.toBeInTheDocument()
@@ -72,7 +73,7 @@ describe('the gateway devices column', () => {
     // It is the answer to "is this gateway healthy" -- the question the column exists to answer.
     // Hiding it behind a "+18" would defeat the column entirely.
     await show(twenty)
-    expect(screen.getByText('20 Online / 0 Offline')).toBeInTheDocument()
+    expect(deviceSummaries()).toEqual(['20 Online / 0 Offline'])
   })
 
   it('pins a quarantined device however deep in the fleet it sits', async () => {
@@ -116,7 +117,7 @@ describe('the gateway devices column', () => {
 describe('the devices column counts by the shared status rules', () => {
   const BORN = '2026-10-01T08:00:00Z'
   const chip = (text) => screen.getByText(text, { selector: '.badge' })
-  const summary = () => screen.getByText(/^\d+ Online \/ /).textContent
+  const summary = () => deviceSummaries()[0]
 
   it('counts a quarantined device in neither Online nor Offline, and draws it amber and pinned', async () => {
     // Stored ONLINE, as the quarantine insert writes it.
