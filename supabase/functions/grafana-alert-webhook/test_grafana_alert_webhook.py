@@ -442,6 +442,62 @@ class TestPrometheusGatewayRules(unittest.TestCase):
         self.assertIn("wireId === NO_VALUE", src)
 
 
+class TestCaptureAndPlaybackJobRules(unittest.TestCase):
+    """
+    The three rules on 0226's platform_health rows. They are about the platform's own jobs, so each
+    is a platform alert naming no asset, and a failed or stuck job is its own instance by its `job`
+    label, the job's kind and id.
+    """
+
+    UIDS = ("aber-job-failed", "aber-job-stuck", "aber-playback-worker-stale")
+    JOB = "capture job 6c1e2f4a-0226-4000-8000-0000000000aa"
+    OTHER = "playback job 7d2f3a5b-0226-4000-8000-0000000000bb"
+
+    def payload(self, uid, series):
+        """An instance as Grafana sends it: the query's text columns, then the rule's labels."""
+        title, labels = provisioned_rule(uid)
+        rules = TestPrometheusGatewayRules
+        sent = {**series, **{k: rules.expand(rules.provision(v), series) for k, v in labels.items()},
+                "alertname": title, "grafana_folder": "Aber - Platform Infrastructure"}
+        return alert(labels=sent, fingerprint=fingerprint_of(sent),
+                     annotations={"summary": f"{title} holds"},
+                     generatorURL=f"http://grafana.localhost/alerting/grafana/{uid}/view")
+
+    def test_each_rule_is_a_platform_alert_with_no_asset(self):
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                _, labels = provisioned_rule(uid)
+                self.assertEqual(labels["entity_type"], "platform")
+                self.assertNotIn("sparkplug_id", labels)
+                series = {} if uid == "aber-playback-worker-stale" else {"job": self.JOB}
+                row = normalize_alert(self.payload(uid, series))
+                self.assertIsNotNone(row, f"{uid} would be skipped as not attributable")
+                self.assertEqual((row["entity_type"], row["entity_id"], row["sparkplug_id"]),
+                                 ("platform", None, None))
+                self.assertEqual(row["rule_uid"], uid)
+
+    def test_two_failed_jobs_are_two_instances(self):
+        for uid in ("aber-job-failed", "aber-job-stuck"):
+            with self.subTest(uid=uid):
+                one = normalize_alert(self.payload(uid, {"job": self.JOB}))
+                other = normalize_alert(self.payload(uid, {"job": self.OTHER}))
+                self.assertNotEqual(one["fingerprint"], other["fingerprint"])
+                self.assertEqual(one["labels"]["job"], self.JOB)
+
+    def test_their_labels_survive_provisioning_and_name_the_job_in_the_summary(self):
+        text = RULES.read_text(encoding="utf-8")
+        for uid in self.UIDS:
+            with self.subTest(uid=uid):
+                _, labels = provisioned_rule(uid)
+                for value in labels.values():
+                    self.assertEqual(TestPrometheusGatewayRules.provision(value), value)
+                block = text[text.index(f"      - uid: {uid}\n"):]
+                block = block[:block.index("\n      - uid: ", 1)]
+                if uid != "aber-playback-worker-stale":
+                    self.assertIn("{{ $labels.job }}", block)
+                    self.assertIn("subject      AS job", block)
+
+
 def fingerprint_of(labels):
     """Alertmanager's fingerprint stands for a hash of the instance's label set."""
     return hashlib.sha256(repr(sorted(labels.items())).encode()).hexdigest()[:16]
