@@ -39,6 +39,12 @@ describe('FiltersPopover', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('moves focus to its first control as it opens, so a keyboard reaches the portalled panel', () => {
+    const { button } = setup()
+    fireEvent.click(button)
+    expect(document.activeElement).toBe(screen.getByLabelText('Type'))
+  })
+
   it('closes on Escape and returns focus to the button', () => {
     const { button } = setup()
     fireEvent.click(button)

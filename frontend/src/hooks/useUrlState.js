@@ -77,7 +77,7 @@ export function pageUrl(page, params = {}, tab = '') {
 }
 
 /** The current address with `changes` applied to its query; null or '' removes a key. */
-function withQuery(changes) {
+export function withQuery(changes) {
   const { pathname, search } = split(currentUrl())
   const query = new URLSearchParams(search)
   for (const [key, value] of Object.entries(changes)) {

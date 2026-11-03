@@ -488,11 +488,11 @@ so a commissioning burst of five or six rows lands on one pixel. Two fixes were 
   moments on the page were the ones it could not draw. Three fanned dots and five look alike, so
   it could not be counted either.
 - **Nudging along the time axis** would make the same pair of events appear different distances
-  apart depending on the range control, and it would erase the causation signal: perfect overlap
+  apart depending on the time window, and it would erase the causation signal: perfect overlap
   is the visual signature of one act.
 
 Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
-count. Grouping is by **pixel** distance, not by time, so the range control acts as a zoom and a
+count. Grouping is by **pixel** distance, not by time, so the time window acts as a zoom and a
 cluster dissolves into its members as the same events move apart on screen. The badge sits at the
 mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
@@ -1035,7 +1035,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
-| Audit Trail | | `search`, `type`, `action`, `changed_by`, `range`, `since`, `until`, `deleted`; `event` |
+| Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
@@ -1157,6 +1157,56 @@ button, and marks the four rows Off. `aria-keyshortcuts` names `?` on that butto
 search box (read from `SingleKeyShortcutsContext`) and Control+K or Meta+K on the top bar's search.
 The first two, and the `/` hint, go while the switch is off. `[` and `]` are named on no element,
 because the tab they open changes; the shortcuts list covers them.
+
+### One time control for every period
+
+**A page that shows a period uses `common/TimeWindowControl.jsx`**, the Audit Trail first. The
+arithmetic is `utils/timeWindow.js`, and `hooks/useTimeWindow.js` keeps the window in the address.
+A page needs three lines:
+
+```jsx
+const [win, setWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
+<TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime />
+const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' for no bound
+```
+
+- **The props.** `value` and `onChange` are the window. `ranges` is the rolling ranges the page
+  offers: `TIME_PRESETS` (15 minutes to 30 days) or some of them. `allTime` adds All time. Pass the
+  same to `useTimeWindow`, with `fallback`, the window shown when the address names none. Pass
+  module-level constants, as the window is memoised on them. The Audit Trail offers every range
+  and All time, and falls back to All time.
+- **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
+  `SegmentedControl`. Today is in the popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
+  not wrap inside itself, so a toolbar that wraps moves it whole.
+- **The words open a `ToolbarPopover`**, the frame `FiltersPopover` is drawn in: the same place,
+  arrow, Escape and click-outside rules, and the chevron every popover's button ends in. Focus moves to the panel's first control as it opens,
+  in the Filters panel too. The groups are Jump to (Today, Yesterday, A week ago, A month ago,
+  Start of the year, and a date field), Rolling, and Custom range (two `datetime-local` boxes and
+  Show range).
+- **The arithmetic is local calendar time.** A day runs from one local midnight to the next, so a
+  step moves by date, never by 24 hours: 25 October 2026 was 25 hours long in London. Weeks start on
+  Monday. Choosing a span keeps the day shown. Under a rolling or custom window, or All time, no
+  span is chosen; choosing one shows the span that holds the window's end. A rolling window
+  becomes fixed when stepped, measured from the current minute. A custom window steps by its own
+  length, by date when it is whole days.
+- **The arrows** are named by the span (Previous day, Next week), or Earlier and Later for a window
+  that steps by its own length. › is `aria-disabled` while the window holds now, as the Audit Trail
+  drawer's end buttons are, and both are under All time. The tooltip says why. No key is bound: `[`
+  and `]` change tab, and the arrow keys step the Audit Trail's drawer. An arrow, Today or a span
+  is said in a polite `role="status"` line ("Showing Tue 3 Nov").
+- **The address.** A calendar window is `span` and `at` (`?span=day&at=2026-11-02`; no `at` means
+  today). A rolling one is `range`. A custom one is `from` and `to`, local `YYYY-MM-DDTHH:mm`, and
+  `to` is the first minute outside the window. The Audit Trail's older `since` and `until` are read
+  as `from` and `to`, and the address is rewritten that way. The old `until` included its whole
+  minute, so its `to` is a minute later and the same rows come back. A change replaces the history
+  entry.
+- **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
+  language setting can pass its own. No date library.
+- **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
+  is the window itself, with calendar ticks at local hours, days, weeks or quarters
+  (`calendarTicks`). A window that runs on past now draws "Now 15:20" there (`.trail-now`). The
+  part after it is hatched and says "Nothing recorded yet" (`.trail-shade`). While older events in
+  the window are not loaded, the part before the oldest loaded one is hatched and says so.
 
 ---
 
@@ -1672,8 +1722,8 @@ arrows point up from `left: 50%` of the wrapper, so they follow the pill as its 
 account menu is `position: fixed`, and so is its arrow: it points left from the panel's left border,
 60px or 240px, 65px above the window's bottom, the centre of the account row over the foot's
 padding and its 34px Collapse all tabs row. Change the foot's padding or its rows and that number
-moves with it. The Filters panel
-is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
+moves with it. The Filters panel, and the time window's in the same frame (`ToolbarPopover`),
+is shifted to stay inside the window, so `ToolbarPopover` sets `--arrow-x`, the button's centre from
 the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
 to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.
 
