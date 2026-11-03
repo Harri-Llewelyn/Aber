@@ -1401,6 +1401,7 @@ a.tab-strip-tab { text-decoration: none; }
   align-items: center;
   background: var(--bg-base);
   border-top: 1px solid var(--border);
+  color: var(--text-muted);
 }
 .filter-section-head:has(> .group-heading:hover) { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
 .filter-section-head > .group-heading {
