@@ -1,34 +1,31 @@
 {
   "gitea/gitea": {
-    "reason": "28.0.0 is the newest Gitea release (2026-09-29). The finding is the Alpine 3.24 base's pcre2, fixed in 10.49-r0 and taken when Gitea rebuilds its image for a release.",
-    "expires": "2026-12-01",
+    "reason": "28.3.0 is the newest Gitea release. Both findings are the Alpine 3.24 base's libexpat, fixed in 2.10.0-r0 and taken when Gitea rebuilds its image. It is there for the base's git, whose http-push (WebDAV) is the one part that parses XML with it, and Gitea never runs it: Gitea is a Go binary, serves Git over its own smart HTTP and SSH, and reads XML with Go's encoding/xml.",
+    "expires": "2026-12-03",
     "accept": [
-      "CVE-2026-103111 pcre2"
-    ]
-  },
-  "grafana/alloy": {
-    "reason": "v1.20.1 is the newest Alloy release (2026-09-28). The finding is the Ubuntu 24.04 base's OpenSSL, in DTLS handshake retransmission: Alloy is a Go binary on Go's own TLS, and nothing in this stack speaks DTLS.",
-    "expires": "2026-12-01",
-    "accept": [
-      "CVE-2026-84782 libssl3t64",
-      "CVE-2026-84782 openssl"
+      "CVE-2026-117610 libexpat",
+      "CVE-2026-118370 libexpat"
     ]
   },
   "grafana/grafana": {
-    "reason": "13.2.3 is the newest Grafana release (2026-09-29). Every finding is inside a bundled datasource plugin's own binary: gRPC-Go, whose server answers only Grafana over the plugin's local go-plugin connection, and the Tempo library in the Tempo plugin, which grafana.ini disables, so Grafana never starts it.",
-    "expires": "2026-12-01",
+    "reason": "13.3.0 is the newest Grafana release. The Tempo findings are in the Tempo plugin, which grafana.ini disables, so Grafana never starts it. The Go findings (stdlib 1.26.7 and golang.org/x/net, compiled into every bundled datasource plugin) each need a hostile HTTP/2 or TLS peer, or a crafted request to a Go file server. A plugin serves only Grafana, over its local go-plugin connection, and the two grafana.ini leaves enabled (PostgreSQL and Loki) speak only to this stack's own databases and Loki.",
+    "expires": "2026-12-03",
     "accept": [
+      "CVE-2026-111943 stdlib",
       "CVE-2026-21728 github.com/grafana/tempo",
       "CVE-2026-28377 github.com/grafana/tempo",
-      "CVE-2026-84304 google.golang.org/grpc",
-      "CVE-2026-84445 google.golang.org/grpc"
+      "CVE-2026-78667 stdlib",
+      "CVE-2026-78669 golang.org/x/net",
+      "CVE-2026-78669 stdlib",
+      "CVE-2026-97031 stdlib"
     ]
   },
   "jryberg/mosquitto-exporter": {
-    "reason": "v0.7.9 is the newest release of the maintained fork (2026-09-19), and its Go binary scans clean. The findings are Debian 13.6 base packages (OpenSSL, Perl, PCRE2, SQLite, gzip) the container never runs: its one process is /mosquitto_exporter, a static binary.",
-    "expires": "2026-12-01",
+    "reason": "v0.7.9 is the release the chart pins. Its Go binary carries five Go findings (stdlib and golang.org/x/net); v0.8.0 is built with a newer Go, scans clean of them, and Renovate proposes it once its three-day wait passes, which retires those five. The rest are Debian 13 base packages (Perl, PCRE2, SQLite, gzip, OpenSSL) that v0.8.0 still carries and the container never runs: its one process is /mosquitto_exporter, a static binary.",
+    "expires": "2026-12-03",
     "accept": [
       "CVE-2026-103111 libpcre2-8-0",
+      "CVE-2026-111943 stdlib",
       "CVE-2026-11822 libsqlite3-0",
       "CVE-2026-11824 libsqlite3-0",
       "CVE-2026-13221 perl-base",
@@ -38,47 +35,53 @@
       "CVE-2026-48962 perl-base",
       "CVE-2026-57432 perl-base",
       "CVE-2026-57433 perl-base",
-      "CVE-2026-75804 libssl3t64",
-      "CVE-2026-75804 openssl",
-      "CVE-2026-75804 openssl-provider-legacy",
+      "CVE-2026-78667 stdlib",
+      "CVE-2026-78669 golang.org/x/net",
+      "CVE-2026-78669 stdlib",
       "CVE-2026-8376 perl-base",
       "CVE-2026-84782 libssl3t64",
       "CVE-2026-84782 openssl",
       "CVE-2026-84782 openssl-provider-legacy",
       "CVE-2026-86145 libpcre2-8-0",
       "CVE-2026-89157 libpcre2-8-0",
-      "CVE-2026-89161 libpcre2-8-0"
+      "CVE-2026-89161 libpcre2-8-0",
+      "CVE-2026-97031 stdlib"
     ]
   },
   "node": {
-    "reason": "npm is never run: the storage-init Job runs `node /app/storage-init.mjs`. All seven are npm's own dependencies under /usr/local/lib/node_modules/npm; the fetch the script uses is the undici built into the node binary.",
-    "expires": "2026-12-01",
+    "reason": "24.22.2 is the newest Node 24 release; Node 26 is a major and moves on its own. npm is never run: the storage-init Job runs `node /app/storage-init.mjs`. All six are npm's own dependencies under /usr/local/lib/node_modules/npm; the fetch the script uses is the undici built into the node binary.",
+    "expires": "2026-12-03",
     "accept": [
       "CVE-2026-102276 brace-expansion",
       "CVE-2026-102278 brace-expansion",
-      "CVE-2026-14257 brace-expansion",
+      "CVE-2026-109383 undici",
+      "CVE-2026-109869 undici",
       "CVE-2026-19534 undici",
-      "CVE-2026-69152 brace-expansion",
-      "CVE-2026-69192 ip-address",
-      "CVE-2026-73566 tar"
+      "CVE-2026-87018 undici"
     ]
   },
   "quay.io/prometheuscommunity/postgres-exporter": {
-    "reason": "v0.20.1 is the newest release (2026-07-08). The findings are Go stdlib 1.26.4 and golang.org/x/crypto, net and text compiled into it; upstream master is built with the fixes and scans clean, so the next release clears them.",
-    "expires": "2026-12-01",
+    "reason": "v0.20.1 is still the newest release (2026-07-08). The findings are Go stdlib and golang.org/x/crypto, net and text compiled into it. It runs as a sidecar in each database pod, reads only its own database over loopback and serves /metrics to the chart's Alloy, so no untrusted peer reaches it. A release built with a newer Go clears them.",
+    "expires": "2026-12-03",
     "accept": [
+      "CVE-2026-111943 stdlib",
       "CVE-2026-33818 stdlib",
       "CVE-2026-39821 stdlib",
       "CVE-2026-39822 stdlib",
       "CVE-2026-46600 golang.org/x/net",
       "CVE-2026-46600 stdlib",
+      "CVE-2026-56851 golang.org/x/text",
       "CVE-2026-56852 golang.org/x/text",
       "CVE-2026-56853 stdlib",
       "CVE-2026-56854 golang.org/x/crypto",
       "CVE-2026-56858 stdlib",
       "CVE-2026-56859 stdlib",
       "CVE-2026-56860 stdlib",
-      "CVE-2026-56862 stdlib"
+      "CVE-2026-56862 stdlib",
+      "CVE-2026-78667 stdlib",
+      "CVE-2026-78669 golang.org/x/net",
+      "CVE-2026-78669 stdlib",
+      "CVE-2026-97031 stdlib"
     ]
   },
   "supabase/gotrue": {
@@ -210,9 +213,6 @@
       "CVE-2026-58050 libssh2-1t64",
       "CVE-2026-59885 python3-pyasn1",
       "CVE-2026-59886 python3-pyasn1",
-      "CVE-2026-75804 libssl3t64",
-      "CVE-2026-75804 openssl",
-      "CVE-2026-75804 openssl-provider-legacy",
       "CVE-2026-8376 perl-base",
       "CVE-2026-84782 libssl3t64",
       "CVE-2026-84782 openssl",
