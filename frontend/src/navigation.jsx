@@ -78,6 +78,18 @@ export const SYSTEM_TABS = [
   { id: 'infrastructure', label: 'Data & Backend Infrastructure', description: 'What the services on the other tabs are built on: the databases, APIs and sign-in behind them.' },
 ]
 
+/**
+ * After the groups, and Administrator only: the lines carry sign-ins and addresses, and the
+ * service-logs function refuses anyone else. A tab of its own, never a group, so it shows while no
+ * service row would put it there.
+ */
+export const SYSTEM_LOGS_TAB = {
+  id: 'logs',
+  label: 'Logs',
+  description: "Each service's recent log lines, newest first. Every new read is recorded in the Audit Trail.",
+  role: 'Administrator',
+}
+
 /** People leads, and is offered to an Administrator only, as the page itself is. */
 export const ACCESS_CONTROL_PEOPLE_TAB = {
   id: 'people',
@@ -203,8 +215,8 @@ export const TABS = [
 
   // What runs, who may touch it, and how it is tuned. System and Settings are ungated and Access
   // Control is Administrator-only, so for anyone else this group is the two. IconServer, not
-  // IconActivity, which means live telemetry.
-  { id: 'system',         label: 'System',         group: 'admin',   icon: <IconServer size={16} />, pageTabs: SYSTEM_TABS },
+  // IconActivity, which means live telemetry. System's Logs tab is gated on its own.
+  { id: 'system',         label: 'System',         group: 'admin',   icon: <IconServer size={16} />, pageTabs: [...SYSTEM_TABS, SYSTEM_LOGS_TAB] },
   // Access Control is narrower than the API behind it: seeing who holds what is an access-control
   // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator', pageTabs: [ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ...ACCESS_CONTROL_TABS] },
@@ -217,8 +229,9 @@ export const TABS = [
 ]
 
 /**
- * Whether a page appears in the navigation. Only a courtesy: hiding a page removes a signpost,
- * not an ability, and what refuses a request is the RLS policy.
+ * Whether a page, or one of a page's tabs, appears in the navigation. Only a courtesy: hiding one
+ * removes a signpost, not an ability, and what refuses a request is the RLS policy or the function
+ * behind the tab.
  */
 export function tabIsVisible(tabDef, hasPermission, userRole) {
   // `role` takes a list as well as a string: the Capture page is admitted to three roles, and a
@@ -229,6 +242,19 @@ export function tabIsVisible(tabDef, hasPermission, userRole) {
   }
   if (!tabDef.permission) return true
   return hasPermission(tabDef.permission)
+}
+
+/**
+ * The pages this viewer may see, each with the tabs they may see: a tab with a `role` (System's
+ * Logs) is left out for anyone else. Computed once in App.jsx, so the rail, the search and the
+ * router's redirect all read the same answer.
+ */
+export function visiblePages(hasPermission, userRole) {
+  return TABS
+    .filter(page => tabIsVisible(page, hasPermission, userRole))
+    .map(page => (page.pageTabs?.some(t => !tabIsVisible(t, hasPermission, userRole))
+      ? { ...page, pageTabs: page.pageTabs.filter(t => tabIsVisible(t, hasPermission, userRole)) }
+      : page))
 }
 
 /**
@@ -259,6 +285,18 @@ export function currentTabOf(pageId, url) {
   if (tabs.length === 0) return null
   const [page, segment] = pathSegments(url)
   return (page === pageId && tabs.find(t => t.id === segment)) || tabs[0]
+}
+
+/**
+ * Whether `url` names a tab of `pageId` that the viewer may not see, given `pages` from
+ * visiblePages(). The router then opens the page's first tab instead, so the address of a gated
+ * tab shows nothing of it.
+ */
+export function urlNamesWithheldTab(pages, pageId, url) {
+  const [page, segment] = pathSegments(url)
+  if (page !== pageId || !segment || !pageTabsOf(pageId).some(t => t.id === segment)) return false
+  const shown = pages.find(p => p.id === pageId)
+  return Boolean(shown) && !shown.pageTabs?.some(t => t.id === segment)
 }
 
 /** The page's name with its tab's, "Devices › Quarantine", for the browser tab's title. */
