@@ -1145,6 +1145,12 @@ toolbar follows this rule: a side panel keeps exactly one primary action, and Di
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
 
+**Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
+Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
+right half sets how often it happens by itself: Off, then the page's intervals. A page that
+refreshes both by hand and on a timer uses it, not a button and a select apart. System › Logs is
+the first.
+
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.
 

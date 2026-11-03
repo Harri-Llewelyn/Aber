@@ -32,10 +32,10 @@ export const LOG_FILTER_MAX = 200
 
 /** The tab's auto-refresh choices, in seconds; 0 is off. */
 export const LOG_REFRESH_EVERY = [
-  { value: 0, label: 'Refresh by hand' },
-  { value: 10, label: 'Every 10 seconds' },
-  { value: 30, label: 'Every 30 seconds' },
-  { value: 60, label: 'Every minute' },
+  { value: 0, label: 'Off' },
+  { value: 10, label: '10 s' },
+  { value: 30, label: '30 s' },
+  { value: 60, label: '1 min' },
 ]
 
 /** The service a read opens on: ingestion, where most faults show first, else the first listed. */

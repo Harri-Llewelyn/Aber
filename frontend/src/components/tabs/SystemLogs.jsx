@@ -8,7 +8,8 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Tooltip } from '../common/Tooltip'
 import { copyText } from '../common/CopyableId'
-import { IconAlertTriangle, IconCheck, IconCopy, IconFileText, IconRefreshCw } from '../common/Icons'
+import { IconAlertTriangle, IconCheck, IconCopy, IconFileText } from '../common/Icons'
+import { RefreshButton } from '../common/RefreshButton'
 import {
   DEFAULT_LOG_RANGE, LOG_FILTER_MAX, LOG_LEVELS, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY,
   defaultLogService, formatLogTime
@@ -204,17 +205,13 @@ export function SystemLogs({ showToast }) {
         <LogRangePicker value={range} onChange={setRange} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
-          <select
-            className="form-control control-md"
-            value={every}
-            onChange={e => setEvery(Number(e.target.value))}
-            aria-label="Refresh automatically"
-          >
-            {LOG_REFRESH_EVERY.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => read().catch(() => {})} disabled={reading}>
-            <IconRefreshCw size={13} /> Refresh
-          </button>
+          <RefreshButton
+            onRefresh={() => read().catch(() => {})}
+            busy={reading}
+            every={every}
+            onEveryChange={setEvery}
+            choices={LOG_REFRESH_EVERY}
+          />
         </div>
       </div>
 
