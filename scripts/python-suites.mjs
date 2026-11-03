@@ -1148,6 +1148,13 @@ export const SUITES = {
       "search and the caller's own policies hold under lists; and that one list form is left, " +
       'with its grants, however 0001, 0168, 0222 and 0227 replay over the single-value form.',
   },
+  'supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py': {
+    lanes: ['db'],
+    why:
+      '0228 -- that audit_event_class() answers every case in test-harness/fixtures/' +
+      'audit-event-classes.json, the four reads included, and stays an IMMUTABLE SQL function ' +
+      'the planner inlines.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

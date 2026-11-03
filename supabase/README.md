@@ -2841,6 +2841,50 @@ them, the one-element list against the single value, NULL and the empty list, a 
 holds, the cursor, the totals, the purged rule, the search and the caller's policies under lists,
 and one list form after `0001`, `0168`, `0222` and `0227` replay over the single-value form.
 
+### The Audit Trail sorts events into classes in the database (0228)
+
+The Audit Trail's legend names the class of each event: Created, Operational, Configuration,
+Lifecycle and, new here, Read. The dashboard used to work the class out in the browser, from rules
+of its own (`classifyEvent()`), while the server paged the trail. A filter on the class could then
+only hide rows from the page already loaded, and "200 of 242" would have been wrong. So the rules
+are the database's now.
+
+**`audit_event_class(action, entity_type, audit_domain, old_data, new_data)`** answers one of
+`created`, `operational`, `configuration`, `lifecycle` and `read`. The first rule that matches
+decides:
+
+1. **Read**: `SERVICE_LOGS_READ`, `CREDENTIAL_SHOWN`, `CAPTURE_DOWNLOAD_ISSUED` and `EXPORTED`. Each
+   records that someone looked at or took a copy of something, and changes nothing. Reads are
+   decided before the security lane's rule, which would otherwise call a log read a configuration
+   change.
+2. **Configuration**, for every row in the security lane, and for a schema rejection, a token minted
+   or revoked and a role granted or revoked.
+3. The capture lane: a recording, capture, upload or playback started is **created**; a capture
+   deleted is **lifecycle**; a recording or playback stopped is **operational**.
+4. **Configuration** for a schema attached to or detached from a device (`device_submodels`).
+5. **Lifecycle** for a `DELETE`, **created** for an `INSERT`.
+6. Otherwise the snapshots decide. **Lifecycle** when `is_archived`, `is_quarantined` or
+   `deprecated` is `true` now and was not before. **Configuration** when `schema_id`,
+   `asset_config`, `connection_method`, `grafana_url` or `access_url` changed. **Operational**
+   otherwise. A missing field and a JSON `null` are the same value. With one snapshot, a field it
+   holds that is neither `null` nor `''` counts as changed.
+
+These are the browser's rules, moved, with Read added. `test-harness/fixtures/audit-event-classes.json`
+holds an answer for each kind of row. The database suite asserts every case. While the browser's copy
+existed, a dashboard suite asserted the same cases against it, and the two differed only on the four
+reads, which the browser drew as a change.
+
+**Computed, not stored.** `audit_trail` is append-only, so a class column could not be filled in for
+the rows already recorded. `audit_event_class()` is `IMMUTABLE` and has no `SET` clause, so the
+planner inlines it into the query that calls it. It reads no table and calls only built-in
+operators, so an unpinned `search_path` changes nothing it resolves; the lint allowlist says so, as
+it does for `may_decide_proposal()`. `authenticated` and `service_role` may run it, and `anon` may
+not.
+
+The file's self-check asserts the function's shape (SQL, `IMMUTABLE`, no `SET`), who may run it, and
+one answer per kind of rule. `test_the_audit_trail_sorts_events_into_classes_in_the_database.py`
+holds the fixture.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

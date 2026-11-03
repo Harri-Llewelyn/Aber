@@ -2734,19 +2734,22 @@ const OPERATOR_PAIRS = [
 // or the Audit Trail and drops it. db-init replays every file on every boot, so another migration
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
-// CellWrite, and no code reads it but the Audit Trail's list of governance fields, which past rows
-// carry.
+// CellWrite, and no code reads it but the Audit Trail's configuration fields, which past rows
+// carry: audit_event_class() (0228) reads it out of a snapshot, as `-> 'grafana_url'` and no other way.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
   const MOVER = '0202_a_cell_s_dashboard_address_is_one_of_its_links.sql';
+  const CLASSIFIER = '0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
   const dir = 'supabase/migrations';
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
   const offences = [];
   for (const f of [MOVER, DROPPER]) if (!files.includes(f)) offences.push(`${dir}/${f} is missing`);
 
   for (const f of files.filter((name) => name !== DROPPER && name !== MOVER)) {
-    if (/\bgrafana_url\b/.test(read(`${dir}/${f}`))) offences.push(`${f} names grafana_url`);
+    const sql = read(`${dir}/${f}`);
+    const named = f === CLASSIFIER ? sql.replace(/-> 'grafana_url'/g, '') : sql;
+    if (/\bgrafana_url\b/.test(named)) offences.push(`${f} names grafana_url`);
   }
   if (files.includes(MOVER)) {
     const mover = read(`${dir}/${MOVER}`);

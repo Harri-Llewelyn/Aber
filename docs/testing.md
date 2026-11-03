@@ -902,6 +902,10 @@ python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_t
 # form, and after 0227 alone does. Its self-check refuses two forms and a single-value argument.
 # Every test rolls back.
 python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
+# The Audit Trail sorts events into classes in the database (0228). audit_event_class() answers
+# every case in test-harness/fixtures/audit-event-classes.json, the four reads included, and stays
+# an IMMUTABLE SQL function the planner inlines. Every test rolls back.
+python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
