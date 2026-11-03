@@ -1159,6 +1159,14 @@ export const SUITES = {
       'and its five class indexes, however 0001, 0168, 0222, 0227 and 0228 replay over the form ' +
       'from before.',
   },
+  'supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py': {
+    lanes: ['db'],
+    why:
+      "0228's target -- that on a trail of a million rows audit_trail_page() answers a page, its " +
+      'total and its counts in under a second with a class chosen, as an Administrator with the ' +
+      "policies on, and that its totals are exact. It attaches ten months of 2001 and drops them, " +
+      'so it belongs on a throwaway database and nowhere else.',
+  },
   'supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py': {
     lanes: ['db'],
     why:

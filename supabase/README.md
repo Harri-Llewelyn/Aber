@@ -2930,7 +2930,25 @@ nothing chosen, before any class was computed. Three changes meet it.
   to show is not read. The purged rule reads the live ids of the five probed tables once, into an
   array, rather than probing five tables per row.
 
-A search is still a scan of every row's snapshots, as before: about five seconds on a million rows.
+`test_a_million_row_trail_answers_in_under_a_second.py` holds the target. It attaches ten months of
+2001 to `audit_trail`, a hundred thousand rows each in a plant's mix, each month filled as a table
+of its own and then attached, so no row trigger runs a million times and the trail's indexes are
+built as a running stack has them. It inserts the devices, gateways and cells the rows name inside
+each test's transaction, leaving one device in ten out for the purged rule, and drops the ten months
+afterwards, as an owner retires whole months. Measured on a laptop, as an Administrator with the
+policies on, the median of three warm calls:
+
+| Call | Time |
+| --- | --- |
+| Seeding the million rows, their indexes and `VACUUM ANALYZE` | 40 to 50 s |
+| All time, Lifecycle, the page with its total and its counts | 0.55 s |
+| All time, Read and Lifecycle, the same | 0.6 s |
+| All time, Lifecycle, the next page, without the counts | 0.1 s |
+| All time, nothing chosen, the page with every count (printed, not asserted) | 0.7 to 0.85 s |
+
+The suite asserts the first three under a second, and the totals, the deleted count and the counts
+exact over the ten months. A search is still a scan of every row's snapshots, as before: about five
+seconds on a million rows.
 
 #### One redeclaration
 
