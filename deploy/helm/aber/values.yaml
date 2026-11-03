@@ -270,6 +270,10 @@ timescaledb:
   # The extension's daily usage report. Off because this stack has no egress to it; `basic`
   # restores the upstream default.
   telemetryLevel: "off"
+  # Merged onto the historian's pod, so a change rolls it. The dev loop sets `checksum/image` to
+  # the id of the historian image it imported under the same tag, so a rebuilt historian restarts
+  # during `helm upgrade`, as a new image tag makes it restart on a real upgrade.
+  podAnnotations: {}
   # --- Telemetry lifecycle --------------------------------------------------------------------
   # Applied by the `timescaledb-retention` hook Job on every install and upgrade, so these are
   # authoritative against a database that already holds data. Any PostgreSQL interval; `never`

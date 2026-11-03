@@ -27,7 +27,8 @@
  *                                 conformance-tests folder of a cesmii/i3X checkout) against
  *                                 https://i3x.<domain>/v1 through Traefik; CORE-05 must pass
  *
- * What both end with: every StatefulSet, Deployment and DaemonSet rolls out, `helm test` passes,
+ * What both end with: every StatefulSet, Deployment and DaemonSet rolls out, the historian's
+ * TimescaleDB extension is the version its image ships, `helm test` passes,
  * every running pod's built image is the checkout's, the first administrator signs in through
  * Traefik with the password from the values file, and admin@aber.local with aber123 is refused.
  * `upgrade` also asserts the upgrade's db-init Job completed, which replays the migration chain
@@ -467,6 +468,27 @@ async function assertPolicyEnforced () {
   console.log('  supabase-db:5432 answered a pod labelled as db-init and not a pod no rule admits: default-deny is enforced')
 }
 
+/**
+ * The historian's extension is the version its image ships, the one timescaledb/Dockerfile is built
+ * FROM. On an upgrade that moves TimescaleDB, a maintenance hook that ran against the old pod
+ * leaves it at the old version under the new binaries.
+ */
+function assertExtensionCurrent () {
+  const dockerfile = readFileSync(path.join(REPO, 'timescaledb', 'Dockerfile'), 'utf8')
+  const shipped = /^FROM\s+timescale\/timescaledb:(\d+(?:\.\d+)*)-pg\d+\s*$/m.exec(dockerfile)?.[1]
+  if (!shipped) die('timescaledb/Dockerfile names no timescale/timescaledb:<version>-pg<n> base')
+  const r = capture('kubectl', ['-n', NS, 'exec', 'statefulset/timescaledb', '-c', 'timescaledb', '--',
+    'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
+    "SELECT default_version || ' ' || coalesce(installed_version, 'none') FROM pg_available_extensions WHERE name = 'timescaledb'"])
+  if (!r.ok || !r.out) die(`could not read the historian's TimescaleDB versions: ${r.err || 'no row'}`)
+  const [offered, installed] = r.out.split(' ')
+  if (offered !== shipped) die(`the historian offers TimescaleDB ${offered}, and timescaledb/Dockerfile is built FROM ${shipped}: it is not on the checkout's image`)
+  if (installed !== offered) {
+    die(`the historian's extension is at ${installed} under TimescaleDB ${offered}'s binaries: the maintenance hook did not update it on the new image`)
+  }
+  console.log(`  timescaledb ${installed} installed, the version the historian's image ships (timescaledb/Dockerfile: ${shipped})`)
+}
+
 /** The upgrade's own db-init: the candidate image, completed. Its pod replayed every migration. */
 function assertUpgradeMigrated (version) {
   const r = capture('kubectl', ['-n', NS, 'get', 'job', `${RELEASE}-db-init`, '-o', 'json'])
@@ -668,6 +690,7 @@ async function rehearse () {
     await phase(`helm install ${candidate}`, () => helm('install', chart, ['--create-namespace']))
   }
   await phase('every workload rolls out', rollOut)
+  await phase("the historian's TimescaleDB extension is the version its image ships", assertExtensionCurrent)
   if (hardened) await phase('the NetworkPolicy layer is enforced', assertPolicyEnforced)
   if (before) await phase('the StatefulSets and their claims came through the upgrade', () => assertStatefulSetsCarried(before, hookLog))
   await phase('helm test', helmTest)

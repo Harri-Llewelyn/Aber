@@ -413,12 +413,13 @@ export function importImages (version, only, cluster = CLUSTER) {
 /**
  * A rebuilt image keeps its tag, and a running pod keeps the image it started with, so after an
  * import the workloads that run a rebuilt image are restarted. Without this a code change is
- * built, imported and silently not running.
+ * built, imported and silently not running. `rolled` names workloads the upgrade itself rolled.
  */
-function restartWorkloadsUsing (refs) {
+function restartWorkloadsUsing (refs, rolled = []) {
   const r = kubectl('get', 'deploy,statefulset,daemonset', '-o', 'json')
   if (!r.ok) return
   const workloads = JSON.parse(r.out).items.filter(w =>
+    !rolled.includes(`${w.kind.toLowerCase()}/${w.metadata.name}`) &&
     (w.spec.template.spec.containers || []).concat(w.spec.template.spec.initContainers || [])
       .some(ct => refs.includes(ct.image)))
   if (!workloads.length) return
@@ -428,6 +429,20 @@ function restartWorkloadsUsing (refs) {
     console.log(`  ${kind}/${w.metadata.name}`)
     run('kubectl', ['-n', NS, 'rollout', 'restart', `${kind}/${w.metadata.name}`], { stdio: 'ignore' })
   }
+}
+
+// The historian's pod annotation installChart sets to its image's id (timescaledb.podAnnotations).
+export const HISTORIAN_IMAGE_ANNOTATION = 'checksum/image'
+
+/**
+ * The --set that rolls the historian during `helm upgrade` when its image changed under the same
+ * tag, as a new tag rolls it on a real upgrade. The maintenance hook waits for the historian to
+ * offer the chart's TimescaleDB, so one restarted only after the upgrade would hold the hook to its
+ * timeout. Without a local image id the release's own is kept, so a missing copy rolls nothing.
+ */
+export function historianImageSet (imageId, released) {
+  const id = imageId || released
+  return id ? ['--set-string', `timescaledb.podAnnotations.${HISTORIAN_IMAGE_ANNOTATION}=${id}`] : []
 }
 
 const E2E_JOBS = [`${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`]
@@ -550,10 +565,13 @@ async function installChart ({ tls, e2e, holdE2e = false, networkPolicy = false 
     // makes the next upgrade fail with `field is immutable` the moment their spec changes.
     run('kubectl', ['-n', NS, 'delete', 'job', `${RELEASE}-e2e-validate`, `${RELEASE}-e2e-aas-export`, '--ignore-not-found'])
   }
+  const historianId = capture('docker', ['image', 'inspect', '--format', '{{.Id}}', `${IMG_NS}/timescaledb:${appVersion()}`]).out
+  sets.push(...historianImageSet(historianId, releaseValues().timescaledb?.podAnnotations?.[HISTORIAN_IMAGE_ANNOTATION]))
   // No --wait: Helm would block on workloads whose initContainers wait for the roles the
   // post-install hooks create. The hooks themselves are waited for regardless.
   must('helm', ['upgrade', '--install', RELEASE, CHART, '-n', NS, '-f', `${CHART}/values-dev.yaml`,
     ...sets, '--timeout', '15m'], 'helm did not install the release')
+  return { historianRolls: Boolean(historianId) }
 }
 
 async function waitForStack () {
@@ -958,11 +976,13 @@ async function up () {
   // install has no older pods for them to meet, and creates them running, as CI's does.
   const upgrade = capture('helm', ['status', RELEASE, '-n', NS]).ok
   const holdE2e = flag('e2e') && upgrade
-  await installChart({ tls, e2e: flag('e2e'), holdE2e, networkPolicy: flag('network-policy') })
+  const { historianRolls } = await installChart({ tls, e2e: flag('e2e'), holdE2e, networkPolicy: flag('network-policy') })
   // Only an upgrade has pods older than the images just imported. After an install every pod
-  // started from them, and a restart would only interrupt the e2e Jobs already running.
+  // started from them, and a restart would only interrupt the e2e Jobs already running. The
+  // historian rolled during the upgrade when its image changed, through its image annotation.
   if (upgrade && !flag('no-build')) {
-    restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`))
+    restartWorkloadsUsing(IMAGES.filter(i => !only || only.includes(i.name)).map(i => `${IMG_NS}/${i.name}:${version}`),
+      historianRolls ? ['statefulset/timescaledb'] : [])
   }
   await waitForStack()
   if (holdE2e) resumeE2eJobs()
