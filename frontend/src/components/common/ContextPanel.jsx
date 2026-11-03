@@ -37,6 +37,10 @@ export const HelpDrawerContext = createContext(null)
  *
  * @param {node} subtitle Optional line under the title.
  *
+ * @param {node} nav Controls that change what the drawer shows, such as the Audit Trail's step
+ * buttons: drawn at the drawer's full width under the header, above the fields, and kept in view
+ * while the body scrolls.
+ *
  * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger? }].
  * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
  * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
@@ -69,7 +73,7 @@ export const HelpDrawerContext = createContext(null)
  *
  * @param {node} headerActions Controls drawn in the header before the X: the help drawer's Expand.
  */
-export function ContextPanel({ open, type, title, icon, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '', headerActions = null }) {
+export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '', headerActions = null }) {
   const closeRef = useRef(null)
 
   // Escape closes, caught at the document because the panel does not take focus. Through the shared
@@ -103,7 +107,9 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
       aria-label={open ? `${title} ${type ? type.toLowerCase() + ' ' : ''}${subject}` : undefined}
     >
       <div className="context-panel-inner">
-        <div className="context-panel-header">
+        {/* With a nav under it, the header's rule moves to the nav's foot, so the two read as one
+            band. */}
+        <div className={`context-panel-header${nav ? ' context-panel-header-nav' : ''}`}>
           <div className="context-panel-heading">
             {/* No type badge: the kind is already established by the page, and is announced on the
                 region label. */}
@@ -129,6 +135,8 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
             </button>
           </Tooltip>
         </div>
+
+        {nav && <div className="context-panel-nav">{nav}</div>}
 
         <div className="context-panel-body">
           {/* The alert goes above the metadata: it is the one item with a deadline. Rendered from a

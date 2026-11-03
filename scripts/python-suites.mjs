@@ -385,6 +385,15 @@ export const SUITES = {
       'credential was re-issued at message 8 ended COMPLETED with all 41 counted and 7 in the ' +
       'historian. A capture is read from a temporary file a message at a time, in flat memory.',
   },
+  'ingestion/test_playback_metrics.py': {
+    lanes: ['unit'],
+    why:
+      "The playback worker's metrics endpoint: one series, aber_playback_jobs_total{outcome}, " +
+      'with failed, cancelled and completed at zero from startup and no other label value, so an ' +
+      'unauthenticated port carries no id. Each outcome is counted once the finish is recorded, as ' +
+      'playback_finish() ranks them, and the startup sweep counts what it failed. Without it a ' +
+      'failed playback leaves no trace in Prometheus.',
+  },
   'ingestion/test_playback_session.py': {
     lanes: ['unit'],
     why:
@@ -1181,6 +1190,15 @@ export const SUITES = {
       'still listed, and that grafana_reader still reads the view. And 0185: replay lanes never ' +
       'counted in expected_publishers, which gates the critical Ingestion Consuming Nothing, and ' +
       'a real device still counted.',
+  },
+  'supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py': {
+    lanes: ['db'],
+    why:
+      "0226's three platform_health arms, each through the query of the Grafana rule that reads " +
+      'it: a failed job for an hour and then gone, a job stuck five minutes past its own limits ' +
+      'and not before, and a silent playback worker only while a playback waits. The last is ' +
+      "the one that would page for ever: the heartbeat is seeded at 'epoch', and a site without " +
+      'the worker never reports, so the suite holds it silent with nothing queued.',
   },
   'supabase/migrations/test_a_shadow_gateway_holds_no_health.py': {
     lanes: ['db'],

@@ -533,15 +533,19 @@ describe('Audit Trail swimlanes', () => {
      comparable against its neighbours' without scrolling. */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
     await showAll()
-    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')]
+    const headings = [...document.querySelectorAll('.trail-section .group-heading-label')]
       .map(h => h.textContent)
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
-  it('puts no count on a section heading', async () => {
+  it('counts each section\'s lanes on its heading', async () => {
     await showAll()
-    const headings = [...document.querySelectorAll('.trail-section')].map(s => s.textContent)
-    expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
+    // "Devices · 3" on screen; the count's words for a screen reader.
+    const counts = [...document.querySelectorAll('.trail-section .group-heading-count [aria-hidden="true"]')]
+      .map(c => c.textContent)
+    expect(counts).toEqual(['· 1', '· 1', '· 3'])
+    expect(screen.getByRole('button', { name: 'Devices, 3 lanes' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Cells, 1 lane' })).toBeInTheDocument()
   })
 
   it('omits a section with nothing in it rather than drawing an empty heading', async () => {
@@ -557,7 +561,7 @@ describe('Audit Trail swimlanes', () => {
     await show()
 
     // Only device lanes are present, so Cells and Gateways must not appear as empty headings.
-    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')].map(h => h.textContent)
+    const headings = [...document.querySelectorAll('.trail-section .group-heading-label')].map(h => h.textContent)
     expect(headings).toEqual(['Devices'])
   })
 
@@ -1606,8 +1610,9 @@ describe('Audit Trail — removed tag filter', () => {
       // edge above it.
       const label = heading.querySelector('.trail-lane-label')
       expect(label).toBeTruthy()
-      expect(label.querySelector('.trail-section-name')).toBeTruthy()
-      expect(label.querySelector('.trail-section-count')).toBeNull()
+      // The label column holds the heading's button: its name and its lane count.
+      expect(label.querySelector('button.group-heading .group-heading-label')).toBeTruthy()
+      expect(label.querySelector('.group-heading-count')).toBeTruthy()
       expect(heading.querySelector('.trail-track')).toBeTruthy()
       // Not a pill: nothing draws a badge any more.
       expect(ruleFor('.trail-section-badge')).toBeUndefined()
@@ -1755,14 +1760,18 @@ describe('Audit Trail timeline density', () => {
     expect(rule('.trail-track')).toMatch(/height:\s*28px/)
   })
 
-  it('pins the lane label so it survives horizontal scrolling', () => {
-    expect(rule('.trail-lane-label')).toMatch(/position:\s*sticky/)
-    // Opaque, or the markers scroll over the label instead of under it.
+  it('keeps the lane label opaque and above its track', () => {
+    // Opaque, or a wide badge near the window's start would paint over the name.
+    expect(rule('.trail-lane-label')).toMatch(/position:\s*relative/)
     expect(rule('.trail-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
   })
 
-  it('scrolls the lanes horizontally rather than the page', () => {
-    expect(rule('.trail-scroll')).toMatch(/overflow-x:\s*auto/)
+  it('never scrolls the lanes sideways: the track narrows to fit instead', () => {
+    // A window always fits the width, however much the drawer takes.
+    expect(rule('.trail-scroll')).toMatch(/overflow-x:\s*hidden/)
+    expect(rule('.trail-swimlanes')).not.toMatch(/min-width/)
+    expect(rule('.trail-track')).toMatch(/min-width:\s*0;/)
+    expect(rule('.trail-swimlanes')).toMatch(/--trail-label-width:\s*clamp\(/)
   })
 
   it('caps the raw payload height so it cannot push the accordion off the drawer', () => {

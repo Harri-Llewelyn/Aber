@@ -826,6 +826,16 @@ reported on for two minutes: `request_capture_stop()` records it `CANCELLED`, wi
 A job that ended elsewhere, or whose subject was deleted, is dropped without an upload when the
 progress gate says so (`ingest_report_capture_progress()`).
 
+**Every job the recorder ends is counted, and a failed or stuck one raises an alert.** The daemon's
+metrics endpoint counts each job by outcome, `aber_ingestion_capture_jobs_total{outcome}`:
+`completed`, `failed` or `discarded`. A failure is counted once it is written, so one kept for a
+retry is counted when the retry lands, and the startup sweep counts the jobs it fails. The label
+takes those three values and never a job's or a subject's id. Grafana's *Capture or Playback
+Failed* rule fires for an hour after a job fails, and *Capture or Playback Stuck* for a job still
+queued or recording five minutes past its own limits (`0226`,
+[`supabase/README.md`](../supabase/README.md#a-failed-or-stuck-capture-or-playback-reaches-someone-0226)).
+A failure writes no Audit Trail row: the job history on the Capture page is its record.
+
 **A device capture must hold the device.** It records its edge node's `NBIRTH` too, and the rebirth
 request it opens with always produces one. So a device that published nothing during the window
 fails the job, as an empty capture does, and the stored capture of that device is kept.
@@ -1309,6 +1319,31 @@ zero on every job written before `0109`, where it means "nobody counted".
 plan is built by the worker after it claims the job — the page would have to download and parse the
 capture itself to show it in the dialog.
 
+### The worker's metrics endpoint, and the alerts on a playback
+
+**The worker serves one HTTP endpoint**, `GET :9109/metrics` (`PLAYBACK_METRICS_PORT`, 0 disables
+it), and one series on it: `aber_playback_jobs_total{outcome}`, the jobs it ended. The outcome is
+`failed`, `cancelled` or `completed`, as `playback_finish()` ranks them: an error first, then a
+stop. A job is counted once its end is recorded, so one whose finish never got through is not
+counted, and the startup sweep counts the jobs it fails. Each outcome is present at zero from
+startup. It has no credential, so it carries a count and nothing else: no job, capture or gateway
+id. It is the daemon's handler (`metrics.start_metrics_server()`), so it answers only `/metrics` and
+`/`, and a port it cannot bind is logged and survived.
+
+On Kubernetes, `playback.metrics` sets the port, the pod carries the scrape annotations Alloy
+reads, and the network policy admits `alloy` to it. There is no Service and no probe. A probe
+reading the endpoint would learn only that the process is alive, because the endpoint answers from
+its own thread whatever the worker's loop is doing, and the kubelet knows that already.
+
+**A failed playback, a stuck one and a silent worker raise alerts** (`0226`). *Capture or Playback
+Failed* fires for an hour after a job fails. *Capture or Playback Stuck* fires for a job still
+queued or running five minutes past its own limits: queued with the worker free, or a minute without
+a progress report. *Playback Worker Not Reporting* fires while a playback is queued or running and
+the heartbeat is more than two minutes old, the age at which the playback dialog calls the worker
+not running. It never fires on the heartbeat's age alone, so a site with `playback.enabled: false`
+is quiet until someone queues a playback that nothing will run. The reasons are in
+[`grafana/README.md`](../grafana/README.md).
+
 ### What the page adds that the CLI cannot, and two things neither does
 
 - **The device map from dropdowns**, built from the replay lanes of the Playback gateway,
@@ -1343,6 +1378,7 @@ operation with more surface.
 | `PRIMARY_HOST_ID` | `playback_worker.py`'s sessions, which `play` opens too | none — no wait for STATE; the chart passes `ingestion.primaryHostId` |
 | `PLAYBACK_PRIMARY_HOST_WAIT_SECONDS` | `playback_worker.py` | `60` — how long a session waits for the primary host to be online |
 | `PLAYBACK_FINISH_RETRY_SECONDS` | `playback_worker.py` | `300` — how long recording a job's end is retried |
+| `PLAYBACK_METRICS_PORT` | `playback_worker.py` | `9109` — the metrics endpoint's port; `0` disables it. The chart sets it from `playback.metrics` |
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
@@ -2314,6 +2350,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |
+| `aber_ingestion_capture_jobs_total` | `outcome` | Capture jobs the recorder ended: `completed` (stored), `failed` (including the jobs the startup sweep failed) or `discarded` (ended on the page, or deleted, while it recorded). A failure is counted once it is written. The *Capture or Playback Failed* alert reads the database rather than this ([Recording from the dashboard](#recording-from-the-dashboard)). |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |

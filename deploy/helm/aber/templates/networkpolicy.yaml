@@ -124,6 +124,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "grafana"            "to" "loki"               "port" 3100 "why" "the logs datasource, and alert state history")
   (dict "from" "supabase-functions" "to" "loki"               "port" 3100 "why" "service-logs reads a service's recent lines for System › Logs, as an Administrator; blocked, the Logs tab says the log store could not be read")
   (dict "from" "alloy"              "to" "ingestion"          "port" (int .Values.ingestion.metrics.port) "why" "scrape")
+  (dict "from" "alloy"              "to" "playback"           "port" (int .Values.playback.metrics.port) "why" "scrape: the playback jobs the worker ended, by outcome")
   (dict "from" "alloy"              "to" $gw                  "port" (int .Values.supabaseEnvoy.metrics.port) "why" "scrape: the admin listener's /stats/prometheus")
   (dict "from" "alloy"              "to" "supabase-rest"      "port" 3001 "why" "scrape: the admin listener")
   (dict "from" "alloy"              "to" "grafana"            "port" 3000 "why" "scrape")

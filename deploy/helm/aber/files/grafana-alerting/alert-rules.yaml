@@ -500,6 +500,187 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # Capture or Playback Failed: a job that failed in the last hour, one instance each. The row
+      # leaves the view an hour on, so the alert resolves by itself.
+      - uid: aber-job-failed
+        title: Capture or Playback Failed
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The {{ $labels.job }} failed {{ humanizeDuration $values.B.Value }} ago. The Capture page
+            lists it, with the reason, on its Captures or Playbacks tab. This alert clears an hour
+            after the failure.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              # `job` is the kind and the id, so each job is its own instance.
+              rawSql: |
+                SELECT collected_at AS "time",
+                       subject      AS job,
+                       value        AS since_failed_seconds
+                  FROM public.platform_health
+                 WHERE condition = 'job_failed'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Capture or Playback Stuck: a job still queued, recording or running five minutes past what
+      # its own limits allow. The view carries the margin, so `for: 0s`.
+      - uid: aber-job-stuck
+        title: Capture or Playback Stuck
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The {{ $labels.job }} is still queued, recording or running
+            {{ humanizeDuration $values.B.Value }} after its own limits ran out. A queued or running
+            capture blocks every other. Press Stop on the Capture page to end it, and check the
+            ingestion or playback service's log.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       subject      AS job,
+                       value        AS past_limits_seconds
+                  FROM public.platform_health
+                 WHERE condition = 'job_stuck'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Playback Worker Not Reporting: a playback is queued or running and the worker's heartbeat is
+      # over two minutes old. The view emits the row only then, so `for: 0s`.
+      - uid: aber-playback-worker-stale
+        title: Playback Worker Not Reporting
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            A playback is queued or running, and the playback worker has not reported for over two
+            minutes, so nothing will run it. Check that the playback Deployment is running
+            (playback.enabled) and read its log.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       value        AS quiet_seconds
+                  FROM public.platform_health
+                 WHERE condition = 'playback_worker_stale'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # Ingestion Pipeline: the daemon's Prometheus counters, which see the pipe the views cannot. Resolves
   # only where a datasource with uid `prometheus` exists; elsewhere DatasourceError, routed by the policy.
   - orgId: 1

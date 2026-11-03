@@ -116,6 +116,33 @@ class ExpositionTestCase(unittest.TestCase):
                 f"be invisible to a scraper",
             )
 
+    def test_every_capture_outcome_the_recorder_counts_is_mapped(self):
+        """
+        capture_worker.py counts each job it ends under `capture_jobs_<outcome>`. Read out of the
+        source, as the drops are above, so an outcome added there is exported or fails here.
+        """
+        import re
+        source = open(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "capture_worker.py"),
+            encoding="utf-8",
+        ).read()
+        counted = set(re.findall(r'registry\.count\("(capture_jobs_[a-z_]+)"', source))
+        self.assertEqual(counted, {"capture_jobs_completed", "capture_jobs_failed",
+                                   "capture_jobs_discarded"})
+        for name in counted:
+            metric, labels = metrics.COUNTER_MAP[name]
+            self.assertEqual((metric, labels),
+                             ("aber_ingestion_capture_jobs_total",
+                              {"outcome": name[len("capture_jobs_"):]}))
+
+    def test_the_capture_outcomes_are_present_at_zero_and_count_under_one_family(self):
+        exported = self.lines()
+        for outcome in ("completed", "failed", "discarded"):
+            self.assertIn(f'aber_ingestion_capture_jobs_total{{outcome="{outcome}"}} 0.0', exported)
+        self.assertIn('aber_ingestion_capture_jobs_total{outcome="failed"} 2.0',
+                      self.counted(capture_jobs_failed=2))
+        self.assertEqual(registry.counter_snapshot()["capture_jobs_failed"], 2)
+
     def test_every_directory_unavailable_drop_path_is_counted(self):
         """
         THE INVERSE ASSERTION, and the defect from #126.

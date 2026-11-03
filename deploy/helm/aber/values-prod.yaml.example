@@ -339,7 +339,12 @@ networkPolicy:
   #   3000  grafana, natively
   #   9901  supabase-envoy's admin listener (requires supabaseEnvoy.metrics.enabled). Envoy serves
   #         /ready AND /stats/prometheus from this one port.
+  #   3001  supabase-rest's admin server
+  #   9108  ingestion (requires ingestion.metrics.enabled)
+  #   9109  the playback worker (requires playback.metrics.enabled)
   #   9234  the mosquitto exporter sidecar (requires mosquitto.metrics.enabled)
+  #   9187  the postgres_exporter sidecars of supabase-db and timescaledb (requires
+  #         databaseMetrics.enabled)
   #
   # CHANGE THE NAMESPACE to wherever your Prometheus runs. `monitoring` is the convention;
   # kube-prometheus-stack's own chart default is its release namespace. The label
@@ -365,7 +370,15 @@ networkPolicy:
           - protocol: TCP
             port: 9901
           - protocol: TCP
+            port: 3001
+          - protocol: TCP
+            port: 9108
+          - protocol: TCP
+            port: 9109
+          - protocol: TCP
             port: 9234
+          - protocol: TCP
+            port: 9187
 
 # ---------------------------------------------------------------------------------------------
 # TLS. Requires cert-manager AND `kubectl apply -f deploy/k8s/internal-ca.yaml` FIRST -- the CA is

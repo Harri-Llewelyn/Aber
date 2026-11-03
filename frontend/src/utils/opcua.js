@@ -101,10 +101,13 @@ export function opcuaPrefill(entry) {
   }
 }
 
-/** One-line summary for a data point chip's tooltip: what it is, then the node it names. */
+/** What a data point chip's tooltip says it is. Its NodeId goes on a line of its own (dataPointId). */
 export function dataPointTooltip(entry) {
   if (!entry) return ''
-  const node = (entry.node_id || '').trim()
-  const bits = [entry.description, node ? `NodeId: ${node}` : null].filter(Boolean)
-  return bits.length ? `${entry.name} — ${bits.join(' · ')}` : entry.name
+  return entry.description ? `${entry.name} — ${entry.description}` : entry.name
+}
+
+/** The node a data point names, which is what tells two points of one name apart. */
+export function dataPointId(entry) {
+  return (entry?.node_id || '').trim()
 }

@@ -929,6 +929,62 @@ class AFailureThatCannotBeWritten(FinishBase):
         self.assertEqual(claims, [])
 
 
+class EachOutcomeIsCounted(FinishBase):
+    """
+    `aber_ingestion_capture_jobs_total{outcome}`: completed, failed or discarded, counted once the
+    database has the outcome, so a failure that could not be written yet is not counted yet.
+    """
+
+    def counted(self, act):
+        """What `act()` added to each outcome's flat counter."""
+        names = ("capture_jobs_completed", "capture_jobs_failed", "capture_jobs_discarded")
+        before = {n: ingestion.registry.counter_snapshot().get(n, 0) for n in names}
+        act()
+        after = ingestion.registry.counter_snapshot()
+        return {n[len("capture_jobs_"):]: after.get(n, 0) - before[n] for n in names}
+
+    def test_a_stored_recording_is_completed(self):
+        self.assertEqual(self.counted(lambda: self.finish({"ingest_finalise_capture": ["cap-new"]})),
+                         {"completed": 1, "failed": 0, "discarded": 0})
+
+    def test_a_failed_upload_is_failed(self):
+        self.assertEqual(self.counted(lambda: self.finish(upload_error=RuntimeError("refused"))),
+                         {"completed": 0, "failed": 1, "discarded": 0})
+
+    def test_a_job_ended_elsewhere_before_finalise_is_discarded(self):
+        ended = FakeAPIError("ingest_finalise_capture: job x is CANCELLED, not RECORDING", "22023")
+        self.assertEqual(self.counted(lambda: self.finish({"ingest_finalise_capture": [ended]})),
+                         {"completed": 0, "failed": 0, "discarded": 1})
+
+    def test_a_job_the_progress_gate_says_has_ended_is_discarded(self):
+        for answer in ("ended", "gone"):
+            with self.subTest(answer=answer):
+                self.assertEqual(self.counted(lambda: capture_worker._discard(job(), answer)),
+                                 {"completed": 0, "failed": 0, "discarded": 1})
+
+    def test_a_failure_is_counted_when_it_is_written_and_not_before(self):
+        unwritten = self.counted(lambda: self.finish(
+            {"ingest_finalise_capture": [TRANSIENT], "ingest_fail_capture": [TRANSIENT]}))
+        self.assertEqual(unwritten, {"completed": 0, "failed": 0, "discarded": 0})
+        self.assertIsNotNone(capture_worker._unsettled)
+
+        def settle():
+            with patch.object(capture_worker, "_supabase", FakeSupabase([])), \
+                    patch.object(capture_worker, "_storage", FakeStorage([])):
+                self.assertTrue(capture_worker.settle_unsettled())
+        self.assertEqual(self.counted(settle), {"completed": 0, "failed": 1, "discarded": 0})
+
+    def test_the_jobs_the_startup_sweep_failed_are_failed(self):
+        swept = FakeSupabase([], {"ingest_reconcile_capture_jobs": [2]})
+        self.assertEqual(self.counted(lambda: self.assertTrue(capture_worker.reconcile(swept))),
+                         {"completed": 0, "failed": 2, "discarded": 0})
+
+    def test_they_reach_the_exposition_as_one_family_with_an_outcome_label(self):
+        exposition = ingestion.registry.render()
+        for outcome in ("completed", "failed", "discarded"):
+            self.assertIn('aber_ingestion_capture_jobs_total{outcome="%s"}' % outcome, exposition)
+
+
 UPLOAD_URL = "http://supabase-envoy:8000/storage/v1/object/broker-captures/" + JOB_PATH
 
 

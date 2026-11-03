@@ -127,7 +127,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `loki` | `grafana/loki:3.7.9` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
-| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
+| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`); no route; `playback-metrics:9109` is scraped |
 | `prometheus` | `prom/prometheus:v3.15.1` | `prometheus:9090`, read by Grafana |
 | `realtime` | `supabase/realtime:v2.134.10` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
 | `release-check` | `node:24.22.2-alpine3.24` | CronJob (`releaseCheck.enabled`, off by default): asks api.github.com once a day for the latest Aber release |

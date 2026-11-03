@@ -1172,7 +1172,7 @@ function edgeFunctionNames() {
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
-    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
+    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -1874,6 +1874,55 @@ const OPERATOR_PAIRS = [
   }
   if (held.length === Object.keys(why).length) {
     pass(`platform_health_rows()'s last declaration (${last.name}) keeps shadow gateways out of ${held.join(' and ')}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 191. A failed or stuck capture or playback, and a silent playback worker, reach someone. The last
+// declaration of platform_health_rows() has the three arms 0226 added, and each has a Platform
+// Conditions rule that reads it from platform_health as a platform alert. The stale-worker arm is
+// gated on a queued or running playback: its row is seeded at the epoch, and a site that runs no
+// worker would alert for ever on the age alone. Comments are stripped, so only the SQL counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const declaration = /CREATE OR REPLACE FUNCTION\s+public\.platform_health_rows\s*\(\)[\s\S]*?\bAS\s+(\$[a-z_]*\$)([\s\S]*?)\1/gi;
+  let last = null;
+  for (const name of files) {
+    for (const m of read(`${dir}/${name}`).matchAll(declaration)) last = { name, body: m[2] };
+  }
+  const sql = last ? last.body.replace(/--[^\n]*/g, '') : '';
+  const rules = Object.fromEntries(read('grafana/provisioning/alerting/alert-rules.yaml')
+    .split(/^ {6}- uid: /m).slice(1).map((block) => [block.split('\n')[0].trim(), block]));
+  const ARMS = { job_failed: 'aber-job-failed', job_stuck: 'aber-job-stuck', playback_worker_stale: 'aber-playback-worker-stale' };
+
+  const wrong = [];
+  for (const [condition, uid] of Object.entries(ARMS)) {
+    if (!sql.includes(`'${condition}'::text`)) {
+      wrong.push(`platform_health_rows() has no ${condition} arm${last ? ` (last declared in ${last.name})` : ''}`);
+    }
+    const rule = rules[uid];
+    if (!rule) {
+      wrong.push(`no rule ${uid} reads ${condition}`);
+    } else if (!/FROM public\.platform_health\b/.test(rule) || !rule.includes(`WHERE condition = '${condition}'`)) {
+      wrong.push(`${uid} does not read platform_health's ${condition} rows`);
+    } else if (!/^ {10}entity_type: platform$/m.test(rule)) {
+      wrong.push(`${uid} is not entity_type: platform, so the webhook would look for an asset it names`);
+    }
+  }
+  const staleArm = sql.slice(sql.indexOf("'playback_worker_stale'::text"));
+  if (sql.includes("'playback_worker_stale'::text")
+      && !/EXISTS\s*\(\s*SELECT 1 FROM public\.playback_jobs p WHERE p\.status IN \('PENDING', 'RUNNING'\)\s*\)/.test(staleArm)) {
+    wrong.push(`${last.name}'s playback_worker_stale arm is not gated on a queued or running playback. Its heartbeat row is `
+      + 'seeded at the epoch, so a site with playback.enabled: false would raise Playback Worker Not Reporting for ever');
+  }
+
+  if (wrong.length) {
+    fail(`a failed or stuck job, or a silent playback worker, would reach no one:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`platform_health_rows()'s last declaration (${last.name}) reports failed and stuck jobs and a silent playback `
+      + 'worker, only while a playback waits, and a Platform Conditions rule reads each');
   }
 }
 
@@ -6884,6 +6933,42 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 192. The playback worker's metrics endpoint is scraped. The worker serves PLAYBACK_METRICS_PORT,
+// whose default is values.yaml's playback.metrics.port; playback.yaml passes the port, or 0 when
+// playback.metrics.enabled is false, and annotates the pod for Alloy's scrape on it; and the network
+// policy admits alloy to playback on it. Any one missing and the outcome count is never collected,
+// with the endpoint answering and nothing failing.
+// -------------------------------------------------------------------------------------------------
+{
+  const worker = read('ingestion/playback_worker.py');
+  const template = read('deploy/helm/aber/templates/apps/playback.yaml');
+  const policy = read('deploy/helm/aber/templates/networkpolicy.yaml');
+  const values = read('deploy/helm/aber/values.yaml');
+  const defaultPort = worker.match(/^PLAYBACK_METRICS_PORT = int\(os\.getenv\("PLAYBACK_METRICS_PORT", "(\d+)"\)\)/m)?.[1];
+  const valuesPort = values.slice(values.indexOf('\nplayback:\n')).match(/\n {2}metrics:\n {4}enabled: \w+\n {4}port: (\d+)\n/)?.[1];
+  const wrong = [];
+  if (!defaultPort) wrong.push('ingestion/playback_worker.py does not read PLAYBACK_METRICS_PORT');
+  if (!valuesPort) wrong.push('values.yaml declares no playback.metrics.enabled and playback.metrics.port');
+  if (defaultPort && valuesPort && defaultPort !== valuesPort) {
+    wrong.push(`the worker's default port is ${defaultPort} and the chart's is ${valuesPort}`);
+  }
+  if (!/- name: PLAYBACK_METRICS_PORT\n\s+value: \{\{ ternary \(\.Values\.playback\.metrics\.port \| toString\) "0" \.Values\.playback\.metrics\.enabled \| quote \}\}/.test(template)) {
+    wrong.push('playback.yaml does not pass PLAYBACK_METRICS_PORT from playback.metrics, 0 when it is disabled');
+  }
+  if (!/\{\{- if \.Values\.playback\.metrics\.enabled \}\}\n\s+\{\{- include "aber\.scrapeAnnotations" \(dict "port" \.Values\.playback\.metrics\.port "path" "\/metrics"\)/.test(template)) {
+    wrong.push("playback.yaml does not annotate the pod for Alloy's scrape on playback.metrics.port");
+  }
+  if (!/\(dict "from" "alloy"\s+"to" "playback"\s+"port" \(int \.Values\.playback\.metrics\.port\)/.test(policy)) {
+    wrong.push('networkpolicy.yaml has no alloy -> playback edge on playback.metrics.port, so under default-deny the scrape is dropped');
+  }
+  if (wrong.length) {
+    fail(`the playback worker's outcome count would not be collected:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`the playback worker serves :${defaultPort}/metrics, and the chart passes the port, annotates the pod and admits alloy to it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 85. A pod that reads a Helm value into its environment from the chart's Secret rolls when the
 // value changes. Environment is fixed when the container starts, and an upgrade that changes only
 // the Secret's data leaves the pod as it was. Each workload below hashes the value in a checksum
@@ -8603,6 +8688,41 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 198. The Audit Trail drawer's "View in" action is offered for the kinds the help page names. The
+// tab's ENTITY_PAGES decides which kinds have a page and what it is called, and each must be a kind
+// routes.js's entityUrl() opens; the help lists the button's wordings. A page added on one side
+// only is a button the help does not mention, or one it promises that never appears.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const block = read(TAB).match(/^const ENTITY_PAGES = \{\n([\s\S]*?)\n\}/m)?.[1] ?? '';
+  const pages = [...block.matchAll(/type: '(\w+)',\s*page: '([^']+)'/g)].map((m) => ({ type: m[1], page: m[2] }));
+  const routed = (read('frontend/src/routes.js').match(/export const entityUrl = [\s\S]*?\{ ([^}]*) \}\[type\]/)?.[1] ?? '')
+    .split(',').map((p) => p.split(':')[0].trim()).filter(Boolean);
+  const help = read('help/pages/audit-trail.md');
+  const said = [...(help.match(/^- \*\*View in Devices\*\*.*$/m)?.[0] ?? '').matchAll(/\*\*View in (\w+)\*\*/g)].map((m) => m[1]);
+  const problems198 = [];
+  if (!pages.length) problems198.push(`could not read ENTITY_PAGES out of ${TAB}`);
+  if (!routed.length) problems198.push('could not read the kinds entityUrl() opens out of routes.js');
+  for (const { type } of pages.filter((p) => !routed.includes(p.type))) {
+    problems198.push(`ENTITY_PAGES offers ${type}, which entityUrl() does not open`);
+  }
+  if (!said.length) problems198.push('help/pages/audit-trail.md has no "View in Devices" bullet');
+  for (const { page } of pages.filter((p) => !said.includes(p.page))) {
+    problems198.push(`help/pages/audit-trail.md does not name "View in ${page}"`);
+  }
+  for (const page of said.filter((s) => !pages.some((p) => p.page === s))) {
+    problems198.push(`help/pages/audit-trail.md names "View in ${page}", which the drawer never offers`);
+  }
+  if (problems198.length) {
+    fail('the Audit Trail drawer\'s View in action is described otherwise than the code offers it:\n' +
+      problems198.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help names the Audit Trail drawer's ${pages.length} View in pages, each one entityUrl() opens`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 43. Every workflow job runs on one pinned runner image. GitHub moves `ubuntu-latest` to a new
 // release on its own schedule and gradually, so for weeks any job, a release among them, can land on
 // either image (#764). Pinned, a move is one change, tried on every workflow before it merges.
@@ -8630,6 +8750,82 @@ const OPERATOR_PAIRS = [
     );
   } else {
     pass(`all ${runners.length} workflow jobs run on ${images[0]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 196. How much a time window loads by itself is stated as AuditTrailTab.jsx holds it. A bounded
+// window pages on, PAGE_SIZE at a time, until WINDOW_EVENT_CAP events are loaded, and the hatch
+// then quotes the cap. The help page and frontend/README.md give the numbers and the hatch's words;
+// a cap stated wrong reads as the page hiding events.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const tab = read(TAB);
+  const pageSize = Number(tab.match(/^const PAGE_SIZE = (\d+)$/m)?.[1]);
+  const cap = Number(tab.match(/^export const WINDOW_EVENT_CAP = (\d+)$/m)?.[1]);
+  const problems196 = [];
+  if (!Number.isFinite(pageSize) || !Number.isFinite(cap)) {
+    problems196.push(`could not read PAGE_SIZE and WINDOW_EVENT_CAP out of ${TAB}; its shape changed`);
+  } else {
+    const words = cap.toLocaleString('en-GB');
+    for (const hatch of ["const capWords = WINDOW_EVENT_CAP.toLocaleString('en-GB')",
+      'Older events not loaded: more than ${capWords} in this window', 'Not loaded: over ${capWords}']) {
+      if (!tab.includes(hatch)) problems196.push(`${TAB} no longer words the hatch with "${hatch}"`);
+    }
+    const help = read('help/pages/audit-trail.md');
+    for (const phrase of [`loads the next ${pageSize} events`, `${pageSize} at a time, up to ${words} events`,
+      `loads the newest ${words}`, `Older events not loaded: more than ${words} in this window`,
+      `Not loaded: over ${words}`]) {
+      if (!help.includes(phrase)) problems196.push(`help/pages/audit-trail.md does not say "${phrase}"`);
+    }
+    const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+    if (!readme.includes(`\`WINDOW_EVENT_CAP\` (${words})`)) {
+      problems196.push(`frontend/README.md does not give WINDOW_EVENT_CAP as (${words})`);
+    }
+  }
+  if (problems196.length) {
+    fail('the Audit Trail\'s window loading is stated otherwise than AuditTrailTab.jsx holds it:\n' +
+      problems196.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and frontend/README.md state the Audit Trail's window loading: ${pageSize} a page, up to ${cap} events`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 197. frontend/README.md shows GroupHeading as the component takes it, and names the key the Audit
+// Trail keeps its closed sections under. A prop the example passes and the component ignores, or a
+// key the page no longer writes, sends the next page that copies them wrong.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/GroupHeading.jsx';
+  const props = (read(COMPONENT).match(/export function GroupHeading\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean);
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('### A group of rows opens and closes under one heading');
+  const section = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1));
+  const fence = '`'.repeat(3);
+  const opened = section.indexOf(`${fence}jsx\n`);
+  const closed = opened < 0 ? -1 : section.indexOf(fence, opened + fence.length + 4);
+  const example = closed < 0 ? '' : section.slice(opened + fence.length + 4, closed);
+  // The props on GroupHeading itself, not those of an element passed as one of them (an icon).
+  const passed = [...example.replace(/<(?!GroupHeading)[A-Z]\w*[^>]*\/>/g, '').matchAll(/(\w+)=\{/g)].map((m) => m[1]);
+  const key = read('frontend/src/components/tabs/AuditTrailTab.jsx')
+    .match(/^export const CLOSED_SECTIONS_KEY = '([^']+)'$/m)?.[1];
+  const problems197 = [];
+  if (!props.length) problems197.push(`could not read GroupHeading's props out of ${COMPONENT}`);
+  if (!section) problems197.push('frontend/README.md has no section "A group of rows opens and closes under one heading"');
+  else if (!passed.length) problems197.push('that section has no GroupHeading example to check');
+  for (const p of passed.filter((p) => !props.includes(p))) {
+    problems197.push(`the README's example passes ${p}, which GroupHeading does not take`);
+  }
+  if (!key) problems197.push('could not read CLOSED_SECTIONS_KEY out of AuditTrailTab.jsx');
+  else if (section && !section.includes(`\`${key}\``)) problems197.push(`the section does not name the key ${key}`);
+  if (problems197.length) {
+    fail('frontend/README.md describes GroupHeading otherwise than the code has it:\n' +
+      problems197.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's GroupHeading example passes ${passed.length} of its props and names ${key}`);
   }
 }
 
