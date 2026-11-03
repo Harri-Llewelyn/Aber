@@ -45,7 +45,7 @@ If a playback completes but loses readings whose timestamps were too old or too 
 
 Each tab shows the newest 20. **Show more**, at the foot of the table, loads the next 20. These two tables have no search, and their columns do not sort.
 
-A failure also raises the Grafana alert **Capture or Playback Failed**, for an hour. A recording or playback that is still queued or running long past its limits raises **Capture or Playback Stuck**. Press **Stop** to end it. A playback waiting for a playback worker that has stopped reporting raises **Playback Worker Not Reporting**. Each reaches the alert counter in the top bar, so nobody has to be watching this page.
+A failure also raises the Grafana alert **Capture or Playback Failed**, for an hour. A recording or playback that is still queued or running long past its limits raises **Capture or Playback Stuck**. Press **Stop** to end it. A playback waiting for a playback worker that has stopped reporting raises **Playback Worker Not Reporting**. Each reaches the alert counter in the top bar, so nobody has to be watching this page. Select one there, or its pop-up message, and this page opens on the **Captures** or **Playbacks** tab, whichever the job was.
 
 ## Who can use it
 

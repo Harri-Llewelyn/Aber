@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
-import { identityUrl } from '../routes'
+import { alertPage } from '../routes'
 
 /**
  * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
@@ -13,13 +13,11 @@ export const RECONCILE_MS = 60000
 export const POLL_INTERVAL_MS = 15000
 
 /**
- * Where an alert's toast leads. An alert about a machine identity's token goes to the identity on
- * Access Control, where a new token is issued and the old one revoked; any other goes to its rule in
- * Grafana Alerting, where its thresholds, silences and history are.
+ * Where an alert's toast leads: the page in the dashboard that alertPage() names, such as a machine
+ * identity on Access Control or a job on the Capture page; for any other alert, its rule in Grafana
+ * Alerting, where its thresholds, silences and history are.
  */
-export const alertToastUrl = (row) => (row.entity_type === 'service_identity' && row.entity_id
-  ? identityUrl(row.entity_id)
-  : grafanaAlertUrl(row))
+export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
 
 /**
  * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
@@ -49,7 +47,7 @@ export function usePlatformAlerts(showToast) {
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from('platform_alerts_active')
-      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid')
+      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels')
       .order('starts_at', { ascending: false })
 
     if (error) {
