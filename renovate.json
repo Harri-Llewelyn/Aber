@@ -93,7 +93,10 @@
       "minimumReleaseAge": "7 days",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["timescale/timescaledb"],
-      "labels": ["dependencies", "data-path"]
+      "labels": ["dependencies", "data-path"],
+      "prBodyNotes": [
+        "Before merging: set `$timescaledbVersion` in `deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml` to the new TimescaleDB version, and the tag in `.github/rehearsal-values.yaml` to the new image. The maintenance hook waits for the historian to offer that version, and `node scripts/check-docs-drift.mjs` fails until both match the Dockerfile."
+      ]
     },
     {
       "description": "THE BROKER. Docker Hub publishes Mosquitto 2.1 and later only under `-alpine` tags, and Renovate keeps a tag suffix as its own stream, so the unsuffixed 2.0.22 pin was never offered 2.1. This keeps proposals to exact `X.Y.Z-alpine` tags, never the floating `2.1-alpine`. One PR moves both pins, values.yaml and gateway-credential/Dockerfile, which check-docs-drift holds together because the credential image's mosquitto_passwd and mosquitto_rr must be the broker's own. A minor release has changed mosquitto_passwd's output before, so run `node scripts/check-broker-config.mjs` on the branch before merging.",

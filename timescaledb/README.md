@@ -30,6 +30,24 @@ a file, `SELECT set_config('aber.<name>', :'name', false)` hands each variable t
 GUC: psql interpolates `:'var'` while lexing and does not descend into dollar-quoted strings, so a
 `DO` block cannot read the variable directly.
 
+**Before any file, the Job waits for the historian to run the chart's image.** It asks the
+historian for `default_version` in `pg_available_extensions` every 5 seconds. It goes on once that
+is the chart's TimescaleDB or later. That version is `$timescaledbVersion` at the top of the hook's
+template, and `check-docs-drift.mjs` (check 186) holds it equal to the `FROM` line of
+[`Dockerfile`](Dockerfile). The wait lasts at most `initJobs.waitTimeout` (600 seconds by default).
+That leaves room for the historian to stop and start inside the 15 minutes `deploy/install.sh` gives
+Helm. On timeout the Job fails, naming the version the historian offers and the one the chart
+expects.
+
+Why it waits: `helm upgrade` runs without `--wait`, so the hook can start while the old historian
+pod still answers. There, `ALTER EXTENSION timescaledb UPDATE` finds nothing newer than the
+installed version, and `extension.sql`'s own check passes. The new pod then runs the new binaries
+on the old definitions, until the next upgrade. Seen on the dev cluster when TimescaleDB moved from
+2.29.2 to 2.31.0. The dev loop rebuilds images under one tag, so it sets the historian's
+`checksum/image` pod annotation (`timescaledb.podAnnotations`) to the rebuilt image's id. The
+historian then restarts during `helm upgrade`, as a new image tag makes it restart on a real
+upgrade.
+
 **The order, and what each position protects:**
 
 1. **`extension.sql`**, first and in its own psql session. `ALTER EXTENSION timescaledb UPDATE`

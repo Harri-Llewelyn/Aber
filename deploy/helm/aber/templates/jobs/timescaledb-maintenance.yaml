@@ -17,6 +17,9 @@ refused by the immutability of a completed Job's pod template.
 {{- $component := "timescaledb-maintenance" -}}
 {{- $fullname := include "aber.fullname" . -}}
 {{- $secretName := include "aber.secretName" . -}}
+{{- /* The TimescaleDB the SQL below is written for: timescaledb/Dockerfile's FROM, held equal by
+       check-docs-drift (186). The Job waits for the historian to offer it before extension.sql. */ -}}
+{{- $timescaledbVersion := "2.31.0" -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -141,6 +144,39 @@ spec:
             - -c
             - |
               PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "aber.timescale.host" . }} -p {{ include "aber.timescale.port" . }} -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }}"
+
+              {{/*
+                FIRST, THE HISTORIAN ON THE CHART'S IMAGE. `helm upgrade` runs without --wait, so
+                this hook can start while the old historian pod still answers, and an update there
+                takes the old binaries' version and passes extension.sql's check. So it waits until
+                the historian offers this chart's TimescaleDB or later, for initJobs.waitTimeout:
+                room for one historian restart, inside the 15 minutes install.sh gives Helm.
+              */}}
+              expected={{ $timescaledbVersion | quote }}
+              deadline=$(( $(date +%s) + {{ .Values.initJobs.waitTimeout }} ))
+              offered=
+              echo "Waiting for the historian to offer TimescaleDB $expected or later..."
+              while :; do
+                row=$($PSQL -tAc "SELECT default_version || ' ' || (string_to_array(substring(default_version FROM '^[0-9.]*[0-9]'), '.')::int[] >= string_to_array('$expected', '.')::int[])::text FROM pg_available_extensions WHERE name = 'timescaledb'" 2>/dev/null) || row=
+                if [ -n "$row" ]; then
+                  offered=${row% *}
+                  if [ "${row#* }" = true ]; then break; fi
+                  now="offers TimescaleDB $offered"
+                else
+                  now="does not answer"
+                fi
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  if [ -n "$offered" ]; then
+                    echo "After {{ .Values.initJobs.waitTimeout }} s the historian still offers TimescaleDB $offered, and this chart expects $expected or later. Its pod is not on the chart's image yet: kubectl -n {{ .Release.Namespace }} rollout status statefulset/timescaledb says why. An image of your own in timescaledb.image must ship TimescaleDB $expected or later." >&2
+                  else
+                    echo "After {{ .Values.initJobs.waitTimeout }} s the historian has not said which TimescaleDB it offers, and this chart expects $expected or later: kubectl -n {{ .Release.Namespace }} rollout status statefulset/timescaledb says why." >&2
+                  fi
+                  exit 1
+                fi
+                echo "the historian $now; waiting for it to run the chart's image..."
+                sleep 5
+              done
+              echo "The historian offers TimescaleDB $offered."
 
               {{/*
                 FIRST, AND IN ITS OWN psql SESSION. `ALTER EXTENSION timescaledb UPDATE` is refused

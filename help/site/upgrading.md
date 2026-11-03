@@ -197,6 +197,11 @@ on every upgrade, in its own session. It does nothing when there is nothing to u
 the step if the two versions still disagree afterwards**, rather than letting the historian run old
 definitions on new binaries. You do nothing: it is part of `helm upgrade`.
 
+Before that, the step waits for the historian to restart on the new image, for up to 10 minutes by
+default (`initJobs.waitTimeout`). Its log says `Waiting for the historian to offer TimescaleDB`
+while it waits. If the time runs out, the step fails and names the version the historian has and
+the one the new release needs.
+
 The same step sets the raw readings' chunk interval, worked out from
 `timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless `chunkInterval` is
 set. A change applies to chunks created afterwards: the chunk open at the time keeps its interval.

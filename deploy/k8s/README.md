@@ -283,6 +283,13 @@ run that started early would not be enough, because what it did stays done. For 
 request starts the node's throttle, which a second run then meets. A first install has no older
 pods, so it creates its Jobs running.
 
+The historian is not restarted after the upgrade. `up` sets its `checksum/image` pod annotation
+(`timescaledb.podAnnotations`) to the id of the historian image it imported. When that image
+changed, the historian restarts during `helm upgrade`, as a new image tag makes it restart on a real
+upgrade. It has to: the maintenance hook waits for the historian to offer the chart's TimescaleDB
+([`timescaledb/README.md`](../../timescaledb/README.md#why-on-every-boot-and-in-this-order)), so a
+historian restarted only afterwards would hold the hook until its timeout.
+
 The port-forwards use the ports that every host-side script and suite defaults to, so every
 host-side tool keeps its defaults. They include `5433` for the historian, `54322` and `54321` for
 Supabase, and `1880`, `3002`, `9090`, `3100` and the rest. `test` takes every credential from

@@ -1,6 +1,6 @@
 // =================================================================================================
-// scripts/dev-cluster.mjs: how a port-forward that does not open says why, and what each image's
-// build is given
+// scripts/dev-cluster.mjs: how a port-forward that does not open says why, what each image's
+// build is given, and the annotation that rolls a rebuilt historian during the upgrade
 //
 // forwardReady() against stand-ins for kubectl (node children that write what kubectl writes), and
 // forwardOnFreePort()'s second attempt, taken only when the port was taken. The forwards themselves
@@ -14,7 +14,10 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { DESCRIBE_ARGS, IMAGES, IMG_NS, dockerBuildArgs, forwardOnFreePort, forwardReady } from './dev-cluster.mjs';
+import {
+  DESCRIBE_ARGS, HISTORIAN_IMAGE_ANNOTATION, IMAGES, IMG_NS, dockerBuildArgs, forwardOnFreePort, forwardReady,
+  historianImageSet,
+} from './dev-cluster.mjs';
 
 /** A node child standing in for kubectl, running `code`, with both outputs piped as the forwards pipe them. */
 function standIn(code) {
@@ -172,4 +175,14 @@ test('the build is given the version in a value and never in a name, and the nam
     'build', '-f', 'timescaledb/Dockerfile', '-t', `${IMG_NS}/timescaledb:1.7.0`,
     '--build-context', 'licenses=./licenses', 'timescaledb',
   ]);
+});
+
+test('a rebuilt historian rolls on its image id, a missing copy keeps the release\'s, and a first install may carry none', () => {
+  const set = (id) => ['--set-string', `timescaledb.podAnnotations.${HISTORIAN_IMAGE_ANNOTATION}=${id}`];
+  assert.deepEqual(historianImageSet('sha256:new', 'sha256:old'), set('sha256:new'));
+  assert.deepEqual(historianImageSet('', 'sha256:old'), set('sha256:old'));
+  assert.deepEqual(historianImageSet('', undefined), []);
+  const statefulSet = readFileSync(new URL('../deploy/helm/aber/templates/data/timescaledb-statefulset.yaml', import.meta.url), 'utf8');
+  assert.match(statefulSet, /\{\{- with \.Values\.timescaledb\.podAnnotations \}\}\n\s+\{\{- toYaml \. \| nindent 8 \}\}/,
+    "the historian's pod template no longer merges timescaledb.podAnnotations, so the annotation rolls nothing");
 });
