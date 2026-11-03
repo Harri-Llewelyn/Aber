@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { inServiceDevices } from './utils/inService';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES, planRotation, nextRotation } from './utils/areaPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES, PLAN_ROTATIONS } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
@@ -3777,16 +3777,18 @@ const apiMethods = {
   },
 
   /**
-   * Turn an area's plan a quarter turn right (clockwise, `direction` 1) or left (-1), from the turn
-   * `area` was read with. One write of `plan_rotation`: the file and every cell's place stay as they
-   * are, since a place is a fraction of the drawing as uploaded. RLS refuses with zero rows, not an
-   * error, so `.select()` is what tells a refused turn from a done one.
+   * Save an area's plan at `rotation`, degrees clockwise, one of PLAN_ROTATIONS: the turn the panel
+   * drafted. One write of `plan_rotation`, so one audit row: the file and every cell's place stay as
+   * they are, since a place is a fraction of the drawing as uploaded. RLS refuses with zero rows,
+   * not an error, so `.select()` is what tells a refused turn from a done one.
    */
-  turnAreaPlan: async (area, direction) => {
+  setAreaPlanRotation: async (area, rotation) => {
+    // Refused here, so the only CHECK a write can break is the one that needs a plan.
+    if (!PLAN_ROTATIONS.includes(rotation)) throw new Error('A plan turns in quarter turns.');
     const areaId = area.area_id ?? area.id;
     const { data, error } = await supabase
       .from('areas')
-      .update({ plan_rotation: nextRotation(planRotation(area), direction) })
+      .update({ plan_rotation: rotation })
       .eq('id', areaId)
       .select();
     if (error) {

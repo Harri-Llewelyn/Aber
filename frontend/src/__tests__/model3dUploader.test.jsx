@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { deviceUrl } from '../routes'
 import { Model3DUploader } from '../components/common/Model3DUploader'
@@ -120,15 +120,57 @@ describe('Model3DUploader', () => {
     await waitFor(() => expect(screen.getByText(/size unavailable/)).toBeInTheDocument())
   })
 
-  it('removes an attached model', async () => {
-    const onChange = vi.fn()
-    api.removeDeviceModel.mockResolvedValue(undefined)
+  /** Remove asks first, as Remove plan does on an area: the way back is another upload. */
+  describe('removing the attached model', () => {
+    const openRemove = async (props = {}) => {
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} {...props} />)
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
+      fireEvent.click(getByTooltip(/Detach this model/i))
+      return screen.getByRole('dialog', { name: 'Remove 3D model' })
+    }
 
-    render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} onChange={onChange} />)
-    fireEvent.click(getByTooltip(/Detach this model/i))
+    it('asks first, naming the device and saying the file is deleted', async () => {
+      const dialog = await openRemove()
 
-    await waitFor(() => expect(api.removeDeviceModel).toHaveBeenCalledWith(DEVICE_ID, `${DEVICE_ID}/cnc.glb`))
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null))
+      expect(api.removeDeviceModel).not.toHaveBeenCalled()
+      expect(dialog).toHaveAccessibleDescription(
+        'Remove the 3D model from CNC_01? The device keeps its other details, and the file is deleted.')
+      expect(within(dialog).getByRole('button', { name: 'Remove Model' })).toHaveClass('btn-danger')
+    })
+
+    it('removes nothing when cancelled', async () => {
+      const onChange = vi.fn()
+      const dialog = await openRemove({ onChange })
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(api.removeDeviceModel).not.toHaveBeenCalled()
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it('removes the model once, when confirmed', async () => {
+      const onChange = vi.fn()
+      api.removeDeviceModel.mockResolvedValue(undefined)
+      const dialog = await openRemove({ onChange })
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
+
+      await waitFor(() => expect(api.removeDeviceModel).toHaveBeenCalledWith(DEVICE_ID, `${DEVICE_ID}/cnc.glb`))
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(null))
+      expect(api.removeDeviceModel).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    })
+
+    it('closes on a failure, which is said under the model', async () => {
+      api.removeDeviceModel.mockRejectedValue(new Error('The model could not be deleted from storage.'))
+      const dialog = await openRemove()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(screen.getByText('The model could not be deleted from storage.')).toBeInTheDocument()
+    })
   })
 
   it('hides every write control from a role that cannot manage devices', async () => {

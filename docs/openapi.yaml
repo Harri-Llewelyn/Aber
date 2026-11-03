@@ -2498,6 +2498,9 @@ paths:
         That last field is the one to read before trusting a capture: `false` means the recording
         contains no `NBIRTH`, so a playback refuses it, since a replay opens with the edge node's
         birth certificate. A capture stored before 1.5 set it for a `DBIRTH` alone too.
+        **`device_ids`** lists the device ids the file records. `ensure_shadow_devices()` makes
+        replay lanes from it and the playback dialog maps from it, never from the file, so an upload
+        whose manifest leaves it out cannot be played back from the dashboard.
 
         `source` distinguishes a capture the daemon recorded from one uploaded through the browser.
         An uploaded capture has no `capture_jobs` row at all, which is why the artifact is a table

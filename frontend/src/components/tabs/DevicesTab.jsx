@@ -23,7 +23,7 @@ import { Modal } from '../common/Modal'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
-import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
+import { usePendingAction } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader, Model3DLabel } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
@@ -33,6 +33,8 @@ import { TabStrip } from '../common/TabStrip'
 import { FiltersPopover } from '../common/FiltersPopover'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { ConfirmModal } from '../modals/ConfirmModal'
+import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
@@ -80,7 +82,8 @@ import {
   IconAlertCircle,
   IconDownload,
   IconRadio,
-  IconLayoutDashboard
+  IconLayoutDashboard,
+  IconTrash
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
@@ -128,7 +131,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [approveItem, setApproveItem] = useState(null)
+  // The quarantined device whose Reject dialog is open, and the archived one whose Restore is.
+  const [rejectTarget, setRejectTarget] = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
+  const [restoreTarget, setRestoreTarget] = useState(null)
   const [configAsset, setConfigAsset] = useState(null)
   const [nameplateFor, setNameplateFor] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
@@ -364,10 +370,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   /** The schema rows the form has ticked: what the device will be judged against once saved. */
   const formSchemas = schemas.filter(s => (form.schema_ids || []).includes(s.schema_uuid))
 
-  // In-flight state for the form and for the row being restored or rejected. Restore and Reject
-  // share one key because both reload the list.
+  // In-flight state for the form. Reject's and Restore's are their dialogs'.
   const [saving, runSave] = usePendingAction()
-  const [rowBusyId, runRowAction] = usePendingKey()
 
   const approveQuarantine = async (assetId, body) => {
     const targetGateway = body?.active_gateway_id || body?.gateway_id || null
@@ -435,11 +439,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Run from the Reject dialog, which closes either way so a failure's toast is not left behind it.
   const rejectQuarantine = async (item) => {
     try {
       await api.post(`/api/v1/quarantine/${item.asset_id}/reject`, {})
       loadAll(); showToast(`Quarantined device '${item.asset_name}' rejected`, 'success')
     } catch (e) { showToast(e.message, 'error') }
+    finally { setRejectTarget(null) }
   }
 
   const archiveDevice = async (days) => {
@@ -450,11 +456,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
   const restoreDevice = async (assetId, name) => {
     try {
       await api.post(`/api/v1/devices/${assetId}/restore`, {})
       loadAll(); showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
     } catch (e) { showToast(e.message, 'error') }
+    finally { setRestoreTarget(null) }
   }
 
   const canApprove = hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)
@@ -797,14 +805,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       >
                         Approve &amp; Onboard
                       </ActionButton>
-                      {/* Keyed on the row: one boolean would spin every Reject button. */}
                       <ActionButton
                         className="btn btn-danger btn-sm"
                         permitted={canReject}
                         deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.QUARANTINE_REJECT)}
-                        pending={rowBusyId === q.asset_id}
-                        pendingLabel="Rejecting…"
-                        onClick={() => runRowAction(q.asset_id, () => rejectQuarantine(q))}
+                        onClick={() => setRejectTarget(q)}
                         title="Discard this device and its held readings"
                       >
                         Reject
@@ -1404,7 +1409,32 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           onCancel={() => setApproveItem(null)}
         />
       )}
+      {/* Reject deletes the row, so nothing is left to restore; a device that publishes again is
+          held afresh. */}
+      {rejectTarget && (
+        <ConfirmModal
+          title="Reject Device"
+          icon={<IconTrash size={18} />}
+          message={
+            `Reject the device '${rejectTarget.asset_name}'` +
+            (rejectTarget.reported_identity ? ` (published as ${rejectTarget.reported_identity})` : '') +
+            '? This deletes the device and the readings held for it, and cannot be undone. If the' +
+            ' device publishes again, it comes back to Quarantine.'
+          }
+          confirmLabel="Reject Device"
+          pendingLabel="Rejecting…"
+          onConfirm={() => rejectQuarantine(rejectTarget)}
+          onCancel={() => setRejectTarget(null)}
+        />
+      )}
       {archiveTarget && <ArchiveModal entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
+      {restoreTarget && (
+        <RestoreEntityModal
+          type="device" name={restoreTarget.asset_name}
+          onConfirm={() => restoreDevice(restoreTarget.asset_id, restoreTarget.asset_name)}
+          onCancel={() => setRestoreTarget(null)}
+        />
+      )}
       {configAsset && (
         <AssetConfigModal
           asset={configAsset}
@@ -1643,9 +1673,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         actions={selectedDevice ? [
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,
-            onClick: () => runRowAction(selectedDevice.asset_id, () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name)),
-            pending: rowBusyId === selectedDevice.asset_id,
-            pendingLabel: 'Restoring…',
+            onClick: () => setRestoreTarget(selectedDevice),
             disabled: !canArchive,
             primary: true,
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore device back to active service'

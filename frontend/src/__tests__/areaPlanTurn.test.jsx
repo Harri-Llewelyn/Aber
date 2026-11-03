@@ -12,7 +12,8 @@ import { tooltipOf } from '../test/tooltips'
  * A plan turned on screen (plan_rotation). The image turns about the frame's centre; the pins stay
  * upright and are placed where the turn puts their place; a click is turned back into the drawing
  * as uploaded; and the expanded viewer fits the turned frame. The panel's Turn left and Turn right
- * write one turn each and reload. jsdom lays nothing out, so the boxes are given sizes here.
+ * turn a draft the preview draws, and Save Turn writes it once and reloads. jsdom lays nothing out,
+ * so the boxes are given sizes here.
  */
 
 vi.mock('../api', async () => {
@@ -20,7 +21,7 @@ vi.mock('../api', async () => {
   return {
     ...actual,
     loadAreaPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
-    api: { turnAreaPlan: vi.fn(), uploadAreaPlan: vi.fn(), removeAreaPlan: vi.fn() }
+    api: { setAreaPlanRotation: vi.fn(), uploadAreaPlan: vi.fn(), removeAreaPlan: vi.fn() }
   }
 })
 
@@ -174,15 +175,21 @@ describe('the expanded plan, turned', () => {
 })
 
 describe('Turn left and Turn right', () => {
-  const panel = (props = {}) => render(
-    <AreaPlanPanel area={turned(90)} cells={[]} canManage showToast={vi.fn()} onChanged={vi.fn()} {...props} />
-  )
+  const props = (extra = {}) => ({ area: turned(90), cells: [], canManage: true, showToast: vi.fn(), onChanged: vi.fn(), ...extra })
+  const panel = (extra = {}) => render(<AreaPlanPanel {...props(extra)} />)
   const actions = () => document.querySelector('.area-plan-panel-actions')
+  const press = (name) => fireEvent.click(screen.getByRole('button', { name }))
+  /** The turn the panel's preview is drawn at. */
+  const drawn = () => Number(document.querySelector('.area-plan').dataset.rotation ?? 0)
 
-  it('sit beside the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
+  it('sit in a row of their own under the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
     panel()
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
     expect(names).toEqual(['Turn left', 'Turn right'])
+    // Not in the heading's row, and above the plan's card.
+    expect(actions().closest('.area-plan-panel-header')).toBeNull()
+    expect(document.querySelector('.area-plan-panel-header').compareDocumentPosition(actions()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(actions().compareDocumentPosition(document.querySelector('.plan-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Away from the turns, so a missed Turn right cannot open a file dialog.
     const fileButtons = document.querySelector('.area-plan-panel-buttons')
     expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Replace plan', 'Remove plan'])
@@ -192,30 +199,135 @@ describe('Turn left and Turn right', () => {
     expect(screen.getByRole('button', { name: 'Turn right' }).querySelector('svg')).not.toBeNull()
   })
 
-  it('each write one turn, then reload the page, and wait for it', async () => {
-    let finish
-    const onChanged = vi.fn(() => new Promise(resolve => { finish = resolve }))
-    api.turnAreaPlan.mockResolvedValue({})
-    panel({ onChanged })
+  it('turn the preview at once, and write nothing until Save Turn', () => {
+    const onChanged = vi.fn()
+    const area = turned(90)
+    panel({ area, onChanged })
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Turn right' })) })
-    expect(api.turnAreaPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'a', plan_rotation: 90 }), 1)
-    expect(onChanged).toHaveBeenCalledTimes(1)
-    // Held until the page has the new turn, so a second press starts from it.
-    expect(screen.getByRole('button', { name: 'Turn left' })).toBeDisabled()
-    await act(async () => { finish() })
-    expect(screen.getByRole('button', { name: 'Turn left' })).toBeEnabled()
-
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Turn left' })) })
-    expect(api.turnAreaPlan).toHaveBeenLastCalledWith(expect.objectContaining({ area_id: 'a' }), -1)
+    press('Turn right')
+    expect(drawn()).toBe(180)
+    press('Turn left')
+    press('Turn left')
+    expect(drawn()).toBe(0)
+    expect(api.setAreaPlanRotation).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
+    // The page's copy is the saved turn, which the Site Map, the Cells page and the table read.
+    expect(area.plan_rotation).toBe(90)
   })
 
-  it('says why a turn failed', async () => {
+  it('offer Save Turn and Discard beside them while the turn is unsaved, as the Settings page offers Save and Discard', () => {
+    panel()
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
+    const [left, right] = within(actions()).getAllByRole('button')
+
+    press('Turn right')
+    const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
+    expect(names).toEqual(['Turn left', 'Turn right', 'Save Turn', 'Discard'])
+    // The pair is added after the turns, which stay the row's first two, so they do not move.
+    expect(within(actions()).getAllByRole('button').slice(0, 2)).toEqual([left, right])
+    expect(screen.getByRole('button', { name: 'Save Turn' })).toHaveClass('btn', 'btn-primary', 'btn-sm')
+    expect(screen.getByRole('button', { name: 'Save Turn' }).closest('.setting-actions')).not.toBeNull()
+  })
+
+  it('save several turns as one write of the last, then reload the page, and wait for it', async () => {
+    let finish
+    const onChanged = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    api.setAreaPlanRotation.mockResolvedValue({})
+    const { rerender } = panel({ onChanged })
+
+    press('Turn right')
+    press('Turn right')
+    press('Turn left')
+    press('Turn left')
+    press('Turn left')
+    await act(async () => { press('Save Turn') })
+    expect(api.setAreaPlanRotation).toHaveBeenCalledTimes(1)
+    expect(api.setAreaPlanRotation).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'a', plan_rotation: 90 }), 0)
+    expect(onChanged).toHaveBeenCalledTimes(1)
+    // Held until the page has the saved turn.
+    for (const name of ['Turn left', 'Turn right', 'Save Turn', 'Discard']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    expect(drawn()).toBe(0)
+
+    rerender(<AreaPlanPanel {...props({ area: turned(0), onChanged })} />)
+    await act(async () => { finish() })
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Turn left' })).toBeEnabled()
+    expect(drawn()).toBe(0)
+  })
+
+  it('offer nothing to save once the turns come back to the saved one', () => {
+    panel()
+    press('Turn left')
+    press('Turn right')
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    for (let i = 0; i < 4; i++) press('Turn right')
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
+    expect(drawn()).toBe(90)
+    expect(screen.getByRole('button', { name: /Replace plan/ })).toBeEnabled()
+  })
+
+  it('put the preview back to the saved turn on Discard, with no request', () => {
+    panel()
+    press('Turn left')
+    expect(drawn()).toBe(0)
+    press('Discard')
+    expect(drawn()).toBe(90)
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(api.setAreaPlanRotation).not.toHaveBeenCalled()
+  })
+
+  it('grey out Replace plan and Remove plan while a turn is unsaved, and say why', () => {
+    panel()
+    const replace = () => screen.getByRole('button', { name: /Replace plan/ })
+    const remove = () => screen.getByRole('button', { name: /Remove plan/ })
+    expect(tooltipOf(remove())).toBe('The area keeps the default outline')
+
+    press('Turn right')
+    for (const button of [replace(), remove()]) {
+      expect(button).toBeDisabled()
+      expect(button).toHaveClass('btn-disabled')
+      expect(tooltipOf(button)).toBe('Save or discard the turn first.')
+    }
+
+    press('Discard')
+    for (const button of [replace(), remove()]) {
+      expect(button).toBeEnabled()
+      expect(button).not.toHaveClass('btn-disabled')
+    }
+    expect(tooltipOf(replace())).toBeNull()
+    expect(tooltipOf(remove())).toBe('The area keeps the default outline')
+  })
+
+  it('drop an unsaved turn when the panel turns to another area', () => {
+    const other = { ...turned(90), area_id: 'b', area_name: 'Paint Shop' }
+    const { rerender } = panel()
+    press('Turn right')
+    expect(screen.getByRole('button', { name: 'Save Turn' })).toBeInTheDocument()
+
+    rerender(<AreaPlanPanel {...props({ area: other })} />)
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(drawn()).toBe(90)
+    // Gone, not set aside: coming back to the first area shows its saved turn.
+    rerender(<AreaPlanPanel {...props()} />)
+    expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
+    expect(drawn()).toBe(90)
+  })
+
+  it('say why a save failed, and keep the turn to save again or discard', async () => {
     const showToast = vi.fn()
-    api.turnAreaPlan.mockRejectedValue(new Error('You do not have permission to change this area.'))
-    panel({ showToast })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Turn left' })) })
+    api.setAreaPlanRotation.mockRejectedValue(new Error('You do not have permission to change this area.'))
+    const onChanged = vi.fn()
+    panel({ showToast, onChanged })
+    press('Turn left')
+    await act(async () => { press('Save Turn') })
     expect(showToast).toHaveBeenCalledWith('You do not have permission to change this area.', 'error')
+    expect(onChanged).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Save Turn' })).toBeEnabled()
+    expect(drawn()).toBe(0)
   })
 
   it('are offered only on a plan, to somebody who may upload one', () => {

@@ -4,15 +4,16 @@ Use this page to record what the broker actually carried, and play it back later
 
 ## What the controls do
 
-- **The Gateways and Devices tabs** choose what the list holds. You record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. It records the device under its Sparkplug ID, its Published ID if it has one, and its UUID. There is no capture of the whole broker.
-- **The search box** finds a name or a Sparkplug ID. **The Stored filter** beside it narrows the list to subjects with or without a capture. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
+- **The page has four tabs.** **Gateways** and **Devices** list what you can record. **Captures** and **Playbacks** list the recordings and playbacks that have finished. Each tab has its own address, and the sidebar lists all four.
+- **On the Gateways and Devices tabs**, you record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. It records the device under its Sparkplug ID, its Published ID if it has one, and its UUID. There is no capture of the whole broker.
+- **The search box** finds a name or a Sparkplug ID, on the Gateways and Devices tabs. **The Stored filter** beside it narrows the list to subjects with or without a capture. Both stay set when you move between Gateways and Devices. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
 - **The columns** are the subject, its Sparkplug ID and its Type (Remote, Third-party, Host or Simulated). The last column is the one stored capture, with its messages, size and date. **UPLOADED** marks a file that was not recorded here. **NO BIRTH** marks a capture with no birth certificate in it.
-- **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
+- **A column's heading sorts the table** by that column, on the Gateways and Devices tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Selecting a row**, by clicking it or pressing Enter on it, opens the details panel. It shows how long the recording ran and why it stopped, the recorded rate, the devices and metrics the capture holds, and the actions.
 - **Record capture** asks for an optional note and a duration. **Record again** does the same, and replaces the stored capture. **Download** saves the file. **Delete capture** removes the capture and its file. Deleting a gateway or device deletes its capture too.
 - **The upload zone** in the details panel stores a capture file recorded elsewhere, filed against the selected subject. It is refused while that subject is being recorded. Upload again when the recording has finished.
-- **Play a file…**, at the right-hand end of the toolbar on both tabs, stores a capture file and goes straight on to playing it back. Dropping the file anywhere on the card does the same. If the file does not name its subject, **File it against** in the dialog names it. Every device the file recorded must exist on this site. A file from another site is refused, and nothing is stored.
-- **The strips above the list** show a recording or a playback that is queued or running, on either tab. They also show one that has just failed. **Stop** ends a running recording early and keeps what it has recorded, or stops a running playback. If the ingestion service has not reported on a recording for two minutes, Stop ends it and nothing from it is stored. Nothing shows there when nothing is in progress.
+- **Play a file…**, at the right-hand end of the toolbar on every tab, stores a capture file and goes straight on to playing it back. Dropping the file anywhere on the card does the same. If the file does not name its subject, **File it against** in the dialog names it. Every device the file recorded must exist on this site. A file from another site is refused, and nothing is stored.
+- **The strips above the list** show a recording or a playback that is queued or running, on every tab. They also show one that has just failed. **Stop** ends a running recording early and keeps what it has recorded, or stops a running playback. If the ingestion service has not reported on a recording for two minutes, Stop ends it and nothing from it is stored. Nothing shows there when nothing is in progress.
 - **Play back…** is in the details panel of a subject with a stored capture. It publishes the capture as the **Playback gateway**, through the real broker and the real ingestion path. The capture's timestamps are shifted so it starts now.
 - The playback dialog asks for the gateway, a **Device mapping** and a **Speed**. The Playback gateway is the only one a capture can be played back onto, and no one can mark another gateway as one. The mapping moves each captured device onto its own **replay lane** on that gateway. Playback refuses a real device, and it refuses the lane of a different device. So replayed traffic is always visibly not live traffic.
 
@@ -26,6 +27,8 @@ If the ingestion service restarts during a recording, it stores what was recorde
 
 A capture with no birth certificate cannot be played back. A playback starts the way a gateway's own session does, with its birth certificate, so it refuses a capture without one. **NO BIRTH** marks such a capture in warning colour. Record it again to replace it: recording asks the gateway to send its birth certificate. A playback also leaves out anything recorded before that birth certificate, and a device's messages before its own.
 
+Some older captures were stored without a list of the devices they hold. The playback dialog cannot map their devices, so it says so and offers no playback. Opening the dialog does not download the file. To play such a capture, **Download** it, then play the file with **Play a file…**. That stores it again with its list of devices.
+
 Playback needs the playback worker, which every install runs. If the playback dialog says the worker is not deployed, set `playback.enabled: true` in the site's Helm values and upgrade the release. Until then a playback cannot start.
 
 Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian. If delivery fails, the credential dialog says how to set the password in the Helm values instead. The worker then uses that password whenever the broker refuses the delivered one, and the playback dialog says which one it uses.
@@ -36,9 +39,11 @@ A playback you stop shows above the list as stopped, with how many messages went
 
 If a playback completes but loses readings whose timestamps were too old or too far in the future for the historian, it says so above the list. A slow playback speed can cause this. It stretches the gap between a reading's timestamp and its arrival. Try the playback again at 1x.
 
-## History
+## The Captures and Playbacks tabs
 
-**History**, below the list, shows every recording and every playback that has finished, newest first, in a table each. A row says when it was started, what it was about, how it ended and how long it ran. It also says who started it. A failed row says why it failed. The strips above the list show a failure for fifteen minutes; the History keeps it. Each table shows the newest 20. **Show more**, at its foot, loads the next 20.
+**Captures** lists every recording that has finished, newest first. **Playbacks** lists every playback that has finished, newest first. A row says when it was started, what it was about, how it ended and how long it ran. It also says who started it. A failed row says why it failed. The strips above the list show a failure for fifteen minutes; these tabs keep it.
+
+Each tab shows the newest 20. **Show more**, at the foot of the table, loads the next 20. These two tables have no search, and their columns do not sort.
 
 ## Who can use it
 

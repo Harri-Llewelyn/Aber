@@ -17,7 +17,7 @@ import { CARDS } from '../searchIndex'
 import { VIEWS as DEVICE_VIEWS } from '../components/tabs/DevicesTab'
 import { QUEUES } from '../components/tabs/ApprovalsTab'
 import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
-import { SUBJECTS } from '../components/tabs/CaptureTab'
+import { VIEWS as CAPTURE_VIEWS } from '../components/tabs/CaptureTab'
 import { STAGES } from '../components/tabs/ArchivesTab'
 import { SERVICE_GROUPS } from '../components/tabs/SystemTab'
 import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
@@ -42,7 +42,7 @@ describe('one list per page', () => {
     expect(DEVICE_VIEWS).toBe(DEVICES_TABS)
     expect(QUEUES).toBe(APPROVALS_TABS)
     expect(METRIC_VIEWS).toBe(METRICS_TABS)
-    expect(SUBJECTS).toBe(CAPTURE_TABS)
+    expect(CAPTURE_VIEWS).toBe(CAPTURE_TABS)
     expect(STAGES).toBe(ARCHIVES_TABS)
     expect(PEOPLE_SECTION).toBe(ACCESS_CONTROL_PEOPLE_TAB)
     expect(APPS_SECTION).toBe(ACCESS_CONTROL_APPS_TAB)
@@ -98,6 +98,9 @@ describe('the addresses', () => {
     expect(tabHref('vocabulary', 'opc-ua')).toBe('/vocabulary/opc-ua')
     expect(tabHref('access-control', 'people')).toBe('/access-control')
     expect(tabHref('settings', 'site')).toBe('/settings/site')
+    expect(tabHref('capture', 'gateway')).toBe('/capture')
+    expect(tabHref('capture', 'captures')).toBe('/capture/captures')
+    expect(tabHref('capture', 'playbacks')).toBe('/capture/playbacks')
   })
 
   it('read the open tab from the second path segment, falling back to the first tab', () => {
@@ -112,6 +115,7 @@ describe('the addresses', () => {
     expect(pageTitleOf('devices', '/devices/quarantine')).toBe('Devices › Quarantine')
     expect(pageTitleOf('vocabulary', '/vocabulary')).toBe('Vocabulary › MTConnect')
     expect(pageTitleOf('gateways', '/gateways')).toBe('Gateways')
+    expect(pageTitleOf('capture', '/capture/playbacks')).toBe('Capture › Playbacks')
     expect(pageTitleOf('nowhere', '/nowhere')).toBeUndefined()
   })
 })

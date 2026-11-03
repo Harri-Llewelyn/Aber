@@ -3437,7 +3437,13 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-.area-plan-panel-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+/* The turns' row, between the heading and the plan, starting at the left: Save Turn and Discard
+   follow the turns, and wrap below them as a pair in a narrow drawer, so the turns never move. */
+.area-plan-panel-actions { display: flex; align-items: center; justify-content: flex-start; gap: 4px; flex-wrap: wrap; }
+
+/* Save Turn and Discard, while a turn is unsaved: the height of the turns beside them, not of a
+   Settings row. */
+.area-plan-panel-actions .setting-actions { min-height: 0; }
 
 /* Replace and Remove under the plan's card, two to a row as the panel's own actions are. */
 .area-plan-panel-buttons {
@@ -6767,12 +6773,7 @@ ol.gateway-steps {
 .capture-strips:empty { display: none; }
 /* A file dragged over the card: an accent frame and a line saying what a drop does. */
 .capture-card-drop { border-color: var(--accent); }
-/* The History (CaptureHistory), under the subject table: a ruled heading, then one scroller holding
-   both lists. It gives way before the subject table does, and keeps the height of a few rows. */
-.capture-history-head { border-top: 1px solid var(--border); }
-.capture-card > .capture-history { flex-shrink: 4; min-height: 180px; }
-.capture-history-title { margin: 0; padding: 12px var(--inset) 6px; }
-.capture-history-list + .capture-history-list { border-top: 1px solid var(--border); }
+/* A failed job's message on the Captures and Playbacks tabs (CaptureHistory). */
 .capture-history-failure { min-width: 240px; font-size: 12px; color: var(--danger-text); }
 .capture-drop-overlay {
   position: absolute;

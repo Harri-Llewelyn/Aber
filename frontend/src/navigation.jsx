@@ -55,9 +55,12 @@ export const METRICS_TABS = [
 export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223]
   .map(label => ({ id: pathSlug(label), label }))
 
+/** The two subjects a capture records, then the recordings and playbacks that have finished. */
 export const CAPTURE_TABS = [
   { id: 'gateway', label: 'Gateways', description: 'Record everything one gateway publishes, every device beneath it included.' },
   { id: 'device', label: 'Devices', description: "Record one device, plus its gateway's birth certificate." },
+  { id: 'captures', label: 'Captures', description: 'Every recording that has finished, newest first, with who started it and why a failed one failed.' },
+  { id: 'playbacks', label: 'Playbacks', description: 'Every playback that has finished, newest first, with who started it and why a failed one failed.' },
 ]
 
 export const ARCHIVES_TABS = [

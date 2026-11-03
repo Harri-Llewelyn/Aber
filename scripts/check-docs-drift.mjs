@@ -2733,6 +2733,33 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 181. A turn is saved as the Areas help says. The panel offers Save Turn through the shared
+// SaveDiscard pair, whose other button is Discard, and the help names both. The panel writes the
+// turn only through setAreaPlanRotation(), called once, from Save Turn.
+// -------------------------------------------------------------------------------------------------
+{
+  const PANEL = 'frontend/src/components/common/AreaPlanPanel.jsx';
+  const PAIR = 'frontend/src/components/common/SaveDiscard.jsx';
+  const HELP = 'help/pages/areas.md';
+  const offences = [];
+
+  const panel = read(PANEL);
+  const help = read(HELP);
+  if (!/<SaveDiscard\b[^>]*\bsaveLabel="Save Turn"/.test(panel)) offences.push(`${PANEL} no longer offers Save Turn through SaveDiscard`);
+  if (!read(PAIR).includes('/> Discard\n')) offences.push(`${PAIR} has no button labelled Discard`);
+  for (const label of ['Save Turn', 'Discard']) {
+    if (!help.includes(`**${label}**`)) offences.push(`${HELP} does not name **${label}**`);
+  }
+  if ((panel.match(/api\.setAreaPlanRotation\(/g) || []).length !== 1) offences.push(`${PANEL} should call api.setAreaPlanRotation() in one place, Save Turn`);
+
+  if (offences.length) {
+    fail(`A turn is saved as the Areas help says:\n  ${offences.join('\n  ')}`);
+  } else {
+    pass(`A turn is saved as the Areas help says: the panel offers Save Turn and Discard through SaveDiscard, the help names both, and the panel writes the turn in one place`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11. frontend/Dockerfile's build args are the set we have deliberately decided are not secrets.
 //
 // That Dockerfile carries `# check=skip=SecretsUsedInArgOrEnv`, which switches off BuildKit's
@@ -4770,24 +4797,24 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 167. The Capture page's History loads as many rows at a time as its help says: the first page of
-// each table and each Show more are HISTORY_PAGE in CaptureHistory.jsx, and the help page's History
-// section states that number twice.
+// 167. The Capture page's Captures and Playbacks tabs load as many rows at a time as its help says:
+// the first page of each table and each Show more are HISTORY_PAGE in CaptureHistory.jsx, and the
+// help page's section on those tabs states that number twice.
 // -------------------------------------------------------------------------------------------------
 {
   const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
   const size = Number(history.match(/^export const HISTORY_PAGE = (\d+)$/m)?.[1]);
-  const section = read('help/pages/capture.md').match(/^## History\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+  const section = read('help/pages/capture.md').match(/^## The Captures and Playbacks tabs\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
   const problems167 = [];
   if (!size) problems167.push('CaptureHistory.jsx declares no HISTORY_PAGE');
-  if (!section) problems167.push('help/pages/capture.md has no "## History" section');
+  if (!section) problems167.push('help/pages/capture.md has no "## The Captures and Playbacks tabs" section');
   for (const piece of [`the newest ${size}`, `the next ${size}`]) {
-    if (size && section && !section.includes(piece)) problems167.push(`help/pages/capture.md's History section does not say "${piece}"`);
+    if (size && section && !section.includes(piece)) problems167.push(`help/pages/capture.md's Captures and Playbacks section does not say "${piece}"`);
   }
   if (problems167.length) {
-    for (const p of problems167) fail(`capture history: ${p}`);
+    for (const p of problems167) fail(`capture job lists: ${p}`);
   } else {
-    pass(`the Capture page's History loads ${size} rows at a time, as its help says`);
+    pass(`the Capture page's Captures and Playbacks tabs load ${size} rows at a time, as its help says`);
   }
 }
 

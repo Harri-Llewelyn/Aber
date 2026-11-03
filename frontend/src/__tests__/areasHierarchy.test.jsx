@@ -677,8 +677,26 @@ describe('AreasTab files cells into areas', () => {
     // Archived, Restore is the one primary and comes first.
     expect(document.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
     expect(document.querySelector('.context-panel-actions .context-action')).toHaveTextContent('Restore Area')
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Restore Area/ })) })
+    // It asks first, in the dialog Archived Entities' Restore uses.
+    fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
+    expect(api.post).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog', { name: 'Restore area' })
+    expect(within(dialog).getByText(/Restore the area 'Press Hall' to active service\?/)).toBeInTheDocument()
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Area' })) })
+    expect(api.post).toHaveBeenCalledTimes(1)
     expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/restore', {})
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('restores nothing when its Restore dialog is cancelled', async () => {
+    api.get.mockImplementation(routeGet({ areas: [areaA, { ...areaB, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }] }))
+    await renderAreas()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+    fireEvent.click(screen.getByText('Press Hall'))
+    fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Restore area' })).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('says whether an area carries a plan, and how many of its cells sit on it', async () => {

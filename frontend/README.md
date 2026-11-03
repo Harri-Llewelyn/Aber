@@ -398,9 +398,14 @@ SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `u
   the frame (`placeInFrame()`, with the turn `AreaPlan` provides by context), so its label stays
   upright and still slides inward at the frame's edges. A click is read as fractions of the frame
   and turned back (`placeOnDrawing()`) before `onPlaceClick` sees it.
-- **A turn is one write.** `AreaPlanPanel`'s Turn left and Turn right call `turnAreaPlan()` with
-  the turn the page read, then reload. The buttons stay disabled until the reload lands, so a
-  second press starts from the first.
+- **A turn is a draft until Save Turn.** `AreaPlanPanel`'s Turn left and Turn right change a turn
+  held in the panel for the area it was made on, and pass the preview a copy of the area at that
+  turn, so the preview and the expanded plan draw it with no request. The page's own copy keeps
+  the saved turn, which the Site Map, the Cells page and the table read. While the draft differs
+  from the saved turn the shared `SaveDiscard` pair (`components/common/SaveDiscard.jsx`, as on
+  Profile) offers Save Turn, which calls `setAreaPlanRotation()` once and reloads, and Discard.
+  Replace plan and Remove plan are held until then. Opening another area or closing the panel
+  drops the draft.
 
 ---
 
@@ -990,7 +995,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   (gateway ids, settings categories) passes `allowed: null` or `ready: false` until it arrives, so a
   good value is not tidied away first.
 - **A tab change drops the query**, so each tab opens on its own defaults. `keep` names the filters a
-  page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
+  page shares across its tabs: the Vocabulary search, and Capture's stored filter and search. A
+  function `keep(tab)` names them for the tab being opened: Capture keeps its two only between
+  Gateways and Devices, as Captures and Playbacks have no filters.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
 - **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
@@ -1031,7 +1038,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
-| Capture | `device` | `stored`, `search`, `gateway`, `sort`; `subject` |
+| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
 | Archives | `retired` | `sort` |
 | System | the group | `sort` |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |

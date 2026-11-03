@@ -156,10 +156,14 @@ export function useUrlState(key, defaultValue = '', { allowed } = {}) {
   return [value, setValue]
 }
 
-/** The address of tab `next` on `page`: the bare page for `home`, with the `kept` keys of `url`. */
+/**
+ * The address of tab `next` on `page`: the bare page for `home`, with the `kept` keys of `url`.
+ * `kept` is a list, or a function of `next` returning one.
+ */
 function tabAddress(page, next, home, kept, url) {
+  const keys = typeof kept === 'function' ? kept(next) : kept
   const carried = new URLSearchParams()
-  for (const [key, value] of queryOf(url)) if (kept.includes(key)) carried.append(key, value)
+  for (const [key, value] of queryOf(url)) if (keys.includes(key)) carried.append(key, value)
   const q = carried.toString()
   return `/${page}${next && next !== home ? `/${next}` : ''}${q ? `?${q}` : ''}`
 }
@@ -172,7 +176,8 @@ function tabAddress(page, next, home, kept, url) {
  * `hrefFor(id)` is the address `setTab(id)` goes to, for the tab bar's links.
  *
  * A tab change drops the query string, so each tab opens on its own defaults, except the keys in
- * `keep`: filters the page shares across its tabs.
+ * `keep`: filters the page shares across its tabs. A function `keep(tab)` names the keys for the tab
+ * being opened, for a filter only some of the tabs share.
  *
  * @param {string} page The page's id, its first path segment.
  *
@@ -181,7 +186,8 @@ function tabAddress(page, next, home, kept, url) {
  * @param {string} fallback The default tab.
  *
  * @param {Object} [options]
- * @param {Array<string>} [options.keep] Query keys that survive a tab change.
+ * @param {Array<string>|function(string): Array<string>} [options.keep] Query keys that survive a
+ * tab change, or a function of the tab being opened that returns them.
  * @param {boolean} [options.ready] False while `ids` is still loading; an unknown tab is then
  * passed through rather than tidied away.
  */

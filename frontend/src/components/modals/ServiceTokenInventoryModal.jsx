@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { Modal } from '../common/Modal'
+import { ConfirmModal } from './ConfirmModal'
 import { IconShieldAlert } from '../common/Icons'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -36,7 +37,8 @@ function lastUse(t) {
  * revocation is per jti, which is what `revoke_service_token()` takes. A revoked token is not a
  * deleted one: `auth_pre_request()` is a PostgREST hook, so a revoked jti still works at storage,
  * realtime, the edge runtime and Studio until its own expiry, which is why the scope is stated at
- * the top and the expiry stays visible on every revoked row. No type-to-confirm, and no undo.
+ * the top and the expiry stays visible on every revoked row. Revoke asks first, in a dialog over
+ * this one; no type-to-confirm, and no undo.
  *
  * `now` is a prop, as it is on `tokenStatus()` and `tokenStatusDetail()`: the status handed in
  * was computed at a clock the caller chose, and a dialog that re-read the real one could
@@ -47,7 +49,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
   // The jtis this dialog has revoked during its own lifetime, so a row updates the moment it is
   // acted on. The server is still the authority: `onChanged` reloads on close.
   const [justRevoked, setJustRevoked] = useState(() => new Set())
-  const [busyJti, setBusyJti] = useState(null)
+  // The token whose Revoke dialog is open over this one.
+  const [confirming, setConfirming] = useState(null)
   const [errors, setErrors] = useState(() => new Map())
 
   const close = useCallback(() => {
@@ -57,8 +60,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
     onClose()
   }, [justRevoked, onChanged, onClose])
 
+  // Run from the Revoke dialog, which closes either way so a failure can be read on its row.
   const revoke = useCallback(async (jti) => {
-    setBusyJti(jti)
     setErrors(prev => { const next = new Map(prev); next.delete(jti); return next })
     try {
       await api.revokeServiceToken(jti)
@@ -69,7 +72,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
       setErrors(prev => new Map(prev).set(jti, err.message))
       showToast?.(err.message, 'error')
     } finally {
-      setBusyJti(null)
+      setConfirming(null)
     }
   }, [principalName, showToast])
 
@@ -162,10 +165,8 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                           an expired token outright, and a jti-less row cannot be addressed. */}
                       {!expired && !revoked && t.jti && (
                         <ActionButton
-                          pending={busyJti === t.jti}
-                          pendingLabel="Revoking…"
                           className="btn btn-sm btn-danger btn-danger-reveal"
-                          onClick={() => revoke(t.jti)}
+                          onClick={() => setConfirming(t)}
                           title="Revoke this token. The API refuses it from the next request onward; this cannot be undone."
                         >
                           Revoke
@@ -178,6 +179,25 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Inside this dialog, so it opens over it and Escape closes it first. */}
+      {confirming && (
+        <ConfirmModal
+          title="Revoke Token"
+          icon={<IconShieldAlert size={18} />}
+          message={<>
+            Revoke the token <span className="mono">{confirming.jti}</span>
+            {confirming.issued_at ? `, issued ${formatDate(confirming.issued_at)},` : ''} for
+            “{principalName}”? The API refuses it from its next request. Storage, realtime, the edge
+            functions and Studio accept it until it expires on {formatDate(confirming.expiresAtMs)}.
+            This cannot be undone.
+          </>}
+          confirmLabel="Revoke Token"
+          pendingLabel="Revoking…"
+          onConfirm={() => revoke(confirming.jti)}
+          onCancel={() => setConfirming(null)}
+        />
       )}
     </Modal>
   )

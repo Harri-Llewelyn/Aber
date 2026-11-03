@@ -200,6 +200,48 @@ describe('the Quarantine tab', () => {
     expect(window.location.pathname).toBe('/devices')
   })
 
+  /** Reject deletes the device and what was held for it, so it asks first. */
+  describe('Reject asks first', () => {
+    const openReject = async () => {
+      await show([device()], [queued])
+      fireEvent.click(tab(/^Quarantine/))
+      const row = within(card()).getByText('Unknown_Robot').closest('tr')
+      fireEvent.click(within(row).getByRole('button', { name: 'Reject' }))
+      return screen.getByRole('dialog', { name: 'Reject Device' })
+    }
+
+    it('names the device and says what Reject deletes, and that it cannot be undone', async () => {
+      const dialog = await openReject()
+
+      expect(dialog).toHaveAccessibleDescription(
+        "Reject the device 'Unknown_Robot' (published as devffffffffffffffffffff1)? This deletes the device" +
+        ' and the readings held for it, and cannot be undone. If the device publishes again, it comes back to Quarantine.')
+      expect(within(dialog).getByRole('button', { name: 'Reject Device' })).toHaveClass('btn-danger')
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('rejects nothing when cancelled', async () => {
+      const dialog = await openReject()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(api.post).not.toHaveBeenCalled()
+      expect(within(card()).getByText('Unknown_Robot')).toBeInTheDocument()
+    })
+
+    it('rejects the device once, when confirmed', async () => {
+      api.post.mockResolvedValue({})
+      const dialog = await openReject()
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Reject Device' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(api.post).toHaveBeenCalledTimes(1)
+      expect(api.post).toHaveBeenCalledWith(`/api/v1/quarantine/${queued.asset_id}/reject`, {})
+    })
+  })
+
   it('lands a quarantined device named by another page on the Quarantine tab, with no panel', async () => {
     const held = device({ asset_id: queued.asset_id, asset_name: 'Unknown_Robot', is_quarantined: true })
     window.history.replaceState(null, '', deviceUrl(queued.asset_id))
