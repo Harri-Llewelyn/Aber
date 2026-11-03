@@ -179,7 +179,8 @@ describe('Audit Trail filter bar', () => {
     expect(within(popover).getByRole('group', { name: 'Entity' })).toBeInTheDocument()
     // The wording is load-bearing: this control filters `audit_trail.action`, while the markers
     // show a derived classification. See auditTrailActionFilter.test.jsx.
-    expect(within(popover).getByRole('group', { name: 'Action' })).toBeInTheDocument()
+    expect(within(popover).getByRole('button', { name: 'Action' })).toHaveAttribute('aria-expanded', 'false')
+    expect(filterList('Action')).toBeInTheDocument()
   })
 
   it('groups the kinds as the timeline groups its sections, and takes several of them', async () => {
@@ -1142,9 +1143,10 @@ describe('Audit Trail — removed tag filter', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
 
     openFilters()
-    // The kind, the action and Changed by, each a list; Show deleted entities is a checkbox beside them.
+    // The kind, the action and Changed by, each a list in a section; Show deleted entities is a
+    // checkbox under them.
     const panel = screen.getByRole('dialog', { name: 'Filters' })
-    expect(panel.querySelectorAll('.filter-list')).toHaveLength(3)
+    expect(panel.querySelectorAll('.filter-section')).toHaveLength(3)
     expect(panel.querySelectorAll('select')).toHaveLength(0)
     expect(within(panel).getByRole('checkbox', { name: /^Show deleted entities/ })).toBeInTheDocument()
   })
