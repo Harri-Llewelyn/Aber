@@ -5,7 +5,7 @@ import { Tooltip } from './Tooltip'
 import { IconCalendar, IconChevronLeft, IconChevronRight } from './Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  ALL_TIME, JUMPS, SPANS, TIME_PRESETS, canStep, chooseSpan, holdsNow, jumpTo, localMinute, parseDay,
+  ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, chooseSpan, holdsNow, jumpTo, localMinute, parseDay,
   parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds, windowWords
 } from '../../utils/timeWindow'
 
@@ -34,7 +34,7 @@ function StepArrow({ name, off, reason, onStep, children }) {
 }
 
 /** The popover's three groups: Jump to, Rolling and Custom range. `onChoose` takes the new window. */
-function WindowChoices({ value, ranges, allTime, now, onChoose }) {
+function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
   const id = useId()
   const bounds = windowBounds(value, now)
   const [day, setDay] = useState('')
@@ -65,14 +65,14 @@ function WindowChoices({ value, ranges, allTime, now, onChoose }) {
         <div className="form-label" id={`${id}-jump`}>Jump to</div>
         <div className="time-window-options">
           {JUMPS.map(j => (
-            <button key={j.id} type="button" className="btn btn-sm btn-ghost" onClick={() => onChoose(jumpTo(value, j.id, now))}>
+            <button key={j.id} type="button" className="btn btn-sm btn-ghost" onClick={() => onChoose(jumpTo(value, j.id, now, spans))}>
               {j.label}
             </button>
           ))}
         </div>
         <form
           className="time-window-row"
-          onSubmit={(e) => { e.preventDefault(); if (parseDay(day)) onChoose(jumpTo(value, day, now)) }}
+          onSubmit={(e) => { e.preventDefault(); if (parseDay(day)) onChoose(jumpTo(value, day, now, spans)) }}
         >
           <label className="time-window-field">
             <span>Another day</span>
@@ -124,17 +124,21 @@ function WindowChoices({ value, ranges, allTime, now, onChoose }) {
  *   <TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime />
  *   const { since, until } = timeWindow(win)   // at fetch time
  *
- * `ranges` and `allTime` are what the Rolling group offers; pass the same to useTimeWindow. The
- * arrows step by the span, or by the window's own length (Earlier and Later). › is off while the
- * window holds now, and both under All time. Each step is said in a polite status line. No key is
- * bound: `[` and `]` change tab, and the arrow keys step the Audit Trail's drawer.
+ * `ranges` and `allTime` are what the Rolling group offers, and `spans` the switch (`SPAN_IDS` or
+ * some of them); pass the same to useTimeWindow. The arrows step by the span, or by the window's
+ * own length (Earlier and Later). › is off while the window holds now, and both under All time.
+ * Each step is said in a polite status line. No key is bound: `[` and `]` change tab, and the
+ * arrow keys step the Audit Trail's drawer.
  */
-export function TimeWindowControl({ value, onChange, ranges = TIME_PRESETS, allTime = false, label = 'Time window' }) {
+export function TimeWindowControl({
+  value, onChange, ranges = TIME_PRESETS, allTime = false, spans = SPAN_IDS, label = 'Time window',
+}) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const [news, setNews] = useState('')
   const names = stepNames(value)
   const span = value.kind === 'calendar' ? value.span : null
+  const offered = SPANS.filter(s => spans.includes(s.id))
 
   /** Show `next`, and say so in the status line: the arrows and the switch keep focus, so nothing else would. */
   const show = (next) => {
@@ -173,6 +177,7 @@ export function TimeWindowControl({ value, onChange, ranges = TIME_PRESETS, allT
               value={value}
               ranges={ranges}
               allTime={allTime}
+              spans={spans}
               now={now}
               onChoose={(next) => { onChange(next); close() }}
             />
@@ -191,7 +196,7 @@ export function TimeWindowControl({ value, onChange, ranges = TIME_PRESETS, allT
 
       <SegmentedControl
         label="Span"
-        options={SPANS}
+        options={offered}
         value={span}
         onChange={(next) => show(chooseSpan(value, next, now))}
       />
