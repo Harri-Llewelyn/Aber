@@ -19,6 +19,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const SERVICE_NAME = "fplus-directory";
 
+import { checkCaller } from "../_shared/callerCheck.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
@@ -104,16 +105,20 @@ export default async function handler(req: Request): Promise<Response> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = gatewayKey();
 
-  // As the caller. Every read below runs under that user's RLS policies, which is what keeps
+  // As the caller. Every read below runs under the caller's RLS policies, which is what keeps
   // this from becoming a way around them.
   const supabase = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const token = authHeader.replace("Bearer ", "");
-  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !user) {
-    return json({ error: "Invalid user token", details: userError?.message }, 401);
+  // A person's token or a machine identity's; a token the check could not judge is a 500.
+  const caller = await checkCaller(supabase);
+  if (!caller.accepted) {
+    if (caller.refused) return json({ error: "Invalid user token", details: caller.reason }, 401);
+    return serverError(req, SERVICE_NAME, new Error(caller.reason), {
+      error: "The token could not be checked",
+      context: "checking the caller's token",
+    });
   }
 
   try {

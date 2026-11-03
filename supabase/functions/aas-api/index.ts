@@ -18,6 +18,7 @@ import {
   type BuiltShell,
   loadDeviceRecord,
 } from "../_shared/aas/shell.ts";
+import { checkCaller } from "../_shared/callerCheck.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { logFailure, REQUEST_ID_HEADER, requestIdOf, SERVER_FAILURE } from "../_shared/failure.ts";
@@ -242,19 +243,20 @@ export default async function handler(req: Request): Promise<Response> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = gatewayKey();
 
-  // As the caller. Every read below runs under that user's RLS policies, which is what keeps this
+  // As the caller. Every read below runs under the caller's RLS policies, which is what keeps this
   // from becoming a way around them.
   const supabase = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
 
-  const token = authHeader.replace("Bearer ", "");
-  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !user) {
-    return problem(401, "Invalid user token", "401");
-  }
-
   try {
+    // A person's token or a machine identity's; a token the check could not judge is a 500 below.
+    const caller = await checkCaller(supabase);
+    if (!caller.accepted) {
+      if (caller.refused) return problem(401, "Invalid user token", "401");
+      throw new Error(`the caller's token could not be checked: ${caller.reason}`);
+    }
+
     const limitOrError = pageSize(url);
     if (limitOrError instanceof Response) return limitOrError;
     const limit = limitOrError;

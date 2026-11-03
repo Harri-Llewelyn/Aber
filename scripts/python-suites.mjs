@@ -766,6 +766,14 @@ export const SUITES = {
       'refuses a revoked token first. Only an Administrator or an Auditor reads it, and a replay ' +
       'keeps it.',
   },
+  'supabase/migrations/test_aas_api_and_the_directory_accept_a_machine_identity_s_token.py': {
+    lanes: ['db'],
+    why:
+      '0224. auth_probe(), called as PostgREST calls it, answers a machine identity\'s token, which ' +
+      'carries no aud, and a person\'s session. The hook refuses a revoked token, a withdrawn ' +
+      'identity, a removed person and an ended session first. anon and service_role may not run ' +
+      'it, even through a plan prepared for authenticated, and a replay keeps its grants.',
+  },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
     why:
@@ -1180,20 +1188,21 @@ export const SUITES = {
   'supabase/functions/aas-api/test_aas_api.py': {
     lanes: ['unit', 'stack'],
     why:
-      'The IDTA 02001/02002 read surface. Nine of its forty checks run offline and guard what is ' +
+      'The IDTA 02001/02002 read surface. Nine of its forty-six checks run offline and guard what is ' +
       'true of the SOURCE regardless of a stack -- above all that this function is never granted ' +
       'the service-role key, which is the entire security argument for it being a separate ' +
       'function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches the same ' +
       'asset through aas-export and through aas-api and asserts the two describe it identically. ' +
       'That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, and it is ' +
       'the property that would rot silently -- an ERP reading a live submodel and a partner ' +
-      'reading a shipped .aasx would disagree, with both endpoints reporting success.',
+      'reading a shipped .aasx would disagree, with both endpoints reporting success. The live ' +
+      'layer also reads as the Read-only API client with no apikey, and revokes its token.',
   },
   'supabase/functions/fplus-directory/test_fplus_directory.py': {
     lanes: ['unit', 'stack'],
     why:
       'The Factory+ Directory adapter, and above all the reverse schema lookup. Six of its ' +
-      'nineteen checks run offline: that the registry entry still grants no service-role key -- a ' +
+      'twenty-seven checks run offline: that the registry entry still grants no service-role key -- a ' +
       'Directory is a live read over the WHOLE address space, so the key would hand every ' +
       'authenticated user a view their policies do not grant -- and that the bearer check still ' +
       'precedes routing, which is the entire boundary in front of these key-auth-exempt routes. ' +
@@ -1201,7 +1210,8 @@ export const SUITES = {
       '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
       'queries, and a disagreement is a 200 at both endpoints. The live layer provisions a second ' +
       'device attached through set_device_schemas(), the Devices page\'s writer, beside the ' +
-      'shared fixture\'s, so the reverse lookup is asserted over a set.',
+      'shared fixture\'s, so the reverse lookup is asserted over a set. Every route answers the ' +
+      'Read-only API client\'s token as it answers a person, and refuses it once revoked.',
   },
   'supabase/migrations/test_third_party_gateway.py': {
     lanes: ['db'],

@@ -5100,13 +5100,14 @@ over-trust, and this inventory is the compensating control
 
 Revocation exists since `0074` (see
 [Tokens became revocable in `0074`](#tokens-became-revocable-in-archived-migration-0074-and-the-mint-followed-in-archived-migration-0075))
-and reaches PostgREST only: Storage, Realtime and the edge runtime verify the signature for
-themselves. Expiry therefore still bounds every token, and the line falls between **keys that name a
+and reaches PostgREST and what checks a token through it (the i3X server, `aas-api` and
+`fplus-directory`): Storage and Realtime verify the signature for themselves. Expiry therefore
+still bounds every token, and the line falls between **keys that name a
 principal** and **keys that name nobody**:
 
 | Key | Expiry | Why |
 | :--- | :--- | :--- |
-| `mint-api-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation reaches PostgREST only, so the expiry bounds the rest |
+| `mint-api-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation does not reach Storage or Realtime, so the expiry bounds them |
 | `SUPABASE_INGESTION_KEY`, `SUPABASE_PLAYBACK_KEY` | **90 days**, rotatable | They carry a `sub`, so they are the same kind of credential as the row above and are bounded by the same ceiling. `npm run keys:rotate` re-signs them |
 | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. No client holds them: the gateway admits only the publishable and secret keys as an `apikey`, refuses these if presented, and substitutes them upstream — so shortening them means re-signing them for the gateway and every service that verifies them at once |
 
@@ -5352,12 +5353,15 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 **The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
 `record_service_token_issued()`, for an inventory that could not act on it.
 
-**Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
-`supabase-realtime` and the edge runtime (which boots `VERIFY_JWT="false"`) each verify the signature
-for themselves (the JWKS, [ES256](#signing-with-es256)) and consult no
-denylist. That is complete coverage for what
-this is about — the Read-only API client and `Service_Ingestor` reach PostgREST and nothing else — but the
-expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
+**Revocation reaches PostgREST and what checks a token through it, and the page says so.** The i3X
+server, `aas-api` and `fplus-directory` check every token with a PostgREST call made as the caller
+([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)), so the hook refuses a
+revoked one there too. `supabase-storage` and `supabase-realtime` each verify the signature for
+themselves (the JWKS, [ES256](#signing-with-es256)) and consult no denylist. The other edge
+functions check a caller with GoTrue's `getUser()`, which refuses every machine identity's token,
+revoked or not. That is complete coverage for what this is about — the Read-only API client and
+`Service_Ingestor` reach PostgREST and what checks through it — but the expiry is still the only
+bound that reaches every service, which is why the 90-day ceiling stays.
 
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
@@ -5417,6 +5421,40 @@ does not fold, granted to `authenticated` and `service_role` only. The call stay
 its EXECUTE check runs on every execution. `service_token_max_days()` keeps its own job, the token
 ceiling, where folding is harmless. Check 32 of `scripts/check-docs-drift.mjs` holds the probe to
 plpgsql and not `IMMUTABLE`, and `test_service_token_revocation.py` replays the attack.
+
+#### aas-api and the Directory accept a machine identity's token (0224)
+
+`aas-api` and `fplus-directory` read as their caller, and they used to check the caller with
+GoTrue's `getUser()`. GoTrue refuses a token with no `aud` claim there, and a machine identity's
+token carries none: `mint-service-token` and `mint-api-token.mjs` sign `sub`, `role`, `iat`, `exp`
+and `jti`. So the Read-only API client could read neither, while PostgREST and the i3X server
+accepted the same token.
+
+Both now check the caller as the i3X server does, with one PostgREST call made as the caller.
+`checkCaller()` in [`_shared/callerCheck.ts`](functions/_shared/callerCheck.ts) calls
+`auth_probe()`, which `0224` declares in the shape of i3X's probe: it returns true, it is plpgsql
+and `STABLE` so no plan folds the call away, and `authenticated` alone may run it.
+
+- **A person's session and a machine identity's token are accepted**, and each reads under RLS as
+  itself.
+- **A revoked token, a withdrawn identity, a removed person and an ended session are refused**,
+  because `auth_pre_request()` runs before the probe. `getUser()` consulted neither denylist.
+- **The publishable and the secret key are refused.** `anon` and `service_role` may not run the
+  probe, so a caller presenting the secret key as its bearer gets no service-role reach from a
+  function that holds no service-role key.
+- **A refusal is still the function's own `401`**, `Invalid user token`. A probe that could not
+  answer is a `500` with a request id, never an acceptance.
+
+**What a machine identity sees.** Every relation a shell or a Directory entry is read from is
+`SELECT TO authenticated USING (true)`, and a minted token's role is `authenticated`. So the
+Read-only API client reads every shell and every Directory route as a signed-in person does. Its
+`telemetry:read` grant is not consulted there.
+
+**No `aud` was added to the minted tokens.** Fourteen functions called `getUser()`, and an audience
+would have admitted machine identities to all of them at once, none of them audited for it. The
+other twelve still refuse a machine identity. i3X keeps its own `i3x_auth_probe()`. Check 184 of
+`scripts/check-docs-drift.mjs` holds `auth_probe()` to its grants and shape, and check 185 holds
+both functions to it.
 
 #### A missing hook is a total outage that every health check calls healthy
 
@@ -5494,13 +5532,13 @@ refuses a missing or wrong token or secret.
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `audit_trail:read`, because it carries the trail |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`, which makes it the only gate on deploying a flow from the platform's Node-RED |
-| [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+| [`fplus-directory`](functions/fplus-directory) | a signed-in person or a machine identity | Factory+ Directory adapter — see below |
 | [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
 | [`studio-admission`](functions/studio-admission) | `Administrator` | The studio listener's `ext_authz` step: refuses a role removed or changed since the token was signed, and sends a session GoTrue ended to the door's sign-out |
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends the door's GoTrue session, then sends the browser to the dashboard's `/sign-out` (`FRONTEND_PUBLIC_URL`) |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
-| [`aas-api`](functions/aas-api) | any authenticated user | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
+| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
 | [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
@@ -5619,7 +5657,9 @@ rather than an adopted format.
 no Supabase `apikey` and no way to acquire one. Those gateway routes are therefore exempt from the
 `apikey` check — which makes the function itself the **only** thing in front of the fleet's address
 space. Every `/v1/` path refuses a request with no bearer token *before it routes*, and
-`validate.py` check 11b asserts that 401 rather than trusting it.
+`validate.py` check 11b asserts that 401 rather than trusting it. It checks a token with one
+PostgREST call made as the caller, so a machine identity's token is accepted and a revoked one is
+not ([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)).
 
 It **queries as the caller**, not as the service role: a Directory is a live read over the whole
 address space, so running it privileged would hand every authenticated user a view their RLS

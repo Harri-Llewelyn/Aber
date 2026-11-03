@@ -317,8 +317,9 @@ an oversight: it makes those gates the only route rather than the tidy one.
 **Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
 and refuses a JWT whose `jti` has been revoked, and a whole machine identity can be withdrawn.
 Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
-for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
-verify the signature for themselves and are not reached by a revocation (see
+for the anon and service-role keys, which name nobody. The i3X server, `aas-api` and the Factory+
+Directory check every token through PostgREST, so a revocation reaches them too. Storage and
+Realtime verify the signature for themselves and are not reached by a revocation (see
 [Accepted risks](#accepted-risks)). The **Access Control** tab states what is outstanding.
 
 The mechanism and its limits are in
@@ -368,12 +369,15 @@ evidence of access: a public or partner-facing deployment, a shared cluster, or 
 multi-tenancy. At that point the choice is dropping these tables from the publication and
 polling instead, or waiting for upstream to authenticate before delivering the envelope.
 
-### Revocation reaches PostgREST and nothing else
+### Revocation reaches PostgREST and what checks a token through it
 
 `0074` made a token revocable at the one choke point PostgREST offers (`PGRST_DB_PRE_REQUEST`).
-Storage, Realtime and the edge runtime verify the signature for themselves and consult no table, so
-a revoked token still opens those doors until its own `exp` — at most 90 days for a token naming a
-principal.
+It reaches whatever checks a token with a PostgREST call made as the caller: the i3X server, within
+its 15-second cache, and `aas-api` and the Factory+ Directory, which call `auth_probe()` (`0224`).
+Storage and Realtime verify the signature for themselves and consult no table, so a revoked token
+still opens those doors until its own `exp` — at most 90 days for a token naming a principal. The
+other edge functions check a caller with GoTrue's `getUser()`, which refuses every machine
+identity's token, revoked or not, because it carries no `aud`.
 
 Who can sign one is narrow: GoTrue and `mint-service-token` hold the ES256 private key, and every
 verifier holds the public key, which signs nothing. No service accepts a token signed with the

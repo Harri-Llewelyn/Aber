@@ -87,7 +87,7 @@ def get(path: str, token: str | None, send_apikey: bool = True):
 
 
 def sign_in() -> str | None:
-    """A *user* JWT, not the service key: the function calls auth.getUser() on the caller."""
+    """A person's session token, not the service key: the function reads as its caller."""
     try:
         status, data = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, DEMO_EMAIL, DEMO_PASSWORD)
     except OSError:
@@ -162,6 +162,29 @@ def target_shell_id() -> str | None:
 
 
 SHELL_ID = target_shell_id() if LIVE else None
+
+# The Read-only API client, the machine identity Access Control issues tokens for. It holds
+# telemetry:read and no role.
+READ_ONLY_CLIENT = "b0000000-0000-4000-8000-000000000001"
+
+
+def issue_machine_token(admin_token: str):
+    """
+    A one-day token for the Read-only API client, issued as the page's Issue Token does and as
+    supabase/test_a_token_s_use_is_recorded.py issues one: (token, jti), or None with the reason.
+    Each issue leaves a TOKEN_MINTED row in the Audit Trail, and each revoke a TOKEN_REVOKED row.
+    """
+    status, body = request("POST", f"{SUPABASE_URL}/functions/v1/mint-service-token", admin_token,
+                           {"principal_id": READ_ONLY_CLIENT, "days": 1})
+    if status != 200:
+        return None, f"could not issue a Read-only API client token as {DEMO_EMAIL} ({status}): {body}"
+    return (body["token"], body["jti"]), None
+
+
+def revoke_machine_token(admin_token: str, jti: str) -> int:
+    status, _ = request("POST", f"{SUPABASE_URL}/rest/v1/rpc/revoke_service_token", admin_token,
+                        {"p_jti": jti})
+    return status
 
 
 # =================================================================================================
@@ -334,6 +357,78 @@ class TestAStandardClientSendsNoApikey(unittest.TestCase):
         self.assertEqual(status, 401, body)
         self.assertNotIn("No API key found in request", json.dumps(body))
         self.assertEqual(body["messages"][0]["text"], "Missing Authorization header")
+
+
+@unittest.skipUnless(LIVE and SHELL_ID, SKIP_REASON)
+class TestAMachineIdentityReadsAsAPersonDoes(unittest.TestCase):
+    """
+    The Read-only API client's token, which a client you keep holds, as a standard client sends it:
+    a bearer and no apikey. It carries no `aud`, which GoTrue's getUser() refused; the function now
+    checks it with one PostgREST call made as the caller.
+
+    WHAT IT SEES, PREDICTED FROM THE POLICIES: every relation a shell is read from is
+    `SELECT TO authenticated USING (true)`, and the token's role is `authenticated`. Its
+    telemetry:read grant is not consulted. So it reads every shell a signed-in person reads, and each
+    part comes back identical.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        issued, reason = issue_machine_token(TOKEN)
+        if issued is None:
+            raise unittest.SkipTest(reason)
+        cls.token, cls.jti = issued
+
+    @classmethod
+    def tearDownClass(cls):
+        revoke_machine_token(TOKEN, cls.jti)
+
+    def machine(self, path: str):
+        return get(path, self.token, send_apikey=False)
+
+    def test_its_token_reads_a_shell(self):
+        status, body = self.machine(f"/shells/{b64url(SHELL_ID)}")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["id"], SHELL_ID)
+
+    def test_it_reads_the_shell_and_every_submodel_a_person_reads(self):
+        _, person = get(f"/shells/{b64url(SHELL_ID)}", TOKEN)
+        _, machine = self.machine(f"/shells/{b64url(SHELL_ID)}")
+        self.assertEqual(machine, person)
+        _, refs = get(f"/shells/{b64url(SHELL_ID)}/submodel-refs", TOKEN)
+        for ref in refs["result"]:
+            submodel = ref["keys"][0]["value"]
+            with self.subTest(submodel=submodel):
+                status, served = self.machine(f"/submodels/{b64url(submodel)}")
+                self.assertEqual(status, 200, served)
+                self.assertEqual(served, get(f"/submodels/{b64url(submodel)}", TOKEN)[1])
+
+    def test_it_lists_the_shells_a_person_lists(self):
+        _, person = get("/shells?limit=100", TOKEN)
+        status, machine = self.machine("/shells?limit=100")
+        self.assertEqual(status, 200, machine)
+        self.assertEqual([s["id"] for s in machine["result"]], [s["id"] for s in person["result"]])
+
+
+@unittest.skipUnless(LIVE and SHELL_ID, SKIP_REASON)
+class TestARevokedMachineTokenIsRefused(unittest.TestCase):
+    """
+    Revocation reaches the function: auth_pre_request() refuses the revoked token's PostgREST call,
+    and the function answers its own 401. Nothing caches an acceptance, so the next request after
+    the revoke is refused.
+    """
+
+    def test_a_token_works_until_it_is_revoked(self):
+        issued, reason = issue_machine_token(TOKEN)
+        if issued is None:
+            self.skipTest(reason)
+        token, jti = issued
+        status, body = get(f"/shells/{b64url(SHELL_ID)}", token, send_apikey=False)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(revoke_machine_token(TOKEN, jti), 200, "the token could not be revoked")
+        status, body = get(f"/shells/{b64url(SHELL_ID)}", token, send_apikey=False)
+        self.assertEqual(status, 401, body)
+        self.assertEqual(body["messages"][0]["text"], "Invalid user token")
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)

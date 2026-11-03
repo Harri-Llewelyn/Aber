@@ -894,9 +894,12 @@ paths:
         That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
-        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime` and the
-        edge runtime each verify the signature for themselves, against `SUPABASE_JWT_JWKS`, and
-        consult no denylist, so a listed token still satisfies those three until it expires.
+        **Revocation reaches PostgREST and what checks a token through it:** the i3X server,
+        within its 15-second cache, and `aas-api` and `fplus-directory`, which call
+        `auth_probe()` as the caller. `supabase-storage` and `supabase-realtime` each verify the
+        signature for themselves, against `SUPABASE_JWT_JWKS`, and consult no denylist, so a
+        listed token still satisfies those two until it expires. The other edge functions check a
+        caller with GoTrue, which refuses every machine identity's token, listed or not.
 
         Read is `Administrator` and `Auditor`; `anon` is granted nothing.
       parameters:
@@ -3948,10 +3951,11 @@ paths:
         would be one nobody could ever withdraw. That is the one case where this endpoint discards
         a valid credential rather than returning it.
 
-        > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
-        > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > and the edge runtime verify the signature independently. For those three the expiry is
-        > still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > **Revocation reaches PostgREST and what checks a token through it.** `revoke_service_token()`
+        > denylists the `jti` and `auth_pre_request()` refuses it on every subsequent API request,
+        > to i3X and to `aas-api` and `fplus-directory` as well — but storage and realtime verify the
+        > signature independently. For those two the expiry is still the only bound, which is why
+        > the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:
@@ -5555,6 +5559,8 @@ components:
         identity's token from **Access Control**. Paste it without the word `Bearer`. Your own
         token acts as you and lasts at most an hour; a machine identity's lasts 7 to 90 days.
         A script with no dashboard gets one from `POST /auth/v1/token?grant_type=password`.
+        A machine identity's token works on the `/rest/v1/` paths, `aas-api` and the Factory+
+        Directory. The other edge functions take a person's token only.
     apiKeyAuth:
       type: apiKey
       in: header

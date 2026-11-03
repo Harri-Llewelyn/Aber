@@ -110,7 +110,8 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - **New Machine Identity** creates an identity for a process that uses Aber through the API. You give a name, a purpose and permissions from a fixed menu, then issue its first token.
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.
 - A machine identity reaches the database only. A process that speaks MQTT is issued a broker account instead.
-- **Read-only API client** is the identity for a tool that only reads: i3X Explorer, an MCP client, Swagger UI or a script. Issue it a token, and give the tool that token. It reads telemetry, and cannot read the Audit Trail or change anything.
+- **Read-only API client** is the identity for a tool that only reads: i3X Explorer, an MCP client, an AAS client, Swagger UI or a script. Issue it a token, and give the tool that token. It reads telemetry and the assets' shells, and cannot read the Audit Trail or change anything.
+- A machine identity's token works on the REST API, the i3X server, the AAS API and the Factory+ Directory. The other edge functions take a person's token only.
 - After **Issue Token**, the dialog says how to connect, for any identity that reads telemetry. It gives the i3X server's address and a setup for each client, with the token already in it. The setups go when the dialog closes, as the token does.
 - The pencil beside an identity's name changes its name or purpose. What it holds is fixed when it is created, because a wider grant would apply to every token already issued for it.
 - **Holds** is the permissions the identity has, and **Reaches** is what those let it get to. Hover over its name for its purpose. The purpose tells you whether an unfamiliar identity is safe to leave alone, or safe to remove.
@@ -168,7 +169,7 @@ A system outside Aber that only reads the broker can have an account of its own.
 
 **Withdrawing a machine identity reaches further than revoking its tokens.** Tokens are revoked one at a time. Withdrawing the identity refuses every token that names it. That includes tokens nobody remembered issuing, and tokens issued afterwards. To stop a machine's access, withdraw its identity.
 
-Neither reaches everything. Revoking stops a token at the API. Storage, realtime, the edge functions and Studio check only the token's signature, so a revoked token keeps working there until it expires. Reinstating an identity brings back the identity, but not the tokens revoked with it.
+Neither reaches everything. Revoking stops a token at the API, the AAS API and the Factory+ Directory at once, and at the i3X server within 15 seconds. Storage and realtime check only the token's signature, so a revoked token keeps working there until it expires. Reinstating an identity brings back the identity, but not the tokens revoked with it.
 
 A machine identity lives on one of two sides, and nothing holds both. A database identity is a set of permissions. A broker identity is an entry in the broker's access list (ACL). A gateway signs in to the broker with the account issued for it.
 
