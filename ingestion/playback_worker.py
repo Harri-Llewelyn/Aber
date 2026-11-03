@@ -12,6 +12,7 @@ accepted, and ends every session with its NDEATH.
 README.md -> "Playback from the dashboard" and the sections after it hold the reasons.
 """
 
+import collections
 import json
 import os
 import shutil
@@ -49,6 +50,11 @@ PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS"
 # The longest single sleep while a job waits for its next message. request_playback_stop() treats a
 # job silent for a minute as stalled, so this stays far below that.
 SLEEP_SLICE_SECONDS = 1.0
+# The most published messages paho may hold unwritten before the replay waits for its socket. paho
+# puts no limit on QoS 0 (max_queued_messages counts QoS 1 and 2 only), so a replay that outran the
+# broker held all it was ahead by: 21,733 messages, 57 MiB, at the size cap and 4x. About 2.7 KB
+# each, so this holds the queue near 3 MiB however fast the replay is.
+MAX_UNWRITTEN_MESSAGES = 1000
 # How long playback_finish() is retried, with backoff, before the row is left RUNNING for Stop or
 # the next startup sweep to end.
 FINISH_RETRY_SECONDS = float(os.getenv("PLAYBACK_FINISH_RETRY_SECONDS", "300"))
@@ -646,6 +652,8 @@ class _Session:
         self.node_birth = None
         self.device_births = {}
         self.seq = None
+        # Published but not yet written to the socket, oldest first (keep_up()).
+        self.unwritten = collections.deque()
 
     def publish(self, topic, raw, progress):
         _, msg_type, _, device = capture.split_topic(topic)
@@ -660,6 +668,7 @@ class _Session:
         info = self.client.publish(topic, out, qos=0, retain=False)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise _JobFailed(_connection_lost(progress.sent))
+        self.unwritten.append(info)
         if msg_type == "NBIRTH":
             self.node_birth = (topic, raw)
             self.device_births.clear()
@@ -701,6 +710,23 @@ class _Session:
             raise _JobFailed(_host_went_offline(self.host, progress.sent))
         if aber.rebirth.is_set():
             self.answer_rebirth(job_id, progress)
+
+    def keep_up(self, job_id, progress):
+        """
+        Wait while more than MAX_UNWRITTEN_MESSAGES are in paho's queue, so the replay goes at the
+        broker's pace once it is ahead and the queue stays bounded. A QoS 0 message reads published
+        once paho has written it. Each wait is a slice, and check() runs after it as between
+        messages, so a lost connection, Stop and a rebirth request are still answered.
+        """
+        unwritten = self.unwritten
+        while unwritten and unwritten[0].is_published():
+            unwritten.popleft()
+        while len(unwritten) > MAX_UNWRITTEN_MESSAGES:
+            unwritten[0].wait_for_publish(SLEEP_SLICE_SECONDS)
+            while unwritten and unwritten[0].is_published():
+                unwritten.popleft()
+            self.check(job_id, progress)
+            progress.report()
 
 
 def _wait_until(target, progress, session, job_id=None):
@@ -883,6 +909,8 @@ def _replay(supabase, open_chunks, job, candidates, outcome):
                 session.publish(topic, payload_bytes, progress)
             progress.sent += 1
             progress.report()
+            if session is not None:
+                session.keep_up(job_id, progress)
     except _Stopped:
         logger.info("Playback %s: stopped by the operator after %d message(s).",
                     job_id, progress.sent)

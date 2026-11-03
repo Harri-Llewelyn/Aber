@@ -91,13 +91,16 @@ def decode(raw):
 # Fakes
 # -------------------------------------------------------------------------------------------------
 class FakeInfo:
-    def __init__(self, rc=0, acked=True):
+    def __init__(self, rc=0, acked=True, write=None):
         self.rc = rc
         self.acked = acked
+        self.write = write    # paho's network thread writing it, while the caller waits
 
     def wait_for_publish(self, timeout=None):
         if self.rc:
             raise RuntimeError(mqtt.error_string(self.rc))
+        if not self.acked and self.write is not None:
+            self.acked = self.write()
 
     def is_published(self):
         return self.acked and not self.rc
@@ -126,6 +129,10 @@ class FakeBroker:
         self.silent_suback = False        # never answer a SUBSCRIBE
         self.accepts = None               # the passwords the broker accepts; None accepts any
         self.refusal = 5                  # the CONNACK rc for any other
+        # paho writes a planned message only while the worker waits on it, and only while connected:
+        # a broker slower than the replay. `unwritten` is paho's queue; `most_unwritten` its peak.
+        self.holds_writes = False
+        self.unwritten = self.most_unwritten = 0
 
 
 class FakeClient:
@@ -187,6 +194,17 @@ class FakeClient:
         self.events.append(("publish", topic, payload, qos, retain))
         if planned and FakeClient.broker.after_publish:
             FakeClient.broker.after_publish(self, self.publishes)
+        broker = FakeClient.broker
+        if planned and broker.holds_writes:
+            broker.unwritten += 1
+            broker.most_unwritten = max(broker.most_unwritten, broker.unwritten)
+
+            def write():
+                if not self.connected:
+                    return False
+                broker.unwritten -= 1
+                return True
+            return FakeInfo(acked=False, write=write)
         return FakeInfo()
 
     def disconnect(self):
@@ -298,6 +316,35 @@ class PublishAccountingTests(WorkerLoopCase):
     def test_a_job_that_kept_its_connection_counts_every_message(self):
         sent, _, error = self.run_job(a_session(readings=4))
         self.assertEqual((sent, error), (6, None))
+
+    def test_a_replay_ahead_of_the_broker_holds_paho_s_queue_to_the_bound(self):
+        """
+        QoS 0 has no queue limit in paho, so a replay faster than the broker queued everything it
+        was ahead by. It now waits once more than MAX_UNWRITTEN_MESSAGES are unwritten.
+        """
+        self.addCleanup(setattr, playback_worker, "MAX_UNWRITTEN_MESSAGES",
+                        playback_worker.MAX_UNWRITTEN_MESSAGES)
+        playback_worker.MAX_UNWRITTEN_MESSAGES = 5
+        self.broker.holds_writes = True
+        sent, _, error = self.run_job(a_session(readings=40))
+        self.assertEqual((sent, error), (42, None))
+        self.assertLessEqual(self.broker.most_unwritten, 6)
+        client, = self.broker.clients
+        self.assertEqual(len([t for t in client.published_types() if t == "DDATA"]), 40)
+
+    def test_a_connection_lost_while_waiting_for_the_socket_fails_the_job(self):
+        """
+        A message that can never be written does not hold the replay: check() runs after each
+        wait. The drop comes with the sixth publish, the first that keep_up() waits on.
+        """
+        self.addCleanup(setattr, playback_worker, "MAX_UNWRITTEN_MESSAGES",
+                        playback_worker.MAX_UNWRITTEN_MESSAGES)
+        playback_worker.MAX_UNWRITTEN_MESSAGES = 5
+        self.broker.holds_writes = True
+        self.broker.after_publish = lambda client, n: n == 6 and client.drop()
+        sent, _, error = self.run_job(a_session(readings=40))
+        self.assertEqual(sent, 6)
+        self.assertIn("publishing stopped after 6 message(s): the broker connection was lost", error)
 
     def test_a_playback_shorter_than_a_progress_interval_still_reports_its_total(self):
         """messages_total stayed 0 on the page for a job that finished within one interval."""
