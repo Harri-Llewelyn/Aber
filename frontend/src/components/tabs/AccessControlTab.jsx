@@ -124,7 +124,7 @@ const NO_STATES = Object.freeze([])
  * People is the people who sign in, for an Administrator to add, re-role and remove (PeopleSection).
  * It is offered only when `userRole` is Administrator, and the page opens on it; the functions behind
  * it check the role again. `currentUserId` is the signed-in account, whose own controls are disabled.
- * `hasPermission` decides whether a person's drawer links to the Audit Trail.
+ * `hasPermission` decides whether a person's or an app's drawer links to the Audit Trail.
  *
  * Apps is the apps that sign those people in, such as Grafana, and who has allowed each
  * (AppsSection). Administrator only, as People is.
@@ -465,7 +465,11 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
           )}
 
           {section === 'apps' && showPeople && (
-            <AppsSection showToast={showToast} drawerHost={personDrawerHost} />
+            <AppsSection
+              showToast={showToast}
+              drawerHost={personDrawerHost}
+              canReadTrail={!!hasPermission?.(PERMISSION_UUIDS.AUDIT_TRAIL_READ)}
+            />
           )}
 
           {section === 'credentials' && (<>

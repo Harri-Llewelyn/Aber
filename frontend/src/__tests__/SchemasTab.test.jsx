@@ -197,6 +197,14 @@ describe('what a schema’s device count counts', () => {
     expect(panel.getByRole('link', { name: /View 1 Device$/ })).toHaveAttribute('href', `/devices?schema=${S1.schema_uuid}`)
   })
 
+  it('opens the Audit Trail filtered to the version, for a reader who may open it (#1349)', async () => {
+    await renderCounts()
+    fireEvent.click(screen.getByText('Lathe_Schema'))
+    const panel = within(document.querySelector('.context-panel'))
+    expect(panel.getByRole('link', { name: /View Audit Trail/ }))
+      .toHaveAttribute('href', `/audit-trail?search=${S1.schema_uuid}&type=SCHEMA`)
+  })
+
   it('warns in Create Version about every attachment, and says how many are archived or replay lanes', async () => {
     await renderCounts()
     fireEvent.click(screen.getByText('Lathe_Schema'))
