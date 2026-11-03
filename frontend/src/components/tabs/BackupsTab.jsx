@@ -206,7 +206,7 @@ export function BackupsTab({ showToast }) {
   const onRemoveDestination = async () => {
     await api.clearBackupOffsiteDestination()
     setEditingDestination(false)
-    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'info', { to: backupUrl() })
+    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'success', { to: backupUrl() })
     await refresh()
   }
 
