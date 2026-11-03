@@ -8,7 +8,7 @@ import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
-import { SYSTEM_TABS } from '../../navigation'
+import { SYSTEM_LOGS_TAB, SYSTEM_TABS, tabIsVisible } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -16,6 +16,7 @@ import { Tooltip } from '../common/Tooltip'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 import { SystemFigures } from './SystemFigures'
+import { SystemLogs } from './SystemLogs'
 
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
@@ -452,7 +453,12 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function SystemTab({ showToast }) {
+/**
+ * The System page. The Logs tab is offered to an Administrator alone (SYSTEM_LOGS_TAB's `role`).
+ * `rolePending` is true while the viewer's role is still loading, and the page holds the address
+ * until it is known, or an Administrator reloading on Logs would be sent to the first tab.
+ */
+export function SystemTab({ showToast, userRole = null, rolePending = false }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
@@ -483,11 +489,20 @@ export function SystemTab({ showToast }) {
   usePolling(loadAll, POLL_INTERVAL_MS)
 
   const groups = groupServices(services)
-  // The tab, in the path (`/system/<group>`); the first group is the bare page. A group has a
-  // tab only while it has rows, so one that empties between polls leaves the address and the first
-  // tab takes over. Before the first read the path is held until the list arrives.
-  const [groupId, setGroupId, groupHref] = useUrlTab('system', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
-  const active = groups.find(g => g.id === groupId) || groups[0]
+  // The groups' tabs, then Logs for an Administrator: its own tab, which no service row decides.
+  const logsOffered = tabIsVisible(SYSTEM_LOGS_TAB, () => false, userRole)
+  const tabs = [
+    ...groups.map(g => ({ id: g.id, label: g.title, description: g.description })),
+    ...(logsOffered ? [{ id: SYSTEM_LOGS_TAB.id, label: SYSTEM_LOGS_TAB.label, description: SYSTEM_LOGS_TAB.description }] : []),
+  ]
+  // The tab, in the path (`/system/<group>`, `/system/logs`); the first group is the bare page. A
+  // group has a tab only while it has rows, so one that empties between polls leaves the address
+  // and the first tab takes over. Before the first read, and while the role is unknown, the path
+  // is held.
+  const [tabId, setTabId, tabHref] = useUrlTab('system', tabs.map(t => t.id), tabs[0]?.id,
+    { ready: !loading && !rolePending })
+  const active = tabs.find(t => t.id === tabId) || tabs[0]
+  const group = groups.find(g => g.id === active?.id)
   const viewerOnHost = viewerIsOnDeploymentHost(typeof window === 'undefined' ? '' : window.location?.hostname)
 
   return (
@@ -524,16 +539,21 @@ export function SystemTab({ showToast }) {
             <TabStrip
               ariaLabel="System"
               value={active.id}
-              onChange={setGroupId}
-              hrefFor={groupHref}
-              tabs={groups.map(g => ({ id: g.id, label: g.title, description: g.description }))}
+              onChange={setTabId}
+              hrefFor={tabHref}
+              tabs={tabs}
             />
-            {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type
-                picker. The path a reading takes is the tab that says what is flowing along it. */}
-            {active.id === 'ingestion' && (
-              <SystemFigures grafanaOpen={grafanaReachable(services, viewerOnHost)} />
-            )}
-            <ServiceTable rows={active.rows} onNotify={showToast} />
+            {/* No toolbar row on a group's tab: a tab holds a dozen rows at most, so there is no
+                search box or type picker. The path a reading takes is the tab that says what is
+                flowing along it. Logs has a toolbar of its own. */}
+            {active.id === SYSTEM_LOGS_TAB.id ? (
+              <SystemLogs showToast={showToast} />
+            ) : (<>
+              {active.id === 'ingestion' && (
+                <SystemFigures grafanaOpen={grafanaReachable(services, viewerOnHost)} />
+              )}
+              <ServiceTable rows={group.rows} onNotify={showToast} />
+            </>)}
           </>)}
         </div>
       </div>

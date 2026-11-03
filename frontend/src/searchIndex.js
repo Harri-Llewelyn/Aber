@@ -84,6 +84,8 @@ export const CARDS = [
   { id: 'system-applications',  ...tabCard('system', 'applications'), keywords: ['grafana', 'node-red', 'studio', 'uis'] },
   { id: 'system-ingestion',     ...tabCard('system', 'ingestion'), keywords: ['mosquitto', 'broker', 'daemon'] },
   { id: 'system-infrastructure', ...tabCard('system', 'infrastructure'), keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  // Administrator only, as the tab is: buildTargets offers a card only while its tab is the viewer's.
+  { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
@@ -108,7 +110,8 @@ export const CARDS = [
 /**
  * Everything this session can reach, as one flat list. Takes the already-filtered pages, so
  * `tabIsVisible` is the only predicate deciding what a session may see. A card inherits its page's
- * visibility, and so does a setting.
+ * visibility, and a card that opens one tab its tab's: a page's `pageTabs` arrive without the tabs
+ * this session may not see (visiblePages, navigation.jsx). A setting inherits its page's.
  *
  * `settings` are rows, not a listed constant -- a migration adds one and nothing here would know --
  * but they are a closed set of a dozen short labels, so they are matched here alongside the pages
@@ -127,8 +130,12 @@ export function buildTargets(visibleTabs, settings = []) {
   }))
 
   const reachable = new Set(visibleTabs.map(t => t.id))
+  const tabShown = (c) => {
+    const tabs = visibleTabs.find(t => t.id === c.tab)?.pageTabs
+    return !c.section || !tabs || tabs.some(t => t.id === c.section)
+  }
   const cards = CARDS
-    .filter(c => reachable.has(c.tab))
+    .filter(c => reachable.has(c.tab) && tabShown(c))
     .map(c => ({
       kind: 'card',
       key: `card:${c.id}`,

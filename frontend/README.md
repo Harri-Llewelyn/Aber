@@ -107,6 +107,27 @@ builders build each entry with `catalogPropertyEntry()` in `utils/schemaProperty
 is a UI affordance only — RLS is the enforcement, and every gated action is independently refused
 by the database.
 
+### A tab can be gated by role
+
+A page's `TABS` entry takes a `role` or a `permission`, and so does each of its `pageTabs`. System's
+Logs tab (`SYSTEM_LOGS_TAB`) carries `role: 'Administrator'` on a page every role opens.
+`tabIsVisible()` decides both, and `visiblePages(hasPermission, userRole)` in `navigation.jsx`
+returns the pages a viewer may open, each with only the tabs they may see. `App.jsx` computes it
+once, and the four places a tab is offered read that one answer:
+
+- **the rail**, whose list of a page's tabs is the page's `pageTabs` as `visiblePages` gives them;
+- **the search**: `buildTargets()` offers a card that opens a tab only while the page's tabs hold
+  it;
+- **the page's tab bar**: the page asks `tabIsVisible()` for the gated tab itself, as System does
+  for Logs, because it builds its bar from more than the list;
+- **the address**: `urlNamesWithheldTab()` sends anyone who opens a tab they may not see to the
+  page's first tab, query and all, as a hidden page sends them to the Site Map. It waits for the
+  role, so an Administrator reloading on the tab stays there; System holds its own address too,
+  through `useUrlTab`'s `ready`, until `rolePending` is false.
+
+Hiding a tab removes a signpost and nothing more. Logs is read through `service-logs`, which refuses
+everyone but an Administrator for itself. `tabRoleGating.test.jsx` holds the four places.
+
 ### What looks clickable
 
 Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
@@ -169,8 +190,9 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   click away, so a click on a tabbed page's icon opens the page, as any page's does.
 - **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
   copy in the database's order, before the page has read them. A category missing from it still
-  shows on the page. System lists its three groups; the page adds a tab for any service type no
-  group claims.
+  shows on the page. System lists its three groups, and Logs for an Administrator ([A tab can be
+  gated by role](#a-tab-can-be-gated-by-role)); the page adds a tab for any service type no group
+  claims.
 - **Profile** is not in the rail, so its tabs are on its tab bar only.
 
 ### Tooltips
@@ -1042,7 +1064,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
 | Archives | `retired` | `sort` |
-| System | the group | `sort` |
+| System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, `range` |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
@@ -1097,7 +1119,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row, and the range picker is `LogRangePicker` alone, so the shared time control can take its place |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1124,6 +1146,12 @@ buttons side by side, Change destination and Take a backup, with the main one st
 toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
+
+**Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
+Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
+right half sets how often it happens by itself: Off, then the page's intervals. A page that
+refreshes both by hand and on a timer uses it, not a button and a select apart. System › Logs is
+the first.
 
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.

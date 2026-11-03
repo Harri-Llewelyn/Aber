@@ -31,9 +31,11 @@ export const RAIL_OPEN_DELAY_MS = 150
  * plain click navigates in place, through `onNavigate(id)` when it is given.
  *
  * A page with tabs (`pageTabs`, navigation.jsx) lists them beneath it as links, behind a chevron:
- * see SidebarPage. Arriving on a page opens its tabs, with the current one marked, and closes every
- * other page's, those opened by hand included; until the next arrival, pages opened by hand stay
- * open together. Collapse all tabs, at the foot, closes every list, the current page's too.
+ * see SidebarPage. `tabs` comes from visiblePages(), so a page's tabs arrive without those this
+ * viewer may not see, such as System's Logs. Arriving on a page opens its tabs, with the current
+ * one marked, and closes every other page's, those opened by hand included; until the next
+ * arrival, pages opened by hand stay open together. Collapse all tabs, at the foot, closes every
+ * list, the current page's too.
  *
  * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above
  * Collapse all tabs.

@@ -4,6 +4,8 @@ This page lists every service Aber runs, what each one is for, whether it is up,
 
 The **Ingestion & Messaging** tab also shows what the stack is doing now: messages arriving, readings written, messages lost, and gateways and devices reporting. See [The figures on Ingestion & Messaging](#the-figures-on-ingestion--messaging).
 
+Administrators also have a **Logs** tab, the last one. It shows the lines each service wrote recently. See [The Logs tab](#the-logs-tab).
+
 ## What the controls do
 
 - **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door: a link there is where you go to do something the dashboard does not do itself. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. If telemetry has stopped arriving, the fault is almost always one of these. **Data & Backend Infrastructure** is what the other two are built on. It is listed so that this page does not make the stack look smaller than it is.
@@ -46,6 +48,28 @@ The Ingestion & Messaging tab opens with a row of figures. They answer "is data 
 - **Devices reporting** reads **not observed** when the historian cannot be reached. The gateway count still shows.
 - **Click a figure to open its history in Grafana**, in a new tab. Messages received and Ingestion links have no Grafana panel, so they open nothing.
 - A figure opens nothing either when your browser cannot reach Grafana, for example when Grafana is published only on the deployment host.
+
+## The Logs tab
+
+The Logs tab shows the newest lines one service wrote to its log, newest first. Use it to find out why a sign-in failed, why a gateway's messages are refused, or whether a service keeps restarting. Only Administrators see the tab. The lines can hold people's email addresses and the addresses of machines.
+
+1. Pick the service in the **Service** list. It opens on the ingestion service, if it has written anything, because most faults show there first.
+2. Type in the search box to keep only lines that contain that text. The match is exact, capital letters included.
+3. Pick a **level** to keep only errors or warnings, for example.
+4. Pick how far back to look, from the last 15 minutes to the last 7 days.
+5. Select **Refresh** to read again. To read again on its own, pick an interval in the right half of the same button, such as **30 s**.
+
+- **Time** is when the service wrote the line, in your time zone, to the thousandth of a second.
+- **Level** is how serious the service said the line is. Only lines written as JSON, a structured format, name a level. The ingestion and playback services write JSON. A line in any other format shows **none**, and appears only under **Any level**.
+- **Message** is the line. For a JSON line it is the message alone, with the fields **reason**, **device** and **edge_node** under it when the line has them. A traceback stays under its message, as one entry.
+- **The copy button** copies the line exactly as the service wrote it.
+- At most 500 lines are shown. When there are more in the range, the tab says so above the table. Choose a shorter range, or type a filter, to reach older lines.
+- A line longer than 8 KiB is cut, and ends with **[cut at 8 KiB]**.
+- Everything in a line is shown as plain text. A line can hold text someone else chose, such as a device's name. Nothing in it can act as a link or run in the page.
+
+**Each new read is recorded in the Audit Trail.** The record says who read which service's lines, with the level, the filter and the range. Opening the tab writes one record, and so does each change of service, level, filter or range. Refresh and the interval write none, because they repeat the same read. A filter is read once you stop typing, so a word you type is one record. The records are on the Audit Trail page, under **Service logs**.
+
+A deployment may run no log store of its own and name none. The tab then says observability is off, and there is nothing to read. Grafana's Explore page reads the same log store, for anything this tab cannot show.
 
 ## What the states mean
 

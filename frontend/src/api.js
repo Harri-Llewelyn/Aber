@@ -1629,6 +1629,38 @@ const apiMethods = {
   },
 
   /**
+   * A service's newest log lines, newest first, for System › Logs: `{ service, level, filter,
+   * range, limit }`, each optional. Without `service` the answer is the list of services alone.
+   * Administrator only, through service-logs, which builds the query from these and records each
+   * read whose parameters differ from the caller's last in the Audit Trail.
+   *
+   * @returns {{ observability: boolean, services: string[], lines: object[], more?: boolean,
+   *             clamped?: object[], audit?: 'recorded'|'unchanged', details?: string }}
+   */
+  readServiceLogs: async (params = {}, { signal } = {}) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)])
+    ).toString();
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/service-logs${query ? `?${query}` : ''}`, {
+      signal,
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+      },
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw await functionFailure(new Error(withReference(body?.details || body?.error || `Could not read the logs (${res.status})`, body)), res.status, body);
+    }
+
+    return body;
+  },
+
+  /**
    * Mint a Host or Third-party gateway's broker credential and get it back once.
    *
    * A raw fetch so both gateway-credential paths read the same way. The password is returned once

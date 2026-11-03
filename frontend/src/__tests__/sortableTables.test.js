@@ -70,6 +70,10 @@ const TABLES = {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']
   },
+  'components/tabs/SystemLogs.jsx': {
+    sortable: 0,
+    fixed: ["A service's newest log lines, newest first, as the log store returns them up to a limit: a sort in the browser would sort only the lines on screen."]
+  },
   'components/tabs/SystemTab.jsx': { sortable: 1 }
 }
 

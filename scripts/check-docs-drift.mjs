@@ -3548,6 +3548,57 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 189. The Logs tab's ceilings are stated as service-logs holds them. logs.ts decides: a range of
+// at most 7 days, 500 lines a read (200 by default), 8 KiB a line, 10 seconds for the store, and the
+// level and range keys. The help page, the API reference and supabase/README.md each state them, and
+// a ceiling stated wrong reads as the tab hiding lines. Mirror check 40 holds the code's three
+// copies; this holds the prose.
+// -------------------------------------------------------------------------------------------------
+{
+  const ts = read('supabase/functions/service-logs/logs.ts');
+  const num = (re) => Number(ts.match(re)?.[1]);
+  const maxLines = num(/export const MAX_LINES = (\d+)/);
+  const defaultLines = num(/export const DEFAULT_LINES = (\d+)/);
+  const lineKiB = num(/export const LINE_BYTES = (\d+) \* 1024/);
+  const timeoutS = num(/export const UPSTREAM_TIMEOUT_MS = (\d+)_000/);
+  const ranges = [...(ts.match(/export const RANGES[^=]*= \{([^}]*)\}/)?.[1] ?? '').matchAll(/"([^"]+)":/g)].map((m) => m[1]);
+  const levels = [...(ts.match(/export const LEVELS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const longest = ranges.at(-1);
+  const problems189 = [];
+  if (![maxLines, defaultLines, lineKiB, timeoutS].every(Number.isFinite) || !ranges.length || !levels.length) {
+    problems189.push('could not read the ceilings out of service-logs/logs.ts; its shape changed');
+  } else {
+    if (longest !== '7d') problems189.push(`logs.ts's longest range is ${longest}, and every page below says 7 days`);
+    const help = read('help/pages/system.md');
+    const section = help.slice(help.indexOf('## The Logs tab'), help.indexOf('\n## ', help.indexOf('## The Logs tab') + 1));
+    for (const phrase of [`At most ${maxLines} lines`, `${lineKiB} KiB`, 'last 7 days']) {
+      if (!section.includes(phrase)) problems189.push(`help/pages/system.md's Logs tab section does not say "${phrase}"`);
+    }
+    const spec = read('docs/openapi.yaml');
+    const at = spec.indexOf('\n  /functions/v1/service-logs:');
+    const entry = at < 0 ? '' : spec.slice(at, spec.indexOf('\n  /', at + 1));
+    if (!entry) problems189.push('docs/openapi.yaml has no /functions/v1/service-logs');
+    for (const phrase of [`at most ${maxLines} lines`, `${defaultLines} by default`, `${lineKiB} KiB`, `${timeoutS} seconds`,
+      `enum: [${levels.join(', ')}]`, `enum: [${ranges.join(', ')}]`, 'at most 7 days']) {
+      if (entry && !entry.includes(phrase)) problems189.push(`docs/openapi.yaml's service-logs entry does not say "${phrase}"`);
+    }
+    const readme = read('supabase/README.md');
+    const from = readme.indexOf("### Reading a service's logs is recorded (0225)");
+    const prose = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1)).replace(/\s+/g, ' ');
+    if (!prose) problems189.push("supabase/README.md has no section \"Reading a service's logs is recorded (0225)\"");
+    for (const phrase of ['at most 7 days', `${maxLines} lines (${defaultLines} by default)`, `${lineKiB} KiB a line`, `${timeoutS} seconds for the store`]) {
+      if (prose && !prose.includes(phrase)) problems189.push(`supabase/README.md's 0225 section does not say "${phrase}"`);
+    }
+  }
+  if (problems189.length) {
+    fail(`the Logs tab's ceilings are stated otherwise than service-logs holds them:\n` +
+      problems189.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help, the API reference and supabase/README.md state service-logs' ceilings: 7 days, ${maxLines} lines (${defaultLines} by default), ${lineKiB} KiB, ${timeoutS} seconds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers
@@ -3693,6 +3744,52 @@ const OPERATOR_PAIRS = [
       `all ${declared.size} variable(s) the function registry declares are set on ` +
         `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 190. service-logs reads the Loki Grafana reads, and nothing else may. aber.lokiUrl (Grafana's
+// datasource) is aber.lokiUrlOrNone with a refusal, so the two cannot name different stores; the
+// functions Deployment sets LOKI_URL from aber.lokiUrlOrNone; main/index.ts forwards LOKI_URL to
+// service-logs alone, since the store has no access control of its own; and the NetworkPolicy
+// admits supabase-functions to loki on the port loki.yaml's Service serves. Each link missing reads
+// as a store that cannot be reached, or as observability off, on a stack where it is on.
+// -------------------------------------------------------------------------------------------------
+{
+  const helpers = read('deploy/helm/aber/templates/_helpers.tpl');
+  const fnChart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+  const policy = read('deploy/helm/aber/templates/networkpolicy.yaml');
+  const lokiChart = read('deploy/helm/aber/templates/obs/loki.yaml');
+  const registry = read('supabase/functions/main/index.ts');
+  const problems190 = [];
+
+  const lokiUrl = helpers.match(/\{\{- define "aber\.lokiUrl" -\}\}([\s\S]*?)\{\{- end -\}\}\n\{\{- end -\}\}/)?.[1] ?? '';
+  // The refusal's sentence names grafana.lokiUrl too, so only a value read or an address counts.
+  if (!/include "aber\.lokiUrlOrNone" \./.test(lokiUrl) || /\.Values\.grafana\.lokiUrl|http:\/\/loki:/.test(lokiUrl)) {
+    problems190.push('aber.lokiUrl does not take its address from aber.lokiUrlOrNone alone, so Grafana and the functions can name different stores');
+  }
+  if (!/include "aber\.lokiUrlOrNone" \.[\s\S]{0,40}\n\s*- name: LOKI_URL\n/.test(fnChart)) {
+    problems190.push('templates/supabase/functions.yaml does not set LOKI_URL from aber.lokiUrlOrNone');
+  }
+  const block = registry.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? '';
+  const holders = [...block.matchAll(/^\s*"([a-z0-9-]+)"\s*:\s*\[([^\]]*)\]/gm)]
+    .filter((m) => m[2].includes('"LOKI_URL"')).map((m) => m[1]);
+  if (holders.join() !== 'service-logs') {
+    problems190.push(`main/index.ts forwards LOKI_URL to ${holders.join(', ') || 'no function'}; service-logs alone may hold it`);
+  }
+  const lokiPort = lokiChart.match(/\n {2}ports:\n\s*- name: \S+\n\s*port: (\d+)/)?.[1];
+  const edge = policy.match(/\(dict "from" "supabase-functions" "to" "loki"\s+"port" (\d+) "why" "([^"]+)"\)/);
+  if (!edge) {
+    problems190.push('networkpolicy.yaml has no supabase-functions -> loki edge');
+  } else if (!lokiPort || edge[1] !== lokiPort) {
+    problems190.push(`networkpolicy.yaml admits supabase-functions to loki on ${edge[1]}, and loki.yaml's Service serves ${lokiPort ?? '(not found)'}`);
+  } else if (!edge[2].includes('service-logs')) {
+    problems190.push("networkpolicy.yaml's supabase-functions -> loki edge does not say service-logs needs it");
+  }
+  if (problems190.length) {
+    fail(`service-logs does not read the Loki Grafana reads:\n` + problems190.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`service-logs alone holds LOKI_URL, set from the helper Grafana's datasource derives from, and reaches loki:${lokiPort} through its own edge`);
   }
 }
 

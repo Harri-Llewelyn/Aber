@@ -1905,6 +1905,108 @@ td.row-actions, th.row-actions {
 }
 .system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
+/* Refresh and its interval as one control (common/RefreshButton.jsx): one filled shape, as a
+   .btn-primary .btn-sm is, holding two plain halves with a hairline between them. Hover lights the
+   half under the pointer and focus rings it inside the shape. While Off the right half is only its
+   chevron (the select's text is transparent and the select as narrow as the chevron). */
+.refresh-split {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  transition: var(--transition);
+}
+.refresh-split:hover { box-shadow: 0 0 16px var(--accent-glow); }
+.refresh-split-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.refresh-split-now:disabled { opacity: 0.6; cursor: default; }
+.refresh-split-every {
+  position: relative;
+  display: inline-flex;
+  border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent);
+}
+.refresh-split-now:hover:not(:disabled),
+.refresh-split-every:hover { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+.refresh-split-every select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px 28px 6px 10px;
+  cursor: pointer;
+}
+.refresh-split-off select { width: 32px; padding: 6px 0; color: transparent; }
+.refresh-split-every option { color: var(--text-primary); background: var(--bg-card); }
+.refresh-split-every svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.refresh-split-now:focus-visible,
+.refresh-split-every:has(select:focus-visible) { outline: 2px solid var(--accent-contrast); outline-offset: -3px; }
+.refresh-split-every select:focus-visible { outline: none; }
+
+/* System › Logs: time, level, message and a copy button. The message takes what the other three
+   leave and wraps anywhere, since a line is one long token as often as a sentence. */
+.table-logs {
+  table-layout: fixed;
+  min-width: 760px;
+}
+.table-logs th:nth-child(1) { width: 210px; }  /* Time */
+.table-logs th:nth-child(2) { width: 100px; }  /* Level */
+.table-logs th:nth-child(4) { width: 60px; }   /* Copy */
+.table-logs th { padding: 9px 16px; }
+.table-logs td {
+  padding: 8px 16px;
+  font-size: 13px;
+  vertical-align: top;
+}
+.table-logs .cell-log-time { font-size: 12px; white-space: nowrap; }
+
+/* As written, line breaks kept: a traceback is one entry, and scrolls inside its cell. */
+.log-message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16em;
+  overflow: auto;
+}
+
+/* A JSON line's named fields (reason, device, edge_node), under its message. */
+.log-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A device id or a reason is one long token: it breaks anywhere rather than widen the column. */
+.log-field { overflow-wrap: anywhere; }
+.log-field-key { color: var(--text-dim); }
+
+/* What a read left out, and what the level filter cannot see, under the toolbar. */
+.log-note {
+  margin: 8px 16px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
   text-decoration: none;

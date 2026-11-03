@@ -79,6 +79,7 @@ const CALLS = [
   ['broker-inventory', () => api.listBrokerInventory()],
   ['broker-subscriber (create)', () => api.createBrokerSubscriber({ name: 'Line 4', description: 'Reads line 4.' })],
   ['broker-subscriber (delete)', () => api.deleteBrokerSubscriber('sub0a1b2c3d4e5f60718293a')],
+  ['service-logs', () => api.readServiceLogs({ service: 'ingestion' })],
   ['gateway-credential', () => api.mintGatewayCredential(ID)],
   ['mint-service-token', () => api.mintServiceToken(ID, 30)],
   ['aas-export (bundle)', () => api.post('/api/v1/devices/asset-export', { device_id: ID })],

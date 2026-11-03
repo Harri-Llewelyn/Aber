@@ -302,12 +302,24 @@ two cannot disagree.
 {{- end -}}
 
 {{- define "aber.lokiUrl" -}}
+{{- $url := include "aber.lokiUrlOrNone" . -}}
+{{- if $url -}}
+{{- $url -}}
+{{- else -}}
+{{- fail "\n\naber: grafana.lokiUrl is empty and observability.enabled is false.\n\nEither enable the chart's own stack or set grafana.lokiUrl to the cluster's Loki.\n" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The same Loki, or nothing where there is none, for the functions' LOKI_URL (System › Logs). It never
+fails: the functions run with Grafana off, and service-logs answers an unset address as
+observability off.
+*/}}
+{{- define "aber.lokiUrlOrNone" -}}
 {{- if .Values.grafana.lokiUrl -}}
 {{- .Values.grafana.lokiUrl -}}
 {{- else if .Values.observability.enabled -}}
 http://loki:3100
-{{- else -}}
-{{- fail "\n\naber: grafana.lokiUrl is empty and observability.enabled is false.\n\nEither enable the chart's own stack or set grafana.lokiUrl to the cluster's Loki.\n" -}}
 {{- end -}}
 {{- end -}}
 

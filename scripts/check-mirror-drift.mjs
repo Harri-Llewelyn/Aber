@@ -777,6 +777,47 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 40. A read of a service's logs, one rule in three places. service-logs (logs.ts) refuses a level,
+// a range or a filter outside its lists, 0225's record_service_logs_read() refuses the same, and
+// System › Logs (utils/serviceLogs.js) offers them. A value the page offers and the function
+// refuses is a picker that fails; one the function reads and 0225 refuses is a read never shown,
+// since no line is released unrecorded.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.record_service_logs_read(', '$$;',
+    'record_service_logs_read()');
+  const ts = read('supabase/functions/service-logs/logs.ts');
+  const js = read('frontend/src/utils/serviceLogs.js');
+  const quoted = (text) => [...(text || '').matchAll(/'([^']*)'/g)].map((m) => m[1]).join(', ');
+  const tsLevels = need(ts, /export const LEVELS = \[([^\]]*)\]/, 'LEVELS in service-logs/logs.ts');
+  const tsRanges = need(ts, /export const RANGES[^=]*= \{([^}]*)\}/, 'RANGES in service-logs/logs.ts');
+  const tsFilter = need(ts, /export const FILTER_MAX = (\d+)/, 'FILTER_MAX in service-logs/logs.ts');
+  const tsService = need(ts, /export const SERVICE_MAX = (\d+)/, 'SERVICE_MAX in service-logs/logs.ts');
+  const tsLines = need(ts, /export const MAX_LINES = (\d+)/, 'MAX_LINES in service-logs/logs.ts');
+  const jsLevels = need(js, /export const LOG_LEVELS = \[([\s\S]*?)\n\]/, 'LOG_LEVELS in frontend/src/utils/serviceLogs.js');
+  const jsRanges = need(js, /export const LOG_RANGES = \[([\s\S]*?)\n\]/, 'LOG_RANGES in frontend/src/utils/serviceLogs.js');
+  const jsFilter = need(js, /export const LOG_FILTER_MAX = (\d+)/, 'LOG_FILTER_MAX in frontend/src/utils/serviceLogs.js');
+  const jsLines = need(js, /export const LOG_LINES_MAX = (\d+)/, 'LOG_LINES_MAX in frontend/src/utils/serviceLogs.js');
+  if (def && tsLevels && tsRanges && tsFilter && tsService && tsLines && jsLevels && jsRanges && jsFilter && jsLines) {
+    const sqlLevels = need(def.body, /p_level = ANY \(ARRAY\[([^\]]*)\]\)/, `the levels record_service_logs_read() takes (${def.file})`);
+    const sqlRanges = need(def.body, /p_range = ANY \(ARRAY\[([^\]]*)\]\)/, `the ranges record_service_logs_read() takes (${def.file})`);
+    const sqlFilter = need(def.body, /char_length\(coalesce\(p_filter, ''\)\) > (\d+)/, `the filter's limit in ${def.file}`);
+    const sqlService = need(def.body, /char_length\(p_service\) NOT BETWEEN 1 AND (\d+)/, `the service's limit in ${def.file}`);
+    const values = (text) => [...text.matchAll(/value: '([^']*)'/g)].map((m) => m[1]).join(', ');
+    const tsRangeKeys = [...tsRanges[1].matchAll(/"([^"]+)":/g)].map((m) => m[1]).join(', ');
+    const tsLevelList = [...tsLevels[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).join(', ');
+    if (sqlLevels && sqlRanges && sqlFilter && sqlService) {
+      compare('serviceLogsRead', 'the levels the function takes and 0225 records', tsLevelList, quoted(sqlLevels[1]));
+      compare('serviceLogsRead', 'the levels System › Logs offers and 0225 records', values(jsLevels[1]), quoted(sqlLevels[1]));
+      compare('serviceLogsRead', 'the ranges the function takes and 0225 records', tsRangeKeys, quoted(sqlRanges[1]));
+      compare('serviceLogsRead', 'the ranges System › Logs offers and 0225 records', values(jsRanges[1]), quoted(sqlRanges[1]));
+      compare('serviceLogsRead', "the filter's limit in the function and 0225", tsFilter[1], sqlFilter[1]);
+      compare('serviceLogsRead', "the filter's limit in System › Logs and 0225", jsFilter[1], sqlFilter[1]);
+      compare('serviceLogsRead', "a service name's limit in the function and 0225", tsService[1], sqlService[1]);
+    }
+    compare('serviceLogsRead', 'the most lines a read returns, which System › Logs asks for', jsLines[1], tsLines[1]);
+  }
+}
+
 // -------------------------------------------------------------------------------------------------
 // 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect row of the example metrics carries (#457):

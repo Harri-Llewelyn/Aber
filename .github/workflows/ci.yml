@@ -951,6 +951,8 @@ jobs:
               ('e2e-validate', 'i3x-service', 8090, 'validate.py checks 12-12f'),
               # Enrolment's repository, the sweep and the door's placement: blocked, each skips the forge.
               ('supabase-functions', 'supabase-envoy', 8003, "the forge's API through the forge-api listener"),
+              # The System page's Logs tab: blocked, every read says the log store could not be read.
+              ('supabase-functions', 'loki', 3100, "service-logs: the System page's Logs tab"),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:

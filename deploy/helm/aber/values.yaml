@@ -1297,6 +1297,10 @@ grafana:
   # stock cluster log stack sets namespace/pod/container and no `service`, so the datasource
   # connects and every query returns nothing. Relabel `service` to the workload name in that
   # collector.
+  #
+  # The edge functions read the same Loki for the System page's Logs tab (LOKI_URL). With neither
+  # this nor observability.enabled the tab says observability is off. An external Loki under
+  # networkPolicy.enabled needs a networkPolicy.extraEgress rule from supabase-functions.
   prometheusUrl: ""
   lokiUrl: ""
   # Bundled datasource plugins a site keeps running although grafana.ini disables them, e.g.

@@ -53,6 +53,6 @@ The address keeps the window, so a link you share opens the same one.
 
 **Captures and playbacks have lanes of their own.** Recordings, Captures and Playbacks record who started or stopped a recording, stored, downloaded or deleted a capture, and started or stopped a playback. A capture's deletion says why it went: deleted, replaced, or deleted with its gateway or device. Each lane is named after the machine that was recorded, with a short ID beside the name. Their progress is not recorded.
 
-**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings and backups. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
+**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 
 Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](../../deploy/k8s/README.md#trimming-the-audit-trail).

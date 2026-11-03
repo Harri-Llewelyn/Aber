@@ -462,6 +462,7 @@ const TOASTED_BY = [
 /** Audited calls with no success toast, by file and a piece of the call, each with its reason. */
 const NO_TOAST = [
   { file: 'pages/OAuthConsent.jsx', piece: '/consent`', why: 'the page leaves the dashboard for the app that asked' },
+  { file: 'components/tabs/SystemLogs.jsx', piece: 'api.readServiceLogs(', why: 'reading logs leaves a trace of the read, not an act the person takes; a toast on every filter change would be noise' },
 ]
 
 describe('an audited action ends with a success toast', () => {

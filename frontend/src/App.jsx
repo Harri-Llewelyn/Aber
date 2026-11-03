@@ -16,7 +16,7 @@ import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { askAuthServer, clearInvalidSession } from './utils/sessionError'
 import { useSessionRecheck } from './hooks/useSessionRecheck'
 import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
-import { TABS, pageTitleOf, tabIsVisible } from './navigation'
+import { TABS, pageTitleOf, tabIsVisible, urlNamesWithheldTab, visiblePages } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
 import { SecondFactorScreen } from './components/auth/SecondFactorChallenge'
@@ -620,9 +620,18 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     />
   )
 
-  // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
-  // in both places would let the search offer a page the rail does not.
-  const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
+  // Computed once and used three times: the rail draws it, the search palette indexes it and the
+  // router reads its tabs. Filtering in each place would let one offer a page or a tab another
+  // does not. A tab with a `role` (System's Logs) is left out of its page for anyone else.
+  const navTabs = useMemo(() => visiblePages(hasPermission, userRole), [hasPermission, userRole])
+
+  /* A tab this viewer may not see, named in the address, opens its page's first tab instead, as
+     the effect above leaves a page. Waits for loadingPerms for the same reason. */
+  useEffect(() => {
+    if (!loadingPerms && urlNamesWithheldTab(navTabs, tab, url)) setTab(tab, {}, { replace: true })
+  }, [loadingPerms, navTabs, tab, url, setTab])
+
+
   // The export warning links to Metrics with Unmapped on, only for a reader who has that page.
   const unmappedMetricsTo = navTabs.some(t => t.id === 'metrics') ? unmappedMetricsUrl() : undefined
   // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
@@ -758,7 +767,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} />}
             {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
-            {tab === 'system'         && <SystemTab showToast={showToast} />}
+            {tab === 'system'         && <SystemTab showToast={showToast} userRole={userRole} rolePending={loadingPerms} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}

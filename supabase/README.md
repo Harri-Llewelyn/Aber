@@ -2677,6 +2677,76 @@ with a local table standing in for the foreign one. Mirror check 39 holds the se
 dashboard's and the API reference's, and check 176 (`scripts/check-docs-drift.mjs`) holds each
 tile's Grafana panel to the dashboard JSON.
 
+### Reading a service's logs is recorded (0225)
+
+The System page's Logs tab shows an Administrator a service's newest log lines, so a failed sign-in
+or a rejected gateway can be read without Grafana Explore. Every container logs to Loki through
+Alloy. Loki has no access control of its own and is reachable only inside the cluster, so the
+browser never reaches it: the `service-logs` function reads it for an Administrator and nobody else.
+
+**The function** ([`functions/service-logs`](functions/service-logs)) follows `broker-inventory`:
+
+- **A GET, and the role is the whole decision.** GoTrue's `getUser()` checks the caller, so a machine
+  identity's token is refused, as it should be: the lines are for a person. Any role but
+  Administrator is `403` before the store is asked anything. No service-role key.
+- **Parameters, never a query.** `service`, `level`, `filter`, `range` and `limit`. Any other
+  parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
+  `| json aber_level="level" | aber_level=~"(?i)(?:…)"` for a level, with every caller value a
+  quoted string, escaped as LogQL reads one (Go's `strconv.Unquote`). `service` must be a value
+  Loki lists for the label over the last 7 days.
+- **A level is a JSON line's.** Alloy keeps two stream labels, `service` and `container`, and no
+  level. Ingestion and playback write JSON (`logging_config.py`), so their lines carry `level`. A
+  line in any other format has none and shows only under *Any level*; the tab says so. The level is
+  read into `aber_level`, so a `level` label on another collector's store is not renamed under it.
+- **Ceilings, clamped or refused, and said.** A range of at most 7 days, 500 lines (200 by
+  default), 8 KiB a line, and 10 seconds for the store. A `limit` over 500 is clamped and `clamped`
+  says why; any other value outside the rules is `400`. A longer line is cut at a character and
+  ends ` … [cut at 8 KiB]`. A store that does not answer in time is `504`, one that fails `503`, each
+  a fixed sentence with the store's answer in the log.
+- **One module knows the store.** `store.ts` holds the query, the service list
+  (`/loki/api/v1/label/service/values`) and the parsing of `query_range`. The store that replaces
+  Loki changes that file alone.
+- **The address is the Loki Grafana reads.** The chart sets `LOKI_URL` from `aber.lokiUrlOrNone`:
+  `grafana.lokiUrl`, else the chart's own `http://loki:3100` while `observability.enabled`, else
+  nothing, which the function answers as `observability: false`. Under `networkPolicy.enabled` the
+  edge `supabase-functions` → `loki:3100` admits it; an external Loki needs a rule in
+  `networkPolicy.extraEgress`.
+
+**`0225` records each new read.** `record_service_logs_read(p_service, p_level, p_filter, p_range)`
+writes one `SERVICE_LOGS_READ` row. The function calls it as the caller after Loki answered, and
+returns the lines only once it has: a read that cannot be recorded is `503` with no lines.
+
+- **The database decides when a row is due**, never the caller. It writes one when the four
+  parameters, as sent, differ from the caller's last recorded read, and otherwise writes nothing
+  and returns NULL. So the tab's first load writes a row, each change of filter writes one, and a
+  refresh, a poll or a repeated direct call writes none. A flag from the page would let a direct
+  API caller read without a trace. `limit` is not part of a read, and neither are the resolved
+  times, so "the last hour" a minute later is the same read.
+- **The last read is looked for among the caller's rows of the last 24 hours**, in the `security`
+  lane. Partitions older than that are pruned when the query starts, and the rest are read through
+  `idx_audit_trail_domain`, as `0204` reads `TOKEN_MINTED` rows. No index was added. A read
+  repeated a day after its row writes another, which says the person is still reading.
+- **Two requests at once write one row.** `record_service_logs_read()` takes a transaction-scoped
+  advisory lock on the caller before it looks, so identical reads arriving together cannot both
+  find no last row.
+- **One lane per service.** `entity_type` is `service_logs`, which `audit_domain_for()` files in the
+  security lane, as it files every type it does not name: an Administrator and an Auditor read the
+  rows. `entity_id` is the md5 of `service_logs:` and the service, and `new_data` names the service
+  as `name`, so the Audit Trail page draws one lane per service, named by it.
+- **The rule is the function's.** The levels, the ranges, 1-128 characters for a service and 200 for
+  a filter are refused with `22023` as `service-logs` refuses them. Mirror check 40
+  (`scripts/check-mirror-drift.mjs`) holds the three lists in `0225`, `logs.ts` and
+  `frontend/src/utils/serviceLogs.js` together.
+- **Administrator only.** `SECURITY DEFINER` with `search_path` pinned, and it checks `has_role()`
+  itself; every other role is `42501`, and `anon` and `service_role` hold no `EXECUTE`.
+
+The file's self-check asserts the function's `SECURITY DEFINER` and pin, who may execute it, the lane,
+and that a request with no identity is refused. `test_reading_a_service_s_logs_is_recorded.py`
+holds the rows, when one is due, the refusals and who reads them. `logs_test.ts` and `store_test.ts`
+hold the role check, the parameters, the query and its escaping, the ceilings and the order: the
+store, then the row, then the lines. `test-harness/test_log_pipeline.py` reads a dropped device's line
+back through the function on a running stack.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -5541,6 +5611,7 @@ refuses a missing or wrong token or secret.
 | [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA-01002 (AAS Part 2) read API over the mapping `aas-export` uses; queries as the caller, and every caller reads the same shells — see [Connecting an AAS client](#connecting-an-aas-client) |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
 | [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
+| [`service-logs`](functions/service-logs) | `Administrator` | A service's newest log lines from Loki, for System › Logs, built from parameters and never a query; each new read is recorded (`0225`) — see [Reading a service's logs is recorded](#reading-a-services-logs-is-recorded-0225) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
