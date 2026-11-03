@@ -51,11 +51,12 @@ HERE = Path(__file__).resolve().parent
 MIGRATION = HERE / "0222_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.sql"
 SCHEMA_FILE = HERE / "0168_every_schema_attached_to_a_device_counts.sql"
 
+# Eleven arguments, the three filters lists since 0227.
 ELEVEN = (
-    "p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, "
+    "p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], "
     "p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, "
     "p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, "
-    "p_changed_by uuid"
+    "p_changed_by uuid[]"
 )
 TEN_TYPES = (
     "integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, "
@@ -174,13 +175,15 @@ class TheActorFilter(Base):
 
     PAGE = (
         "SELECT public.audit_trail_page(p_entity_ids => %(ids)s::uuid[], p_include_purged => true,"
-        " p_changed_by => %(changed_by)s::uuid, p_action => %(action)s, p_limit => %(limit)s,"
+        " p_changed_by => %(changed_by)s::uuid[], p_action => %(action)s::text[], p_limit => %(limit)s,"
         " p_before_recorded_at => %(before_at)s::timestamptz, p_before_id => %(before_id)s::bigint);"
     )
 
     def page(self, as_user=None, changed_by=None, action=None, limit=None, cursor=None):
         """The page over this suite's subjects, deleted ones included (none of them is live)."""
-        args = {"ids": SUBJECTS, "changed_by": changed_by, "action": action, "limit": limit,
+        # One-element lists: the single person and action, as the filter sends one (0227).
+        args = {"ids": SUBJECTS, "changed_by": [changed_by] if changed_by else None,
+                "action": [action] if action else None, "limit": limit,
                 "before_at": (cursor or {}).get("recorded_at"), "before_id": (cursor or {}).get("id")}
         if as_user:
             return self.as_person(as_user, self.PAGE, args)[0][0]
@@ -410,7 +413,7 @@ class OneSignature(Base):
         for path in sorted(HERE.glob("[0-9][0-9][0-9][0-9]_*.sql")):
             for m in declared.finditer(path.read_text(encoding="utf-8")):
                 found.append(path.name)
-                self.assertTrue(m.group(1).rstrip().endswith("p_changed_by uuid DEFAULT NULL::uuid"),
+                self.assertTrue(m.group(1).rstrip().endswith("p_changed_by uuid[] DEFAULT NULL::uuid[]"),
                                 f"{path.name} declares audit_trail_page without p_changed_by last")
         self.assertEqual(sorted(found), ["0001_baseline_schema.sql",
                                          "0168_every_schema_attached_to_a_device_counts.sql"])

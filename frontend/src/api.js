@@ -2684,7 +2684,11 @@ const apiMethods = {
 
     if (path.includes('/audit-trail')) {
       const url = new URL(path, window.location.origin);
-      const entityType = url.searchParams.get('entity_type');
+      // Each filter is a comma-separated list, matched as any of its values; absent or empty is no
+      // constraint. One value is the one-element list.
+      const listParam = (key) => (url.searchParams.get(key) || '')
+        .split(',').map(v => v.trim()).filter(Boolean);
+      const entityTypes = listParam('entity_type');
       // Pushed down as a SQL predicate, matching the entity id and the audit-snapshot fields the
       // timeline labels a lane from, so a deleted entity is still searchable by name.
       const search = (url.searchParams.get('search') || '').trim();
@@ -2694,14 +2698,14 @@ const apiMethods = {
       // INSERT / UPDATE / DELETE. Filtered in SQL rather than client-side because the row limit
       // is applied by the database: filtering after the fact would page through 200 mixed rows
       // and then show whatever fraction of them happened to be deletions.
-      const action = (url.searchParams.get('action') || '').trim().toUpperCase();
+      const actions = listParam('action').map(a => a.toUpperCase());
       const limit = Number.parseInt(url.searchParams.get('limit') || '', 10);
       // The timeline's range control is pushed down as a SQL predicate: `limit` applies to rows
       // ordered newest first, so a client-side window would spend the budget on rows it then discards.
       const since = (url.searchParams.get('since') || '').trim();
       const until = (url.searchParams.get('until') || '').trim();
-      // Whose changes: the `changed_by` id, a person's or a machine identity's (0222).
-      const changedBy = (url.searchParams.get('changed_by') || '').trim();
+      // Whose changes: `changed_by` ids, people's or machine identities' (0222).
+      const changedBy = listParam('changed_by');
 
       // The keyset cursor: both halves or neither. `recorded_at` is not unique (one transaction's rows
       // share one `now()`), so the id is what makes the position exact. The RPC ignores a half-cursor.
@@ -2720,7 +2724,7 @@ const apiMethods = {
       // returns the purged count, which drives the control that reveals them.
       const includePurged = url.searchParams.get('include_purged') === 'true';
 
-      if (action && !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, action)) {
+      if (actions.some(a => !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, a))) {
         // An action the client does not know about. Refusing beats widening: returning every row
         // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
         return [];
@@ -2729,20 +2733,20 @@ const apiMethods = {
       const { data, error } = await supabase.rpc('audit_trail_page', {
         p_limit: Number.isFinite(limit) && limit > 0 ? limit : 200,
         p_include_purged: includePurged,
-        // Normalised to the stored form: the trigger writes TG_TABLE_NAME ('cells' / 'gateways' /
+        // Arrays, each matched as any of its values, and null for no constraint (0227). Kinds are
+        // normalised to the stored form: the trigger writes TG_TABLE_NAME ('cells' / 'gateways' /
         // 'devices') and the UI offers 'CELL' / 'GATEWAY' / 'DEVICE'. Read from `constants.js`, shared
-        // with the dropdown that offers them, so a kind cannot be offered without being resolvable. An
-        // unrecognised kind is passed through rather than nulled.
-        p_entity_type: entityType
-          ? (ENTITY_TABLE_BY_KIND[entityType.toUpperCase()] || entityType)
+        // with the filter that offers them, so a kind cannot be offered without being resolvable. An
+        // unrecognised kind is passed through rather than dropped, and matches nothing.
+        p_entity_type: entityTypes.length
+          ? entityTypes.map(k => ENTITY_TABLE_BY_KIND[k.toUpperCase()] || k)
           : null,
-        p_action: action || null,
+        p_action: actions.length ? actions : null,
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,
         p_search: search || null,
         p_since: since || null,
         p_until: until || null,
-        // Sent only when set, so an unfiltered page still reads a database from before 0222.
-        ...(changedBy ? { p_changed_by: changedBy } : {}),
+        p_changed_by: changedBy.length ? changedBy : null,
         // Sent only with a cursor, both halves or neither.
         ...(hasCursor
           ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }

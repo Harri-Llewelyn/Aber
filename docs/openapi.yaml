@@ -847,9 +847,13 @@ paths:
         previous answer's `next_cursor` back as `p_before_recorded_at` and `p_before_id`. A null
         `next_cursor` is the only end of the data.
 
-        `p_changed_by` keeps the rows one person or machine identity wrote, matched on `changed_by`
-        (`0222`). Any role that reads the trail may filter by any id; the same policies decide which
-        of that actor's rows come back.
+        `p_entity_type`, `p_action` and `p_changed_by` are arrays (`0227`). Each keeps the rows
+        that match any of its values, and the three are combined with AND. Null or an empty array is
+        no constraint, and a one-element array is that one value.
+
+        `p_changed_by` keeps the rows those people or machine identities wrote, matched on
+        `changed_by` (`0222`). Any role that reads the trail may filter by any id; the same
+        policies decide which of those actors' rows come back.
       requestBody:
         content:
           application/json:
@@ -858,15 +862,15 @@ paths:
               properties:
                 p_limit: { type: integer, default: 200, description: 'Rows per page, 1 to 1000.' }
                 p_include_purged: { type: boolean, default: false, description: 'Include rows about an area, cell, gateway, device or schema no live table holds.' }
-                p_entity_type: { type: string, description: 'One `AuditTrailEntry.entity_type`, e.g. `devices`.' }
-                p_action: { type: string, description: 'One `AuditTrailEntry.action`, e.g. `UPDATE`.' }
+                p_entity_type: { type: array, nullable: true, items: { type: string }, description: 'Any of these `AuditTrailEntry.entity_type` values, e.g. `["gateways", "devices"]`. Null or empty is no constraint.' }
+                p_action: { type: array, nullable: true, items: { type: string }, description: 'Any of these `AuditTrailEntry.action` values, e.g. `["INSERT", "DELETE"]`. Null or empty is no constraint.' }
                 p_entity_ids: { type: array, items: { type: string, format: uuid }, description: 'Only these entities. An empty array matches nothing.' }
                 p_since: { type: string, format: date-time }
                 p_until: { type: string, format: date-time }
                 p_before_recorded_at: { type: string, format: date-time, description: 'The cursor, with `p_before_id`.' }
                 p_before_id: { type: integer, format: int64 }
                 p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
-                p_changed_by: { type: string, format: uuid, description: 'Only the rows this person or machine identity wrote: the `changed_by` id.' }
+                p_changed_by: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'Only the rows these people or machine identities wrote: any of these `changed_by` ids. Null or empty is no constraint.' }
       responses:
         '200':
           description: One page, and facts about the whole match.

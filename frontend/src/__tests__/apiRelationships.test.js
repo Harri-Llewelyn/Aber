@@ -543,7 +543,30 @@ describe('audit trail filtering', () => {
     // log_audit_trail_event() writes TG_TABLE_NAME ('devices'); the dropdown offers 'DEVICE'.
     // An exact match would never have hit even once the parameter was honoured at all.
     await api.get('/api/v1/audit-trail?entity_type=DEVICE');
-    expect(rpcArgs().p_entity_type).toBe('devices');
+    expect(rpcArgs().p_entity_type).toEqual(['devices']);
+  });
+
+  it('sends each filter as a list, one value as a one-element list, and none as null (0227)', async () => {
+    const a = 'a0000000-0000-4000-8000-000000000003'
+    const b = 'a0000000-0000-4000-8000-000000000004'
+    await api.get(`/api/v1/audit-trail?entity_type=GATEWAY,DEVICE&action=INSERT,DELETE&changed_by=${a},${b}`);
+    expect(rpcArgs().p_entity_type).toEqual(['gateways', 'devices']);
+    expect(rpcArgs().p_action).toEqual(['INSERT', 'DELETE']);
+    expect(rpcArgs().p_changed_by).toEqual([a, b]);
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/audit-trail?action=UPDATE');
+    expect(rpcArgs().p_action).toEqual(['UPDATE']);
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/audit-trail?entity_type=&action=');
+    expect(rpcArgs().p_entity_type).toBeNull();
+    expect(rpcArgs().p_action).toBeNull();
+    expect(rpcArgs().p_changed_by).toBeNull();
+  });
+
+  it('refuses a list naming an action it does not know, rather than widening it', async () => {
+    const rows = await api.get('/api/v1/audit-trail?action=INSERT,EXPLODED');
+    expect(rows).toEqual([]);
+    expect(rpcArgs()).toBeUndefined();
   });
 
   it('honours the row limit', async () => {
@@ -607,14 +630,13 @@ describe('audit trail filtering', () => {
     expect(rpcArgs().p_entity_ids).toBeNull();
   });
 
-  it('sends Changed by as p_changed_by, and nothing when it is not set (0222)', async () => {
+  it('sends Changed by as p_changed_by, and null when it is not set (0222, 0227)', async () => {
     const id = 'a0000000-0000-4000-8000-000000000003';
     await api.get(`/api/v1/audit-trail?changed_by=${id}`);
-    expect(rpcArgs().p_changed_by).toBe(id);
-    // Left out rather than null, so an unfiltered page still reads a database from before 0222.
+    expect(rpcArgs().p_changed_by).toEqual([id]);
     state.rpcCalls.length = 0;
     await api.get('/api/v1/audit-trail');
-    expect(rpcArgs()).not.toHaveProperty('p_changed_by');
+    expect(rpcArgs().p_changed_by).toBeNull();
   });
 
   it('sends no search rather than an empty one', async () => {

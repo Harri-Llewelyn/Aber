@@ -1130,6 +1130,15 @@ export const SUITES = {
       'expiry, a decision from before 0222 and a client write leave none; and that the function is ' +
       'declared once, with p_changed_by last, however 0168 and 0222 replay over it.',
   },
+  'supabase/migrations/test_an_audit_trail_filter_takes_several_values.py': {
+    lanes: ['db'],
+    why:
+      '0227 -- that audit_trail_page() keeps the rows matching any value of each of its three ' +
+      'lists, combined with AND; that a one-element list returns what the single value did, and ' +
+      'NULL or an empty list is no constraint; that the cursor, the totals, the purged rule, the ' +
+      "search and the caller's own policies hold under lists; and that one list form is left, " +
+      'with its grants, however 0001, 0168, 0222 and 0227 replay over the single-value form.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
