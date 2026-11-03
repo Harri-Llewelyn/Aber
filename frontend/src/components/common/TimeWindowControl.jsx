@@ -5,8 +5,8 @@ import { Tooltip } from './Tooltip'
 import { IconCalendar, IconChevronLeft, IconChevronRight } from './Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, chooseSpan, holdsNow, jumpTo, localMinute, parseDay,
-  parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds, windowWords
+  ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, chooseSpan, holdsNow, jumpTo, localMinute,
+  parseDay, parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds, windowWords
 } from '../../utils/timeWindow'
 
 /** How often the control looks at the clock, so the words and the › arrow follow it. */

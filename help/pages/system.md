@@ -56,7 +56,7 @@ The Logs tab shows the newest lines one service wrote to its log, newest first. 
 1. Pick the service in the **Service** list. It opens on the ingestion service, if it has written anything, because most faults show there first.
 2. Type in the search box to keep only lines that contain that text. The match is exact, capital letters included.
 3. Pick a **level** to keep only errors or warnings, for example.
-4. Choose how far back to look in the **time window**, after the search box. It opens on **Last 1 hour**. Select the words between its arrows to pick a range from the last 15 minutes to the last 7 days, jump to a day, or set a custom range. Choose **Day** or **Week** to see a whole day or week, and **‹** or **›** to step back or forward one at a time.
+4. Choose how far back to look in the **time window**, after the search box. It opens on **Last 1 hour**. Select the words between its arrows to jump to a day or set a custom range. The same list has ranges from the last 15 minutes to the last 7 days. Choose **Day** or **Week** to see a whole day or week, and **‹** or **›** to step back or forward one at a time.
 5. Select **Refresh** to read again. To read again on its own, pick an interval in the right half of the same button, such as **30 s**.
 
 - **Time** is when the service wrote the line, in your time zone, to the thousandth of a second.
