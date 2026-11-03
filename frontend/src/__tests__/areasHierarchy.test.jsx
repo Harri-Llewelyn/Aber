@@ -768,36 +768,84 @@ describe('AreasTab files cells into areas', () => {
     expect(within(panel()).getByRole('link', { name: /Old Bay/ })).toHaveTextContent('ARCHIVED')
   })
 
-  it('files a dropped cell with one write naming the area, and says so', async () => {
-    const showToast = vi.fn()
-    await renderAreas({ showToast })
-    const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-4' }), setData: vi.fn() }
-    const rowB = rowFor('Press Hall')
-    fireEvent.dragOver(rowB, { dataTransfer })
-    await act(async () => { fireEvent.drop(rowB, { dataTransfer }) })
+  /** Drops the chip of `cellId` on `target`, as a drag from the page does. */
+  const dropCell = async (cellId, target) => {
+    const dataTransfer = { getData: () => JSON.stringify({ cell_id: cellId }), setData: vi.fn() }
+    fireEvent.dragOver(target, { dataTransfer })
+    await act(async () => { fireEvent.drop(target, { dataTransfer }) })
+  }
+  const queue = () => screen.getByText(/1 unfiled cell/).parentElement
+  const filingDialog = () => document.querySelector('.modal')
+  const PLACE_CLEARED = /Its place on North Shop's plan is cleared\. Set a new one on the Cells page\./
 
+  it('asks before filing a dropped cell, naming the cell and the area, and writes nothing yet', async () => {
+    await renderAreas()
+    await dropCell('cell-4', rowFor('Press Hall'))
+
+    expect(api.put).not.toHaveBeenCalled()
+    const dialog = filingDialog()
+    expect(within(dialog).getByRole('heading', { name: 'Move Cell' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Move Loose End to Press Hall?')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Move Cell' })).toHaveClass('btn-primary')
+  })
+
+  it('files the cell with one write naming the area once the dialog is confirmed, and says so', async () => {
+    const showToast = vi.fn()
+    let finish
+    api.put.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    await renderAreas({ showToast })
+    await dropCell('cell-4', rowFor('Press Hall'))
+    await act(async () => { fireEvent.click(within(filingDialog()).getByRole('button', { name: 'Move Cell' })) })
+
+    expect(within(filingDialog()).getByRole('button', { name: /Moving…/ })).toBeDisabled()
+    await act(async () => { finish({}) })
     expect(api.put).toHaveBeenCalledTimes(1)
     expect(api.put.mock.calls[0][0]).toBe('/api/v1/cells/cell-4')
     // Only the name and the area: nothing else is sent back with the move.
     expect(api.put.mock.calls[0][1]).toEqual({ cell_name: 'Loose End', area_id: 'area-b' })
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Press Hall/), 'success', { to: cellUrl('cell-4') })
+    expect(filingDialog()).toBeNull()
   })
 
-  it('un-files a cell dropped back onto the queue', async () => {
+  it('writes nothing on Cancel, and leaves the cell where it was', async () => {
     await renderAreas()
-    const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-1' }), setData: vi.fn() }
-    const queue = screen.getByText(/1 unfiled cell/).parentElement
-    fireEvent.dragOver(queue, { dataTransfer })
-    await act(async () => { fireEvent.drop(queue, { dataTransfer }) })
-    expect(api.put.mock.calls[0][1]).toMatchObject({ area_id: '' })
+    await dropCell('cell-1', rowFor('Press Hall'))
+    fireEvent.click(within(filingDialog()).getByRole('button', { name: 'Cancel' }))
+
+    expect(filingDialog()).toBeNull()
+    expect(api.put).not.toHaveBeenCalled()
+    expect(within(rowFor('North Shop')).getByText('Bay 1')).toBeInTheDocument()
+    expect(within(rowFor('Press Hall')).queryByText('Bay 1')).toBeNull()
   })
 
-  it('does not write for a drop that changes nothing', async () => {
+  it('says a placed cell loses its place, and says nothing of a place to a cell with none', async () => {
     await renderAreas()
-    const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-1' }), setData: vi.fn() }
-    const rowA = rowFor('North Shop')
-    fireEvent.dragOver(rowA, { dataTransfer })
-    await act(async () => { fireEvent.drop(rowA, { dataTransfer }) })
+    await dropCell('cell-1', rowFor('Press Hall'))
+    expect(within(filingDialog()).getByText('Move Bay 1 to Press Hall?', { exact: false })).toHaveTextContent(PLACE_CLEARED)
+    fireEvent.click(within(filingDialog()).getByRole('button', { name: 'Cancel' }))
+
+    await dropCell('cell-3', rowFor('North Shop'))
+    expect(within(filingDialog()).getByText('Move Paint Shop to North Shop?')).toBeInTheDocument()
+    expect(filingDialog()).not.toHaveTextContent(/place/i)
+  })
+
+  it('asks to unfile a cell dropped back onto the queue, then writes it out of its area', async () => {
+    await renderAreas()
+    await dropCell('cell-1', queue())
+
+    expect(api.put).not.toHaveBeenCalled()
+    const dialog = filingDialog()
+    expect(within(dialog).getByRole('heading', { name: 'Unfile Cell' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Take Bay 1 out of North Shop?', { exact: false })).toHaveTextContent(PLACE_CLEARED)
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Unfile Cell' })) })
+    expect(api.put).toHaveBeenCalledTimes(1)
+    expect(api.put.mock.calls[0][1]).toEqual({ cell_name: 'Bay 1', area_id: '' })
+  })
+
+  it('neither asks nor writes for a drop on the cell\'s own area', async () => {
+    await renderAreas()
+    await dropCell('cell-1', rowFor('North Shop'))
+    expect(filingDialog()).toBeNull()
     expect(api.put).not.toHaveBeenCalled()
   })
 
@@ -813,10 +861,8 @@ describe('AreasTab files cells into areas', () => {
   it('withholds the drag and the actions from somebody who may not manage cells', async () => {
     await renderAreas({ hasPermission: () => false })
     expect(screen.getByRole('button', { name: /New Area/ })).toBeDisabled()
-    const dataTransfer = { getData: () => JSON.stringify({ cell_id: 'cell-4' }), setData: vi.fn() }
-    const rowB = rowFor('Press Hall')
-    fireEvent.dragOver(rowB, { dataTransfer })
-    await act(async () => { fireEvent.drop(rowB, { dataTransfer }) })
+    await dropCell('cell-4', rowFor('Press Hall'))
+    expect(filingDialog()).toBeNull()
     expect(api.put).not.toHaveBeenCalled()
   })
 })
