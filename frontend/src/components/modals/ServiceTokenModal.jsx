@@ -9,6 +9,7 @@ import { formatDate } from '../../utils/format'
 import { i3xBaseUrl, i3xClientSetups } from '../../utils/i3xClientSetups'
 import { i3xUrl } from '../../constants'
 import { identityUrl } from '../../routes'
+import { REVOCATION_REACHES, SIGNATURE_ONLY } from '../../utils/revocationScope'
 import { Tooltip } from '../common/Tooltip'
 
 const COPY_FEEDBACK_MS = 1600
@@ -215,12 +216,12 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
                 <option key={d} value={d}>{d} days</option>
               ))}
             </select>
-            {/* Why the ceiling exists: revocation reaches PostgREST and nothing else, so for the
-                other services the expiry is the only bound. */}
+            {/* Why the ceiling exists: for the services that check only the signature, the expiry
+                is the only bound. */}
             <div className="form-hint">
-              90 days is the ceiling. Prefer the shortest that works: revoking reaches the API
-              only, so for storage, realtime, the edge functions and Studio the expiry is the only
-              limit.
+              90 days is the ceiling. Prefer the shortest that works: revoking stops a token at
+              {' '}{REVOCATION_REACHES}, but {SIGNATURE_ONLY} check only its signature, so for them
+              the expiry is the only limit.
             </div>
           </div>
         </>
@@ -287,8 +288,8 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
             <div className="callout">
               <IconShieldAlert size={14} className="callout-icon" />
               <div>
-                Revoking this token stops it reaching <strong>the API</strong>. Storage, realtime,
-                the edge functions and Studio verify the signature independently and will keep
+                Revoking this token stops it at <strong>{REVOCATION_REACHES}</strong> from their
+                next request. {SIGNATURE_ONLY} verify the signature themselves and will keep
                 accepting it until {expiresOn}.
               </div>
             </div>

@@ -1714,8 +1714,9 @@ const apiMethods = {
   /**
    * Withdraw a minted token, so PostgREST refuses it from the next request onward.
    *
-   * Not a complete revocation: storage, realtime, the edge runtime and Studio verify the signature
-   * themselves and consult no denylist, so a withdrawn token satisfies those until it expires.
+   * PostgREST's refusal reaches i3X, aas-api and the Factory+ Directory, which check each caller
+   * through it. Storage and realtime verify the signature themselves and consult no denylist, so a
+   * withdrawn token satisfies those until it expires (`utils/revocationScope.js`).
    */
   revokeServiceToken: async (jti) => {
     const { data, error } = await supabase.rpc('revoke_service_token', { p_jti: jti });

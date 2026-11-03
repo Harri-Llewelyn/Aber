@@ -111,16 +111,17 @@ describe('ServiceTokenModal', () => {
   })
 
   /**
-   * The scope is read from the response, not hardcoded: revocation is a PostgREST hook, and
-   * storage, realtime, the edge runtime and Studio keep accepting a revoked token until it
+   * The scope is read from the response, not hardcoded: revocation reaches PostgREST and what
+   * checks a caller through it, and Storage and realtime keep accepting a revoked token until it
    * expires.
    */
-  it('states that revoking reaches the API only', async () => {
+  it('states what revoking reaches and what it does not', async () => {
     api.mintServiceToken.mockResolvedValue(MINTED)
     open()
 
     screen.getByRole('button', { name: /Issue Token/i }).click()
-    await waitFor(() => expect(screen.getByText(/verify the signature independently/i)).toBeTruthy())
+    await waitFor(() => expect(document.body.textContent.replace(/\s+/g, ' ')).toMatch(
+      /stops it at the API, i3X, the AAS API and the Factory\+ Directory from their next request\. Storage and realtime verify the signature themselves/))
   })
 
   /** Issue Token, then wait for the reveal step. */
@@ -153,7 +154,9 @@ describe('ServiceTokenModal', () => {
 
       await mint({ principal: { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: ['proposal:create'] }, principalName: 'Schema sync' })
       expect(screen.queryByRole('group', { name: 'Connect' })).toBeNull()
-      expect(screen.queryByText(/i3X/)).toBeNull()
+      // i3X is still named in what revoking reaches; no setup or address for it is offered.
+      expect(screen.queryByText(/i3X Explorer/)).toBeNull()
+      expect(screen.queryByDisplayValue(/i3x\.plant\.example/)).toBeNull()
     })
 
     it('gives the i3X server with /v1 on it, and a bearer token as the authentication', async () => {
@@ -233,12 +236,15 @@ describe('ServiceTokenModal', () => {
     })
   })
 
-  it('names Studio among the services a revocation does not reach, before and after the mint', async () => {
+  it('names only Storage and realtime as what a revocation does not reach, before and after the mint', async () => {
     api.mintServiceToken.mockResolvedValue(MINTED)
     open()
-    expect(document.body.textContent).toMatch(/edge functions and Studio the expiry is the only limit/)
+    const text = () => document.body.textContent.replace(/\s+/g, ' ')
+    expect(text()).toMatch(/but Storage and realtime check only its signature, so for them the expiry is the only limit/)
+    expect(text()).not.toMatch(/edge functions|Studio/)
     screen.getByRole('button', { name: /Issue Token/i }).click()
-    await waitFor(() => expect(document.body.textContent).toMatch(/the edge functions and Studio verify the signature/))
+    await waitFor(() => expect(text()).toMatch(/Storage and realtime verify the signature themselves and will keep accepting it/))
+    expect(text()).not.toMatch(/edge functions|Studio/)
   })
 
   /**

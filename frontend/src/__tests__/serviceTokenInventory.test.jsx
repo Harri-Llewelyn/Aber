@@ -53,7 +53,8 @@ describe('tokenStatus with a denylist', () => {
     // either way -- so the distinction lives in the detail line rather than in the badge.
     expect(tokenStatusDetail(status, NOW)).toMatch(/revoked/i)
     // And the scope is still stated, because a revoked token is not a dead one everywhere.
-    expect(tokenStatusDetail(status, NOW)).toMatch(/storage, realtime/i)
+    expect(tokenStatusDetail(status, NOW)).toMatch(/refused by the API, i3X, the AAS API and the Factory\+ Directory, and still accepted by Storage and realtime/)
+    expect(tokenStatusDetail(status, NOW)).not.toMatch(/edge functions|Studio/)
   })
 
   it('mentions revocations alongside a live count, so the smaller number is legible', () => {
@@ -213,10 +214,11 @@ describe('ServiceTokenInventoryModal', () => {
   })
 
   /** A revoked token is not a deleted one; the scope is stated where the control is offered. */
-  it('states that revoking reaches the API only, and cannot be undone', () => {
+  it('states what revoking reaches, what it does not, and that it cannot be undone', () => {
     const { container } = openWith([mint('one', 10)])
     const copy = container.textContent.replace(/\s+/g, ' ')
-    expect(copy).toMatch(/Storage, realtime, the edge functions and Studio verify the signature independently/i)
+    expect(copy).toMatch(/Revoking stops a token at the API, i3X, the AAS API and the Factory\+ Directory\. Storage and realtime verify the signature themselves/)
+    expect(copy).not.toMatch(/edge functions|Studio/)
     expect(copy).toMatch(/cannot be undone/i)
   })
 })

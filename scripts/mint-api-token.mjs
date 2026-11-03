@@ -26,9 +26,9 @@
 //
 // THE EXPIRY IS A REAL DECISION, NOT A DEFAULT TO IGNORE. This token is pasted into a file on
 // somebody's laptop -- a client's settings, or `claude_desktop_config.json`.
-// `revoke_service_token('<jti>')` withdraws it from PostgREST, and so from i3X, which authenticates
-// every request through PostgREST. Storage, realtime and the edge runtime check only the signature
-// and accept it until it expires, so for them the expiry is the only bound: 30 days is the default
+// `revoke_service_token('<jti>')` withdraws it from PostgREST, and so from i3X, aas-api and the
+// Factory+ Directory, which check each caller through PostgREST. Storage and realtime check only the
+// signature and accept it until it expires, so for them the expiry is the only bound: 30 days is the default
 // and 90 the ceiling. Never rotate the signing key to withdraw one token; that invalidates every
 // token in the stack.
 //
@@ -40,7 +40,7 @@
 //
 // So `record_service_token_issued()` (0043) is called FIRST, and if it refuses, nothing is printed
 // and this exits non-zero. That RPC enforces the same 90-day ceiling this script does -- deliberate
-// duplication, because the ceiling is the only bound storage, realtime and the edge runtime honour,
+// duplication, because the ceiling is the only bound storage and realtime honour,
 // and it should not be removable by editing one file.
 //
 // Usage:
@@ -60,8 +60,8 @@ const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 /**
  * THE CEILING, MIRRORED BY `service_token_max_days()` IN 0043.
  *
- * 90 IS THE MAXIMUM AND 30 THE DEFAULT. Revocation reaches PostgREST and i3X but not storage,
- * realtime or the edge runtime, so for those the expiry is the only bound -- and a bound that
+ * 90 IS THE MAXIMUM AND 30 THE DEFAULT. Revocation reaches PostgREST, i3X, aas-api and the Factory+
+ * Directory, but not storage or realtime, so for those the expiry is the only bound -- and a bound that
  * applies only when somebody remembers to pass a flag is not one. Asking for more is an error rather
  * than a clamp, because silently issuing something shorter than requested is how an operator ends up
  * surprised by an expiry.
@@ -95,8 +95,8 @@ if (!Number.isFinite(days) || days <= 0) {
 if (days > MAX_DAYS) {
   console.error(`--days may not exceed ${MAX_DAYS}, got ${days}.`);
   console.error(
-    'Revoking a token reaches PostgREST and i3X, but storage, realtime and the edge runtime check\n' +
-    'only the signature, so for them the expiry is the only bound. Never rotate the signing key\n' +
+    'Revoking a token reaches PostgREST, i3X, aas-api and the Factory+ Directory, but storage and\n' +
+    'realtime check only the signature, so for them the expiry is the only bound. Never rotate the signing key\n' +
     'to withdraw one token: that invalidates every token in the stack.'
   );
   process.exit(1);
@@ -249,6 +249,6 @@ if (asJson) {
   // The revocation and its scope go together: auth_pre_request() is a PostgREST hook, so a revoked
   // token still reaches every service that verifies the signature itself (i3x/README.md, "The token").
   console.error(`# jti ${jti} — revoke it against the API with`);
-  console.error(`# SELECT revoke_service_token('${jti}'); storage, realtime and the edge`);
-  console.error('# functions verify the signature only and will still accept it until it expires.');
+  console.error(`# SELECT revoke_service_token('${jti}'); storage and realtime`);
+  console.error('# verify the signature only and will still accept it until it expires.');
 }

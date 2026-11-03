@@ -4,6 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconShieldAlert } from '../common/Icons'
 import { identityUrl } from '../../routes'
+import { SIGNATURE_ONLY } from '../../utils/revocationScope'
 
 /**
  * Withdraw a whole machine identity, or put one back. One dialog for both directions because what a
@@ -105,8 +106,8 @@ export function ServicePrincipalRevocationModal({
                 </div>
               )}
               <div>
-                Reversible — but storage, realtime, the edge functions and Studio verify the
-                signature independently and will keep accepting existing tokens until they expire.
+                Reversible — but {SIGNATURE_ONLY} verify the signature themselves and will keep
+                accepting existing tokens until they expire.
               </div>
             </div>
           </div>
