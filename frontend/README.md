@@ -990,7 +990,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   (gateway ids, settings categories) passes `allowed: null` or `ready: false` until it arrives, so a
   good value is not tidied away first.
 - **A tab change drops the query**, so each tab opens on its own defaults. `keep` names the filters a
-  page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
+  page shares across its tabs: the Vocabulary search, and Capture's stored filter and search. A
+  function `keep(tab)` names them for the tab being opened: Capture keeps its two only between
+  Gateways and Devices, as Captures and Playbacks have no filters.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
 - **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
@@ -1031,7 +1033,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
-| Capture | `device` | `stored`, `search`, `gateway`, `sort`; `subject` |
+| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
 | Archives | `retired` | `sort` |
 | System | the group | `sort` |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
