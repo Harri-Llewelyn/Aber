@@ -213,6 +213,9 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['info bell badge',                '--accent-text',  on(paint('.notif-badge-info', 'background-image'), card),    AA_TEXT],
     ['warning bell badge',             '--warning-text', on(paint('.notif-badge-warning', 'background-image'), card), AA_TEXT],
     ['error bell badge',               '--danger-text',  on(paint('.notif-badge-error', 'background-image'), card),   AA_TEXT],
+    // An unsorted column's double arrow is all that tells a sortable header from a plain one, so
+    // it is an icon at 3:1 on the header's ground, which is --bg-base in every table.
+    ['idle sort arrow',                tokenIn(paint('.sort-arrow-idle', 'color')),             base, AA_LARGE],
     // The notification list: the timestamp is the dimmest text in it.
     ['notification time',              '--text-dim',     card,                              AA_TEXT],
     // A segment's name is text now, not only a tooltip: muted on the card, and the chosen one on

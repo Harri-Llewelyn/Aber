@@ -1580,7 +1580,12 @@ th[aria-sort] > .sort-header { color: var(--text-primary); }
   transform: translateY(-50%);
 }
 
-.sort-header:not(:hover):not(:focus-visible) > .sort-arrow-idle { visibility: hidden; }
+/* An unsorted column's double arrow is drawn at rest, so the header says it sorts before anyone
+   points at it, on a touch screen too. Quieter than the label; it steps up with the label on hover
+   or focus. */
+.sort-arrow-idle { color: var(--text-dim); }
+.sort-header:hover > .sort-arrow-idle,
+.sort-header:focus-visible > .sort-arrow-idle { color: var(--text-primary); }
 
 /* A sortable header's "?" (SortHeader's `help`), clear of the arrow the label's margin overhangs. */
 .sort-header + .help-tip { margin-left: 20px; }
