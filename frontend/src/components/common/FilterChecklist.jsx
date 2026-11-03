@@ -93,7 +93,7 @@ export function FilterChecklist({ label, options, value = NONE, onChange, counts
 
   const option = (o) => (
     <label key={o.value} className="filter-checklist-option">
-      <input type="checkbox" checked={chosen.has(o.value)} onChange={() => toggle(o.value)} />
+      <input type="checkbox" value={o.value} checked={chosen.has(o.value)} onChange={() => toggle(o.value)} />
       <span className="filter-checklist-label">{o.label}</span>
       {/* The space keeps the name "Online 4" rather than "Online4"; a flex row does not draw it. */}
       {counts && <>{' '}<span className="filter-checklist-count">{countOf(counts, o.value)}</span></>}

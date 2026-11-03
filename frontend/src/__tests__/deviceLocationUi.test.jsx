@@ -5,6 +5,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
 import { tabLink } from '../test/tabBar'
+import { filterList, offered, pick } from '../test/listFilters'
 import { helpTipText } from '../test/tooltips'
 
 /**
@@ -161,22 +162,24 @@ describe('the cell column', () => {
 })
 
 describe('the cell filter', () => {
-  const cellSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Cell' }) }
 
   it('matches an inherited device when filtering by its resolved cell', async () => {
     // The regression this guards: filtering on cell_id would match only explicitly filed
     // devices and silently hide every inherited one.
     await show([device()])
-    fireEvent.change(cellSelect(), { target: { value: CELL_1 } })
+    pick('Cell', CELL_1)
     expect(screen.getByText('CNC_01')).toBeInTheDocument()
   })
 
   it('offers Unassigned and Site-Wide as lanes beside the real cells', async () => {
     await show([device()])
-    const options = within(cellSelect()).getAllByRole('option').map(o => o.textContent)
+    const options = offered(filterList('Cell'))
     expect(options).toEqual(expect.arrayContaining([
-      'Any cell', 'Unassigned (needs a cell)', 'Site-Wide', 'Assembly', 'Paint Shop'
+      'Unassigned (needs a cell)', 'Site-Wide', 'Assembly', 'Paint Shop'
     ]))
+    // The two lanes are a group of their own, above the cells.
+    expect(offered(within(filterList('Cell')).getByRole('group', { name: 'Not in a cell' })))
+      .toEqual(['Unassigned (needs a cell)', 'Site-Wide'])
   })
 
   it('the Unassigned lane selects only devices with no resolved cell', async () => {
@@ -185,7 +188,7 @@ describe('the cell filter', () => {
       device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'AGV_01',
                effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned' })
     ])
-    fireEvent.change(cellSelect(), { target: { value: '__unassigned__' } })
+    pick('Cell', '__unassigned__')
     expect(screen.getByText('AGV_01')).toBeInTheDocument()
     expect(screen.queryByText('CNC_01')).not.toBeInTheDocument()
   })
@@ -197,7 +200,7 @@ describe('the cell filter', () => {
       device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'AGV_01',
                effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned' })
     ], { expect: 'BMS' })
-    fireEvent.change(cellSelect(), { target: { value: '__site_wide__' } })
+    pick('Cell', '__site_wide__')
     expect(screen.getByText('BMS')).toBeInTheDocument()
     expect(screen.queryByText('AGV_01')).not.toBeInTheDocument()
   })
@@ -611,13 +614,13 @@ describe('replay lanes', () => {
     // report zero exactly when the button is worth pressing.
     await show([device(), shadow()])
     openFilters()
-    await waitFor(() => expect(screen.getByText(/Show replay lanes \(1\)/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Show replay lanes 1' })).toBeInTheDocument())
   })
 
   it('shows them when asked, marked as what they are', async () => {
     await show([device(), shadow()])
     openFilters()
-    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Show replay lanes 1' }))
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     // The badge is on the ROW, not only implied by the filter: filters are forgotten, and the row
     // may be read later from a link or a screenshot.
@@ -637,8 +640,8 @@ describe('replay lanes', () => {
     // those combinations unreachable.
     await show([device(), shadow({ is_archived: true })])
     openFilters()
-    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Show replay lanes 1' }))
+    pick('Lifecycle', 'active', 'archived')
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     expect(screen.getAllByText('ARCHIVED').length).toBeGreaterThan(0)
   })
@@ -663,7 +666,7 @@ describe('the actions a shadow device does not offer', () => {
   const openShadowPanel = async () => {
     await show([device(), shadowDevice()])
     openFilters()
-    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Show replay lanes 1' }))
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(await screen.findByText('CNC_01 (replay)'))
     return within(document.querySelector('.context-panel'))

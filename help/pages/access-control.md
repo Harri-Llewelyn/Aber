@@ -11,7 +11,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 ## Finding a person
 
 - The **search** box matches the display name and the email address.
-- The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each option shows how many people it would list.
+- The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each takes several values: tick every one you want. Each value shows how many people have it, among those the other filter and the search let through.
 - People whose access is removed are hidden. Select **Show removed** to list them. The button shows how many there are, and appears only while there are some. While it is on, the status filter also offers **Access removed**.
 - A **Sign-in still open** row is never hidden. Its removal did not finish, so it still needs **Remove Access**.
 - **Clear filters** resets the search, both filters and Show removed. When nothing matches, the list says so.
@@ -94,7 +94,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 ## The other tabs
 
 - **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
-- The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count.
+- The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count. Tick every state you want.
 - Archived gateways are hidden. Select **Show archived** to list them. While it is on, the state filter also offers **Archived**. **Clear filters** resets the search, the filter and Show archived.
 - **Type** is the kind of gateway: Remote, Third-party, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.

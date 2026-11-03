@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
+import { pick } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -43,7 +44,7 @@ const show = async (rows, hasPermission = () => true) => {
   // Filters popover.
   if (rows.some(r => r.is_archived)) {
     fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'all' } })
+    await waitFor(() => pick('Lifecycle', 'active', 'archived'))
   }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 }

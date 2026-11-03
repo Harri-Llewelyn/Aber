@@ -53,7 +53,9 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { METRICS_TABS } from '../../navigation'
 import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
 
@@ -69,8 +71,8 @@ const CUSTOM_TYPE = '__custom__'
 // name), because Machinery and Robotics both define names like `Manufacturer`.
 const OPCUA_KEY_SEP = '::'
 
-// The catalog's Standard filter: '' is All standards, and this sentinel is Local extension, because
-// a local extension's own value, STANDARDS.CUSTOM, is '' too.
+// The catalog's Standard filter: nothing chosen is any standard, and this sentinel is Local
+// extension, because a local extension's own value, STANDARDS.CUSTOM, is '' too.
 const LOCAL_STANDARD_FILTER = '__local__'
 
 // The standards the Standard filter offers, in the Add Metric form's order. Local extension follows.
@@ -78,6 +80,15 @@ const FILTER_STANDARDS = STANDARD_OPTIONS.filter(o => o.value !== STANDARDS.CUST
 
 /** The Standard filter option a metric falls under. */
 const standardFilterValue = (m) => m.standard || LOCAL_STANDARD_FILTER
+
+/** No standard chosen. */
+const NO_STANDARDS = Object.freeze([])
+
+/** The Standard filter's values: the standards in the Add Metric form's order, then Local extension. */
+const STANDARD_FILTER_OPTIONS = [
+  ...FILTER_STANDARDS.map(o => ({ value: o.value, label: o.label })),
+  { value: LOCAL_STANDARD_FILTER, label: LOCAL_EXTENSION_LABEL },
+]
 
 /**
  * No semantic id, as the AAS export counts it: NULL and '' alike. The dashboard stores a blank id
@@ -209,14 +220,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useUrlState('search')
-  // The catalog's other filters: a standard (or LOCAL_STANDARD_FILTER), and metrics with no id.
-  const [standardFilter, setStandardFilter] = useUrlState('standard', '', {
+  // The catalog's other filters: standards (LOCAL_STANDARD_FILTER among them), any of which a metric
+  // may be under, and metrics with no id.
+  const [standardFilter, setStandardFilter] = useUrlList('standard', NO_STANDARDS, {
     allowed: [...FILTER_STANDARDS.map(o => o.value), LOCAL_STANDARD_FILTER]
   })
   const [unmappedOnly, setUnmappedOnly] = useUrlState('unmapped', false)
-  const catalogFilterCount = [catalogSearch, standardFilter, unmappedOnly].filter(Boolean).length
+  const catalogFilterCount = (catalogSearch ? 1 : 0) + (standardFilter.length ? 1 : 0) + (unmappedOnly ? 1 : 0)
   const clearCatalogFilters = () => {
-    setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(false)
+    setCatalogSearch(''); setStandardFilter([]); setUnmappedOnly(false)
   }
 
   /**
@@ -583,16 +595,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const matchesCatalogSearch = (m) =>
     !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
 
-  const matchesCatalogFilters = (m) =>
-    matchesCatalogSearch(m) &&
-    (!standardFilter || standardFilterValue(m) === standardFilter) &&
-    (!unmappedOnly || isUnmapped(m))
-
   const currentCatalog = catalog.filter(m => !m.deprecated)
-  const activeCatalog = currentCatalog.filter(matchesCatalogFilters)
-  // The filters' counts are over the whole active catalog, not what the search and the other filter
-  // leave, so they do not change while the operator types.
-  const standardCount = (value) => currentCatalog.filter(m => standardFilterValue(m) === value).length
+  // Standard is any of its values. Its counts are over what the search and Unmapped let through, as
+  // every list filter's are; Unmapped's own count is over the whole active catalog.
+  const { rows: activeCatalog, counts: facetCounts } = applyFacets(currentCatalog, [
+    { key: 'standard', chosen: standardFilter, values: m => [standardFilterValue(m)] },
+  ], m => matchesCatalogSearch(m) && (!unmappedOnly || isUnmapped(m)))
   const unmappedCount = currentCatalog.filter(isUnmapped).length
   // Its own tab, unfiltered: the search and the filters belong to the catalog tab.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
@@ -883,18 +891,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   placeholder="Search metrics…"
                   ariaLabel="Search the metric catalog"
                 />
-                <select
-                  className="form-control control-md"
+                <FilterDropdown
+                  label="Standard"
+                  noun="standard"
+                  plural="standards"
+                  options={STANDARD_FILTER_OPTIONS}
                   value={standardFilter}
-                  onChange={e => setStandardFilter(e.target.value)}
-                  aria-label="Filter the catalog by standard"
-                >
-                  <option value="">All standards ({currentCatalog.length})</option>
-                  {FILTER_STANDARDS.map(o => (
-                    <option key={o.value} value={o.value}>{o.label} ({standardCount(o.value)})</option>
-                  ))}
-                  <option value={LOCAL_STANDARD_FILTER}>{LOCAL_EXTENSION_LABEL} ({standardCount(LOCAL_STANDARD_FILTER)})</option>
-                </select>
+                  onChange={setStandardFilter}
+                  counts={facetCounts.standard}
+                  width="md"
+                />
                 <Tooltip text="Metrics with no semantic id. An AAS export writes them without one, so they cannot fill a Digital Nameplate field.">
                   <button
                     type="button"

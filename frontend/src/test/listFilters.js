@@ -52,3 +52,47 @@ export const offered = (group) => [...group.querySelectorAll('.filter-checklist-
 
 /** Closes whichever panel is open, as Escape does. */
 export const closePanel = () => fireEvent.keyDown(document, { key: 'Escape' })
+
+/**
+ * Chooses exactly `values` in the list filter `label`, by the values the page keeps (each
+ * checkbox's `value`), as a select's change event once chose one: a toolbar dropdown when there is
+ * one by that name, which is shut again by its button, otherwise the Filters panel's list, which is
+ * left open. No values chooses nothing.
+ */
+export function pick(label, ...values) {
+  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const group = isDropdown
+    ? within(openDropdown(label)).getByRole('group', { name: label })
+    : filterList(label)
+  const boxes = [...group.querySelectorAll('.filter-checklist-option input[type="checkbox"]')]
+  for (const want of values) {
+    if (!boxes.some(box => box.value === want)) throw new Error(`${label} offers no value ${want}`)
+  }
+  for (const box of boxes) {
+    if (box.checked !== values.includes(box.value)) fireEvent.click(box)
+  }
+  if (isDropdown) fireEvent.click(dropdownButton(label))
+}
+
+/** Each value the list filter `label` offers, as it reads with its count ("Online 4"), in order. */
+export function valuesShown(label) {
+  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const group = isDropdown
+    ? within(openDropdown(label)).getByRole('group', { name: label })
+    : filterList(label)
+  const texts = [...group.querySelectorAll('.filter-checklist-option')].map(o => o.textContent)
+  if (isDropdown) fireEvent.click(dropdownButton(label))
+  return texts
+}
+
+/** The values the list filter `label` has chosen, by the values the page keeps. */
+export function picked(label) {
+  const isDropdown = screen.queryAllByRole('button', { name: new RegExp(`^${escapeRe(label)}: `) }).length > 0
+  const group = isDropdown
+    ? within(openDropdown(label)).getByRole('group', { name: label })
+    : filterList(label)
+  const values = [...group.querySelectorAll('.filter-checklist-option input[type="checkbox"]')]
+    .filter(box => box.checked).map(box => box.value)
+  if (isDropdown) fireEvent.click(dropdownButton(label))
+  return values
+}

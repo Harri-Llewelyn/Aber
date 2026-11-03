@@ -31,6 +31,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { FiltersPopover } from '../common/FiltersPopover'
+import { FilterCheck, FilterDropdown, FilterList } from '../common/FilterChecklist'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -57,7 +58,7 @@ import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
-  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG,
+  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, availableTags, UNMODELLED_TAG,
   outOfVocabularyMetrics, OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
 import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
@@ -86,7 +87,10 @@ import {
   IconTrash
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import {
+  LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
+} from '../../utils/listFilters'
 import { DEVICES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
@@ -95,6 +99,19 @@ import { severityRank } from '../../utils/tableSort'
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
+
+/** No list filter chosen. */
+const NONE = Object.freeze([])
+
+/** The Status filter's values: a device can be several at once (offline and unmodelled). */
+const STATUS_OPTIONS = [
+  { value: 'online', label: 'Online' },
+  { value: 'offline', label: 'Offline / DDEATH' },
+  { value: 'unborn', label: 'Awaiting first birth' },
+  { value: 'overdue', label: 'Awaiting first birth (24h+)' },
+  { value: 'unmodelled', label: 'Publishing unmodelled metrics' },
+]
+const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
 
 /** Whether two lists of schema ids name the same schemas, in any order. */
 const sameSchemaSet = (a, b) => a.length === b.length && a.every(id => b.includes(id))
@@ -160,7 +177,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
-  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   // The card's tab, in the path: `/devices` or `/devices/quarantine`. A tab change drops the
   // query, so the Registered filters and the drawer, which belong to that tab, go with it.
   const [view, setView, viewHref] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
@@ -210,40 +227,39 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const editFormFor = (device) => ({ ...device, schema_ids: schemaIdsForDevice(device) })
 
   // Every filter is a query parameter, so a filtered list can be linked to and survives a reload.
-  // A drill-down from another page arrives as `?search=<id>` or `?schema=<uuid>`.
+  // A drill-down from another page arrives as `?search=<id>` or `?schema=<uuid>`. Each list filter
+  // holds several values, any of which a device may match (`?status=online,offline`).
   const [searchQuery, setSearchQuery] = useUrlState('search')
-  const [schemaFilter, setSchemaFilter] = useUrlState('schema', '', { allowed: loading ? null : schemas.map(s => s.schema_uuid) })
-  const [statusFilter, setStatusFilter] = useUrlState('status', '', { allowed: ['online', 'offline', 'unborn', 'overdue', 'unmodelled'] })
-  const [tagFilter, setTagFilter] = useUrlState('type')
-  const [gatewayFilter, setGatewayFilter] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.gateway_id) })
-  const [cellFilter, setCellFilter] = useUrlState('cell', '', {
+  const [schemaFilter, setSchemaFilter] = useUrlList('schema', NONE, { allowed: loading ? null : schemas.map(s => s.schema_uuid) })
+  const [statusFilter, setStatusFilter] = useUrlList('status', NONE, { allowed: STATUS_VALUES })
+  const [tagFilter, setTagFilter] = useUrlList('type')
+  const [gatewayFilter, setGatewayFilter] = useUrlList('gateway', NONE, { allowed: loading ? null : gateways.map(g => g.gateway_id) })
+  const [cellFilter, setCellFilter] = useUrlList('cell', NONE, {
     allowed: loading ? null : [CELL_FILTER_UNASSIGNED, CELL_FILTER_SITE_WIDE, ...cells.map(c => c.cell_id)]
   })
   const [attentionOnly, setAttentionOnly] = useUrlState('attention', false)
-  // Shadow devices. Off by default; not a `filterMode`, which is the archived axis.
+  // Shadow devices. Off by default; not a lifecycle, which is the archived axis.
   const [showShadows, setShowShadows] = useUrlState('replay', false)
-
-  const handleSchemaFilterChange = (val) => setSchemaFilter(val)
 
   const resetFilters = () => {
     setSearchQuery('')
-    setSchemaFilter('')
-    setStatusFilter('')
-    setTagFilter('')
-    setGatewayFilter('')
-    setCellFilter('')
+    setSchemaFilter([])
+    setStatusFilter([])
+    setTagFilter([])
+    setGatewayFilter([])
+    setCellFilter([])
     setAttentionOnly(false)
-    setFilterMode('active')
+    setLifecycle(LIFECYCLE_DEFAULT)
     setShowShadows(false)
   }
 
   // The Filters popover's own Clear: only the filters inside it, the schema hand-over included.
   const clearPopoverFilters = () => {
-    setFilterMode('active')
-    setTagFilter('')
-    handleSchemaFilterChange('')
-    setGatewayFilter('')
-    setCellFilter('')
+    setLifecycle(LIFECYCLE_DEFAULT)
+    setTagFilter([])
+    setSchemaFilter([])
+    setGatewayFilter([])
+    setCellFilter([])
     setShowShadows(false)
   }
 
@@ -561,45 +577,51 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
     a.cell_mismatch
 
-  // Memoised: the predicate resolves schemas, tags, gateway and cell for every device, and this
+  /**
+   * The statuses a device is in, as the Status filter offers them. Through the shared helper, not a
+   * literal comparison, so a row with a null status lands in the same lane the badge draws it in.
+   * "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived, and
+   * "Offline / DDEATH" is a claim about something the device sent.
+   */
+  const statusesOf = (a) => [
+    deviceLifecycleStatus(a) === DEVICE_STATUS.ONLINE && !a.is_archived && 'online',
+    deviceLifecycleStatus(a) === DEVICE_STATUS.OFFLINE && !isNeverSeen(a) && 'offline',
+    isNeverSeen(a) && 'unborn',
+    isProvisioningOverdue(a) && 'overdue',
+    unmodelledFor(a).length > 0 && 'unmodelled',
+  ].filter(Boolean)
+
+  /**
+   * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every inherited
+   * device would be hidden; and Unassigned and Site-Wide, which are lanes rather than rows in `cells`.
+   */
+  const cellLanesOf = (a) => [
+    needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) && CELL_FILTER_UNASSIGNED,
+    a.location_source === SOURCE_SITE_WIDE && CELL_FILTER_SITE_WIDE,
+    a.effective_cell_id,
+  ].filter(Boolean)
+
+  // Memoised: the facets resolve schemas, tags, gateway and cell for every device, and this
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
-  // miss a value the predicate reads and that filter stops responding.
-  const matchingAssets = useMemo(() => assets.filter(a => {
+  // miss a value the facets read and that filter stops responding. Each list filter is any of its
+  // values; the filters combine with AND, and each value's count is over what the others let through.
+  const { rows: matchingAssets, counts: facetCounts } = useMemo(() => applyFacets(assets, [
+    { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
+    // Matches any attached schema, so a device carrying several is found by each of them.
+    { key: 'schema', chosen: schemaFilter, values: a => schemasForDevice(a, schemas).map(sc => sc.schema_uuid) },
+    { key: 'type', chosen: tagFilter, values: a => deviceTagList(a, schemasForDevice(a, schemas), latestFor(a), catalog) },
+    { key: 'gateway', chosen: gatewayFilter, values: a => [a.active_gateway_id || ''] },
+    { key: 'cell', chosen: cellFilter, values: cellLanesOf },
+    { key: 'status', chosen: statusFilter, values: statusesOf },
+  ], (a) => {
     // Quarantined devices belong to the Quarantine queue card and nowhere else. The two lists come
     // from different sources, so this is the only place the separation is enforced.
     if (a.is_quarantined) return false
-
     // Replay lanes are out by default: `ensure_shadow_devices()` mints one per captured device when
-    // a playback starts, which would otherwise double the list. Not folded into `filterMode`, which
-    // is the archived axis; a shadow can be archived or not.
+    // a playback starts, which would otherwise double the list. Not a lifecycle, which is the
+    // archived axis; a shadow can be archived or not.
     if (!showShadows && a.shadow_of) return false
-
-    if (filterMode === 'active'   && a.is_archived) return false
-    if (filterMode === 'archived' && !a.is_archived) return false
-    // Matches any attached schema, so a device carrying several is found by each of them.
-    if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
-    if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
-    if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
-    // The resolved cell, not the explicit override, or every inherited device would be hidden.
-    // Unassigned and Site-Wide are lanes, not rows in `cells`.
-    if (cellFilter === CELL_FILTER_UNASSIGNED) {
-      if (!needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null)) return false
-    } else if (cellFilter === CELL_FILTER_SITE_WIDE) {
-      if (a.location_source !== SOURCE_SITE_WIDE) return false
-    } else if (cellFilter && (a.effective_cell_id || '') !== cellFilter) return false
     if (attentionOnly && !needsAttention(a)) return false
-
-    // Through the shared helper, not a literal comparison, so a row with a null status lands in
-    // the same lane the badge draws it in rather than in neither.
-    if (statusFilter === 'online'   && (deviceLifecycleStatus(a) !== DEVICE_STATUS.ONLINE || a.is_archived)) return false
-    // "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived. This
-    // option is labelled "Offline / DDEATH", which is a claim about something the device sent, so
-    // a device that has never sent anything is excluded here and answered by `unborn` below.
-    if (statusFilter === 'offline'  && (deviceLifecycleStatus(a) !== DEVICE_STATUS.OFFLINE || isNeverSeen(a))) return false
-    if (statusFilter === 'unborn'   && !isNeverSeen(a)) return false
-    if (statusFilter === 'overdue'  && !isProvisioningOverdue(a)) return false
-    if (statusFilter === 'unmodelled' && unmodelledFor(a).length === 0) return false
-
     if (searchQuery) {
       // Searchable by everything an engineer might paste in: the friendly name, the internal
       // UUID (for log correlation), the issued Sparkplug id and the one the device publishes under.
@@ -610,7 +632,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     }
     return true
   }), [
-    assets, filterMode, schemaFilter, schemas, tagFilter, latestBySparkplugId, catalog,
+    assets, lifecycle, schemaFilter, schemas, tagFilter, latestBySparkplugId, catalog,
     gatewayFilter, cellFilter, gatewayById, attentionOnly, showShadows, statusFilter, searchQuery,
     unmodelledFor, cellById,
   ])
@@ -665,19 +687,30 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     [assets, schemas, latestBySparkplugId, catalog]
   )
   // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
-  // The lifecycle counts are taken from it.
+  // The empty state reads it to tell none yet from none matching.
   const roster = useMemo(
     () => assets.filter(a => !a.is_quarantined && (showShadows || !a.shadow_of)),
     [assets, showShadows]
   )
-  const archivedCount = roster.filter(a => a.is_archived).length
   // The filters inside the Filters popover, which its button counts; the bar's Clear counts all.
   const popoverFilterCount =
-    [schemaFilter, tagFilter, gatewayFilter, cellFilter].filter(Boolean).length +
-    (showShadows ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    [schemaFilter, tagFilter, gatewayFilter, cellFilter].filter(l => l.length > 0).length +
+    (showShadows ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
   const activeFilterCount =
-    popoverFilterCount + [statusFilter, searchQuery].filter(Boolean).length + (attentionOnly ? 1 : 0)
-  const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
+    popoverFilterCount + (statusFilter.length ? 1 : 0) + (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0)
+  const schemaNames = schemaFilter.map(id => schemas.find(sc => sc.schema_uuid === id)?.schema_name).filter(Boolean)
+
+  /** The cell filter's values: the two lanes, then the cells under their areas. */
+  const cellOptions = useMemo(() => {
+    const areaName = (id) => areaById.get(id)?.area_name || 'No area'
+    return [
+      { value: CELL_FILTER_UNASSIGNED, label: 'Unassigned (needs a cell)', group: 'Not in a cell' },
+      { value: CELL_FILTER_SITE_WIDE, label: 'Site-Wide', group: 'Not in a cell' },
+      ...[...cells]
+        .sort((x, y) => areaName(x.area_id).localeCompare(areaName(y.area_id)) || x.cell_name.localeCompare(y.cell_name))
+        .map(c => ({ value: c.cell_id, label: c.cell_name, group: areaName(c.area_id) })),
+    ]
+  }, [cells, areaById])
 
   // A tab change closes the panel: it belongs to the list it was opened from.
   const chooseView = (next) => { setView(next); setSelectedId(null) }
@@ -693,7 +726,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
       if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
       // An archived device is off the default list, so the list shows it as well as the drawer.
-      if (a.is_archived && filterMode === 'active') setFilterMode('all')
+      if (a.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       if (view !== 'registered') setView('registered', { replace: true })
       setSelectedId(a.asset_id)
     }
@@ -834,14 +867,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           ariaLabel="Search devices"
         />
 
-        <select className="form-control control-md" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Status">
-          <option value="">Any status</option>
-          <option value="online">Online</option>
-          <option value="offline">Offline / DDEATH</option>
-          <option value="unborn">Awaiting first birth</option>
-          <option value="overdue">Awaiting first birth (24h+)</option>
-          <option value="unmodelled">Publishing unmodelled metrics</option>
-        </select>
+        <FilterDropdown
+          label="Status"
+          noun="status"
+          plural="statuses"
+          options={STATUS_OPTIONS}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          counts={facetCounts.status}
+          width="md"
+        />
 
         <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, or in a cell apart from their gateway's.">
           <button
@@ -854,64 +889,66 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         </Tooltip>
 
         <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
-          {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
-          <select
-            className="form-control"
-            value={filterMode}
-            onChange={e => setFilterMode(e.target.value)}
-            aria-label="Lifecycle"
-          >
-            <option value="all">All ({roster.length})</option>
-            <option value="active">Active ({roster.length - archivedCount})</option>
-            <option value="archived">Archived ({archivedCount})</option>
-          </select>
+          {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
+          <FilterList
+            label="Lifecycle"
+            plural="lifecycles"
+            options={LIFECYCLE_OPTIONS}
+            value={lifecycle}
+            onChange={setLifecycle}
+            counts={facetCounts.lifecycle}
+          />
 
-          <Tooltip text={tagOptions.length === 0
-            ? 'No device has a type yet. A type comes from the metric groups its schema models.'
-            : 'A device\'s types come from the metric groups its schema models.'}>
-            <select
-              className="form-control"
-              value={tagFilter}
-              onChange={e => setTagFilter(e.target.value)}
-              disabled={tagOptions.length === 0}
-              aria-label="Type"
-            >
-              <option value="">Any type</option>
-              {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Tooltip>
+          <FilterList
+            label="Type"
+            plural="types"
+            options={tagOptions.map(t => ({ value: t, label: t }))}
+            value={tagFilter}
+            onChange={setTagFilter}
+            counts={facetCounts.type}
+            tip={tagOptions.length === 0
+              ? 'No device has a type yet. A type comes from the metric groups its schema models.'
+              : 'A device\'s types come from the metric groups its schema models.'}
+          />
 
-          <select className="form-control" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} aria-label="Schema">
-            <option value="">Any schema</option>
-            {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
-          </select>
+          <FilterList
+            label="Schema"
+            plural="schemas"
+            options={schemas.map(sc => ({ value: sc.schema_uuid, label: sc.schema_name }))}
+            value={schemaFilter}
+            onChange={setSchemaFilter}
+            counts={facetCounts.schema}
+          />
 
-          <select className="form-control" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} aria-label="Gateway">
-            <option value="">Any gateway</option>
-            {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
-          </select>
+          <FilterList
+            label="Gateway"
+            plural="gateways"
+            options={gateways.map(g => ({ value: g.gateway_id, label: g.gateway_name }))}
+            value={gatewayFilter}
+            onChange={setGatewayFilter}
+            counts={facetCounts.gateway}
+          />
 
           {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
-          <Tooltip text="A device's own cell if it has one, otherwise its gateway's.">
-            <select className="form-control" value={cellFilter} onChange={e => setCellFilter(e.target.value)} aria-label="Cell">
-              <option value="">Any cell</option>
-              <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
-              <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
-              {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
-            </select>
-          </Tooltip>
+          <FilterList
+            label="Cell"
+            plural="cells"
+            options={cellOptions}
+            value={cellFilter}
+            onChange={setCellFilter}
+            counts={facetCounts.cell}
+            tip="A device's own cell if it has one, otherwise its gateway's."
+          />
 
           {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
           {shadowCount > 0 && (
-            <Tooltip text="Playback makes one replay lane per device a capture recorded. They are hidden by default because they are not machines.">
-              <button
-                className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setShowShadows(v => !v)}
-                aria-pressed={showShadows}
-              >
-                <IconPlay size={13} /> Show replay lanes ({shadowCount})
-              </button>
-            </Tooltip>
+            <FilterCheck
+              label="Show replay lanes"
+              checked={showShadows}
+              onChange={setShowShadows}
+              count={shadowCount}
+              tip="Playback makes one replay lane per device a capture recorded. They are hidden by default because they are not machines."
+            />
           )}
         </FiltersPopover>
 
@@ -929,10 +966,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       </div>
 
       {/* Named here because the schema filter sits inside the popover, out of sight. */}
-      {schemaName && (
+      {schemaNames.length > 0 && (
         <div className="card-body">
           <div className="form-hint">
-            Showing devices provisioned with schema <strong>{schemaName}</strong>.
+            Showing devices provisioned with {schemaNames.length === 1 ? 'schema' : 'any of the schemas'}{' '}
+            {schemaNames.map((name, i) => (
+              <React.Fragment key={`${i}-${name}`}>{i > 0 && ', '}<strong>{name}</strong></React.Fragment>
+            ))}.
           </div>
         </div>
       )}

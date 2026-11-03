@@ -9,6 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
+import { dropdownButton, pick, valuesShown } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
@@ -106,39 +107,48 @@ describe('People', () => {
     expect(query()).toEqual({ search: 'OPERATOR' })
   })
 
-  it('filters by role, with All roles, the four roles and No role, each with its count', async () => {
+  it('filters by role, with the four roles and No role, each with its count', async () => {
     renderPage()
     await screen.findByText('me@site.test')
-    const role = screen.getByLabelText('Filter people by role')
-    expect([...role.options].map(o => o.textContent)).toEqual([
-      'All roles (6)', 'Administrator (1)', 'Shopfloor Manager (1)', 'Operator (2)', 'Auditor (1)', 'No role (1)',
+    expect(dropdownButton('Role')).toHaveTextContent('Any role')
+    expect(valuesShown('Role')).toEqual([
+      'Administrator 1', 'Shopfloor Manager 1', 'Operator 2', 'Auditor 1', 'No role 1',
     ])
 
-    fireEvent.change(role, { target: { value: 'Operator' } })
+    pick('Role', 'Operator')
     expect(listed()).toEqual(['operator.one@site.test', 'operator.two@site.test'])
-    fireEvent.change(role, { target: { value: 'none' } })
+    pick('Role', 'none')
     expect(listed()).toEqual(['leaving@site.test'])
+  })
+
+  it('takes several roles at once, and keeps them in the address', async () => {
+    renderPage()
+    await screen.findByText('me@site.test')
+    pick('Role', 'Auditor', 'none')
+    expect(listed().sort()).toEqual(['leaving@site.test', 'newcomer@site.test'])
+    expect(dropdownButton('Role')).toHaveTextContent('2 roles')
+    expect(query()).toEqual({ role: 'Auditor,none' })
   })
 
   it('filters by the Status column\'s labels, and offers Access removed only while removed accounts are shown', async () => {
     renderPage()
     await screen.findByText('me@site.test')
-    const status = screen.getByLabelText('Filter people by status')
-    expect([...status.options].map(o => o.textContent)).toEqual([
-      'Any status (6)', 'Active (3)', 'Invited (1)', 'Not signed in yet (1)', 'Sign-in still open (1)',
+    expect(valuesShown('Status')).toEqual([
+      'Active 3', 'Invited 1', 'Not signed in yet 1', 'Sign-in still open 1',
     ])
 
-    fireEvent.change(status, { target: { value: 'not-signed-in' } })
+    pick('Status', 'not-signed-in')
     expect(listed()).toEqual(['newcomer@site.test'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Show removed (1)' }))
-    expect([...status.options].map(o => o.textContent)).toContain('Access removed (1)')
-    fireEvent.change(status, { target: { value: 'removed' } })
+    // Counted among the people the other filters let through: the removed one is not signed in.
+    expect(valuesShown('Status')).toContain('Access removed 1')
+    pick('Status', 'removed')
     expect(listed()).toEqual(['gone@site.test'])
 
     // Turning the toggle off takes Access removed with it, and the filter falls back to any status.
     fireEvent.click(screen.getByRole('button', { name: 'Show removed (1)' }))
-    await waitFor(() => expect(status.value).toBe(''))
+    await waitFor(() => expect(dropdownButton('Status')).toHaveTextContent('Any status'))
     expect(query()).toEqual({})
   })
 
@@ -146,7 +156,7 @@ describe('People', () => {
     renderPage()
     await screen.findByText('me@site.test')
     fireEvent.click(screen.getByRole('button', { name: 'Show removed (1)' }))
-    fireEvent.change(screen.getByLabelText('Filter people by role'), { target: { value: 'Auditor' } })
+    pick('Role', 'Auditor')
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search people by name or email' }), { target: { value: 'nobody' } })
     expect(screen.getByText('No person matches these filters.')).toBeInTheDocument()
 
@@ -161,7 +171,7 @@ describe('People', () => {
     renderPage()
     await screen.findByText('operator.two@site.test')
     expect(listed()).toEqual(['operator.two@site.test'])
-    expect(screen.getByLabelText('Filter people by role')).toHaveValue('Operator')
+    expect(dropdownButton('Role')).toHaveTextContent('Operator')
   })
 
   it('has no Refresh button', async () => {

@@ -51,7 +51,11 @@ import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnT
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import {
+  LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
+} from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { Tooltip } from '../common/Tooltip'
 
@@ -83,7 +87,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const [unsPaths, setUnsPaths] = useState(undefined)
   // The filters are query parameters. A cell handed over from another page arrives as
   // `?search=<cell_id>`; the search predicate matches cell_id or cell_name.
-  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   const [searchQuery, setSearchQuery] = useUrlState('search')
   const [attentionOnly, setAttentionOnly] = useUrlState('attention', false)
   const [emptyOnly, setEmptyOnly] = useUrlState('empty', false)
@@ -236,9 +240,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // serving no devices is not empty.
   const cellIsEmpty = (c) => liveGateways(c).length === 0 && liveDevices(c).length === 0
 
-  const matchingCells = cells.filter(c => {
-    if (filterMode === 'active'   && c.is_archived) return false
-    if (filterMode === 'archived' && !c.is_archived) return false
+  // Lifecycle is any of its values; its counts are over what the toggles and the search let through.
+  const { rows: matchingCells, counts: facetCounts } = applyFacets(cells, [
+    { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
+  ], (c) => {
     if (attentionOnly && !cellNeedsAttention(c)) return false
     if (emptyOnly && !cellIsEmpty(c)) return false
     if (searchQuery) {
@@ -264,7 +269,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const attentionCount = cells.filter(c => !c.is_archived && cellNeedsAttention(c)).length
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
   const activeFilterCount =
-    (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
   // Arriving from a cell chip or the Site Map with one cell named: open it, and show it whatever
   // its state. Identifier equality only, since the search predicate also matches names.
@@ -273,7 +278,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     cells,
     (c, term) => c.cell_id === term,
     (c) => {
-      if (c.is_archived) setFilterMode('all')
+      if (c.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       setSelectedId(c.cell_id)
     }
   )
@@ -328,17 +333,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               ariaLabel="Search cells"
             />
 
-            {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
-            <select
-              className="form-control control-sm"
-              value={filterMode}
-              onChange={e => setFilterMode(e.target.value)}
-              aria-label="Lifecycle"
-            >
-              <option value="all">All ({cells.length})</option>
-              <option value="active">Active ({cells.filter(c => !c.is_archived).length})</option>
-              <option value="archived">Archived ({cells.filter(c => c.is_archived).length})</option>
-            </select>
+            {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
+            <FilterDropdown
+              label="Lifecycle"
+              noun="lifecycle"
+              plural="lifecycles"
+              options={LIFECYCLE_OPTIONS}
+              value={lifecycle}
+              onChange={setLifecycle}
+              counts={facetCounts.lifecycle}
+              defaultValue={LIFECYCLE_DEFAULT}
+              everyIsAny
+              width="sm"
+            />
 
             <Tooltip text="Cells containing an offline or stale gateway, or any quarantined device">
               <button
@@ -361,7 +368,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             <div className="filter-bar-actions">
               <ClearFilters
                 count={activeFilterCount}
-                onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('active') }}
+                onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setLifecycle(LIFECYCLE_DEFAULT) }}
               />
               <ActionButton
                 className="btn btn-primary btn-sm"

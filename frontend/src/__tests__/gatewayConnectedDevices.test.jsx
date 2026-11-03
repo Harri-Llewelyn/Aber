@@ -242,7 +242,7 @@ describe('the gateways table sorts by a column (#801)', () => {
     at('gw-stale', 'Stale_Gateway', devices('stale', 5), { last_heartbeat: ago(10 * MINUTE), is_simulated: true, deployment: 'host' })
   ]
 
-  const showFleet = async (url = '/gateways?lifecycle=all') => {
+  const showFleet = async (url = '/gateways?lifecycle=active,archived') => {
     window.history.replaceState(null, '', url)
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/cells')) return Promise.resolve([{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }, { cell_id: 'cell-2', cell_name: 'Boiler Bay' }])
@@ -264,12 +264,12 @@ describe('the gateways table sorts by a column (#801)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Gateway Status' }))
     expect(names()).toEqual(['Stale', 'Pending', 'Enrolled', 'Offline', 'Online', 'Archived'])
     expect(header).toHaveAttribute('aria-sort', 'ascending')
-    expect(address()).toBe('/gateways?lifecycle=all&sort=status')
+    expect(address()).toBe('/gateways?lifecycle=active,archived&sort=status')
 
     fireEvent.click(screen.getByRole('button', { name: 'Gateway Status' }))
     expect(names()).toEqual(['Online', 'Offline', 'Enrolled', 'Pending', 'Stale', 'Archived'])
     expect(header).toHaveAttribute('aria-sort', 'descending')
-    expect(address()).toBe('/gateways?lifecycle=all&sort=-status')
+    expect(address()).toBe('/gateways?lifecycle=active,archived&sort=-status')
   })
 
   it('sorts Last Heartbeat by instant with Never last, and Devices by count with an archived gateway last', async () => {
@@ -298,7 +298,7 @@ describe('the gateways table sorts by a column (#801)', () => {
   /* The open drawer drops the UUID and Devices columns; a sort by one of them stays in the
      address and in the order of the rows, and its header returns marked when the drawer closes. */
   it('opens sorted from the address, and keeps the order while the drawer hides the sorted column', async () => {
-    await showFleet('/gateways?lifecycle=all&sort=-devices')
+    await showFleet('/gateways?lifecycle=active,archived&sort=-devices')
     const sorted = ['Stale', 'Enrolled', 'Online', 'Offline', 'Pending', 'Archived']
     expect(names()).toEqual(sorted)
     expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending')
@@ -308,7 +308,7 @@ describe('the gateways table sorts by a column (#801)', () => {
     expect(screen.queryByRole('columnheader', { name: 'Gateway UUID' })).toBeNull()
     expect(document.querySelectorAll('th[aria-sort]')).toHaveLength(0)
     expect(names()).toEqual(sorted)
-    expect(address()).toBe('/gateways?lifecycle=all&sort=-devices&gateway=gw-online')
+    expect(address()).toBe('/gateways?lifecycle=active,archived&sort=-devices&gateway=gw-online')
 
     fireEvent.click(screen.getByText('Online_Gateway', { selector: 'tbody strong' }))
     await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending'))

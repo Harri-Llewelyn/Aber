@@ -6,6 +6,7 @@ import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { pick } from '../test/listFilters'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -82,14 +83,10 @@ const rowFor = (name) => {
 }
 
 /**
- * Bring superseded versions into the registry through the status filter. isCurrentSchema() is
- * `status !== archived`, so a separate toggle would be a status filter able to contradict the
- * dropdown.
+ * Bring superseded versions into the registry through the status filter, every status chosen. A
+ * separate toggle would be a status filter able to contradict it.
  */
-const revealArchived = () => fireEvent.change(
-  screen.getByLabelText('Filter schemas by lifecycle state'),
-  { target: { value: 'all' } }
-)
+const revealArchived = () => pick('Status', 'active', 'draft', 'archived')
 
 /**
  * Select a schema row and return its context panel, where View / Edit Draft / Create Version live.

@@ -18,7 +18,7 @@ export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
 export const devicesForSchemaUrl = (uuid) => pageUrl('devices', { schema: uuid })
 
 /** Every device in one cell, archived ones included: the Devices page hides those by default. */
-export const devicesInCellUrl = (id) => pageUrl('devices', { cell: id, lifecycle: 'all' })
+export const devicesInCellUrl = (id) => pageUrl('devices', { cell: id, lifecycle: ['active', 'archived'] })
 
 /** The replay lanes on one gateway, the Playback gateway: the Devices page hides lanes by default. */
 export const replayLanesUrl = (gatewayId) => pageUrl('devices', { gateway: gatewayId, replay: true })

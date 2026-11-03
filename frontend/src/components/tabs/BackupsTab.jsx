@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
 import { backupUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
@@ -75,14 +76,24 @@ const capitalised = (db) => `${db.noun.charAt(0).toUpperCase()}${db.noun.slice(1
 const PAGE_SIZE = 30
 
 /**
- * The list's filter. A cancelled run is listed under All only: it neither failed nor completed.
- * `empty` is what the list says when the filter matches nothing.
+ * The list's Status filter: how a run ended, any of which a run may have; none is every run. The
+ * list is read a page at a time, so the database filters it. `empty` is what the list says when
+ * one status matches nothing. A link from before reads `status=all` as none.
  */
-const FILTERS = {
-  all: { label: 'All runs', statuses: ['COMPLETED', 'FAILED', 'CANCELLED'] },
-  completed: { label: 'Completed', statuses: ['COMPLETED'], empty: 'No run has completed yet.' },
-  failed: { label: 'Failed', statuses: ['FAILED'], empty: 'No run has failed.' }
-}
+const STATUS_OPTIONS = [
+  { value: 'completed', label: 'Completed', status: 'COMPLETED', empty: 'No run has completed yet.' },
+  { value: 'failed', label: 'Failed', status: 'FAILED', empty: 'No run has failed.' },
+  { value: 'cancelled', label: 'Cancelled', status: 'CANCELLED', empty: 'No run was cancelled.' },
+]
+const ANY_STATUS = Object.freeze([])
+const STATUS_ALIASES = Object.freeze({ all: ANY_STATUS })
+/** The statuses a choice asks the database for. */
+const statusesFor = (chosen) => STATUS_OPTIONS
+  .filter(o => chosen.length === 0 || chosen.includes(o.value)).map(o => o.status)
+/** What the list says when a choice matches no run. */
+const emptyFor = (chosen) => (chosen.length === 1
+  ? STATUS_OPTIONS.find(o => o.value === chosen[0])?.empty
+  : 'No run ended in these ways.')
 
 /**
  * Backups without a shell.
@@ -98,7 +109,7 @@ export function BackupsTab({ showToast }) {
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
   const [activeJob, setActiveJob] = useState(null)
-  const [filter, setFilter] = useUrlState('status', 'all', { allowed: Object.keys(FILTERS) })
+  const [filter, setFilter] = useUrlList('status', ANY_STATUS, { allowed: STATUS_OPTIONS.map(o => o.value), aliases: STATUS_ALIASES })
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [paging, setPaging] = useState(false)
@@ -124,7 +135,7 @@ export function BackupsTab({ showToast }) {
     const call = ++lastCall.current
     const on = { historian: historianOn, platform: platformOn }
     const [page, active, sum, floor, destination, ...states] = await Promise.all([
-      api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
+      api.listBackupRuns({ statuses: statusesFor(filter), limit }),
       api.activeBackupJob(),
       api.backupRunSummary(),
       // Soft: without it the Retention cells cannot say a backup is kept as one of the newest.
@@ -225,7 +236,7 @@ export function BackupsTab({ showToast }) {
   // cleared, so the run is in the list and its panel opens on the next load.
   const newestId = summary?.latestOutcome?.id || null
   const openNewest = () => {
-    if (selectedId !== newestId && filter !== 'all' && !runs.some(r => r.id === newestId)) onFilter('all')
+    if (selectedId !== newestId && filter.length > 0 && !runs.some(r => r.id === newestId)) onFilter(ANY_STATUS)
     toggleRun(newestId)
   }
 
@@ -242,17 +253,18 @@ export function BackupsTab({ showToast }) {
           {/* The status filter narrows the list of runs, so it waits for one. */}
           <div className="filter-bar">
             {!loading && !neverRun && (
-              <select
-                className="form-control control-sm"
+              <FilterDropdown
+                label="Status"
+                noun="status"
+                plural="statuses"
+                options={STATUS_OPTIONS}
                 value={filter}
-                onChange={e => onFilter(e.target.value)}
-                aria-label="Run status filter"
-              >
-                {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
-              </select>
+                onChange={onFilter}
+                width="sm"
+              />
             )}
             <div className="filter-bar-actions">
-              <ClearFilters count={filter === 'all' ? 0 : 1} onClear={() => onFilter('all')} />
+              <ClearFilters count={filter.length ? 1 : 0} onClear={() => onFilter(ANY_STATUS)} />
               <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
               {/* The main button, last. Disabled rather than hidden while one is in flight: the
                   gate refuses a second anyway, and the callout below says why. */}
@@ -302,8 +314,8 @@ export function BackupsTab({ showToast }) {
           ) : runs.length === 0 ? (
             <EmptyState
               message="No backups yet."
-              filtered={filter !== 'all'}
-              filteredMessage={FILTERS[filter].empty}
+              filtered={filter.length > 0}
+              filteredMessage={emptyFor(filter)}
             />
           ) : (
             <div className="table-wrap">

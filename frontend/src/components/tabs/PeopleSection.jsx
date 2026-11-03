@@ -14,7 +14,9 @@ import { PersonName } from '../common/PersonName'
 import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
 import { SessionsTable } from '../common/SessionsTable'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { rankIn, severityRank } from '../../utils/tableSort'
 import { SortHeader } from '../common/SortHeader'
@@ -75,6 +77,9 @@ const nameOf = (p) => p.display_name || p.email || p.user_id
 /** The drawer's list of sessions, shut. */
 const CLOSED_LIST = { userId: null, rows: undefined, error: null }
 
+/** No list filter chosen. */
+const NONE = Object.freeze([])
+
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
  * Administrator to add, re-role, rename, re-address, sign out, remove or restore, to give a new
@@ -120,10 +125,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
   const [sessionList, setSessionList] = useState(CLOSED_LIST)
   const sessionListId = useId()
   const [search, setSearch] = useUrlState('search')
-  const [roleFilter, setRoleFilter] = useUrlState('role', '', { allowed: [...PERSON_ROLES.map(r => r.name), NO_ROLE] })
+  const [roleFilter, setRoleFilter] = useUrlList('role', NONE, { allowed: [...PERSON_ROLES.map(r => r.name), NO_ROLE] })
   const [showRemoved, setShowRemoved] = useUrlState('removed', false)
   // Access removed is offered only while removed accounts are shown.
-  const [statusFilter, setStatusFilter] = useUrlState('status', '', {
+  const [statusFilter, setStatusFilter] = useUrlList('status', NONE, {
     allowed: PERSON_STATUSES.map(st => st.key).filter(key => showRemoved || key !== 'removed')
   })
   // Whoever the list holds, filtered out or not: a link to a removed person opens their drawer.
@@ -190,16 +195,16 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
   // What the role and status options count: everyone the removed toggle lets in.
   const listed = useMemo(() => people.filter(p => showRemoved || !accessRemoved(p)), [people, showRemoved])
   const query = search.trim().toLowerCase()
-  const matching = useMemo(() => listed.filter(p => {
-    if (roleFilter && (p.role || NO_ROLE) !== roleFilter) return false
-    if (statusFilter && personStatus(p).key !== statusFilter) return false
-    return !query || [p.display_name, p.email || p.user_id].some(v => String(v || '').toLowerCase().includes(query))
-  }), [listed, roleFilter, statusFilter, query])
+  // Role and status are each any of their values, combined with AND; each value's count is over
+  // what the other filter and the search let through.
+  const { rows: matching, counts: facetCounts } = useMemo(() => applyFacets(listed, [
+    { key: 'role', chosen: roleFilter, values: p => [p.role || NO_ROLE] },
+    { key: 'status', chosen: statusFilter, values: p => [personStatus(p).key] },
+  ], p => !query || [p.display_name, p.email || p.user_id].some(v => String(v || '').toLowerCase().includes(query))),
+  [listed, roleFilter, statusFilter, query])
   const [shown, sort] = useSortableRows(matching, PEOPLE_SORT)
-  const roleCount = (name) => listed.filter(p => (p.role || NO_ROLE) === name).length
-  const statusCount = (key) => listed.filter(p => personStatus(p).key === key).length
-  const filterCount = [search, roleFilter, statusFilter].filter(Boolean).length + (showRemoved ? 1 : 0)
-  const clearFilters = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setShowRemoved(false) }
+  const filterCount = (search ? 1 : 0) + (roleFilter.length ? 1 : 0) + (statusFilter.length ? 1 : 0) + (showRemoved ? 1 : 0)
+  const clearFilters = () => { setSearch(''); setRoleFilter(NONE); setStatusFilter(NONE); setShowRemoved(false) }
 
   // The toggle shows only while there is something to show, so an address that turns it on with
   // nothing removed is tidied once the list is in.
@@ -453,35 +458,35 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
             placeholder="Search by name or email…"
             ariaLabel="Search people by name or email"
           />
-          <select
-            className="form-control control-md"
+          <FilterDropdown
+            label="Role"
+            noun="role"
+            plural="roles"
+            options={[
+              ...PERSON_ROLES.map(r => ({ value: r.name, label: r.label })),
+              { value: NO_ROLE, label: 'No role' },
+            ]}
             value={roleFilter}
-            onChange={e => setRoleFilter(e.target.value)}
-            aria-label="Filter people by role"
-          >
-            <option value="">All roles ({listed.length})</option>
-            {PERSON_ROLES.map(r => (
-              <option key={r.name} value={r.name}>{r.label} ({roleCount(r.name)})</option>
-            ))}
-            <option value={NO_ROLE}>No role ({roleCount(NO_ROLE)})</option>
-          </select>
-          <select
-            className="form-control control-md"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            aria-label="Filter people by status"
-          >
-            <option value="">Any status ({listed.length})</option>
-            {PERSON_STATUSES
-              // Sign-in still open only while someone is in that state; Access removed only while
-              // removed accounts are shown.
+            onChange={setRoleFilter}
+            counts={facetCounts.role}
+            width="md"
+          />
+          <FilterDropdown
+            label="Status"
+            noun="status"
+            plural="statuses"
+            options={PERSON_STATUSES
+              // Sign-in still open only while someone is in that state or it is chosen; Access
+              // removed only while removed accounts are shown.
               .filter(st => (st.key === 'removed' ? showRemoved
-                : st.key === 'sign-in-open' ? statusCount(st.key) > 0 || statusFilter === st.key
+                : st.key === 'sign-in-open' ? (facetCounts.status.get(st.key) || 0) > 0 || statusFilter.includes(st.key)
                   : true))
-              .map(st => (
-                <option key={st.key} value={st.key}>{st.label} ({statusCount(st.key)})</option>
-              ))}
-          </select>
+              .map(st => ({ value: st.key, label: st.label }))}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            counts={facetCounts.status}
+            width="md"
+          />
           {/* Offered only while an account is removed; the count is what it would list. */}
           {removedCount > 0 && (
             <Tooltip text="People whose access is removed are left off the list. Their accounts and history stay.">

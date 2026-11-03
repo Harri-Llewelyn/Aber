@@ -240,7 +240,7 @@ describe('the Bundle format', () => {
     await waitFor(() => expect(document.querySelector('.loading-wrap')).toBeNull())
     // Replay lanes are hidden by default; the popover's toggle shows them.
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Show replay lanes/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /^Show replay lanes/ }))
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     const dialog = openExport()

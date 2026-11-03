@@ -8,7 +8,11 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import {
+  LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
+} from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
@@ -84,7 +88,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [restoreTarget, setRestoreTarget] = useState(null)
   // The filters are query parameters; an area handed over from another page arrives as
   // `?search=<area_id>`.
-  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   const [searchQuery, setSearchQuery] = useUrlState('search')
   const clearSearch = useCallback(() => setSearchQuery(''), [setSearchQuery])
 
@@ -134,8 +138,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
 
-  // Every control that is off its default: the lifecycle select opens on Active.
-  const activeFilterCount = (searchQuery ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+  // Every control that is off its default: the lifecycle filter opens on Active.
+  const activeFilterCount = (searchQuery ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
   const openForm = (area, seed) => {
     setEditing(area); setFormVal(seed); setFormError(null); setShowForm(true)
@@ -275,9 +279,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
-  const matchingAreas = areas.filter(a => {
-    if (filterMode === 'active'   && a.is_archived) return false
-    if (filterMode === 'archived' && !a.is_archived) return false
+  // Lifecycle is any of its values; its counts are over what the search lets through.
+  const { rows: matchingAreas, counts: facetCounts } = applyFacets(areas, [
+    { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
+  ], (a) => {
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
     return String(a.area_id).toLowerCase().includes(q) || a.area_name.toLowerCase().includes(q)
@@ -294,7 +299,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   // An arrival by id opens the area whatever its state, so a link to an archived one still lands.
   useArrivalSelection(searchQuery, areas, (a, term) => a.area_id === term, (a) => {
-    if (a.is_archived) setFilterMode('all')
+    if (a.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
     setSelectedId(a.area_id)
   })
 
@@ -360,20 +365,22 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               placeholder="Search by area ID or name…"
               ariaLabel="Search areas"
             />
-            {/* Lifecycle is a filter like the rest, as it is on the Cells page; the counts are in
-                the option labels. */}
-            <select
-              className="form-control control-sm"
-              value={filterMode}
-              onChange={e => setFilterMode(e.target.value)}
-              aria-label="Lifecycle"
-            >
-              <option value="all">All ({areas.length})</option>
-              <option value="active">Active ({areas.filter(a => !a.is_archived).length})</option>
-              <option value="archived">Archived ({areas.filter(a => a.is_archived).length})</option>
-            </select>
+            {/* Lifecycle is a filter like the rest, as it is on the Cells page, opening on Active;
+                the counts are beside each value. */}
+            <FilterDropdown
+              label="Lifecycle"
+              noun="lifecycle"
+              plural="lifecycles"
+              options={LIFECYCLE_OPTIONS}
+              value={lifecycle}
+              onChange={setLifecycle}
+              counts={facetCounts.lifecycle}
+              defaultValue={LIFECYCLE_DEFAULT}
+              everyIsAny
+              width="sm"
+            />
             <div className="filter-bar-actions">
-              <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setFilterMode('active') }} />
+              <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setLifecycle(LIFECYCLE_DEFAULT) }} />
               <ActionButton
                 className="btn btn-primary btn-sm"
                 permitted={canManage}
