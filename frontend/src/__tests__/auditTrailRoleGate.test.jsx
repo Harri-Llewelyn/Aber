@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -10,6 +10,7 @@ import {
   AUDIT_TRAIL_SECURITY_ROLES,
   auditTrailEntityTypesFor
 } from '../constants'
+import { filterList, offered } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -71,10 +72,9 @@ describe('the filter bar on the page', () => {
   const optionsOffered = async (userRole) => {
     render(<AuditTrailTab userRole={userRole} />)
     // The kind filter lives in the Filters popover.
-    fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    const select = await screen.findByRole('combobox', { name: 'Entity' })
+    await screen.findByRole('button', { name: /^Filters/ })
     await waitFor(() => expect(api.get).toHaveBeenCalled())
-    return [...select.options].map(o => o.textContent)
+    return offered(filterList('Entity'))
   }
 
   it('does not list the security lanes for a manager', async () => {

@@ -14,6 +14,7 @@ import {
 import { api } from '../api'
 import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 import { tooltipOf } from '../test/tooltips'
+import { closePanel, filterList, openFiltersPanel, toggleInList, offered } from '../test/listFilters'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
    .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
@@ -114,9 +115,13 @@ const show = async () => {
  */
 const showAll = async () => {
   await show()
-  fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
+  showDeleted()
   await waitFor(() => expect(screen.getByRole('button', { name: /Clear filters/ })).toBeInTheDocument())
 }
+
+/** Show deleted entities, a checkbox in the Filters panel: ticked, and the panel shut again. */
+const deletedBox = () => within(openFiltersPanel()).queryByRole('checkbox', { name: /^Show deleted entities/ })
+const showDeleted = () => { fireEvent.click(deletedBox()); closePanel() }
 
 /** Every marker on the timeline, in DOM order. */
 const nodes = () => [...document.querySelectorAll('.trail-node')]
@@ -147,13 +152,7 @@ const customRange = (from, to) => {
 const params = () => new URL(lastTrailUrl(), 'http://x').searchParams
 
 /** The kind and action filters live in the Filters popover, which is opened first. */
-const openFilters = () => {
-  if (!document.querySelector('.filters-popover')) {
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-  }
-}
-const kindSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Entity' }) }
-const actionSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Action' }) }
+const openFilters = () => { openFiltersPanel() }
 
 describe('Audit Trail card header', () => {
   it('names the page with its icon, title and description, and nothing else', async () => {
@@ -173,20 +172,35 @@ describe('Audit Trail filter bar', () => {
     expect(bar).toBeTruthy()
     expect(within(bar).getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
     expect(bar.contains(timeControl())).toBe(true)
-    expect(screen.queryByRole('combobox', { name: 'Entity' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Entity' })).toBeNull()
 
     openFilters()
     const popover = screen.getByRole('dialog', { name: 'Filters' })
-    expect(within(popover).getByRole('combobox', { name: 'Entity' })).toBeInTheDocument()
+    expect(within(popover).getByRole('group', { name: 'Entity' })).toBeInTheDocument()
     // The wording is load-bearing: this control filters `audit_trail.action`, while the markers
     // show a derived classification. See auditTrailActionFilter.test.jsx.
-    expect(within(popover).getByRole('combobox', { name: 'Action' })).toBeInTheDocument()
+    expect(within(popover).getByRole('group', { name: 'Action' })).toBeInTheDocument()
+  })
+
+  it('groups the kinds as the timeline groups its sections, and takes several of them', async () => {
+    await show()
+    const kinds = filterList('Entity')
+    expect(within(kinds).getAllByRole('group').map(g => g.getAttribute('aria-labelledby') && document.getElementById(g.getAttribute('aria-labelledby')).textContent))
+      .toEqual(['The plant', 'The model', 'Capture', 'Security'])
+    expect(offered(within(kinds).getByRole('group', { name: 'The plant' }))).toEqual(['Areas', 'Cells', 'Gateways', 'Devices'])
+    toggleInList('Entity', 'Gateways')
+    toggleInList('Entity', 'Devices')
+    await waitFor(() => expect(params().get('entity_type')).toBe('GATEWAY,DEVICE'))
+    expect(window.location.search).toBe('?type=GATEWAY,DEVICE')
+    // The heading takes the whole group.
+    fireEvent.click(within(kinds).getByRole('checkbox', { name: 'The plant' }))
+    await waitFor(() => expect(params().get('entity_type')).toBe('AREA,CELL,GATEWAY,DEVICE'))
   })
 
   it('counts the popover\'s own filters on its button, and its Clear resets only those', async () => {
     await show()
-    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
-    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
+    toggleInList('Entity', 'Gateways')
+    toggleInList('Action', 'Delete')
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent('Filters (2)'))
@@ -200,16 +214,27 @@ describe('Audit Trail filter bar', () => {
 
   it('filters by entity type', async () => {
     await show()
-    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
+    toggleInList('Entity', 'Gateways')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=GATEWAY'))
   })
 
-  it('filters by audit event type', async () => {
+  it('filters by audit event type, and by several at once', async () => {
     await show()
-    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
-
+    toggleInList('Action', 'Delete')
     await waitFor(() => expect(lastTrailUrl()).toContain('action=DELETE'))
+    toggleInList('Action', 'Insert')
+    await waitFor(() => expect(params().get('action')).toBe('INSERT,DELETE'))
+    expect(window.location.search).toBe('?action=INSERT,DELETE')
+  })
+
+  it('opens a link written with one kind or one action, as an older page wrote it', async () => {
+    window.history.replaceState(null, '', '/audit-trail?type=CELL&action=UPDATE')
+    await show()
+    await waitFor(() => expect(params().get('entity_type')).toBe('CELL'))
+    expect(params().get('action')).toBe('UPDATE')
+    expect(within(filterList('Entity')).getByRole('checkbox', { name: 'Cells' }).checked).toBe(true)
+    expect(within(filterList('Action')).getByRole('checkbox', { name: 'Update' }).checked).toBe(true)
   })
 
   /* SENT AS THE TYPED TEXT, not resolved to ids here. It is still a database predicate rather than
@@ -248,7 +273,8 @@ describe('Audit Trail filter bar', () => {
 
   it('counts the active filters and clears them together, the time window included', async () => {
     await show()
-    fireEvent.change(actionSelect(), { target: { value: 'UPDATE' } })
+    toggleInList('Action', 'Update')
+    closePanel()
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
     chooseWindow('Last 7 days')
 
@@ -1112,8 +1138,11 @@ describe('Audit Trail — removed tag filter', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
 
     openFilters()
-    // The kind, the action and Changed by.
-    expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(3)
+    // The kind, the action and Changed by, each a list; Show deleted entities is a checkbox beside them.
+    const panel = screen.getByRole('dialog', { name: 'Filters' })
+    expect(panel.querySelectorAll('.filter-list')).toHaveLength(3)
+    expect(panel.querySelectorAll('select')).toHaveLength(0)
+    expect(within(panel).getByRole('checkbox', { name: /^Show deleted entities/ })).toBeInTheDocument()
   })
 
   it('puts export at the right-hand end of the toolbar, after Clear filters', async () => {
@@ -1172,13 +1201,13 @@ describe('Audit Trail — removed tag filter', () => {
      from `service_role`, so hiding is a filter and removal is an administrative act. The fixture
      already contains the case: `cell-gone` and the orphan UUID on event 6. */
   describe('events for assets that no longer exist', () => {
-    const toggle = () => screen.getByRole('button', { name: /Show deleted entities/i })
+    const toggle = () => deletedBox()
 
     it('counts distinct ASSETS, not the events belonging to them', async () => {
       /* The control counts purged entities, not their rows: two in the fixture, however many rows
          they own. */
       await show()
-      expect(toggle()).toHaveTextContent('Show deleted entities (2)')
+      expect(toggle()).toHaveAccessibleName('Show deleted entities 2')
     })
 
     it('hides them by default, and that is not an active filter', async () => {
@@ -1192,7 +1221,7 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('showing them is the deviation, so Clear filters appears', async () => {
       await show()
-      fireEvent.click(toggle())
+      showDeleted()
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
@@ -1201,24 +1230,25 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('Clear filters returns them to hidden', async () => {
       await show()
-      fireEvent.click(toggle())
+      showDeleted()
       fireEvent.click(await screen.findByRole('button', { name: /Clear filters/ }))
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)'))
     })
 
-    it('is styled as the toggle Gateways and Cells already use', async () => {
-      /* The same control shape as Has quarantined devices and Empty: `btn btn-sm`, ghost at rest
-         and primary when engaged, with an icon and a count. The label says Show because hiding is
-         the default. */
+    it('is a checkbox in the Filters panel, not a button in the bar, and the panel counts it', async () => {
+      /* It took the room that pushed the toolbar onto a second line. In the panel it is a checkbox
+         beside the lists, with its count, and "Filters (n)" counts it. The label says Show because
+         hiding is the default. */
       await show()
-      expect(toggle()).toHaveClass('btn', 'btn-sm', 'btn-ghost')
-      expect(toggle()).not.toHaveClass('btn-primary')
+      expect(within(document.querySelector('.filter-bar')).queryByRole('button', { name: /Show deleted entities/ })).toBeNull()
+      expect(toggle().checked).toBe(false)
 
-      fireEvent.click(toggle())
-      await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
-      expect(toggle()).not.toHaveClass('btn-ghost')
+      showDeleted()
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent('Filters (1)'))
+      expect(toggle().checked).toBe(true)
+      expect(window.location.search).toBe('?deleted=1')
     })
 
     it('drops those events from the export as well as the timeline', async () => {
@@ -1227,7 +1257,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
       expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
 
-      fireEvent.click(toggle())
+      showDeleted()
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
     })
@@ -1246,7 +1276,7 @@ describe('Audit Trail — removed tag filter', () => {
       })
       await show()
 
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('hides nothing while the asset lookups are still outstanding', async () => {
@@ -1261,7 +1291,7 @@ describe('Audit Trail — removed tag filter', () => {
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('does not treat an ARCHIVED asset as deleted', async () => {
@@ -1281,7 +1311,7 @@ describe('Audit Trail — removed tag filter', () => {
       render(<AuditTrailTab />)
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
   })
 
@@ -1322,14 +1352,13 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(screen.queryByText('VALIDATE_Schema_Robot')).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Show deleted entities/i }))
-        .toHaveTextContent('Show deleted entities (1)')
+      expect(deletedBox()).toHaveAccessibleName('Show deleted entities 1')
     })
 
     it('reveals it, named from its snapshot, when asked', async () => {
       withSchemas(() => Promise.resolve([]))
       await show()
-      fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
+      showDeleted()
 
       expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
     })
@@ -1339,7 +1368,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(screen.getByText('Robot pose')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('hides nothing when the schemas lookup was refused, rather than hiding all of them', async () => {
@@ -1350,7 +1379,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
       expect(document.querySelector('.trail-lane-gone')).toBeNull()
     })
 
@@ -1375,7 +1404,7 @@ describe('Audit Trail — removed tag filter', () => {
       await waitFor(() => expect(document.querySelector('.trail-lane-label')).toBeTruthy())
 
       expect(document.querySelector('.trail-lane-gone')).toBeNull()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
   })
 

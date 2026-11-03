@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { isUuid } from '../../utils/isUuid'
@@ -17,12 +17,14 @@ import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { FiltersPopover } from '../common/FiltersPopover'
+import { FilterCheck, FilterList } from '../common/FilterChecklist'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import {
-  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
+  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS, AUDIT_TRAIL_ENTITY_GROUPS, AUDIT_TRAIL_ENTITY_TYPES,
+  ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 import { useTimeWindow } from '../../hooks/useTimeWindow'
@@ -90,6 +92,15 @@ const DELETABLE_KINDS = new Set(
 
 /** Before any lookup lands, nothing is answerable. Hoisted so it is not a new Set every render. */
 const EMPTY_KINDS = new Set()
+
+/** No list filter chosen. Hoisted: useUrlList's default is compared, not copied. */
+const NONE = Object.freeze([])
+
+/** The Action filter's values, under the groups AUDIT_TRAIL_ACTION_GROUPS names. */
+const ACTION_OPTIONS = AUDIT_TRAIL_ACTION_GROUPS.flatMap(g => g.actions.map(a => ({
+  value: a, label: AUDIT_TRAIL_ACTIONS[a] || a, group: g.label,
+})))
+const ACTION_VALUES = Object.keys(AUDIT_TRAIL_ACTIONS)
 
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
@@ -974,12 +985,14 @@ export function AuditTrailTab({ userRole, showToast }) {
   // deleted and hidden. Narrower than the constant whenever a tolerated lookup failed.
   const [loadedKinds, setLoadedKinds] = useState(EMPTY_KINDS)
   const [loading, setLoading]         = useState(true)
-  const [entityTypeFilter, setEntityTypeFilter] = useUrlState('type', '', { allowed: entityTypes.map(e => e.kind) })
+  // The three list filters, each any of its values (`?type=GATEWAY,DEVICE`); one value from an
+  // older link is a list of one. The kinds offered are the role's.
+  const [entityTypeFilter, setEntityTypeFilter] = useUrlList('type', NONE, { allowed: entityTypes.map(e => e.kind) })
   const [nameFilter, setNameFilter]   = useUrlState('search')
-  const [actionFilter, setActionFilter] = useUrlState('action', '', { allowed: Object.keys(AUDIT_TRAIL_ACTIONS) })
-  // Whose changes: the user id the trail stamps in `changed_by`, a person's or a machine identity's.
+  const [actionFilter, setActionFilter] = useUrlList('action', NONE, { allowed: ACTION_VALUES })
+  // Whose changes: the user ids the trail stamps in `changed_by`, people's or machine identities'.
   // Any id is kept, listed or not: the database's policies decide which of their rows come back.
-  const [changedBy, setChangedBy] = useUrlState('changed_by', '', { allowed: isUuid })
+  const [changedBy, setChangedBy] = useUrlList('changed_by', NONE, { allowed: isUuid })
   // All time is the default: most arrivals are a handover for one entity whose last edit may be
   // years old, and any window would answer that with an empty timeline.
   const [timeWin, setTimeWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
@@ -1117,12 +1130,31 @@ export function AuditTrailTab({ userRole, showToast }) {
     return { people, machines: [...machines].map(([id, label]) => ({ id, label })).sort(byLabel) }
   }, [userAccounts, machinePrincipals])
 
-  /** The chosen actor as the chip and the list say them, or the id where nothing here names them. */
-  const changedByName = changedBy
-    ? ([...actorOptions.people, ...actorOptions.machines].find(o => o.id === changedBy)?.label || changedBy)
-    : ''
-  const changedByListed = !changedBy
-    || [...actorOptions.people, ...actorOptions.machines].some(o => o.id === changedBy)
+  /** A chosen actor as the chip and the list say them, or the id where nothing here names them. */
+  const actorName = (id) =>
+    [...actorOptions.people, ...actorOptions.machines].find(o => o.id === id)?.label || id
+  /** What the chip says: the one actor, or the first and how many more. */
+  const changedByWords = changedBy.length === 0 ? ''
+    : changedBy.length === 1 ? actorName(changedBy[0])
+      : `${actorName(changedBy[0])} and ${changedBy.length - 1} more`
+
+  /**
+   * Changed by's values: People, then Machine identities, then any id from a link that neither list
+   * holds, so the list still shows it.
+   */
+  const changedByOptions = useMemo(() => {
+    const listed = new Set([...actorOptions.people, ...actorOptions.machines].map(o => o.id))
+    return [
+      ...actorOptions.people.map(o => ({ value: o.id, label: o.label, group: 'People' })),
+      ...actorOptions.machines.map(o => ({ value: o.id, label: o.label, group: 'Machine identities' })),
+      ...changedBy.filter(id => !listed.has(id)).map(id => ({ value: id, label: id, group: 'Not listed' })),
+    ]
+  }, [actorOptions, changedBy])
+
+  /** Entity's values: the kinds this role may ask for, under the groups the timeline's sections fall in. */
+  const kindOptions = useMemo(() => AUDIT_TRAIL_ENTITY_GROUPS.flatMap(g => entityTypes
+    .filter(e => e.group === g.id)
+    .map(e => ({ value: e.kind, label: e.label, group: g.label }))), [entityTypes])
 
   // Deleted entities: in the log, absent from every live table. The list endpoints do not filter
   // `is_archived`, so absent means gone rather than retired. The server counts them over everything
@@ -1200,9 +1232,10 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   const buildUrl = useCallback((cursor) => {
     let url = `/api/v1/audit-trail?limit=${PAGE_SIZE}`
-    if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
-    if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
-    if (changedBy)        url += `&changed_by=${encodeURIComponent(changedBy)}`
+    // Each list as one comma-separated parameter, which api.js sends as an array.
+    if (entityTypeFilter.length) url += `&entity_type=${encodeURIComponent(entityTypeFilter.join(','))}`
+    if (actionFilter.length)     url += `&action=${encodeURIComponent(actionFilter.join(','))}`
+    if (changedBy.length)        url += `&changed_by=${encodeURIComponent(changedBy.join(','))}`
     if (search)           url += `&search=${encodeURIComponent(search)}`
     // Measured at fetch time, so a rolling window or today does not go stale under the poll.
     const { since, until } = timeWindow(timeWin)
@@ -1277,14 +1310,18 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   const rangeIsFiltering = timeWin.kind !== 'all'
 
-  /** The controls in the Filters popover that are off their default; its own Clear resets them. */
-  const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0) + (changedBy ? 1 : 0)
+  /**
+   * The controls in the Filters popover that are off their default; its own Clear resets them.
+   * Showing deleted entities is the deviation, so Clear returns them to hidden.
+   */
+  const popoverFilterCount = (entityTypeFilter.length ? 1 : 0) + (actionFilter.length ? 1 : 0) +
+    (changedBy.length ? 1 : 0) + (showPurged ? 1 : 0)
 
-  const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) +
-    // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
-    (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
+  const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) + (rangeIsFiltering ? 1 : 0)
 
-  const clearPopoverFilters = () => { setEntityTypeFilter(''); setActionFilter(''); setChangedBy('') }
+  const clearPopoverFilters = () => {
+    setEntityTypeFilter([]); setActionFilter([]); setChangedBy([]); setShowPurged(false)
+  }
 
   /**
    * Load every row one transaction wrote, by searching its id.
@@ -1298,14 +1335,14 @@ export function AuditTrailTab({ userRole, showToast }) {
    */
   const showWholeTransaction = (causationId) => {
     setNameFilter(String(causationId))
-    setEntityTypeFilter('')
-    setActionFilter('')
-    setChangedBy('')
+    setEntityTypeFilter([])
+    setActionFilter([])
+    setChangedBy([])
     setShowPurged(true)
   }
 
   const resetFilters = () => {
-    setEntityTypeFilter(''); setNameFilter(''); setActionFilter(''); setChangedBy('')
+    setEntityTypeFilter([]); setNameFilter(''); setActionFilter([]); setChangedBy([])
     setTimeWin(ALL_TIME); setShowPurged(false)
   }
 
@@ -1675,86 +1712,58 @@ export function AuditTrailTab({ userRole, showToast }) {
               outside it. */}
           <TimeWindowControl value={timeWin} onChange={setTimeWin} ranges={TIME_PRESETS} allTime />
 
-          {/* The secondary filters: the kind of entity and the action. Search, the time window and
-              the deleted-entities toggle stay in the bar. */}
+          {/* The secondary filters: the kinds of entity, the actions, who made the change, and
+              whether deleted entities are shown. Search and the time window stay in the bar. */}
           <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
-            <select
-              className="form-control"
+            {/* Every kind this role may ask for, from the same table the sections are built from,
+                so a kind cannot be drawable and unfilterable. */}
+            <FilterList
+              label="Entity"
+              plural="kinds"
+              options={kindOptions}
               value={entityTypeFilter}
-              onChange={e => setEntityTypeFilter(e.target.value)}
-              aria-label="Entity"
-            >
-              <option value="">All entities</option>
-              {/* Every kind this role may ask for, from the same table the sections are built from,
-                  so a kind cannot be drawable and unfilterable. */}
-              {entityTypes.map(({ kind, label }) => (
-                <option key={kind} value={kind}>{label}</option>
-              ))}
-            </select>
-
-            <Tooltip text="The database action on the audit row, as the drawer's badge shows it. The key's markers are a separate classification.">
-              <select
-                className="form-control"
-                value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
-                aria-label="Action"
-              >
-                <option value="">Any action</option>
-                {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </Tooltip>
-
-            <Tooltip text="Only the changes one person or machine identity made, under any email address they had.">
-              <select
-                className="form-control"
-                value={changedBy}
-                onChange={e => setChangedBy(e.target.value)}
-                aria-label="Changed by"
-              >
-                <option value="">Changed by anyone</option>
-                {actorOptions.people.length > 0 && (
-                  <optgroup label="People">
-                    {actorOptions.people.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </optgroup>
-                )}
-                {actorOptions.machines.length > 0 && (
-                  <optgroup label="Machine identities">
-                    {actorOptions.machines.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </optgroup>
-                )}
-                {/* An id from a link that neither list holds, so the control still shows it. */}
-                {!changedByListed && <option value={changedBy}>{changedBy}</option>}
-              </select>
-            </Tooltip>
+              onChange={setEntityTypeFilter}
+            />
+            <FilterList
+              label="Action"
+              plural="actions"
+              options={ACTION_OPTIONS}
+              value={actionFilter}
+              onChange={setActionFilter}
+              tip="The database action on the audit row, as the drawer's badge shows it. The key's markers are a separate classification."
+            />
+            <FilterList
+              label="Changed by"
+              plural="names"
+              options={changedByOptions}
+              value={changedBy}
+              onChange={setChangedBy}
+              tip="Only the changes these people or machine identities made, under any email address they had."
+            />
+            {/* Offered while something is deleted, or while they are shown. The tip says no longer
+                in the database, because absence from the lookups is all the test sees. */}
+            {(purgedEntityCount > 0 || showPurged) && (
+              <FilterCheck
+                label="Show deleted entities"
+                checked={showPurged}
+                onChange={setShowPurged}
+                count={purgedEntityCount}
+                tip="Include events for entities no longer in the database. The records are kept either way; this changes only the list."
+              />
+            )}
           </FiltersPopover>
 
-          {/* The chosen actor stays in view while the popover is shut; selecting it clears it. */}
-          {changedBy && (
+          {/* The chosen actors stay in view while the popover is shut; selecting the chip clears them. */}
+          {changedBy.length > 0 && (
             <Tooltip text="Only their changes are shown. Select to show everyone's.">
               <button
                 type="button"
                 className="chip chip-link trail-actor-chip"
-                onClick={() => setChangedBy('')}
-                aria-label={`Changed by ${changedByName}. Show everyone's changes`}
+                onClick={() => setChangedBy([])}
+                aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
               >
-                <span className="chip-name">Changed by {changedByName}</span>
+                <span className="chip-name">Changed by {changedByWords}</span>
                 <IconX size={11} aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
-
-          {/* Shown only when something is deleted. The tooltip says no longer in the database,
-              because absence from the lookups is all the test sees. */}
-          {purgedEntityCount > 0 && (
-            <Tooltip text="Include events for entities no longer in the database. The records are kept either way; this changes only the list.">
-              <button
-                className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
-                aria-pressed={showPurged}
-                onClick={() => setShowPurged(v => !v)}
-              >
-                <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
               </button>
             </Tooltip>
           )}

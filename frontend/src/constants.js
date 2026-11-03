@@ -132,43 +132,94 @@ export const AUDIT_TRAIL_ACTIONS = {
  * drawable, filterable and resolvable at once, and `auditTrailEntityTypes.test.js` fails if
  * any consumer is left behind.
  */
-// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities.
+// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities. `group`
+// is the heading the filter draws the kind under (AUDIT_TRAIL_ENTITY_GROUPS), security for the
+// security domain.
 export const AUDIT_TRAIL_ENTITY_TYPES = [
-  { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
-  { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
-  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
-  { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
+  { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset', group: 'plant' },
+  { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset', group: 'plant' },
+  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset', group: 'plant' },
+  { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset', group: 'plant' },
   // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
   // reader meets it: who holds what, what the machines are, then the contracts and settings that
   // shape both.
-  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
-  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
+  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security', group: 'security' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security', group: 'security' },
   // A read-only broker account made or deleted on Access Control (0218): an INSERT and a DELETE,
   // filed under security by audit_domain_for()'s fail-closed default. No table holds the account.
-  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
+  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security', group: 'security' },
   // The apps that sign people in (0217): the sign-in service's OAuth clients.
-  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
+  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security', group: 'security' },
   // Reads of a service's log lines (0225), one lane per service, filed under security by
   // audit_domain_for()'s fail-closed default: the lines carry sign-ins and addresses.
-  { kind: 'SERVICE LOGS',     table: 'service_logs',       label: 'Service logs',       domain: 'security' },
-  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
+  { kind: 'SERVICE LOGS',     table: 'service_logs',       label: 'Service logs',       domain: 'security', group: 'security' },
+  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
-  { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
-  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
+  { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security', group: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
-  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
-  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
+  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset', group: 'model' },
+  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset', group: 'model' },
   // A schema attached to or detached from a device; the entity id is the device's (0168).
-  { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset' },
+  { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset', group: 'model' },
   // The capture lane (0193): the act of recording, the capture it stores, and its replays. Asset,
   // because the roles that read the asset lane are the roles that read captures.
-  { kind: 'RECORDING',        table: 'capture_jobs',       label: 'Recordings',         domain: 'asset' },
-  { kind: 'CAPTURE',          table: 'captures',           label: 'Captures',           domain: 'asset' },
-  { kind: 'PLAYBACK',         table: 'playback_jobs',      label: 'Playbacks',          domain: 'asset' },
+  { kind: 'RECORDING',        table: 'capture_jobs',       label: 'Recordings',         domain: 'asset', group: 'capture' },
+  { kind: 'CAPTURE',          table: 'captures',           label: 'Captures',           domain: 'asset', group: 'capture' },
+  { kind: 'PLAYBACK',         table: 'playback_jobs',      label: 'Playbacks',          domain: 'asset', group: 'capture' },
   // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
   // fail-closed default, which is where an act on the whole database belongs.
-  { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },
-  { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security' },
+  { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security', group: 'security' },
+  { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security', group: 'security' },
+];
+
+/**
+ * The groups the Audit Trail's entity filter draws its kinds under, in this order: each kind's
+ * `group` above. The security group is the security domain, which only some roles may read.
+ */
+export const AUDIT_TRAIL_ENTITY_GROUPS = [
+  { id: 'plant', label: 'The plant' },
+  { id: 'model', label: 'The model' },
+  { id: 'capture', label: 'Capture' },
+  { id: 'security', label: 'Security' },
+];
+
+/**
+ * The groups the Audit Trail's action filter draws AUDIT_TRAIL_ACTIONS under, by what each act is
+ * about. Every action is in exactly one (`auditTrailFilterGroups.test.js`). Not the legend's
+ * categories, which classify an event rather than name its action.
+ */
+export const AUDIT_TRAIL_ACTION_GROUPS = [
+  { label: 'Row changes', actions: ['INSERT', 'UPDATE', 'DELETE'] },
+  {
+    label: 'The plant and the model',
+    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'EXPORTED', 'FLOW_DEPLOYED'],
+  },
+  {
+    label: 'Capture and playback',
+    actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
+      'CAPTURE_DOWNLOAD_ISSUED', 'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
+  },
+  {
+    label: 'People and access',
+    actions: ['PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
+      'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET'],
+  },
+  {
+    label: 'Apps',
+    actions: ['APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED'],
+  },
+  {
+    label: 'Machine identities and credentials',
+    actions: ['PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN'],
+  },
+  {
+    label: 'Backups',
+    actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
+      'BACKUP_PRUNED'],
+  },
+  { label: 'System', actions: ['SERVICE_LOGS_READ'] },
 ];
 
 /**

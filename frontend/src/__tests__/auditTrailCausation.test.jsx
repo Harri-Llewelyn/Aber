@@ -14,6 +14,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, causationSiblings } from '../components/tabs/AuditTrailTab'
+import { closePanel, filterList, openFiltersPanel, ticked, toggleInList } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -222,9 +223,8 @@ describe('the Same transaction control', () => {
        part of the act under a count that reads as the whole of it. */
     await show()
     // The kind filter lives in the Filters popover.
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Entity' }),
-      { target: { value: 'DEVICE' } })
+    toggleInList('Entity', 'Devices')
+    closePanel()
     // The filter is a query parameter, so the page refetches; selecting before that lands picks
     // an event out of the list that is about to be replaced.
     await waitFor(() =>
@@ -234,8 +234,8 @@ describe('the Same transaction control', () => {
 
     fireEvent.click(control())
 
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Entity' }).value).toBe(''))
+    await waitFor(() => expect(window.location.search).not.toContain('type='))
+    expect(ticked(filterList('Entity'))).toEqual([])
   })
 
   it('shows deleted entities, whose rows the count includes', async () => {
@@ -245,12 +245,15 @@ describe('the Same transaction control', () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
-    const toggle = () => screen.getByRole('button', { name: /Show deleted entities \(1\)/ })
-    expect(toggle()).not.toHaveClass('btn-primary')
+    const toggle = () => within(openFiltersPanel()).getByRole('checkbox', { name: 'Show deleted entities 1' })
+    expect(toggle().checked).toBe(false)
+    // Shut by its button: Escape would close the drawer too.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
 
     fireEvent.click(control())
 
-    await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
+    await waitFor(() => expect(window.location.search).toContain('deleted=1'))
+    expect(toggle().checked).toBe(true)
   })
 
   it('says the list is complete once every row the act wrote is loaded', async () => {
