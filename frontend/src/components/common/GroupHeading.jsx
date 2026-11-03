@@ -1,5 +1,6 @@
 import React from 'react'
 import { IconChevronDown, IconChevronUp } from './Icons'
+import { OverflowText } from './OverflowText'
 
 /**
  * The heading of a group of rows that opens and closes: a disclosure button with a chevron, an
@@ -13,6 +14,8 @@ import { IconChevronDown, IconChevronUp } from './Icons'
  * @param {number} [count] How many rows the group holds, drawn after the name.
  * @param {string} [countLabel] The count as a screen reader hears it ("12 lanes"); the number alone
  *   without it.
+ * @param {string} [detail] Words drawn after the name in place of a count, such as what a filter
+ *   list has chosen ("Entity · 2 chosen"). Cut before the name is, and slides on hover or focus.
  * @param {node} [icon] Drawn before the name. Decorative: hidden from assistive technology.
  * @param {string} [controls] The id of the element holding the rows.
  * @param {string} [className] Extra classes on the button.
@@ -20,7 +23,7 @@ import { IconChevronDown, IconChevronUp } from './Icons'
  *   <GroupHeading open={open} onToggle={toggle} label="Devices" count={12} countLabel="12 lanes"
  *     icon={<IconCpu size={12} />} controls="devices-rows" />
  */
-export function GroupHeading({ open, onToggle, label, count, countLabel, icon = null, controls, className = '' }) {
+export function GroupHeading({ open, onToggle, label, count, countLabel, detail, icon = null, controls, className = '' }) {
   const Chevron = open ? IconChevronUp : IconChevronDown
   return (
     <button
@@ -37,6 +40,12 @@ export function GroupHeading({ open, onToggle, label, count, countLabel, icon = 
         <span className="group-heading-count">
           <span aria-hidden="true">· {count}</span>
           <span className="sr-only">, {countLabel || count}</span>
+        </span>
+      )}
+      {detail && (
+        <span className="group-heading-count group-heading-detail">
+          <span className="group-heading-detail-shown" aria-hidden="true"><OverflowText>· {detail}</OverflowText></span>
+          <span className="sr-only">, {detail}</span>
         </span>
       )}
     </button>

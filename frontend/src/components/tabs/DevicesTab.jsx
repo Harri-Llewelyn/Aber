@@ -889,12 +889,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         </Tooltip>
 
         <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
-          {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
+          {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value.
+              At Active it is not a choice that opens its section first. */}
           <FilterList
             label="Lifecycle"
             plural="lifecycles"
             options={LIFECYCLE_OPTIONS}
             value={lifecycle}
+            defaultValue={LIFECYCLE_DEFAULT}
             onChange={setLifecycle}
             counts={facetCounts.lifecycle}
           />

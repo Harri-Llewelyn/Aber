@@ -299,7 +299,8 @@ slowness, so the list names every value the predicate reads, in the order it rea
 `common/GroupHeading.jsx` is the heading of a group of rows a reader can close. It is a disclosure
 button (the WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the group's name and its
 count: "Devices · 12". The chevron points up while open and down while closed, as a table's group
-rows do, and the name takes `.table-group-label`'s look.
+rows do, and the name takes `.table-group-label`'s look. In place of a count, `detail` takes words,
+cut before the name is (`OverflowText`): a Filters panel's section says what is chosen in its list.
 
 ```jsx
 <GroupHeading open={open} onToggle={() => toggle(kind)} label="Devices" count={12}
@@ -1223,9 +1224,22 @@ yes-or-no choice stays a toggle button in the toolbar.
   reads "Any status" with nothing chosen, the value with one, and "2 statuses" with several
   (`filterWords`). A page may name a choice, as Schemas' Current is Active and Draft. Its name is
   "Status: Any status", and its panel ends in Clear, which returns it to its default.
-- **In a Filters panel it is a `FilterList`**: a label, an optional HelpTip, then the checklist. The
-  panel's own Clear resets it. A yes-or-no choice in a panel is a `FilterCheck` checkbox: Show
-  deleted entities, Show replay lanes.
+- **In a Filters panel it is a `FilterList`**, with an optional HelpTip, and the panel's own Clear
+  resets it. A yes-or-no choice in a panel is a `FilterCheck` checkbox: Show deleted entities, Show
+  replay lanes.
+- **A Filters panel with several lists makes each a section that opens and closes**, as Home
+  Assistant's filter pane does, so the panel is the one scroller. `FiltersPopover` finds the
+  `FilterList`s written into it and draws each under a `GroupHeading` that says what is chosen in
+  it: "Entity · 2 chosen", the value's name when one is chosen, or the name alone.
+  - One section is open at a time. As the panel opens, the first list whose choice differs from its
+    `defaultValue` opens, or else the first list. Devices' Lifecycle at Active does not count.
+  - An open list is at full height, with its search box over it. Only a toolbar dropdown's list
+    scrolls on its own. The panel's `FilterCheck` boxes stay under the sections.
+  - Which section is open is not in the address, and starts again each time the panel opens. A
+    pressed heading keeps the focus while the list it closes goes.
+  - A panel with one list draws its label, not a heading.
+  - Write each list straight into the panel, not inside a `<div>`, or the panel cannot find it.
+    Check 203 holds this, and that nothing in App.css scrolls a list inside the panel.
 - **The checklist** draws the values under headings when the options carry a `group`, and flat
   when none does. A heading's checkbox chooses or clears its group, and is mixed while some of it
   is chosen. Over eight values it has a search box; while a search is typed, a heading acts on the
