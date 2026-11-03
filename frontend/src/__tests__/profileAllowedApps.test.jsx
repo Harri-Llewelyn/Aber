@@ -64,15 +64,16 @@ const rows = () => screen.getAllByRole('row').slice(1)
 const rowOf = (name) => rows().find(r => r.querySelector('.session-where')?.textContent === name)
 
 describe('Apps you have allowed', () => {
-  it('is a tab of its own, after MFA, with its own heading, About tip and line', async () => {
+  it('is a tab of its own, after MFA, that explains itself in its tooltip and draws no toolbar', async () => {
     renderAllowedApps()
     expect(tabLink('Allowed Apps')).toHaveAttribute('aria-current', 'page')
     expect(tabLinks().map(t => t.textContent).slice(-2)).toEqual(['MFA', 'Allowed Apps'])
-    const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
-    expect(headings).toEqual(['Apps you have allowed'])
-    expect(screen.getByRole('button', { name: 'About apps you have allowed' })).toBeInTheDocument()
-    expect(document.querySelector('.profile-section-note')).toHaveTextContent(/what it can read about you/)
     await loaded()
+    // No heading, About tip or line of its own under the bar, as no other tab has; and no button,
+    // so no toolbar row.
+    expect(screen.queryAllByRole('heading', { level: 4 })).toEqual([])
+    expect(screen.queryByRole('button', { name: /^About / })).toBeNull()
+    expect(document.querySelector('.card .filter-bar')).toBeNull()
   })
 
   it('has the Sessions table\'s header row', async () => {
