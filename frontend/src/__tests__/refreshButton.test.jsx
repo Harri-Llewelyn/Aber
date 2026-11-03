@@ -33,6 +33,14 @@ describe('the refresh control', () => {
     expect(onEveryChange).toHaveBeenCalledWith(30)
   })
 
+  it('draws the interval half as only its chevron while Off, and names the interval once set', () => {
+    const { group } = draw()
+    expect(group.querySelector('.refresh-split-off')).not.toBeNull()
+    const { container } = render(<RefreshButton onRefresh={() => {}} every={30} onEveryChange={() => {}} choices={CHOICES} />)
+    expect(container.querySelector('.refresh-split-off')).toBeNull()
+    expect(within(container).getByRole('combobox', { name: 'Refresh automatically' })).toHaveDisplayValue('30 s')
+  })
+
   it('holds the button while a read runs, and leaves the interval free', () => {
     const { group } = draw({ busy: true })
     expect(within(group).getByRole('button', { name: 'Refresh' })).toBeDisabled()

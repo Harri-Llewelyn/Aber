@@ -1901,31 +1901,59 @@ td.row-actions, th.row-actions {
 }
 .system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-/* Refresh and its interval as one control (common/RefreshButton.jsx): two halves of one filled
-   button. The interval is a native select laid over the right half, with a chevron drawn under it. */
-.refresh-split { display: inline-flex; }
-.refresh-split > .btn:hover { transform: none; }
-.refresh-split-now { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+/* Refresh and its interval as one control (common/RefreshButton.jsx): one filled shape, as a
+   .btn-primary .btn-sm is, holding two plain halves with a hairline between them. Hover lights the
+   half under the pointer and focus rings it inside the shape. While Off the right half is only its
+   chevron (the select's text is transparent and the select as narrow as the chevron). */
+.refresh-split {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  transition: var(--transition);
+}
+.refresh-split:hover { box-shadow: 0 0 16px var(--accent-glow); }
+.refresh-split-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.refresh-split-now:disabled { opacity: 0.6; cursor: default; }
 .refresh-split-every {
   position: relative;
-  padding: 0;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 35%, transparent);
+  display: inline-flex;
+  border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent);
 }
+.refresh-split-now:hover:not(:disabled),
+.refresh-split-every:hover { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
 .refresh-split-every select {
   appearance: none;
-  background: transparent;
   border: 0;
+  background: transparent;
   color: inherit;
   font: inherit;
   padding: 6px 28px 6px 10px;
   cursor: pointer;
 }
-.refresh-split-every select:focus-visible { outline: none; }
-.refresh-split-every:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.refresh-split-off select { width: 32px; padding: 6px 0; color: transparent; }
 .refresh-split-every option { color: var(--text-primary); background: var(--bg-card); }
 .refresh-split-every svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.refresh-split-now:focus-visible,
+.refresh-split-every:has(select:focus-visible) { outline: 2px solid var(--accent-contrast); outline-offset: -3px; }
+.refresh-split-every select:focus-visible { outline: none; }
 
 /* System › Logs: time, level, message and a copy button. The message takes what the other three
    leave and wraps anywhere, since a line is one long token as often as a sentence. */
