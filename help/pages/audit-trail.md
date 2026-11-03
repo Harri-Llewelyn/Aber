@@ -7,7 +7,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 ## What the controls do
 
 - **The search box** matches a name or an id. It takes the three ids shown in the event drawer: an entity ID, a mutation ID or a transaction ID. A term made only of digits also matches a mutation ID and a transaction ID. A deleted entity can be found by its name too, because the trail keeps the name it had.
-- **The range select** limits the timeline to the last 15 minutes, hour, day, week or month. It can also take a custom range between two dates and times. **All time** is the default.
+- **The time window** after the search box sets the stretch of time the timeline shows. **All time** is the default. [Moving through time](#moving-through-time) says how to use it.
 - **Filters** opens the three filters used less often: the kind filter, the action filter and **Changed by**. Its number is how many of them are set, and its own **Clear** resets just those three.
 - **The kind filter** narrows the timeline to one kind of entity: areas, cells, gateways, devices, schemas, metrics and so on. It does not pick out one entity. For one entity's history, paste its name or id into the search box. Or open the Audit Trail from that entity's page, which fills in the search box for you. From a device, that also shows its nameplate and schema changes.
 - **The action filter** narrows the timeline to one database action across every entity. That is Insert, Update, Delete, or a named act such as Token minted or Proposal applied. The markers use a separate classification, which the key above the timeline explains.
@@ -18,13 +18,35 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **Clear filters** puts every control back to its default, including the deleted entities toggle. Its number is how many controls are changed.
 - **Export CSV** saves the events loaded on the page. The changes are flattened into one column. Its number says how many events are loaded and, when more match, how many match in all. To export them all, load the rest first.
 - **The key** above the timeline says what each marker means. Each kind has its own shape as well as its own colour, so you can tell them apart without colour vision. A circle is **Operational**, the most common. A square is **Created**, and a diamond is **Configuration**. A triangle is **Lifecycle**: deletes and archives.
-- **Grouped** is a violet badge with a count. It replaces markers too close together to draw apart. Hover over it for a breakdown, or narrow the range and the markers separate.
+- **Grouped** is a violet badge with a count. It replaces markers too close together to draw apart. Hover over it for a breakdown, or narrow the time window and the markers separate.
 - **The event drawer** opens when you click a marker. It shows when the change was recorded, the actor, the entity ID, the mutation ID, the transaction ID and the description. **Previous** and **Next**, or ← and →, step through that lane's history. **Previous Entity** and **Next Entity**, or ↑ and ↓, move to the entity above or below, at the same point in time. Above the buttons, "Event 3 of 7 · Entity 4 of 23" says where you are.
 - **Property** and **Previous** in the drawer show the field that changed and the value it held before. Together they answer "when did this become wrong?".
 - **Same transaction** lists the other rows written by the same act. **Show whole transaction** loads all of them, by searching for the transaction ID.
 - **Raw audit payload** opens the entry exactly as it was recorded, for when the summary is not enough.
 - **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded.
 - The page **refreshes itself** every 60 seconds, unless an Administrator changed that on the Settings page. A refresh adds new events at the top, and keeps the pages you already loaded.
+
+## Moving through time
+
+1. Choose **Day**, **Week**, **Month** or **Year** in the bar. The timeline shows the whole of that span, around the date shown.
+2. Select **‹** or **›** to step back or forward one span at a time.
+3. Select **Today** to come back to the span that holds now.
+4. To go further, select the date between the arrows. Under **Jump to**, choose a day such as **A month ago**. Or pick any date and select **Jump**.
+
+The span stays as it was when you jump. In **Week**, **A month ago** shows the week that holds that day. Weeks start on Monday.
+
+The same list has two other kinds of window:
+
+- **Rolling** shows the last 15 minutes, hour, day, week or month, ending now. **All time** shows everything.
+- **Custom range** takes two dates and times, then **Show range**. The range stops at the start of the minute you give as its end.
+
+Under a rolling or custom range, no span is chosen. The arrows are called **Earlier** and **Later**, and step by the range's own length. Stepping a rolling range fixes it: **Last 1 hour** at 15:20, stepped back, shows 13:20 to 14:20. Choosing a span then shows the day, week, month or year that holds the end of the range.
+
+**›** is greyed out while the window reaches now, and both arrows are greyed out under **All time**. Point at an arrow, or move to it with Tab, to see why.
+
+When the window runs on past now, as **Today** does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**. When a window holds more events than are loaded, its start is hatched and says **Older events not loaded**. **Show more** at the foot loads them.
+
+The address keeps the window, so a link you share opens the same one.
 
 ## What the states mean
 

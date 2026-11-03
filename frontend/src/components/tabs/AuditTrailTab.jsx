@@ -17,6 +17,7 @@ import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { FiltersPopover } from '../common/FiltersPopover'
+import { TimeWindowControl } from '../common/TimeWindowControl'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -24,6 +25,11 @@ import {
   AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
+import { useTimeWindow } from '../../hooks/useTimeWindow'
+import { useClockTick } from '../../hooks/useClockTick'
+import {
+  ALL_TIME, TIME_PRESETS, calendarTicks, clockWords, timeWindow, windowBounds
+} from '../../utils/timeWindow'
 
 /**
  * `actor_source` names the kind of actor; `changed_by` only says which principal it was, and is set
@@ -248,49 +254,6 @@ export function classifyEvent(event, diff) {
 }
 
 /**
- * The range presets; `ms` of null is unbounded. The short presets exist because an act happens
- * inside a second, and a date-only picker could not frame one.
- */
-const TIME_PRESETS = [
-  { value: 'all', label: 'All time',       ms: null },
-  { value: '15m', label: 'Last 15 minutes', ms: 15 * 60 * 1000 },
-  { value: '1h',  label: 'Last 1 hour',     ms: 60 * 60 * 1000 },
-  { value: '24h', label: 'Last 24 hours',   ms: 24 * 60 * 60 * 1000 },
-  { value: '7d',  label: 'Last 7 days',     ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: '30d', label: 'Last 30 days',    ms: 30 * 24 * 60 * 60 * 1000 }
-]
-
-/**
- * The preset or custom dates as the `since` / `until` the API takes. All time is the default: most
- * arrivals are a handover for one entity whose last edit may be years old. Called at fetch time
- * rather than memoised, so a rolling window does not drift while the poll runs.
- */
-export function timeWindow(preset, customStart, customEnd) {
-  /**
-   * A custom bound as an ISO instant. Accepts `YYYY-MM-DDTHH:mm` from `datetime-local` and
-   * `YYYY-MM-DD` from the older date input, which names a day and is widened to one end of it.
-   * Parsed as local time: appending `Z` or using toISOString() would shift the window by the
-   * timezone offset.
-   */
-  const iso = (value, endOfRange) => {
-    if (!value) return ''
-    const hasTime = String(value).includes('T')
-    const d = hasTime
-      ? new Date(value)
-      : new Date(`${value}T${endOfRange ? '23:59:59.999' : '00:00:00.000'}`)
-    if (Number.isNaN(d.getTime())) return ''
-    // Minute granularity: an end bound of 16:11 must include 16:11:59.
-    if (hasTime && endOfRange) d.setSeconds(59, 999)
-    return d.toISOString()
-  }
-
-  if (preset === 'custom') return { since: iso(customStart, false), until: iso(customEnd, true) }
-
-  const ms = TIME_PRESETS.find(p => p.value === preset)?.ms
-  return { since: ms ? new Date(Date.now() - ms).toISOString() : '', until: '' }
-}
-
-/**
  * The fallback for the `ui.audit_trail_poll_seconds` setting, whose `fallback_source` names this
  * constant.
  */
@@ -301,6 +264,9 @@ const DEFAULT_POLL_SECONDS = 60
  * the page size, so a larger page only costs; paging is the answer, not a bigger page.
  */
 const PAGE_SIZE = 200
+
+/** The narrowest hatched part that says what it is in words; a narrower one is hatched alone. */
+const SHADE_WORDS_PX = 150
 
 /**
  * Fold a freshly polled first page into the pages already loaded. The trail is append-only and
@@ -319,7 +285,7 @@ export function mergeFirstPage (prev, fresh) {
 }
 
 /* Markers too close to draw separately become one badge carrying the count. Grouping is by pixel
-   distance, so the range control acts as a zoom, and positions are never nudged along the time
+   distance, so the time window acts as a zoom, and positions are never nudged along the time
    axis: identical timestamps are the visual signature of one transaction. See the Audit Trail
    notes in frontend/README.md. */
 
@@ -405,7 +371,7 @@ export function clusterSummary(events, kindOf) {
         : `${first} → ${last}`
 
   return `${events.length} events: ${breakdown}\n${when}\n`
-       + 'Click to open the first — narrow the time range to separate them'
+       + 'Click to open the first — narrow the time window to separate them'
 }
 
 /** A lane's key: the stored kind and the entity, so a device, its nameplate and its schemas are three lanes. */
@@ -1012,9 +978,9 @@ export function AuditTrailTab({ userRole, showToast }) {
   // Whose changes: the user id the trail stamps in `changed_by`, a person's or a machine identity's.
   // Any id is kept, listed or not: the database's policies decide which of their rows come back.
   const [changedBy, setChangedBy] = useUrlState('changed_by', '', { allowed: isUuid })
-  const [rangePreset, setRangePreset] = useUrlState('range', 'all', { allowed: [...TIME_PRESETS.map(p => p.value), 'custom'] })
-  const [customStart, setCustomStart] = useUrlState('since')
-  const [customEnd, setCustomEnd]     = useUrlState('until')
+  // All time is the default: most arrivals are a handover for one entity whose last edit may be
+  // years old, and any window would answer that with an empty timeline.
+  const [timeWin, setTimeWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
@@ -1236,9 +1202,8 @@ export function AuditTrailTab({ userRole, showToast }) {
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
     if (changedBy)        url += `&changed_by=${encodeURIComponent(changedBy)}`
     if (search)           url += `&search=${encodeURIComponent(search)}`
-    // Evaluated here, not held in state: see timeWindow's note on a rolling window going stale
-    // under auto-refresh.
-    const { since, until } = timeWindow(rangePreset, customStart, customEnd)
+    // Measured at fetch time, so a rolling window or today does not go stale under the poll.
+    const { since, until } = timeWindow(timeWin)
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
     if (showPurged) url += '&include_purged=true'
@@ -1249,14 +1214,19 @@ export function AuditTrailTab({ userRole, showToast }) {
       url += `&before_id=${encodeURIComponent(cursor.id)}`
     }
     return url
-  }, [entityTypeFilter, actionFilter, changedBy, search, rangePreset, customStart, customEnd, showPurged])
+  }, [entityTypeFilter, actionFilter, changedBy, search, timeWin, showPurged])
+
+  /** When the loaded events were asked for: where a rolling window, or today, is measured from. */
+  const [askedAt, setAskedAt] = useState(() => Date.now())
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
+    const asked = Date.now()
     api.get(buildUrl(null))
       // `d` is the event array carrying the page-level counts as properties. A fixture that
       // resolves a bare array reports no deleted entities and no truncation.
       .then(d => {
+        setAskedAt(asked)
         const fresh = Array.isArray(d) ? d : []
         // The poll merges into the loaded pages rather than replacing them: a reader six pages back
         // must not lose five of them every minute.
@@ -1303,8 +1273,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       .catch(() => setLoadingMore(false))
   }, [nextCursor, loadingMore, buildUrl])
 
-  const rangeIsFiltering =
-    rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
+  const rangeIsFiltering = timeWin.kind !== 'all'
 
   /** The controls in the Filters popover that are off their default; its own Clear resets them. */
   const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0) + (changedBy ? 1 : 0)
@@ -1322,8 +1291,8 @@ export function AuditTrailTab({ userRole, showToast }) {
    * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
    * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
    * hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
-   * no live table holds, and `transaction_rows` counts it. The time range is kept: the rows share
-   * one `recorded_at`, so a range holding this event holds its siblings.
+   * no live table holds, and `transaction_rows` counts it. The time window is kept: the rows share
+   * one `recorded_at`, so a window holding this event holds its siblings.
    */
   const showWholeTransaction = (causationId) => {
     setNameFilter(String(causationId))
@@ -1335,7 +1304,7 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter(''); setChangedBy('')
-    setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
+    setTimeWin(ALL_TIME); setShowPurged(false)
   }
 
   useEffect(() => {
@@ -1422,10 +1391,20 @@ export function AuditTrailTab({ userRole, showToast }) {
   const drawnLanes = useMemo(() => sections.flatMap(s => s.lanes), [sections])
 
   /**
-   * The x-axis extent, from the events rather than the range control: the default range is
-   * unbounded, and a requested window would push a dense day into one corner of the track.
+   * The x-axis extent: the time window's, so the axis reads as the control does and today runs on
+   * past now. All time has no bounds, so its extent is the events'. `calendar` is the span whose
+   * ticks it takes.
    */
   const domain = useMemo(() => {
+    const { start, end } = windowBounds(timeWin, askedAt)
+    if (start && end && end > start) {
+      return {
+        min: start.getTime(),
+        max: end.getTime(),
+        span: end.getTime() - start.getTime(),
+        calendar: timeWin.kind === 'calendar' ? timeWin.span : null,
+      }
+    }
     const stamps = events
       .map(e => new Date(e.timestamp).getTime())
       .filter(Number.isFinite)
@@ -1434,8 +1413,8 @@ export function AuditTrailTab({ userRole, showToast }) {
     let max = Math.max(...stamps)
     // A single instant has no extent; pad it by an hour so the marker lands mid-track.
     if (max === min) { min -= 30 * 60 * 1000; max += 30 * 60 * 1000 }
-    return { min, max, span: max - min }
-  }, [events])
+    return { min, max, span: max - min, calendar: null }
+  }, [events, timeWin, askedAt])
 
   /** Fraction of the track, 0..1, for a timestamp. */
   const fractionFor = useCallback((timestamp) => {
@@ -1495,13 +1474,33 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   const ticks = useMemo(() => {
     if (!domain) return []
+    // The full timestamp is always one hover away, whatever the axis had room to print.
+    if (domain.calendar) {
+      return calendarTicks(domain.calendar, new Date(domain.min), new Date(domain.max))
+        .map(({ at, label }) => ({ f: (at.getTime() - domain.min) / domain.span, label, title: at.toLocaleString() }))
+    }
     const format = tickFormatter(domain.span)
     return [0, 0.25, 0.5, 0.75, 1].map(f => {
       const at = new Date(domain.min + domain.span * f)
-      // The full timestamp is always one hover away, whatever the axis had room to print.
       return { f, label: format(at), title: at.toLocaleString() }
     })
   }, [domain])
+
+  // Each minute while the axis runs on past now, so the now marker keeps up with the clock.
+  const nowMs = Date.now()
+  useClockTick(domain && domain.max > nowMs ? 60 * 1000 : 0)
+  /** Where now falls inside the axis, or null; a window running on past it is hatched after it. */
+  const nowF = domain && nowMs > domain.min && nowMs < domain.max ? (nowMs - domain.min) / domain.span : null
+  /**
+   * Where the oldest loaded event falls, while older ones in the window are not loaded, or null.
+   * The axis is the window's, so the part before it would otherwise look empty.
+   */
+  const oldestLoaded = allEvents.reduce((t, e) => Math.min(t, new Date(e.timestamp).getTime() || Infinity), Infinity)
+  const unloadedF = domain && (nextCursor || truncated) && Number.isFinite(oldestLoaded) && oldestLoaded > domain.min
+    ? Math.min(1, (oldestLoaded - domain.min) / domain.span)
+    : null
+  /** Whether a hatched part is wide enough for its words; jsdom measures nothing, so says yes. */
+  const fitsWords = (fraction) => !trackWidth || fraction * trackWidth >= SHADE_WORDS_PX
 
   // Resolved fresh every render: a refresh replaces every event object. If the selected event drops
   // out of the filter, the drawer closes.
@@ -1670,48 +1669,12 @@ export function AuditTrailTab({ userRole, showToast }) {
             ariaLabel="Search by name, entity ID, mutation ID or transaction ID"
           />
 
-          {/* All time is the default (see timeWindow). The window is a query parameter, so a
-              narrower range does not spend the row budget outside it. */}
-          <select
-            className="form-control control-sm"
-            value={rangePreset}
-            onChange={e => setRangePreset(e.target.value)}
-            aria-label="Time range"
-          >
-            {TIME_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-            <option value="custom">Custom range…</option>
-          </select>
+          {/* The window is a query parameter, so a narrower one does not spend the row budget
+              outside it. */}
+          <TimeWindowControl value={timeWin} onChange={setTimeWin} ranges={TIME_PRESETS} allTime />
 
-          {/* Shown only in custom mode. */}
-          {rangePreset === 'custom' && (
-            <>
-              {/* `datetime-local`, not `date`: a date pair cannot express a window narrower than a
-                  day. `timeWindow()` widens the end bound to :59.999. */}
-              <Tooltip text="In local time.">
-                <input
-                  type="datetime-local"
-                  className="form-control"
-                  style={{ width: '210px' }}
-                  value={customStart}
-                  onChange={e => setCustomStart(e.target.value)}
-                  aria-label="Range start"
-                />
-              </Tooltip>
-              <Tooltip text="In local time, and including that minute.">
-                <input
-                  type="datetime-local"
-                  className="form-control"
-                  style={{ width: '210px' }}
-                  value={customEnd}
-                  onChange={e => setCustomEnd(e.target.value)}
-                  aria-label="Range end"
-                />
-              </Tooltip>
-            </>
-          )}
-
-          {/* The secondary filters: the kind of entity and the action. Search, the range and the
-              deleted-entities toggle stay in the bar. */}
+          {/* The secondary filters: the kind of entity and the action. Search, the time window and
+              the deleted-entities toggle stay in the bar. */}
           <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
             <select
               className="form-control"
@@ -1833,7 +1796,7 @@ export function AuditTrailTab({ userRole, showToast }) {
               {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
                   reading `n` as a placeholder for each badge's count. */}
               {clusterCount > 0 && (
-                <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the range.">
+                <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the time window.">
                   <span className="trail-legend-item" tabIndex={0}>
                     <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
                     Grouped ({clusterCount})
@@ -1856,7 +1819,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                       ? 'one deleted entity does'
                       : `${purgedEntityCount} deleted entities do`}. Their records are kept; this view just hides them.`
                   : rangeIsFiltering
-                    ? 'No audit trail events in this time range. Widen it, or switch back to All time.'
+                    ? 'No audit trail events in this time window. Step back, widen it, or switch back to All time.'
                     : 'No audit trail events match the filter criteria.'
               }
             >
@@ -1885,6 +1848,16 @@ export function AuditTrailTab({ userRole, showToast }) {
                           </span>
                         </Tooltip>
                       ))}
+                      {/* A div among the ticks' spans, so `.trail-tick:first-of-type` still finds
+                          the end ticks. Kept inside the track near either end, as they are. */}
+                      {nowF !== null && (
+                        <div
+                          className={`trail-now${nowF > 0.85 ? ' trail-now-end' : nowF < 0.15 ? ' trail-now-start' : ''}`}
+                          style={{ left: offsetForFraction(nowF) }}
+                        >
+                          Now {clockWords(new Date(nowMs))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1900,7 +1873,20 @@ export function AuditTrailTab({ userRole, showToast }) {
                             <section.Icon size={12} className="trail-section-icon" />
                             <span className="trail-section-name">{section.label}</span>
                           </div>
-                          <div className="trail-track" aria-hidden="true" />
+                          {/* The hatched parts carry their words here, as the headings are pinned
+                              in view and opaque over the layer behind the rows. */}
+                          <div className="trail-track" aria-hidden="true">
+                            {unloadedF !== null && (
+                              <span className="trail-shade trail-shade-unloaded" style={{ width: offsetForFraction(unloadedF) }}>
+                                {fitsWords(unloadedF) && 'Older events not loaded'}
+                              </span>
+                            )}
+                            {nowF !== null && (
+                              <span className="trail-shade trail-shade-future" style={{ left: offsetForFraction(nowF) }}>
+                                {fitsWords(1 - nowF) && 'Nothing recorded yet'}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {section.lanes.map(lane => (
@@ -2005,11 +1991,18 @@ export function AuditTrailTab({ userRole, showToast }) {
                         one lane can be read against the same instant on another. Drawn once,
                         behind the rows, rather than once per lane; placed last so the first
                         section stays the body's first child. Positioned by the same helper as
-                        the ticks and the markers. Nothing here is content. */}
+                        the ticks and the markers. Nothing here is content. The hatched parts of
+                        the window are in the same layer. */}
                     <div className="trail-gridlines" aria-hidden="true">
                       {ticks.map(t => (
                         <span key={t.f} className="trail-gridline" style={{ left: offsetForFraction(t.f) }} />
                       ))}
+                      {unloadedF !== null && (
+                        <span className="trail-shade trail-shade-unloaded" style={{ width: offsetForFraction(unloadedF) }} />
+                      )}
+                      {nowF !== null && (
+                        <span className="trail-shade trail-shade-future" style={{ left: offsetForFraction(nowF) }} />
+                      )}
                     </div>
                   </div>
                 </div>

@@ -488,11 +488,11 @@ so a commissioning burst of five or six rows lands on one pixel. Two fixes were 
   moments on the page were the ones it could not draw. Three fanned dots and five look alike, so
   it could not be counted either.
 - **Nudging along the time axis** would make the same pair of events appear different distances
-  apart depending on the range control, and it would erase the causation signal: perfect overlap
+  apart depending on the time window, and it would erase the causation signal: perfect overlap
   is the visual signature of one act.
 
 Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
-count. Grouping is by **pixel** distance, not by time, so the range control acts as a zoom and a
+count. Grouping is by **pixel** distance, not by time, so the time window acts as a zoom and a
 cluster dissolves into its members as the same events move apart on screen. The badge sits at the
 mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
@@ -1033,7 +1033,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
-| Audit Trail | | `search`, `type`, `action`, `changed_by`, `range`, `since`, `until`, `deleted`; `event` |
+| Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |

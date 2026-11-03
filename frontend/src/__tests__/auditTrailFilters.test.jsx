@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow, MARKERS, CLUSTER_GAP_PX
+  AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, MARKERS, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
@@ -128,7 +128,23 @@ const selectEvent = async (pattern) => {
   await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
 }
 
-const rangeSelect = () => screen.getByRole('combobox', { name: 'Time range' })
+/** The time control in the bar, its button showing the window in words, and its popover. */
+const timeControl = () => screen.getByRole('group', { name: 'Time window' })
+const windowWords = () => timeControl().querySelector('.time-window-pick').textContent
+const windowChoices = () => {
+  if (!screen.queryByRole('dialog', { name: 'Choose a time window' })) {
+    fireEvent.click(timeControl().querySelector('.time-window-pick'))
+  }
+  return screen.getByRole('dialog', { name: 'Choose a time window' })
+}
+const chooseWindow = (name) => fireEvent.click(within(windowChoices()).getByRole('button', { name }))
+const customRange = (from, to) => {
+  const dialog = windowChoices()
+  fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: from } })
+  fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: to } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Show range' }))
+}
+const params = () => new URL(lastTrailUrl(), 'http://x').searchParams
 
 /** The kind and action filters live in the Filters popover, which is opened first. */
 const openFilters = () => {
@@ -148,7 +164,7 @@ describe('Audit Trail card header', () => {
 })
 
 describe('Audit Trail filter bar', () => {
-  it('keeps search and the time range in the bar, and the kind and action in the Filters popover', async () => {
+  it('keeps search and the time window in the bar, and the kind and action in the Filters popover', async () => {
     await show()
 
     // The same `.filter-bar` the Gateways and Devices pages use, not a row of controls wedged
@@ -156,7 +172,7 @@ describe('Audit Trail filter bar', () => {
     const bar = document.querySelector('.filter-bar')
     expect(bar).toBeTruthy()
     expect(within(bar).getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
-    expect(bar.contains(rangeSelect())).toBe(true)
+    expect(bar.contains(timeControl())).toBe(true)
     expect(screen.queryByRole('combobox', { name: 'Entity' })).toBeNull()
 
     openFilters()
@@ -230,11 +246,11 @@ describe('Audit Trail filter bar', () => {
     expect(lastTrailUrl()).not.toContain('entity_ids=')
   })
 
-  it('counts the active filters and clears them together, the time range included', async () => {
+  it('counts the active filters and clears them together, the time window included', async () => {
     await show()
     fireEvent.change(actionSelect(), { target: { value: 'UPDATE' } })
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
-    fireEvent.change(rangeSelect(), { target: { value: '7d' } })
+    chooseWindow('Last 7 days')
 
     const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('(3)')
@@ -242,20 +258,22 @@ describe('Audit Trail filter bar', () => {
     fireEvent.click(clear)
     await waitFor(() => expect(lastTrailUrl()).not.toContain('action='))
     expect(lastTrailUrl()).not.toContain('since=')
-    expect(rangeSelect().value).toBe('all')
+    expect(windowWords()).toBe('All time')
+    expect(window.location.search).toBe('')
   })
 })
 
 /**
- * The time range is pushed down: `limit=200` is applied by the database to rows ordered
+ * The time window is pushed down: `limit=200` is applied by the database to rows ordered
  * newest-first, so a window filtered in the browser would spend its row budget on events outside
- * the window. These assert on the URL because that is where the difference is observable.
+ * the window. These assert on the URL because that is where the difference is observable. The
+ * control itself is timeWindowControl.test.jsx; the arithmetic is timeWindow.test.js.
  */
-describe('Audit Trail time range', () => {
+describe('Audit Trail time window', () => {
   it('defaults to All time and sends no bound at all', async () => {
     await show()
 
-    expect(rangeSelect().value).toBe('all')
+    expect(windowWords()).toBe('All time')
     expect(lastTrailUrl()).not.toContain('since=')
     expect(lastTrailUrl()).not.toContain('until=')
   })
@@ -267,84 +285,115 @@ describe('Audit Trail time range', () => {
     expect(nodes().length).toBe(EVENTS.length)
   })
 
-  it('sends a since bound for a preset, computed at fetch time', async () => {
+  it('sends a since bound for a rolling range, computed at fetch time', async () => {
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: '24h' } })
+    chooseWindow('Last 24 hours')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('since='))
-    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
-    const ageMs = Date.now() - new Date(since).getTime()
+    const ageMs = Date.now() - new Date(params().get('since')).getTime()
     // 24 hours, give or take the time the test took to run.
     expect(ageMs).toBeGreaterThan(23.9 * 60 * 60 * 1000)
     expect(ageMs).toBeLessThan(24.1 * 60 * 60 * 1000)
+    // Open at the top, so a row written while the request runs still counts.
+    expect(lastTrailUrl()).not.toContain('until=')
+    expect(window.location.search).toBe('?range=24h')
   })
 
-  it('sends both bounds for a custom range, and only shows the pickers in that mode', async () => {
+  it('sends both bounds for a custom range, in local time, stopping at the start of the end minute', async () => {
     await show()
-    expect(screen.queryByLabelText('Range start')).toBeNull()
-
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T09:30' } })
-    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T09:45' } })
+    customRange('2026-08-01T09:30', '2026-08-01T09:45')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('until='))
-    const params = new URL(lastTrailUrl(), 'http://x').searchParams
-    // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. The end bound is
-    // widened to the end of that minute.
-    expect(new Date(params.get('since')).getTime())
+    // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. `until` is the last
+    // millisecond inside, since the trail's query includes it.
+    expect(new Date(params().get('since')).getTime())
       .toBe(new Date('2026-08-01T09:30:00.000').getTime())
-    expect(new Date(params.get('until')).getTime())
-      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+    expect(new Date(params().get('until')).getTime())
+      .toBe(new Date('2026-08-01T09:44:59.999').getTime())
+    expect(window.location.search).toBe('?from=2026-08-01T09%3A30&to=2026-08-01T09%3A45')
+    expect(windowWords()).toMatch(/^Sat,? 1 Aug( 2026)?, 09:30 – 09:45$/)
   })
 
   it('takes a window narrower than a day, which the date pickers could not express', async () => {
     /* The point of the sub-day zoom: `type="date"` bounded the narrowest window at 24 hours, so on
        a stack commissioned this morning "All time" and "today" drew the same picture. */
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
-    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T16:12' } })
+    customRange('2026-08-01T16:11', '2026-08-01T16:12')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('until='))
-    const params = new URL(lastTrailUrl(), 'http://x').searchParams
-    const spanMs = new Date(params.get('until')) - new Date(params.get('since'))
+    const spanMs = new Date(params().get('until')) - new Date(params().get('since'))
     expect(spanMs).toBeLessThan(2 * 60 * 1000)
     expect(spanMs).toBeGreaterThan(0)
   })
 
-  it('still understands a date-only bound, tested on the function rather than the input', () => {
-    /* A `datetime-local` input refuses a date-only value, so this cannot be driven through the DOM.
-       `timeWindow` is an exported pure function whose contract says a bare date means the whole of
-       that day, so it is tested directly. */
-    const { since, until } = timeWindow('custom', '2026-08-01', '2026-08-03')
-    expect(new Date(since).getTime()).toBe(new Date('2026-08-01T00:00:00.000').getTime())
-    expect(new Date(until).getTime()).toBe(new Date('2026-08-03T23:59:59.999').getTime())
+  it('refuses a custom range whose end is not after its start', async () => {
+    await show()
+    const dialog = windowChoices()
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2026-08-01T10:00' } })
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: '2026-08-01T09:00' } })
+    expect(within(dialog).getByRole('button', { name: 'Show range' })).toBeDisabled()
   })
 
-  it('offers the sub-day presets, with All time still the default', async () => {
+  it('asks for the calendar day an address names, from local midnight to the next', async () => {
+    window.history.replaceState(null, '', '/?span=day&at=2026-08-02')
     await show()
-    const values = [...rangeSelect().querySelectorAll('option')].map(o => o.value)
 
-    expect(values).toContain('15m')
-    expect(values).toContain('1h')
-    // All time stays first and stays selected: most arrivals here are a handover from a device
-    // row, and a rolling default would answer that click with an empty timeline.
-    expect(values[0]).toBe('all')
-    expect(rangeSelect().value).toBe('all')
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime()).toBe(new Date(2026, 7, 2).getTime())
+    expect(new Date(params().get('until')).getTime()).toBe(new Date(2026, 7, 3).getTime() - 1)
+    expect(windowWords()).toMatch(/^Sun,? 2 Aug/)
   })
 
-  it('asks for a 15-minute window when that preset is chosen', async () => {
+  /* Links already sent still open: the older names are read as `from` and `to`, and the window they
+     named is the window shown. The address is then written the one way. */
+  it('opens a link written with the older since and until as the same window', async () => {
+    window.history.replaceState(null, '', '/?range=custom&since=2026-08-01T09%3A30&until=2026-08-01T09%3A45')
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: '15m' } })
+
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime())
+      .toBe(new Date('2026-08-01T09:30:00.000').getTime())
+    // The older `until` included its whole minute, so the same rows come back.
+    expect(new Date(params().get('until')).getTime())
+      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+    await waitFor(() => expect(window.location.search).toBe('?from=2026-08-01T09%3A30&to=2026-08-01T09%3A46'))
+  })
+
+  it('still understands a date-only bound in an older link, as the whole of each day', async () => {
+    window.history.replaceState(null, '', '/?range=custom&since=2026-08-01&until=2026-08-03')
+    await show()
+
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime()).toBe(new Date(2026, 7, 1).getTime())
+    expect(new Date(params().get('until')).getTime()).toBe(new Date(2026, 7, 4).getTime() - 1)
+    expect(windowWords()).toMatch(/^Sat,? 1 Aug( 2026)? – Mon,? 3 Aug( 2026)?$/)
+  })
+
+  it('offers the sub-day ranges and All time, with All time still the default', async () => {
+    await show()
+    const rolling = within(windowChoices()).getByRole('group', { name: 'Rolling' })
+    const offered = within(rolling).getAllByRole('button').map(b => b.textContent)
+
+    expect(offered).toEqual(['Last 15 minutes', 'Last 1 hour', 'Last 24 hours', 'Last 7 days', 'Last 30 days', 'All time'])
+    // All time stays the one chosen: most arrivals here are a handover from a device row, and a
+    // rolling default would answer that click with an empty timeline.
+    expect(within(rolling).getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('asks for a 15-minute window when that range is chosen', async () => {
+    await show()
+    chooseWindow('Last 15 minutes')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('since='))
-    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
-    const ageMs = Date.now() - new Date(since).getTime()
+    const ageMs = Date.now() - new Date(params().get('since')).getTime()
     expect(ageMs).toBeGreaterThan(14.5 * 60 * 1000)
     expect(ageMs).toBeLessThan(15.5 * 60 * 1000)
+    // The popover closes on a choice and the button says what was chosen.
+    expect(screen.queryByRole('dialog', { name: 'Choose a time window' })).toBeNull()
+    expect(windowWords()).toBe('Last 15 minutes')
   })
 
-  it('says the range is why the timeline is empty, rather than blaming the filters', async () => {
+  it('says the window is why the timeline is empty, rather than blaming the filters', async () => {
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([])
       if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
@@ -353,8 +402,8 @@ describe('Audit Trail time range', () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/No audit trail events/)).toBeInTheDocument())
 
-    fireEvent.change(rangeSelect(), { target: { value: '24h' } })
-    await waitFor(() => expect(screen.getByText(/Widen it, or switch back to All time/)).toBeInTheDocument())
+    chooseWindow('Last 24 hours')
+    await waitFor(() => expect(screen.getByText(/Step back, widen it, or switch back to All time/)).toBeInTheDocument())
   })
 
   // A source guard on the pushdown: the window must reach the database as RPC arguments and not be
@@ -1048,17 +1097,19 @@ describe('Audit Trail — removed tag filter', () => {
     expect(screen.queryByTitle(/carry this tag/i)).not.toBeInTheDocument()
   })
 
-  it('leaves two controls in the bar, four in the custom range mode, and three in the popover', async () => {
+  it('leaves the search box and the time window in the bar, and three filters in the popover', async () => {
     await show()
 
-    // The bar's own controls: the search box and the range. Export is a button, not a control.
+    // The bar's one field is the search box; the time window is buttons. Export is a button too.
     const controls = () => document.querySelectorAll('.filter-bar select, .filter-bar input')
-    expect(controls().length).toBe(2)
+    expect(controls().length).toBe(1)
+    expect(document.querySelector('.filter-bar').contains(timeControl())).toBe(true)
 
-    // The date pickers are not present until they mean something. Two controls sitting inert
-    // beside the presets are two controls whose relationship to them has to be guessed at.
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    await waitFor(() => expect(controls().length).toBe(4))
+    // The custom range's boxes are in the time window's popover, so they are not in the bar sitting
+    // inert beside everything else until a custom range is wanted.
+    expect(within(windowChoices()).getAllByLabelText(/^(From|To)$/)).toHaveLength(2)
+    expect(controls().length).toBe(1)
+    fireEvent.keyDown(document, { key: 'Escape' })
 
     openFilters()
     // The kind, the action and Changed by.

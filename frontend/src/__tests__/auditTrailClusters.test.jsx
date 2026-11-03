@@ -3,16 +3,17 @@
  * the count. What must stay true: x is untouched, since a badge sits at the mean of its members'
  * positions and the time axis keeps telling the truth; the causation signal survives, stated as
  * "One transaction" when every member shares a causation_id; and the threshold is in pixels, so
- * narrowing the range control zooms a badge apart into its members. Why a badge rather than a fan:
+ * narrowing the time window zooms a badge apart into its members. Why a badge rather than a fan:
  * frontend/README.md, Migrated design notes.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   AuditTrailTab, clusterEvents, clusterSummary, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
+import { localMinute } from '../utils/timeWindow'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 const WIDTH = 1000
@@ -197,13 +198,13 @@ describe('the hover summary', () => {
 
   it('tells the reader how to see the events individually', () => {
     // The badge is the only place the zoom relationship is discoverable: nothing else on the page
-    // connects the range control to whether a group is drawn as one mark or several.
+    // connects the time window to whether a group is drawn as one mark or several.
     const summary = clusterSummary([
       ev(1, 'creation',    '2026-08-21T09:00:00Z'),
       ev(2, 'operational', '2026-08-21T09:00:01Z')
     ], kindOf)
 
-    expect(summary).toMatch(/narrow the time range/i)
+    expect(summary).toMatch(/narrow the time window/i)
   })
 })
 
@@ -252,9 +253,8 @@ describe('the component draws the badges', () => {
     vi.clearAllMocks()
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/audit-trail')) {
-        /* The range control is honoured: the window is a query parameter, so a narrower range
-           returns fewer rows, which shrinks the domain and spreads a burst. A mock that ignored
-           `since` would make that test a no-op. */
+        /* The time window is honoured: it is a query parameter, so a narrower window returns
+           fewer rows. A mock that ignored `since` would draw the distant event too. */
         return Promise.resolve(path.includes('since=') ? BURST : EVENTS)
       }
       if (path.startsWith('/api/v1/devices')) return Promise.resolve(DEVICES)
@@ -360,13 +360,19 @@ describe('the component draws the badges', () => {
     expect(badges()[0].className).not.toContain('trail-node-selected')
   })
 
-  it('dissolves the badge into individual markers when the range is narrowed', async () => {
-    /* The range control as a zoom, end to end: narrowing it drops the distant event, the domain
-       shrinks to two seconds, and the same two events are a track's width apart. */
+  it('dissolves the badge into individual markers when the window is narrowed', async () => {
+    /* The time window as a zoom, end to end: the axis is the window, so two minutes around the
+       burst put its two events, two seconds apart, 17px apart on a 1000px track. The bounds are
+       the fixture's instants in local time, whatever zone runs the suite. */
     await draw()
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Time range' }),
-      { target: { value: '15m' } })
+    fireEvent.click(document.querySelector('.time-window-pick'))
+    const dialog = screen.getByRole('dialog', { name: 'Choose a time window' })
+    fireEvent.change(within(dialog).getByLabelText('From'),
+      { target: { value: localMinute(new Date('2026-08-21T08:59:00Z')) } })
+    fireEvent.change(within(dialog).getByLabelText('To'),
+      { target: { value: localMinute(new Date('2026-08-21T09:01:00Z')) } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Show range' }))
 
     await waitFor(() => expect(badges()).toHaveLength(0))
     expect(dots()).toHaveLength(2)
