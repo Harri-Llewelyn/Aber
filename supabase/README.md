@@ -1253,6 +1253,56 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
 
+### A failed or stuck capture or playback reaches someone (0226)
+
+A failed job showed on the Capture page as a banner for fifteen minutes, and in the job history.
+A job stuck in flight, or a playback queued for a worker that was not running, showed only in its
+own strip. Nobody away from the page was told. `platform_health_rows()` now has three more arms,
+and a Grafana rule in the Platform Conditions group reads each one. The alert reaches the
+dashboard's counter through the existing webhook. The rules' thresholds and their reasons are in
+[`grafana/README.md`](../grafana/README.md).
+
+| Condition | One row for | Value |
+| --- | --- | --- |
+| `job_failed` | each capture or playback job that ended `FAILED` in the last hour | seconds since it failed |
+| `job_stuck` | each job still queued, recording or running five minutes past what its own limits allow | seconds since its limits ran out |
+| `playback_worker_stale` | the playback worker, while its heartbeat is over two minutes old **and** a playback is queued or running | seconds since it last reported |
+
+- **A failure is an event, not a state.** Its row leaves the view an hour after `finished_at`,
+  so the alert resolves by itself. Every writer of `FAILED` stamps `finished_at`: the two failure
+  gates, `playback_finish()` and both startup sweeps.
+- **A job's limits are the ones Stop already uses.** A queued capture should be claimed within
+  seconds. A recording ends at `max_seconds`, and two minutes without a progress report is what
+  `request_capture_stop()` calls stale; its last report is `started_at` plus `elapsed_seconds`. A
+  queued playback is timed from when it was queued, or from when the last playback ended if that is
+  later, and only while no playback runs, since the worker runs one at a time. A running playback
+  that has not reported for a minute is what `request_playback_stop()` calls stalled. The margin
+  is five minutes past whichever comes first, so Stop ends any job the rule reports.
+- **The stale worker is gated on a waiting playback, never on the age alone.** The heartbeat row is
+  seeded at the epoch (`0002`), and the database cannot tell whether the worker is deployed: only
+  the dashboard is told `playback.enabled`. An age-only condition would fire for ever on a site that
+  runs no worker. Two minutes is the playback dialog's `WORKER_STALE_MS`, and mirror check 41 holds
+  them equal.
+- **One cause, one alert.** `job_stuck` leaves out a playback while the worker's heartbeat is stale,
+  because `playback_worker_stale` names that cause.
+- **No row names an asset.** These are the platform's own jobs, so `sparkplug_id` is NULL and the
+  rules are `entity_type: platform`. A row is named by the job's kind and id, such as
+  `capture job 6c1e…`, so each job is its own alert. `detail` names the subject and, for a failure,
+  the error.
+- **A failure writes no Audit Trail row.** The trail keeps the acts of named people. A failed job
+  is the system's outcome, and the job history on the Capture page is its record.
+
+The function keeps `0001`'s signature and grants, and `0185`'s arms. The file revokes it from
+`PUBLIC`, `anon` and `authenticated` by name. Its self-check asserts the three arms, the gate on the
+stale arm, the shadow-gateway exclusions, and that `grafana_reader` still reads the view; it reads
+the definition and the catalogue, never the rows. `test_a_failed_or_stuck_job_is_a_platform_condition.py`
+runs each rule's own query against every case. Check 191 in `scripts/check-docs-drift.mjs` holds
+the arms, the gate and the rules together.
+
+The workers count their outcomes too, on their metrics endpoints
+([`ingestion/README.md`](../ingestion/README.md#metrics)). The rules read the database instead,
+because a restart resets a counter, and a restart is one of the commonest causes of a failure.
+
 ### Single-key shortcuts can be turned off (0194)
 
 The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts

@@ -996,6 +996,12 @@ playback:
   enabled: true
   # How often an idle worker looks for a queued job.
   pollIntervalSeconds: 3
+  # The worker's Prometheus endpoint, shaped like ingestion.metrics. It serves one series, the jobs
+  # the worker ended by outcome (aber_playback_jobs_total). No credential, so a count and nothing
+  # else. Alloy scrapes it through the pod's annotations.
+  metrics:
+    enabled: true
+    port: 9109
   resources:
     requests: { cpu: 25m, memory: 96Mi }
     limits: { memory: 256Mi }

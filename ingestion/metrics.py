@@ -146,6 +146,12 @@ COUNTER_MAP = {
     "uns_skipped_cell_unfiled": ("aber_ingestion_uns_skipped_total", {"reason": "cell_unfiled"}),
     "uns_skipped_unsafe_name": ("aber_ingestion_uns_skipped_total", {"reason": "unsafe_name"}),
     "uns_skipped_publish_error": ("aber_ingestion_uns_skipped_total", {"reason": "publish_error"}),
+    # Capture jobs the recorder (capture_worker.py) ended, by outcome. `discarded` is a job ended
+    # elsewhere or deleted while it recorded, whose recording was dropped. The label values are this
+    # fixed set, never a job's or a subject's id.
+    "capture_jobs_completed": ("aber_ingestion_capture_jobs_total", {"outcome": "completed"}),
+    "capture_jobs_failed": ("aber_ingestion_capture_jobs_total", {"outcome": "failed"}),
+    "capture_jobs_discarded": ("aber_ingestion_capture_jobs_total", {"outcome": "discarded"}),
 }
 
 # FLAT COUNTERS THAT ARE DELIBERATELY NOT EXPORTED UNDER A NAME OF THEIR OWN, each because the
@@ -267,6 +273,12 @@ HELP = {
         "holds every one. site_unset means the site.name setting is empty; unassigned and "
         "cell_unfiled are the two Unassigned queues on the dashboard; lane is a shadow or "
         "simulated device; unsafe_name is a segment carrying / + or #.",
+    "aber_ingestion_capture_jobs_total":
+        "Capture jobs the recorder ended, by outcome: completed (the recording was stored), failed "
+        "(the job was recorded FAILED, including those the startup sweep failed after a restart), "
+        "or discarded (the job was ended on the Capture page or deleted while it recorded, so "
+        "nothing was stored). A failure is also listed on the Capture page, and raises the Capture "
+        "or Playback Failed alert for an hour.",
     "aber_ingestion_uns_publish_seconds":
         "Time the UNS republish takes per DDATA, on the historian writer thread after the commit. "
         "Read it beside aber_ingestion_write_seconds: both occupy the one thread whose saturation "
@@ -428,7 +440,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 def start_metrics_server(port, collect, logger=None):
     """
-    Serve `collect()` on `port` from a daemon thread.
+    Serve `collect()` on `port` from a daemon thread. The playback worker serves its own registry
+    through this too (playback_worker.start_metrics_endpoint()).
 
     A THREAD IN THE EXISTING PROCESS, matching the watchdog, heartbeat and stats reporter that are
     already there. A separate exporter process would need its own copy of the counters, which is
@@ -454,8 +467,8 @@ def start_metrics_server(port, collect, logger=None):
     except OSError as exc:
         if logger:
             logger.warning(
-                "Could not bind the metrics endpoint on port %s (%s). Ingestion continues; "
-                "this component will have no metrics until it is restarted.", port, exc
+                "Could not bind the metrics endpoint on port %s (%s). The process carries on; "
+                "it will have no metrics until it is restarted.", port, exc
             )
         return None
 

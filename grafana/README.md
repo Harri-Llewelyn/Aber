@@ -171,7 +171,8 @@ send the error under the rule's own name, read as the condition holding. `check-
 holds every rule to `Error`; `supabase/README.md` has the payload.
 
 **`for: 0s` where the window is the delay.** *Enrolment Stuck* reads a view that already carries an
-hour of age; *Gateway CA Expiring* has thirty days in its threshold; *Database Deadlocks* and
+hour of age; *Capture or Playback Stuck* and *Playback Worker Not Reporting* read rows the view
+emits only past their margins; *Gateway CA Expiring* has thirty days in its threshold; *Database Deadlocks* and
 *Historian Policy Job Failing* read `increase(...[window])`, which already requires the event to be
 recent. A `for` on top of any of these would require a one-off event to persist, and it would never
 fire.
@@ -426,6 +427,63 @@ reports a nightly backup the same day. The window is the delay, so there is no `
 destination is incomplete the view has no row, so a stack without one, and every CI run, reads
 NoData, which is OK. Warning rather than critical: the local backup exists, and Backup Stale is the
 rule for having none.
+
+### Capture or Playback Failed (`aber-job-failed`)
+
+Warning, `for: 0s`, one instance per job, for an hour after it failed. A capture or playback that
+ended `FAILED`: a recording whose upload kept failing, one a restart left no time to store, a device
+that sent nothing, or a playback the broker cut or the worker could not run. The Capture page shows
+the failure as a banner for fifteen minutes, and keeps it on its Captures or Playbacks tab. This
+rule reaches someone who is not looking at that page, such as whoever left a two-hour capture
+running.
+
+A failure is an event, not a state. So `platform_health_rows()` (`0226`) returns the job for an
+hour after its `finished_at`, and the instance resolves by itself when the row leaves. An hour is
+long enough to be seen on the next look at the alert counter, and short enough that the counter
+does not fill with yesterday's failures. The job history is the record that lasts. The `job` label
+is the job's kind and id, so two failures are two instances. The value is the seconds since the
+failure, which the threshold reads as `> 0`. No row while nothing failed in the hour, so NoData is
+OK. No Audit Trail row is written for a failure: the trail keeps the acts of named people, and a
+failure is the system's outcome.
+
+Both workers count their outcomes too (`aber_ingestion_capture_jobs_total`,
+`aber_playback_jobs_total`). The rule reads the database instead, because a restart resets a
+counter, and a restart is one of the commonest causes of a failed capture.
+
+### Capture or Playback Stuck (`aber-job-stuck`)
+
+Warning, `for: 0s`, one instance per job. A job still queued, recording or running five minutes
+past what its own limits allow. A queued or recording capture blocks every other capture on the
+stack, and a playback blocks its target. Each job's limits run out at a time the view computes:
+
+| Job | Its limits run out |
+| :--- | :--- |
+| A queued capture | When it was queued: the daemon polls every 3 seconds |
+| A recording | At its duration cap, or two minutes after its last progress report, whichever comes first |
+| A queued playback | When it was queued, or when the last playback ended if that is later. Only while no playback runs, since the worker runs one at a time |
+| A running playback | A minute after its last progress report |
+
+The two minutes and the minute are what Stop already treats as stale (`request_capture_stop()`,
+`request_playback_stop()`), so Stop on the Capture page ends any job this rule reports. Five
+minutes is the margin. It covers a recording's finish, whose upload is tried four times with 14
+seconds of waits and whose finalise is retried for 31 seconds. It also covers an ingestion restart:
+the new daemon's sweep fails a job left in flight after 45 seconds, and *Capture or Playback Failed*
+reports it. So this rule fires only for a job nothing else will end. The view carries the margin,
+so there is no `for`. A playback is left out while the worker's heartbeat is stale, because
+*Playback Worker Not Reporting* names that cause, and one cause raises one alert.
+
+### Playback Worker Not Reporting (`aber-playback-worker-stale`)
+
+Warning, `for: 0s`, one instance. A playback is queued or running, and the playback worker has not
+reported for more than two minutes (`playback_worker_status.reported_at`). The worker reports
+every 30 seconds from its own thread, while a job runs too. The playback dialog already reads a
+report two minutes old as a worker that is not running (`WORKER_STALE_MS`), and mirror check 41
+holds the two thresholds equal.
+
+Never from the report's age alone. The row is seeded at the epoch, the database cannot tell whether
+the worker is deployed, and a site with `playback.enabled: false` would fire for ever. A queued job
+that nothing runs is the failure a person meets, so the job is the gate. NoData is OK: nothing is
+waiting.
 
 ## Ingestion Pipeline
 
