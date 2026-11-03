@@ -8431,6 +8431,82 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 196. How much a time window loads by itself is stated as AuditTrailTab.jsx holds it. A bounded
+// window pages on, PAGE_SIZE at a time, until WINDOW_EVENT_CAP events are loaded, and the hatch
+// then quotes the cap. The help page and frontend/README.md give the numbers and the hatch's words;
+// a cap stated wrong reads as the page hiding events.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const tab = read(TAB);
+  const pageSize = Number(tab.match(/^const PAGE_SIZE = (\d+)$/m)?.[1]);
+  const cap = Number(tab.match(/^export const WINDOW_EVENT_CAP = (\d+)$/m)?.[1]);
+  const problems196 = [];
+  if (!Number.isFinite(pageSize) || !Number.isFinite(cap)) {
+    problems196.push(`could not read PAGE_SIZE and WINDOW_EVENT_CAP out of ${TAB}; its shape changed`);
+  } else {
+    const words = cap.toLocaleString('en-GB');
+    for (const hatch of ["const capWords = WINDOW_EVENT_CAP.toLocaleString('en-GB')",
+      'Older events not loaded: more than ${capWords} in this window', 'Not loaded: over ${capWords}']) {
+      if (!tab.includes(hatch)) problems196.push(`${TAB} no longer words the hatch with "${hatch}"`);
+    }
+    const help = read('help/pages/audit-trail.md');
+    for (const phrase of [`loads the next ${pageSize} events`, `${pageSize} at a time, up to ${words} events`,
+      `loads the newest ${words}`, `Older events not loaded: more than ${words} in this window`,
+      `Not loaded: over ${words}`]) {
+      if (!help.includes(phrase)) problems196.push(`help/pages/audit-trail.md does not say "${phrase}"`);
+    }
+    const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+    if (!readme.includes(`\`WINDOW_EVENT_CAP\` (${words})`)) {
+      problems196.push(`frontend/README.md does not give WINDOW_EVENT_CAP as (${words})`);
+    }
+  }
+  if (problems196.length) {
+    fail('the Audit Trail\'s window loading is stated otherwise than AuditTrailTab.jsx holds it:\n' +
+      problems196.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and frontend/README.md state the Audit Trail's window loading: ${pageSize} a page, up to ${cap} events`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 197. frontend/README.md shows GroupHeading as the component takes it, and names the key the Audit
+// Trail keeps its closed sections under. A prop the example passes and the component ignores, or a
+// key the page no longer writes, sends the next page that copies them wrong.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/GroupHeading.jsx';
+  const props = (read(COMPONENT).match(/export function GroupHeading\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean);
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('### A group of rows opens and closes under one heading');
+  const section = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1));
+  const fence = '`'.repeat(3);
+  const opened = section.indexOf(`${fence}jsx\n`);
+  const closed = opened < 0 ? -1 : section.indexOf(fence, opened + fence.length + 4);
+  const example = closed < 0 ? '' : section.slice(opened + fence.length + 4, closed);
+  // The props on GroupHeading itself, not those of an element passed as one of them (an icon).
+  const passed = [...example.replace(/<(?!GroupHeading)[A-Z]\w*[^>]*\/>/g, '').matchAll(/(\w+)=\{/g)].map((m) => m[1]);
+  const key = read('frontend/src/components/tabs/AuditTrailTab.jsx')
+    .match(/^export const CLOSED_SECTIONS_KEY = '([^']+)'$/m)?.[1];
+  const problems197 = [];
+  if (!props.length) problems197.push(`could not read GroupHeading's props out of ${COMPONENT}`);
+  if (!section) problems197.push('frontend/README.md has no section "A group of rows opens and closes under one heading"');
+  else if (!passed.length) problems197.push('that section has no GroupHeading example to check');
+  for (const p of passed.filter((p) => !props.includes(p))) {
+    problems197.push(`the README's example passes ${p}, which GroupHeading does not take`);
+  }
+  if (!key) problems197.push('could not read CLOSED_SECTIONS_KEY out of AuditTrailTab.jsx');
+  else if (section && !section.includes(`\`${key}\``)) problems197.push(`the section does not name the key ${key}`);
+  if (problems197.length) {
+    fail('frontend/README.md describes GroupHeading otherwise than the code has it:\n' +
+      problems197.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's GroupHeading example passes ${passed.length} of its props and names ${key}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');

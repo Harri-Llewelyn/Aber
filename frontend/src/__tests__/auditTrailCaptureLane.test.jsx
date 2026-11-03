@@ -1,7 +1,7 @@
 /**
  * Audit Trail: the capture lane (0193). Recordings, captures and playbacks are kinds the timeline
  * draws and the filters offer a Shopfloor_Manager, each act gets a marker class, a lane is named
- * by the machine it recorded with its own short id beside the name, and the drawer words each act.
+ * by the machine it recorded with its own id in the name's tooltip, and the drawer words each act.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, classifyEvent, diffFields, shortId } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS } from '../constants'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -79,15 +80,20 @@ describe('the capture lane', () => {
   it('draws a section for recordings, captures and playbacks', async () => {
     await show()
     for (const label of ['Recordings', 'Captures', 'Playbacks']) {
-      expect(screen.getByRole('separator', { name: `${label} lanes` })).toBeInTheDocument()
+      expect(screen.getByRole('group', { name: `${label} lanes` })).toBeInTheDocument()
     }
   })
 
-  it('names each lane by its machine, with its own short id beside the name', async () => {
+  it('names each lane by its machine alone, with its own id in the label\'s tooltip', async () => {
     await show()
-    // Two captures of one press are two lanes; the id is what tells them apart.
+    // Two captures of one press are two lanes. The id that tells them apart is one point away,
+    // rather than taking half the label from the name.
+    const names = screen.getAllByRole('button', { name: 'Open the latest change to Press_02' })
+    expect(names).toHaveLength(4)
+    const tips = names.map(tooltipOf)
     for (const id of [JOB, CAPTURE, OLDER, PLAYBACK]) {
-      expect(screen.getByText(shortId(id))).toBeInTheDocument()
+      expect(screen.queryByText(shortId(id))).toBeNull()
+      expect(tips.filter(t => t.includes(id))).toHaveLength(1)
     }
   })
 

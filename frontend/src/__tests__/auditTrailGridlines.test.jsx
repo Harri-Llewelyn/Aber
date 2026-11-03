@@ -93,7 +93,7 @@ describe('the gridlines under the axis ticks', () => {
     expect(ruleFor('.trail-gridlines')).toMatch(/left:\s*calc\(var\(--trail-label-width\) \+ var\(--trail-lane-gap\)\)/)
     expect(ruleFor('.trail-lane-label')).toMatch(/flex:\s*0 0 var\(--trail-label-width\)/)
     expect(ruleFor('.trail-lane')).toMatch(/gap:\s*var\(--trail-lane-gap\)/)
-    expect(ruleFor('.trail-swimlanes')).toMatch(/--trail-label-width:\s*260px/)
+    expect(ruleFor('.trail-swimlanes')).toMatch(/--trail-label-width:\s*clamp\(140px, 30%, 260px\)/)
   })
 
   it('is inert and behind everything', () => {
