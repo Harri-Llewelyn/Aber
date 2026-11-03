@@ -702,10 +702,9 @@ the Supabase database's certificate Secret. Each kind of client is set up differ
 
 **Realtime is the one named exception.** Its own pool takes the CA as a file (`DB_SSL_CA_CERT`), and
 verifies under OTP 27's client default. Its per-tenant connections follow the tenant row's
-`ssl_enforced`, which the image's seed hardcodes to false. When it is true, Postgrex gets
-`verify: :verify_none` with no CA option (measured against v2.102.3). The chart mounts a copy of
-that seed with `ssl_enforced` taken from `DB_SSL`, so the tenant link is encrypted but not verified
-by the client. When you bump Realtime's tag, copy the seed again.
+`ssl_enforced`, which the image's seed takes from `DB_SSL`. When it is true, Postgrex gets
+`verify: :verify_none` with no CA option (measured against v2.102.3). So the tenant link is
+encrypted but not verified by the client.
 
 **Two things this exposed.** Keep both fixes:
 

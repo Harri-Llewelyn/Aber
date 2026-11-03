@@ -832,7 +832,6 @@ container gets back only the capabilities its process was shown to need, each na
 
 | Container (pod) | Added back | Why |
 |---|---|---|
-| `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
 | `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
@@ -947,9 +946,10 @@ Two images the chart does not run follow the same rule. The Remote gateway appli
 chowns the broker's key.
 
 The chart also states the user of each third-party image that already runs as one: Grafana (472),
-Loki (10001), Prometheus and postgres_exporter (65534), GoTrue and PostgREST (1000). The broker
-(`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod. The Jobs
-that run `supabase/postgres` or `node` tools run as those images' own users (100:101, 1000:1000).
+Loki (10001), Prometheus, postgres_exporter and Realtime (65534), GoTrue and PostgREST (1000). The
+broker (`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod.
+The Jobs that run `supabase/postgres` or `node` tools run as those images' own users (100:101,
+1000:1000).
 
 Four third-party images name no `USER`. The chart runs each as the user the image carries, with its
 init containers:
@@ -964,14 +964,12 @@ init containers:
 - **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
   to `emptyDir` volumes. Its Edge Functions folder is read, never written.
 
-`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, though Realtime starts as
-root.
+`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, beside Realtime's 65534.
 
 These pods still start a container as root, each for the reason given:
 
 - **`alloy`** reads the node's `/`, `/proc` and `/sys`, which root owns.
 - **`gitea`**: the image's s6 supervisor and sshd start as root and drop to git (1000).
-- **`supabase-realtime`**: `/app/run.sh` runs the migrations through `sudo`.
 - **`supabase-db`**: its data directory is the volume's own root, because the image's
   `postgresql.conf` names `/var/lib/postgresql/data`. A provisioner creates that directory owned by
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the

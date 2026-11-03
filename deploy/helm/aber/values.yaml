@@ -558,7 +558,7 @@ realtime:
   enabled: true
   image:
     repository: supabase/realtime
-    tag: v2.134.10
+    tag: v2.143.3
     pullPolicy: IfNotPresent
   # Never more than one: Realtime holds a logical replication slot, which is per-instance state.
   replicas: 1
@@ -658,7 +658,7 @@ supabaseRest:
   enabled: true
   image:
     repository: postgrest/postgrest
-    tag: v14.17
+    tag: v14.18
     pullPolicy: IfNotPresent
   # Stateless; an HPA candidate.
   replicas: 1
@@ -753,7 +753,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.74.0
+    tag: v1.81.0
     pullPolicy: IfNotPresent
   # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
   replicas: 1
@@ -807,7 +807,7 @@ supabaseMeta:
   image:
     # The version the official stack pairs with the Studio tag below (Zod-coupled).
     repository: supabase/postgres-meta
-    tag: v0.99.0
+    tag: v0.100.0
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -818,7 +818,7 @@ supabaseStudio:
   enabled: true
   image:
     repository: supabase/studio
-    tag: 2026.09.28-sha-5e59b60
+    tag: 2026.10.12-sha-3699278
     pullPolicy: IfNotPresent
   replicas: 1
   organizationName: Aber
