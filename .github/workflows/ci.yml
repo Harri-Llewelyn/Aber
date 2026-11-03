@@ -1916,10 +1916,10 @@ jobs:
                   bad.append(f"{job}: up={r['value'][1]}")
               else:
                   print(f"  ok  {job}")
-          # What Alloy scrapes with the dev values: the annotated pods, the two databases' exporters,
-          # the host, and the kubelet with its cAdvisor. A job lost from this set is reported; one
-          # added must be declared here.
-          expected = {'ingestion', 'mosquitto', 'supabase-db', 'timescaledb', 'supabase-envoy',
+          # What Alloy scrapes with the dev values: the annotated pods (the playback worker's among
+          # them), the two databases' exporters, the host, and the kubelet with its cAdvisor. A job lost
+          # from this set is reported; one added must be declared here.
+          expected = {'ingestion', 'playback', 'mosquitto', 'supabase-db', 'timescaledb', 'supabase-envoy',
                       'supabase-rest', 'grafana', 'prometheus', 'loki', 'alloy', 'node', 'kubelet',
                       'cadvisor'}
           for want in sorted(expected - set(seen)):
