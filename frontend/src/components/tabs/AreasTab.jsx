@@ -34,6 +34,7 @@ import { Modal } from '../common/Modal'
 import { plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconFactory,
@@ -78,6 +79,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   // Archive, never delete, from this page: the delete is the Archived Entities page's. The table
   // opens on Active; archived areas are shown, tinted, under the lifecycle filter.
   const [archiveTarget, setArchiveTarget] = useState(null)
+  // The archived area whose Restore dialog is open.
+  const [restoreTarget, setRestoreTarget] = useState(null)
   // The filters are query parameters; an area handed over from another page arrives as
   // `?search=<area_id>`.
   const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
@@ -176,11 +179,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
   const restoreArea = async (area) => {
     try {
       await api.post(`/api/v1/areas/${area.area_id}/restore`, {})
       loadAll(); showToast(`Area '${area.area_name}' restored to active service`, 'success', { to: areaUrl(area.area_id) })
     } catch (e) { showToast(e.message, 'error') }
+    finally { setRestoreTarget(null) }
   }
 
   /** File one cell into an area, or into none. One PATCH, written at the drop. */
@@ -521,6 +526,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         />
       )}
 
+      {restoreTarget && (
+        <RestoreEntityModal
+          type="area" name={restoreTarget.area_name}
+          onConfirm={() => restoreArea(restoreTarget)} onCancel={() => setRestoreTarget(null)}
+        />
+      )}
+
       {linksForArea && (
         <EntityLinksModal
           entityType="area"
@@ -630,7 +642,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             ? {
               label: 'Restore Area', icon: <IconRefreshCw size={13} />,
               primary: true,
-              onClick: () => restoreArea(selectedArea),
+              onClick: () => setRestoreTarget(selectedArea),
               disabled: !canArchive,
               title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Return this area to service; its retention timer is cleared'
             }

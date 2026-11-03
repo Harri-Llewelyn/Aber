@@ -6,8 +6,9 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import CopyableId from '../common/CopyableId'
 // Restore and delete run from inside a ConfirmModal, which owns its own pending state; the export
-// is the one action that runs from the row.
+// is the one action that runs from the row. The drawers' Restore asks with the same dialog.
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { CardHeading } from '../common/CardHeading'
@@ -106,12 +107,13 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
 
   useEffect(() => { load() }, [load])
 
+  // The dialog closes either way, so a failure's toast is not left behind it.
   const restore = async (item) => {
     try {
       await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
-      setConfirmRestore(null)
       load(); showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
     } catch (e) { showToast(e.message, 'error') }
+    finally { setConfirmRestore(null) }
   }
 
   /**
@@ -330,36 +332,12 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
       </div>
       </div>
 
-      {/* Restore is not gated on typing the name, since it is recoverable. It names what does not
-          come back: the timer is cleared, not paused, and a gateway's broker credential and deploy
-          key stay withdrawn. Restore returns the row, not the credentials archiving withdrew. */}
       {confirmRestore && (
-        <ConfirmModal
-          title={`Restore ${confirmRestore.entity_type}`}
-          icon={<IconRefreshCw size={18} />}
-          message={
-            `Restore the ${confirmRestore.entity_type} '${confirmRestore.name}' to active service? ` +
-            'It reappears on the asset pages with its history intact, and its auto-purge timer is ' +
-            'cleared — archiving it again starts a fresh retention window rather than resuming the ' +
-            'one it had.' +
-            (confirmRestore.entity_type === 'gateway' && confirmRestore.credential_revoked_at
-              ? ' Its broker credential was revoked when it was archived and is not restored with it:' +
-                ' issue it again from its drawer on the Gateways page (Generate Broker Credential) for a Host or' +
-                ' Simulated gateway, or set a Remote gateway up again from its drawer (Set Up Gateway)' +
-                ' with a fresh command or bundle, before it can publish again.'
-              : '') +
-            (confirmRestore.entity_type === 'gateway' && confirmRestore.forge_archived_at
-              ? ' Its repository comes back out of the forge’s archive within a few seconds. The' +
-                ' appliance’s deploy key does not come back with it — re-enrol the appliance before' +
-                ' it can pull its flow again.'
-              : '') +
-            (confirmRestore.entity_type === 'device'
-              ? ' Any replay lane recorded from it comes back with it.'
-              : '')
-          }
-          confirmLabel="Restore"
-          pendingLabel="Restoring…"
-          confirmClassName="btn btn-primary"
+        <RestoreEntityModal
+          type={confirmRestore.entity_type}
+          name={confirmRestore.name}
+          credentialRevoked={Boolean(confirmRestore.credential_revoked_at)}
+          forgeArchived={Boolean(confirmRestore.forge_archived_at)}
           onConfirm={() => restore(confirmRestore)}
           onCancel={() => setConfirmRestore(null)}
         />
