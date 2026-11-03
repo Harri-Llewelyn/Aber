@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { navigate, queryOf, useUrl, withQuery } from './useUrlState'
-import { ALL_TIME, TIME_PRESETS, WINDOW_KEYS, windowFromQuery, windowToQuery } from '../utils/timeWindow'
+import { ALL_TIME, SPAN_IDS, TIME_PRESETS, WINDOW_KEYS, windowFromQuery, windowToQuery } from '../utils/timeWindow'
 
 /**
  * A page's time window, held in the address as `span` and `at`, `range`, or `from` and `to`
@@ -13,8 +13,9 @@ import { ALL_TIME, TIME_PRESETS, WINDOW_KEYS, windowFromQuery, windowToQuery } f
  * @param {Array} [options.ranges] The rolling ranges the page offers, `TIME_PRESETS` or some of them.
  * @param {boolean} [options.allTime] Whether All time is one of them.
  * @param {Object} [options.fallback] The window with nothing in the address.
+ * @param {string[]} [options.spans] The spans the page offers, `SPAN_IDS` or some of them.
  */
-export function useTimeWindow({ ranges = TIME_PRESETS, allTime = false, fallback = ALL_TIME } = {}) {
+export function useTimeWindow({ ranges = TIME_PRESETS, allTime = false, fallback = ALL_TIME, spans = SPAN_IDS } = {}) {
   const query = queryOf(useUrl())
   // The window's own keys as one string, so the window is a new object only when they change.
   const written = JSON.stringify(WINDOW_KEYS.map(k => query.get(k)))
@@ -22,8 +23,8 @@ export function useTimeWindow({ ranges = TIME_PRESETS, allTime = false, fallback
   const win = useMemo(() => {
     const own = new URLSearchParams()
     JSON.parse(written).forEach((value, i) => { if (value !== null) own.set(WINDOW_KEYS[i], value) })
-    return windowFromQuery(own, { ranges, allTime, fallback })
-  }, [written, ranges, allTime, fallback])
+    return windowFromQuery(own, { ranges, allTime, fallback, spans })
+  }, [written, ranges, allTime, fallback, spans])
 
   const tidy = JSON.stringify(WINDOW_KEYS.map(k => windowToQuery(win, fallback)[k])) !== written
   useEffect(() => {

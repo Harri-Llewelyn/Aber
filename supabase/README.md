@@ -2741,8 +2741,8 @@ browser never reaches it: the `service-logs` function reads it for an Administra
 - **A GET, and the role is the whole decision.** GoTrue's `getUser()` checks the caller, so a machine
   identity's token is refused, as it should be: the lines are for a person. Any role but
   Administrator is `403` before the store is asked anything. No service-role key.
-- **Parameters, never a query.** `service`, `level`, `filter`, `range` and `limit`. Any other
-  parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
+- **Parameters, never a query.** `service`, `level`, `filter`, `range` (or `from` and `to`, since
+  `0230`) and `limit`. Any other parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
   `| json aber_level="level" | aber_level=~"(?i)(?:…)"` for a level, with every caller value a
   quoted string, escaped as LogQL reads one (Go's `strconv.Unquote`). `service` must be a value
   Loki lists for the label over the last 7 days.
@@ -2765,7 +2765,8 @@ browser never reaches it: the `service-logs` function reads it for an Administra
   `networkPolicy.extraEgress`.
 
 **`0225` records each new read.** `record_service_logs_read(p_service, p_level, p_filter, p_range)`
-writes one `SERVICE_LOGS_READ` row. The function calls it as the caller after Loki answered, and
+writes one `SERVICE_LOGS_READ` row. (`0230` adds `p_from` and `p_to`, for a fixed window:
+[A read of a service's logs names a range or a fixed window](#a-read-of-a-services-logs-names-a-range-or-a-fixed-window-0230).) The function calls it as the caller after Loki answered, and
 returns the lines only once it has: a read that cannot be recorded is `503` with no lines.
 
 - **The database decides when a row is due**, never the caller. It writes one when the four
@@ -2798,6 +2799,51 @@ holds the rows, when one is due, the refusals and who reads them. `logs_test.ts`
 hold the role check, the parameters, the query and its escaping, the ceilings and the order: the
 store, then the row, then the lines. `test-harness/test_log_pipeline.py` reads a dropped device's line
 back through the function on a running stack.
+
+### A read of a service's logs names a range or a fixed window (0230)
+
+System › Logs uses the shared time control (`TimeWindowControl`), as the Audit Trail does. A day, a
+week, a step back or a custom range is a fixed window: it has two ends, and moves only when the
+person moves it. Until `0230`, `service-logs` took a rolling `range` alone, and the record compared
+the range key.
+
+- **`service-logs` takes `from` and `to` beside `range`.** Each is an ISO 8601 instant with an
+  offset, and `to` is the first moment outside the window. A read names a range or the two ends,
+  never both. The ends are in order and at most 169 hours apart: the 7 days a read covers, and the
+  hour a calendar week gains when the clocks go back, so the control's Week is never refused.
+  Anything else is `400` with the reason, before the store is asked. A rolling window is still
+  measured back from the function's own now, and the services listed are still those of the last 7
+  days, whatever the window.
+- **The row records what was asked for.** `record_service_logs_read()` takes `p_from` and `p_to`
+  after `p_range`, each `DEFAULT NULL`. A rolling read's `new_data` is `name`, `level`, `filter`
+  and `range`, as before, so a poll of the last hour writes nothing, and the first poll after an
+  upgrade matches the row written before it. A fixed read's is `name`, `level`, `filter`, `from`
+  and `to`, the ends in UTC to the millisecond whatever the session's time zone. So stepping to
+  yesterday writes one row, and refreshing yesterday writes none. The same instants written with
+  another offset are the same read.
+- **The tab sends what it shows.** A rolling window goes as `range`, and any other as `from` and
+  `to`, worked out from the browser's local calendar at fetch time (`logWindowParams` in
+  `frontend/src/utils/serviceLogs.js`). Refresh and the interval repeat a fixed window exactly.
+- **A rolling call is still four arguments.** The function sends `p_from` and `p_to` only for a
+  fixed read, and the defaults fill them otherwise. So a function from before `0230` still records
+  on the new form while the edge functions roll out.
+
+**Two more arguments are a new signature**, so the rule `0227` followed applies. `0225`, the
+function's own file, declares the six-argument form in place, as `0001` and `0168` declared
+`0227`'s, and its self-check calls it by six arguments. On the first boot of an upgrade, `0225`
+creates the new form beside the four-argument one, and `0230` drops that one, guarded, and states
+the grants by name. Between the two, a four-argument call is ambiguous, so a read of the logs fails
+for the seconds those files take on that one boot. No later boot holds two. A body in `0230`
+instead would leave `0225` recreating the four-argument form on every boot.
+
+The file's self-check asserts one `record_service_logs_read`, `p_range`, `p_from` and `p_to` by
+name and type, their two defaults, `SECURITY DEFINER` and its pin, who may execute it, and that a
+fixed window with no identity behind it is refused. Mirror check 40 (`scripts/check-mirror-drift.mjs`)
+now also holds the widest window in `logs.ts` and `0225`, the arguments the function sends against
+those `0225` declares, and the tab's spans against the widest window.
+`test_a_logs_read_names_a_range_or_a_fixed_window.py` holds the rows, the repeats, the refusals and
+the one form after `0225` and `0230` replay over the four-argument one. `logs_test.ts` holds the
+parameters, the refusals and what the function sends.
 
 ### An Audit Trail filter takes several values (0227)
 

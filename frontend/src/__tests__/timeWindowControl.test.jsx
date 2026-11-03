@@ -198,6 +198,51 @@ describe('the popover', () => {
   })
 })
 
+describe('a page offering some spans', () => {
+  const SOME_SPANS = ['day', 'week']
+  const SOME_RANGES = TIME_PRESETS.slice(0, 2)
+  function Narrow() {
+    const [win, setWin] = useTimeWindow({ ranges: SOME_RANGES, fallback: ALL_TIME, spans: SOME_SPANS })
+    return <TimeWindowControl value={win} onChange={setWin} ranges={SOME_RANGES} spans={SOME_SPANS} />
+  }
+  const narrow = (search = '') => {
+    window.history.replaceState(null, '', `/logs${search}`)
+    render(<Narrow />)
+  }
+
+  it('switches between those spans alone, and the arrows and the switch work as before', () => {
+    narrow('?span=week&at=2026-11-02')
+    const radios = within(screen.getByRole('radiogroup', { name: 'Span' })).getAllByRole('radio')
+    expect(radios.map(r => r.textContent)).toEqual(['Day', 'Week'])
+    expect(span('Week')).toHaveAttribute('aria-checked', 'true')
+
+    fireEvent.click(arrow('Previous week'))
+    expect(window.location.search).toBe('?span=week&at=2026-10-26')
+    fireEvent.click(span('Day'))
+    expect(window.location.search).toBe('?span=day&at=2026-10-26')
+  })
+
+  it('reads a span it does not offer as its fallback, and tidies the address', () => {
+    narrow('?span=month&at=2026-11-02')
+    expect(words()).toHaveTextContent('All time')
+    expect(window.location.search).toBe('')
+  })
+
+  it('jumps from a rolling window to a day, a span it offers', () => {
+    narrow('?range=1h')
+    fireEvent.click(words())
+    fireEvent.click(within(choices()).getByRole('button', { name: 'Yesterday' }))
+    expect(window.location.search).toBe('?span=day&at=2026-11-01')
+  })
+
+  it('leaves the Audit Trail its four spans by default', () => {
+    show('?span=year&at=2026-11-02')
+    expect(within(screen.getByRole('radiogroup', { name: 'Span' })).getAllByRole('radio').map(r => r.textContent))
+      .toEqual(['Day', 'Week', 'Month', 'Year'])
+    expect(words()).toHaveTextContent('2026')
+  })
+})
+
 describe('the clock', () => {
   it('turns › on once the day it held is over', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })

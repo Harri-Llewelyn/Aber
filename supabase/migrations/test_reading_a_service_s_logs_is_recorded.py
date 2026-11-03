@@ -60,7 +60,9 @@ class ServiceLogsReadBase(unittest.TestCase):
     def setUp(self):
         self.conn = get_connection()
         self.cur = self.conn.cursor()
-        self.cur.execute("SELECT to_regprocedure('public.record_service_logs_read(text, text, text, text)');")
+        # The form 0230 added the window's two ends to; this suite reads rolling windows alone.
+        self.cur.execute("SELECT to_regprocedure('public.record_service_logs_read(text, text, text, text,"
+                         " timestamp with time zone, timestamp with time zone)');")
         if self.cur.fetchone()[0] is None:
             self.skipTest("0225 is not applied to this database")
         self.cur.execute("SELECT id, name FROM public.roles;")

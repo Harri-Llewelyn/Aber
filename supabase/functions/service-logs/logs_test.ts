@@ -5,7 +5,9 @@ import {
   FILTER_MAX,
   handler,
   LINE_BYTES,
+  LONGEST_WINDOW_HOURS,
   MAX_LINES,
+  parseInstant,
   RANGES,
   shapeLine,
 } from "./logs.ts";
@@ -291,6 +293,96 @@ Deno.test("a row on the first load and on each change, none on a refresh or a re
   assert.equal(s.rows(), 4);
   // The handler sends the parameters as read, never resolved times, so a repeat is the same read.
   assert.equal(new Set(s.records().map((r) => JSON.stringify(r.body))).size, 4);
+});
+
+Deno.test("a fixed window is read between its ends, recorded as them, and answered with them", async () => {
+  env();
+  const s = stack();
+  const { response, body } = await run(get("service=ingestion&level=error&from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z"), s);
+  assert.equal(response.status, 200);
+
+  const read = s.toLoki().find((c) => c.path === "/loki/api/v1/query_range")!;
+  assert.equal([read.params.start, read.params.end], [`${Date.UTC(2026, 10, 1)}000000`, `${Date.UTC(2026, 10, 2)}000000`]);
+  // The service list is still the last 7 days', whatever the window.
+  const listed = s.toLoki().find((c) => c.path === "/loki/api/v1/label/service/values")!;
+  assert.equal(String((BigInt(listed.params.end) - BigInt(listed.params.start)) / 1_000_000n), String(RANGES["7d"]));
+
+  const [record] = s.records();
+  assert.equal(record.body, {
+    p_service: "ingestion", p_level: "error", p_filter: "", p_range: null,
+    p_from: "2026-11-01T00:00:00.000Z", p_to: "2026-11-02T00:00:00.000Z",
+  });
+  assert.equal([body.range, body.from, body.to, body.audit], [null, "2026-11-01T00:00:00.000Z", "2026-11-02T00:00:00.000Z", "recorded"]);
+});
+
+Deno.test("an instant written with an offset is the same instant, and recorded in UTC", async () => {
+  env();
+  const s = stack();
+  const { response } = await run(get(`service=ingestion&from=${encodeURIComponent("2026-11-01T01:00+01:00")}&to=2026-11-01T06:30:15.250Z`), s);
+  assert.equal(response.status, 200);
+  const sent = s.records()[0].body as Record<string, unknown>;
+  assert.equal([sent.p_from, sent.p_to], ["2026-11-01T00:00:00.000Z", "2026-11-01T06:30:15.250Z"]);
+  assert.equal(parseInstant("2026-02-28T23:59:59.999Z"), Date.UTC(2026, 1, 28, 23, 59, 59, 999));
+  assert.equal(parseInstant("2028-02-29T00:00Z"), Date.UTC(2028, 1, 29));
+});
+
+Deno.test("a week that holds a clock change, 7 days and an hour, is read", async () => {
+  env();
+  const s = stack();
+  // London's week of 19 October 2026: Monday's midnight is BST's, the next Monday's GMT's.
+  const { response } = await run(get("service=ingestion&from=2026-10-18T23:00:00Z&to=2026-10-26T00:00:00Z"), s);
+  assert.equal(response.status, 200);
+  assert.equal(LONGEST_WINDOW_HOURS, 7 * 24 + 1);
+});
+
+Deno.test("a window that is not two ends in order, at most 7 days and an hour apart, is refused before the store is asked", async () => {
+  for (const [query, reason] of [
+    ["from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z&range=1h", /not both/],
+    ["from=2026-11-01T00:00:00Z", /both from and to/],
+    ["to=2026-11-02T00:00:00Z", /both from and to/],
+    ["from=&to=2026-11-02T00:00:00Z", /ISO 8601/],
+    ["from=2026-11-01T00:00&to=2026-11-02T00:00", /with an offset/],
+    ["from=2026-11-01&to=2026-11-02", /ISO 8601/],
+    ["from=2026-02-30T00:00:00Z&to=2026-03-01T00:00:00Z", /ISO 8601/],
+    ["from=2026-11-01T00:00:00Z&to=2026-11-01T24:00:00Z", /ISO 8601/],
+    ["from=2026-11-01T00:00:00Z&to=2026-11-01T10:00:00%2B24:00", /ISO 8601/],
+    ["from=1969-12-31T00:00:00Z&to=1970-01-01T00:00:00Z", /ISO 8601/],
+    ["from=2026-11-02T00:00:00Z&to=2026-11-02T00:00:00Z", /after from/],
+    ["from=2026-11-02T00:00:00Z&to=2026-11-01T00:00:00Z", /after from/],
+    ["from=2026-10-18T23:00:00Z&to=2026-10-26T00:00:00.001Z", /at most 7 days/],
+    ["from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z", /at most 7 days/],
+  ] as const) {
+    env();
+    const s = stack();
+    const { response, body } = await run(get(`service=ingestion&${query}`), s);
+    assert.equal(response.status, 400, query);
+    assert.ok(reason.test(body.details), `${query}: ${body.details}`);
+    assert.equal(s.toLoki(), [], query);
+    assert.equal(s.records(), [], query);
+  }
+});
+
+Deno.test("a fixed window repeated is the same read, and a step or a change of window is a new one", async () => {
+  env();
+  const s = stack();
+  const yesterday = "from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z";
+  const audits: string[] = [];
+  for (const query of [
+    "service=ingestion",                                         // Last 1 hour, the tab's first load
+    "service=ingestion&range=1h",                                // a poll of Last 1 hour
+    `service=ingestion&${yesterday}`,                            // stepped to yesterday
+    `service=ingestion&${yesterday}`,                            // a refresh of yesterday
+    "service=ingestion&from=2026-11-01T00:00:00.000%2B00:00&to=2026-11-02T00:00Z", // the same instants, spelt otherwise
+    "service=ingestion&from=2026-10-31T00:00:00Z&to=2026-11-01T00:00:00Z", // the day before
+    "service=ingestion&range=1h",                                // back to Last 1 hour
+    "service=ingestion&range=1h",                                // and a poll of it
+  ]) {
+    const { body } = await run(get(query), s, { keep: true });
+    audits.push(body.audit);
+  }
+  s.restore();
+  assert.equal(audits, ["recorded", "unchanged", "recorded", "unchanged", "unchanged", "recorded", "recorded", "unchanged"]);
+  assert.equal(s.rows(), 4);
 });
 
 Deno.test("a limit over the ceiling is clamped, and the answer says so and why", async () => {
