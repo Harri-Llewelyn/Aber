@@ -19,10 +19,11 @@ keep in step.
 values key would let a deployment run the two from different builds, which is a way to get a worker
 whose capture.py disagrees with the daemon's about the file format.
 
-ONE PORT, FOR ITS METRICS, AND NO SERVICE OR PROBE. It is a producer: nothing calls it. Its one
-HTTP endpoint is Prometheus `/metrics` on `playback.metrics.port`, which serves the jobs it ended by
-outcome (`aber_playback_jobs_total`) and nothing else, as it has no credential. Alloy finds it by
-the pod's scrape annotations, so no Service is needed. No probe reads it: the endpoint answers from
+ONE PORT, FOR ITS METRICS, AND NO PROBE. It is a producer: nothing calls it. Its one HTTP endpoint
+is Prometheus `/metrics` on `playback.metrics.port`, which serves the jobs it ended by outcome
+(`aber_playback_jobs_total`) and nothing else, as it has no credential. Alloy finds it by the pod's
+scrape annotations; `playback-metrics`, below, is for a Prometheus Operator's ServiceMonitor, which
+selects a Service. No probe reads it: the endpoint answers from
 its own thread, so it would say the process is alive, which the kubelet already knows, and not that
 the worker's loop is moving. What a restart costs is bounded and visible --
 `playback_reconcile_jobs()` fails whatever was in flight with a message saying the worker
@@ -193,4 +194,29 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ add (.Values.supabaseStorage.captureFileSizeLimit | int64) 16777216 }}
+
+{{- if .Values.playback.metrics.enabled }}
+---
+{{/*
+A Service that exists only to be scraped, as `ingestion-metrics` is (apps/ingestion.yaml says why):
+headless, since one replica has nothing to balance, and publishing a pod that is not ready, since a
+worker in trouble is the one worth scraping.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: playback-metrics
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.playback.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
 {{- end }}
