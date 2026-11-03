@@ -49,7 +49,7 @@ export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-gh
     setPos({ top: r.bottom + GAP, left, arrowX })
   }, [open])
 
-  // Once placed, as a hidden panel cannot take focus. Not scrolled to, which would close it.
+  // Once placed. Not scrolled to, which would close it.
   const placed = pos !== null
   useEffect(() => {
     if (placed) panelRef.current?.querySelector(FOCUSABLE)?.focus({ preventScroll: true })
@@ -99,7 +99,9 @@ export function ToolbarPopover({ label, button, buttonClass = 'btn btn-sm btn-gh
           role="dialog"
           aria-label={label}
           className="filters-popover"
-          style={pos ? { top: pos.top, left: pos.left, '--arrow-x': `${pos.arrowX}px` } : { visibility: 'hidden' }}
+          // Unplaced, transparent rather than hidden: `.btn` transitions every property, so a button
+          // would inherit visibility through a transition that starts hidden, and refuse the focus above.
+          style={pos ? { top: pos.top, left: pos.left, '--arrow-x': `${pos.arrowX}px` } : { opacity: 0, pointerEvents: 'none' }}
         >
           <div className="filters-popover-controls">{content(children)}</div>
           {foot && <div className="filters-popover-foot">{content(foot)}</div>}
