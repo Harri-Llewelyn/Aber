@@ -60,12 +60,14 @@ def as_user(cur, user_id):
     cur.execute('SET LOCAL "request.jwt.claims" = %s;', ('{"sub": "%s"}' % user_id,))
 
 
-#: `{ kind: 'X', table: 'y', label: 'Z', domain: 'asset' }`, the shape constants.js holds.
+#: `{ kind: 'X', table: 'y', label: 'Z', domain: 'asset', group: 'plant' }`, the shape constants.js
+#: holds. Fields after `domain` are read past, so one added there does not empty the parse.
 _LANE_ENTRY = re.compile(
     r"\{\s*kind:\s*'(?P<kind>[^']+)',\s*"
     r"table:\s*'(?P<table>[^']+)',\s*"
     r"label:\s*'[^']*',\s*"
-    r"domain:\s*'(?P<domain>[^']+)'\s*\}"
+    r"domain:\s*'(?P<domain>[^']+)'"
+    r"(?:,\s*\w+:\s*'[^']*')*\s*\}"
 )
 
 
