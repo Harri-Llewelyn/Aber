@@ -1780,6 +1780,11 @@ reach the ports above; `values-prod.yaml.example` carries the rule. The cluster'
 streams `service` with the workload name. Otherwise every shipped log query returns nothing, against a
 datasource that reports healthy.
 
+The System page's Logs tab reads the same Loki, through the edge functions (`service-logs`). Under
+`networkPolicy.enabled` the functions reach the chart's own Loki on their own edge, but your Loki
+needs a `networkPolicy.extraEgress` rule from `supabase-functions` to it. Without one the tab says
+the log store could not be read.
+
 ### Still outstanding
 
 Two pieces of work are not built yet:
