@@ -24,7 +24,7 @@ const CATALOG = [
 ]
 
 const VOCABULARY = [
-  { kind: 'DATA_ITEM_TYPE', name: 'ANGLE', category: 'SAMPLE' },
+  { kind: 'DATA_ITEM_TYPE', name: 'ANGLE', category: 'SAMPLE', semantic_id: 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE' },
   { kind: 'COMPONENT', name: 'Axes', category: null },
   { kind: 'UNIT', name: 'MILLIMETER', category: null },
   { kind: 'UNIT', name: 'PERCENT', category: null }
@@ -256,6 +256,42 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     await ready()
     fireEvent.click(standardTab(/ASHRAE 223P/))
     expect(within(sensorHead()).getByText('1 in use')).toBeTruthy()
+  })
+})
+
+/** The bubble that describes `el`, the first id in its aria-describedby. */
+const bubbleOf = (el) => document.getElementById((el.getAttribute('aria-describedby') || '').split(' ')[0])
+
+describe('Vocabulary page — an id in a tooltip', () => {
+  it("draws an OPC UA point's NodeId on a line of its own, in mono, between what it is and the hint", async () => {
+    renderTab()
+    await ready()
+    fireEvent.click(standardTab(/OPC UA/))
+    fireEvent.click(card().getByRole('button', { name: /^OPC 40010 Robotics/ }))
+
+    const bubble = bubbleOf(getByTooltip(/^ActualPosition — Current position of an axis\./, cardEl()))
+    const lines = [...bubble.querySelectorAll('.tooltip-line')]
+    expect(lines.map(l => l.textContent)).toEqual([
+      'NodeId nsu=http://opcfoundation.org/UA/Robotics/;i=16662',
+      'Press it to start a new catalog metric from this.',
+    ])
+    expect(lines[0].querySelector('.copyable-id-full')).toHaveTextContent('nsu=http://opcfoundation.org/UA/Robotics/;i=16662')
+  })
+
+  it("draws an MTConnect type's semantic id the same way, and the search still finds the entry by it", async () => {
+    renderTab()
+    await ready()
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'DataItemType/ANGLE' } })
+
+    const bubble = bubbleOf(getByTooltip(/^ANGLE/, cardEl()))
+    const id = bubble.querySelector('.tooltip-line .copyable-id-full')
+    expect(id).toHaveTextContent('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+    expect(id.parentElement).toHaveTextContent(/^Semantic ID/)
+  })
+
+  it('breaks a word wider than the bubble, so an id cannot run past its edge', () => {
+    const rule = APP_CSS.match(/\.tooltip-bubble \{([^}]*)\}/)[1]
+    expect(rule).toMatch(/overflow-wrap:\s*anywhere/)
   })
 })
 

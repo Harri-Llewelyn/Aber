@@ -14,8 +14,9 @@ import { Tooltip } from './Tooltip'
  * is the standard's `hint`, a toolbar row (the search, Expand all), then the selected standard's
  * sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`). What a
  * standard is, and what to watch for in it, is on the page's help page. What differs per standard
- * arrives as a tab descriptor (how sections are derived, what an entry's tooltip says, what counts
- * as in use); see common/MTConnectVocabularyPanel.jsx and its siblings. Sections start collapsed,
+ * arrives as a tab descriptor (how sections are derived, what an entry's tooltip says, the id it
+ * shows on a line of its own (`idFor`, `{ label, value }`), what counts as in use); see
+ * common/MTConnectVocabularyPanel.jsx and its siblings. The search matches the name, the tooltip and the id. Sections start collapsed,
  * and searching opens only the sections that match. An entry is clickable when its tab has an
  * `onUse` and the viewer can add a metric.
  */
@@ -46,7 +47,8 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
         ...s,
         items: s.items.filter(i =>
           i.name.toLowerCase().includes(query) ||
-          (active.tooltipFor?.(i) || '').toLowerCase().includes(query)
+          (active.tooltipFor?.(i) || '').toLowerCase().includes(query) ||
+          (active.idFor?.(i)?.value || '').toLowerCase().includes(query)
         )
       }))
       .filter(s => s.items.length > 0)
@@ -145,12 +147,18 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
                         !!active.onUse && canAddMetric && (active.isActionable ? active.isActionable(item) : true)
                       const meta = active.metaFor?.(item)
                       const tooltip = active.tooltipFor?.(item) || item.name
+                      // The id on a line of its own, in mono as CopyableId shows one; the hint last.
+                      const id = active.idFor?.(item)
+                      const hint = inUse ? 'Already used by a catalog metric.'
+                        : actionable ? 'Press it to start a new catalog metric from this.' : null
                       return (
                         <Tooltip
                           key={item.id || item.name}
-                          text={inUse ? `${tooltip} — already used by a catalog metric`
-                            : actionable ? `${tooltip} — press it to start a new catalog metric from this`
-                              : tooltip}
+                          text={<>
+                            {tooltip}
+                            {id && <span className="tooltip-line">{id.label} <span className="copyable-id-full">{id.value}</span></span>}
+                            {hint && <span className="tooltip-line">{hint}</span>}
+                          </>}
                         >
                           <span
                             role={actionable ? 'button' : undefined}
