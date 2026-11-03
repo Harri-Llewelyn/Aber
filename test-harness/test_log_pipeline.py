@@ -526,7 +526,8 @@ class DropPairTestCase(unittest.TestCase):
         THE LOGS TAB'S READ, through the gateway, the function and the store. An Administrator's
         read of ingestion's lines, filtered by the dropped device's id, returns the drop's line
         with its reason and device as fields; an Operator's is refused; the read is one Audit
-        Trail row, and the same read again writes none.
+        Trail row, and the same read again writes none. The same lines read through a fixed
+        window's two ends are one more row, which names the ends, and a refresh of it writes none.
 
         The filter is the device id, which is random per run, so the line is the one this run
         caused, and the read's parameters are new to the Administrator: the first answer is a row.
@@ -559,15 +560,30 @@ class DropPairTestCase(unittest.TestCase):
         status, again = service_logs(admin, service="ingestion", filter=self.device, range="15m")
         self.assertEqual((200, "unchanged"), (status, again["audit"]), again)
         self.assertEqual(["recorded"] + ["unchanged"] * (len(audits) - 1), audits)
+
+        # The same lines through a fixed window, as the tab sends a day, a week or a step: its two
+        # ends, through PostgREST to the six-argument record. One row, and a refresh writes none.
+        minute = time.time() // 60 * 60
+        ends = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t)) for t in (minute - 15 * 60, minute + 60)]
+        window = {"service": "ingestion", "filter": self.device, "from": ends[0], "to": ends[1]}
+        status, fixed = service_logs(admin, **window)
+        self.assertEqual((200, "recorded", None), (status, fixed.get("audit"), fixed.get("range")), fixed)
+        self.assertTrue([e for e in fixed["lines"] if self.device in e["line"]], fixed)
+        status, fixed_again = service_logs(admin, **window)
+        self.assertEqual((200, "unchanged"), (status, fixed_again["audit"]), fixed_again)
+
         query = urllib.parse.urlencode({
             "action": "eq.SERVICE_LOGS_READ", "entity_type": "eq.service_logs",
             "changed_by": f"eq.{admin_id}", "new_data->>filter": f"eq.{self.device}",
-            "select": "new_data",
+            "select": "new_data", "order": "id.asc",
         })
         status, rows = gateway_get(f"/rest/v1/audit_trail?{query}", admin)
         self.assertEqual(200, status, rows)
-        self.assertEqual([{"name": "ingestion", "level": "any", "filter": self.device, "range": "15m"}],
-                         [r["new_data"] for r in rows])
+        self.assertEqual([
+            {"name": "ingestion", "level": "any", "filter": self.device, "range": "15m"},
+            {"name": "ingestion", "level": "any", "filter": self.device,
+             "from": ends[0].replace("Z", ".000Z"), "to": ends[1].replace("Z", ".000Z")},
+        ], [r["new_data"] for r in rows])
 
 
 class MultilineTestCase(unittest.TestCase):

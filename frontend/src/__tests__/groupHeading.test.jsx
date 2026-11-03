@@ -1,7 +1,7 @@
 /**
  * GroupHeading: the shared heading of a group of rows that opens and closes. A disclosure button
- * (WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the name and a count, which
- * reports a press and leaves the page to keep which groups are open.
+ * (WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the name and a count or words in
+ * its place, which reports a press and leaves the page to keep which groups are open.
  */
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
@@ -36,6 +36,15 @@ describe('GroupHeading', () => {
     render(<GroupHeading open label="Areas" onToggle={() => {}} />)
     expect(screen.getByRole('button')).toHaveAccessibleName('Areas')
     expect(document.querySelector('.group-heading-count')).toBeNull()
+  })
+
+  it('draws words in place of a count as cut text, "Entity · 2 chosen", and speaks them after the name', () => {
+    render(<GroupHeading open={false} label="Entity" detail="2 chosen" onToggle={() => {}} />)
+    expect(screen.getByRole('button')).toHaveAccessibleName('Entity, 2 chosen')
+    const detail = document.querySelector('.group-heading-detail')
+    expect(detail.querySelector('[aria-hidden="true"] .overflow-text')).toHaveTextContent('· 2 chosen')
+    expect(detail.querySelector('.sr-only')).toHaveTextContent(', 2 chosen')
+    expect(document.querySelector('.group-heading-count:not(.group-heading-detail)')).toBeNull()
   })
 
   it('points its chevron up while open and down while closed, as the table group rows do', () => {

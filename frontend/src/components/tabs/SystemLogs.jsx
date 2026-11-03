@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -10,33 +11,17 @@ import { Tooltip } from '../common/Tooltip'
 import { copyText } from '../common/CopyableId'
 import { IconAlertTriangle, IconCheck, IconCopy, IconFileText } from '../common/Icons'
 import { RefreshButton } from '../common/RefreshButton'
+import { TimeWindowControl } from '../common/TimeWindowControl'
 import {
-  DEFAULT_LOG_RANGE, LOG_FILTER_MAX, LOG_LEVELS, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY,
-  defaultLogService, formatLogTime
+  DEFAULT_LOG_WINDOW, LOG_FILTER_MAX, LOG_LEVELS, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY, LOG_SPANS,
+  defaultLogService, formatLogTime, logWindowParams
 } from '../../utils/serviceLogs'
+import { sameWindow } from '../../utils/timeWindow'
 
 /** How long the filter waits after the last keystroke, so a word typed is one read, not one a letter. */
 export const FILTER_SETTLE_MS = 600
 
 const LEVEL_VALUES = LOG_LEVELS.map(l => l.value)
-const RANGE_VALUES = LOG_RANGES.map(r => r.value)
-
-/**
- * The range picker: the rolling ranges, as a select. Kept to this one component so the shared
- * time control can take its place without touching the rest of the tab.
- */
-export function LogRangePicker({ value, onChange }) {
-  return (
-    <select
-      className="form-control control-sm"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      aria-label="Time range"
-    >
-      {LOG_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-    </select>
-  )
-}
 
 /** A level's badge colour, by the spellings the function's level filter matches; any other is neutral. */
 const LEVEL_TONES = {
@@ -109,7 +94,7 @@ function LogRow({ entry, showToast }) {
 /** What a read left out, in words: older lines past the limit, or a ceiling the function applied. */
 function shownNote(answer) {
   if (answer.more) {
-    return `Showing the newest ${answer.lines.length} lines. Older lines in this range are not shown: choose a shorter range or a filter to reach them.`
+    return `Showing the newest ${answer.lines.length} lines. Older lines in this window are not shown: choose a shorter window or a filter to reach them.`
   }
   return (answer.clamped || []).map(c => c.why).join(' ') || null
 }
@@ -117,14 +102,15 @@ function shownNote(answer) {
 /**
  * System › Logs: a service's recent log lines, newest first, read through the service-logs
  * function. Administrator only; the page offers the tab to nobody else, and the function refuses
- * them. The function writes an Audit Trail row for a read whose service, level, filter or range
- * differs from the reader's last, so the filter settles before it reads, and a refresh writes none.
+ * them. The function writes an Audit Trail row for a read whose service, level, filter or window
+ * differs from the reader's last, so the filter settles before it reads, and a refresh writes none:
+ * a rolling window is sent as its range and any other as its bounds, so a repeat is the same read.
  */
 export function SystemLogs({ showToast }) {
   const [services, setServices] = useState(null)
   const [service, setService] = useUrlState('service', '', { allowed: services ? (v => services.includes(v)) : null })
   const [level, setLevel] = useUrlState('level', 'any', { allowed: LEVEL_VALUES })
-  const [range, setRange] = useUrlState('range', DEFAULT_LOG_RANGE, { allowed: RANGE_VALUES })
+  const [win, setWin] = useTimeWindow({ ranges: LOG_RANGES, fallback: DEFAULT_LOG_WINDOW, spans: LOG_SPANS })
   const [search, setSearch] = useUrlState('search', '')
   const [filter, setFilter] = useState(search)
   const [every, setEvery] = useState(0)
@@ -144,7 +130,7 @@ export function SystemLogs({ showToast }) {
     setReading(true)
     try {
       const body = await api.readServiceLogs(
-        shown ? { service: shown, level, filter, range, limit: LOG_LINES_MAX } : {},
+        shown ? { service: shown, level, filter, ...logWindowParams(win), limit: LOG_LINES_MAX } : {},
         { signal }
       )
       setServices(body.services || [])
@@ -157,7 +143,7 @@ export function SystemLogs({ showToast }) {
     } finally {
       setReading(false)
     }
-  }, [shown, level, filter, range])
+  }, [shown, level, filter, win])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -168,13 +154,13 @@ export function SystemLogs({ showToast }) {
   // The optional interval. A poll repeats the read on screen, which the function does not record.
   usePolling(read, every * 1000, every > 0)
 
-  const filterCount = [service, search, level !== 'any', range !== DEFAULT_LOG_RANGE].filter(Boolean).length
-  const clear = () => { setService(''); setSearch(''); setLevel('any'); setRange(DEFAULT_LOG_RANGE) }
+  const filterCount = [service, search, level !== 'any', !sameWindow(win, DEFAULT_LOG_WINDOW)].filter(Boolean).length
+  const clear = () => { setService(''); setSearch(''); setLevel('any'); setWin(DEFAULT_LOG_WINDOW) }
 
   const current = answer && answer.observability !== false && answer.service === shown ? answer : null
   const note = current ? shownNote(current) : null
   const filtered = Boolean(filter) || level !== 'any'
-  const rangeLabel = LOG_RANGES.find(r => r.value === range)?.label.toLowerCase()
+  const during = win.kind === 'rolling' ? `the ${win.label.toLowerCase()}` : 'this time window'
 
   return (
     <>
@@ -185,6 +171,7 @@ export function SystemLogs({ showToast }) {
           placeholder="Find text in a line…"
           ariaLabel="Find text in the log lines, matched exactly"
         />
+        <TimeWindowControl value={win} onChange={setWin} ranges={LOG_RANGES} spans={LOG_SPANS} />
         <select
           className="form-control control-md"
           value={shown}
@@ -202,7 +189,6 @@ export function SystemLogs({ showToast }) {
         >
           {LOG_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
         </select>
-        <LogRangePicker value={range} onChange={setRange} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           <RefreshButton
@@ -240,8 +226,8 @@ export function SystemLogs({ showToast }) {
         <EmptyState
           icon={<IconFileText size={36} />}
           filtered={filtered}
-          message={`${shown} wrote nothing in the ${rangeLabel}.`}
-          filteredMessage={`No line from ${shown} in the ${rangeLabel} matches the filter.`}
+          message={`${shown} wrote nothing in ${during}.`}
+          filteredMessage={`No line from ${shown} in ${during} matches the filter.`}
         />
       ) : (
         <div className="table-wrap">

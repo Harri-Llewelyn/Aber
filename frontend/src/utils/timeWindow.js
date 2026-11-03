@@ -38,7 +38,9 @@ export const SPANS = [
   { id: 'month', label: 'Month' },
   { id: 'year', label: 'Year' },
 ]
-const SPAN_IDS = SPANS.map(s => s.id)
+
+/** Every span, as a page offering all four passes them; a page may offer some of them. */
+export const SPAN_IDS = SPANS.map(s => s.id)
 
 /** The Jump to list: each keeps the span shown, so in Week "A month ago" is the week holding it. */
 export const JUMPS = [
@@ -207,8 +209,11 @@ export function chooseSpan(win, span, now = Date.now()) {
   return { kind: 'calendar', span, at: localDay(last || new Date(now)) }
 }
 
-/** A Jump to choice (a JUMPS id, or a `YYYY-MM-DD` from the date field), at the span shown or Day. */
-export function jumpTo(win, target, now = Date.now()) {
+/**
+ * A Jump to choice (a JUMPS id, or a `YYYY-MM-DD` from the date field), at the span shown, or else
+ * at Day, or the first of `spans` on a page that does not offer Day.
+ */
+export function jumpTo(win, target, now = Date.now(), spans = SPAN_IDS) {
   const today = midnight(new Date(now))
   const day = {
     today,
@@ -218,7 +223,8 @@ export function jumpTo(win, target, now = Date.now()) {
     'year-start': new Date(today.getFullYear(), 0, 1),
   }[target] || parseDay(target)
   if (!day) return win
-  return { kind: 'calendar', span: win?.kind === 'calendar' ? win.span : 'day', at: localDay(day) }
+  const span = win?.kind === 'calendar' ? win.span : spans.includes('day') ? 'day' : spans[0]
+  return { kind: 'calendar', span, at: localDay(day) }
 }
 
 /** The arrows' names: by the span, or Earlier and Later for a window that steps by its own length. */
@@ -316,13 +322,14 @@ function legacyTo(until) {
 }
 
 /**
- * The window an address names, for a page offering `ranges` (and All time if `allTime`). In order:
- * `span` with `at`; `from` and `to`; the older `since` and `until`, read as `from` and `to`; `range`.
- * Anything else is the page's `fallback`.
+ * The window an address names, for a page offering `ranges`, `spans` (and All time if `allTime`).
+ * In order: `span` with `at`; `from` and `to`; the older `since` and `until`, read as `from` and
+ * `to`; `range`. A span the page does not offer is passed over, and anything else is the page's
+ * `fallback`.
  */
-export function windowFromQuery(query, { ranges = TIME_PRESETS, allTime = false, fallback = ALL_TIME } = {}) {
+export function windowFromQuery(query, { ranges = TIME_PRESETS, allTime = false, fallback = ALL_TIME, spans = SPAN_IDS } = {}) {
   const get = (key) => query.get(key)
-  if (SPAN_IDS.includes(get('span'))) {
+  if (spans.includes(get('span'))) {
     return { kind: 'calendar', span: get('span'), at: parseDay(get('at')) ? get('at') : null }
   }
   const [from, to] = [get('from'), get('to')].map(v => (parseLocal(v) ? v : ''))

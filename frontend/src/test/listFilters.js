@@ -23,8 +23,22 @@ export function openFiltersPanel() {
   return screen.getByRole('dialog', { name: 'Filters' })
 }
 
-/** The list named `label` in the Filters panel, opening the panel. */
-export const filterList = (label) => within(openFiltersPanel()).getByRole('group', { name: label })
+/**
+ * The heading of the section `label` in the Filters panel, opening the panel. Its name is the
+ * list's, then what is chosen in it ("Entity, 2 chosen"). Null in a panel with one list.
+ */
+export const sectionHeading = (label) => within(openFiltersPanel())
+  .queryByRole('button', { name: (name) => name === label || name.startsWith(`${label}, `) })
+
+/**
+ * The list named `label` in the Filters panel, opening the panel and then its section, which
+ * closes the section that was open.
+ */
+export function filterList(label) {
+  const heading = sectionHeading(label)
+  if (heading?.getAttribute('aria-expanded') === 'false') fireEvent.click(heading)
+  return within(openFiltersPanel()).getByRole('group', { name: label })
+}
 
 /** Ticks or unticks `words` in the Filters panel's list `label`. */
 export function toggleInList(label, words) {

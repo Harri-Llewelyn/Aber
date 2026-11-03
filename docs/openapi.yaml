@@ -1911,13 +1911,14 @@ paths:
       tags: [Auth]
       summary: Record a read of a service's logs
       description: |
-        Called by `/functions/v1/service-logs` in the caller's session (`0225`), before it returns
-        the lines it read. Writes one `SERVICE_LOGS_READ` row in the `service_logs` lane of the
-        security domain: the service (as `name`), the level, the text filter (null when none) and
-        the range key, with you in `changed_by`. The entity id is the md5 of `service_logs:` and
-        the service, so every read of one service is one lane.
+        Called by `/functions/v1/service-logs` in the caller's session (`0225`, `0230`), before it
+        returns the lines it read. Writes one `SERVICE_LOGS_READ` row in the `service_logs` lane
+        of the security domain: the service (as `name`), the level, the text filter (null when
+        none), and the range key for a rolling window or the two ends (`from` and `to`, in UTC to
+        the millisecond) for a fixed one, with you in `changed_by`. The entity id is the md5 of
+        `service_logs:` and the service, so every read of one service is one lane.
 
-        Writes nothing and returns null when those four are your last recorded read of the last 24
+        Writes nothing and returns null when those are your last recorded read of the last 24
         hours: the database decides when a row is due, so a refresh is never recorded twice and a
         read with new parameters always is. Administrator only.
       requestBody:
@@ -1931,14 +1932,16 @@ paths:
                 p_service: { type: string, description: '1-128 characters on one line.' }
                 p_level:   { type: string, enum: [any, error, warning, info, debug] }
                 p_filter:  { type: string, maxLength: 200, description: 'As sent; empty for none.' }
-                p_range:   { type: string, enum: [15m, 1h, 6h, 24h, 7d] }
+                p_range:   { type: string, nullable: true, enum: [15m, 1h, 6h, 24h, 7d], description: 'A rolling window''s key; null for a fixed window.' }
+                p_from:    { type: string, format: date-time, nullable: true, description: 'A fixed window''s start. Leave it out, or null, for a rolling window.' }
+                p_to:      { type: string, format: date-time, nullable: true, description: 'A fixed window''s end: after `p_from`, and at most 169 hours after it.' }
       responses:
         '200':
           description: The audit row's id, or null when the read repeats your last.
           content:
             application/json:
               schema: { type: integer, nullable: true }
-        '400': { description: 'A level, range, service name or filter outside the rule (`22023`).' }
+        '400': { description: 'A level, range, service name, filter or window outside the rule (`22023`): a range or two ends, not both, the ends in order and at most 169 hours apart.' }
         '403': { description: 'Not an Administrator (`42501`).' }
 
   # ------------------------------------------------------------ Registry ----
@@ -4405,7 +4408,8 @@ paths:
       summary: A service's newest log lines
       description: |
         The System page's Logs tab. Without `service`, the services that wrote a line to the log
-        store in the last 7 days; with one, that service's newest lines, newest first.
+        store in the last 7 days; with one, that service's newest lines, newest first, in a
+        rolling window (`range`, back from now) or a fixed one (`from` and `to`).
 
         **Parameters, never a query.** The function builds the one query shape from these:
         `service`'s stream, then `filter` as a quoted line filter, then `level` read from each
@@ -4413,15 +4417,18 @@ paths:
         the store as anything but a quoted string. A line that is not JSON names no level, and
         shows only under `level=any`.
 
-        **Ceilings.** A read covers at most 7 days (`range`), returns at most 500 lines (`limit`,
-        200 by default), and waits 10 seconds for the store. A `limit` over 500 is clamped, and
+        **Ceilings.** A read covers at most 7 days (`range`, or `from` and `to` at most 169 hours
+        apart: a week that holds a clock change is an hour longer), returns at most 500 lines
+        (`limit`, 200 by default), and waits 10 seconds for the store. A `limit` over 500 is clamped, and
         `clamped` says so and why; any other value outside the rules is refused. A line longer
         than 8 KiB is cut at a character, ending ` … [cut at 8 KiB]`, and `cut` is true.
 
-        **Each new read is recorded.** `record_service_logs_read()` (0225) writes a
+        **Each new read is recorded.** `record_service_logs_read()` (0225, 0230) writes a
         `SERVICE_LOGS_READ` row in the Audit Trail as the caller, when `service`, `level`,
-        `filter` or `range` differs from the caller's last recorded read, so a refresh writes
-        nothing (`audit: unchanged`). The lines are returned only once that call has answered.
+        `filter` or the window differs from the caller's last recorded read, so a refresh writes
+        nothing (`audit: unchanged`). A rolling window is recorded as its `range`, never the times
+        it resolved to, so the last hour a minute later is the same read; a fixed one as its two
+        ends, so a repeat of it is too. The lines are returned only once that call has answered.
         Listing the services records nothing.
 
         The store is the Loki Grafana reads: the chart's own, or `grafana.lokiUrl`. With neither
@@ -4432,7 +4439,9 @@ paths:
         - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists. Without it, the answer is the list alone.' }
         - { name: level, in: query, schema: { type: string, enum: [any, error, warning, info, debug], default: any } }
         - { name: filter, in: query, schema: { type: string, maxLength: 200 }, description: 'Text a line must contain, matched exactly, case and all.' }
-        - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s.' }
+        - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s. Not with `from` and `to`.' }
+        - { name: from, in: query, schema: { type: string, format: date-time }, description: 'A fixed window''s start: an ISO 8601 instant with an offset, such as `2026-11-02T00:00:00Z`. Given with `to`, and never with `range`.' }
+        - { name: to, in: query, schema: { type: string, format: date-time }, description: 'A fixed window''s end, the first moment outside it: after `from`, and at most 169 hours after it.' }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, default: 200 }, description: 'Lines to return; over 500 is clamped to 500.' }
       responses:
         '200':
@@ -4448,10 +4457,10 @@ paths:
                   service:  { type: string }
                   level:    { type: string }
                   filter:   { type: string }
-                  range:    { type: string }
+                  range:    { type: string, nullable: true, description: 'The rolling range read; null for a fixed window.' }
                   limit:    { type: integer }
-                  from:     { type: string, format: date-time }
-                  to:       { type: string, format: date-time }
+                  from:     { type: string, format: date-time, description: 'Where the lines read start: the fixed window''s, or now less the range.' }
+                  to:       { type: string, format: date-time, description: 'Where they end: the fixed window''s, or now.' }
                   lines:
                     type: array
                     items:
@@ -4478,7 +4487,7 @@ paths:
                         used:      { type: integer }
                         why:       { type: string }
                   audit: { type: string, enum: [recorded, unchanged] }
-        '400': { description: 'A parameter that is not one, a value outside the rules, or a service the store has not listed in the last 7 days. Nothing was read or recorded.' }
+        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store has not listed in the last 7 days. Nothing was read or recorded.' }
         '401': { description: Missing or invalid Authorization header, or a token GoTrue does not take for a person. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }

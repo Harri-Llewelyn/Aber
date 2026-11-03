@@ -1346,8 +1346,9 @@ a.tab-strip-tab { text-decoration: none; }
 }
 
 /* A list filter (FilterChecklist): the values as checkboxes under their group headings, a search
-   box above a long list, and each value's count at the right. The values scroll; the search box
-   stays. A dropdown's panel gives them more height than a list sharing the Filters panel. */
+   box above a long list, and each value's count at the right. In a toolbar dropdown, its one list,
+   the values scroll under the search box. In a Filters panel a list is at full height and only the
+   panel scrolls (check 203). */
 .filter-checklist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .filter-checklist .search-input,
 .filter-checklist .search-input.control-lg { width: 100%; }
@@ -1355,10 +1356,8 @@ a.tab-strip-tab { text-decoration: none; }
 .filter-checklist-options {
   display: flex;
   flex-direction: column;
-  max-height: 220px;
-  overflow-y: auto;
 }
-.filter-dropdown-panel .filter-checklist-options { max-height: min(50vh, 360px); }
+.filter-dropdown-panel .filter-checklist-options { max-height: min(50vh, 360px); overflow-y: auto; }
 .filter-checklist-section + .filter-checklist-section { margin-top: 6px; }
 .filter-checklist-option,
 .filter-checklist-group {
@@ -1387,6 +1386,33 @@ a.tab-strip-tab { text-decoration: none; }
 .filter-list-head { display: flex; align-items: center; gap: 6px; }
 .filter-list-head .form-label { margin-bottom: 0; }
 .filter-check { flex: 1; }
+/* Two or more lists in a Filters panel are sections, one open at a time (FiltersPopover): each
+   heading a GroupHeading on a strip of the base surface, ruled off as the timeline's sections are,
+   edge to edge across the panel. The strip tints while its button is hovered; a HelpTip beside the
+   button is not part of it. */
+.filter-sections {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--inset-tight));
+  border-bottom: 1px solid var(--border);
+}
+.filter-section { display: flex; flex-direction: column; }
+.filter-section-head {
+  display: flex;
+  align-items: center;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.filter-section-head:has(> .group-heading:hover) { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+.filter-section-head > .group-heading {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px var(--inset-tight);
+}
+.filter-section-head > .help-tip { margin-right: var(--inset-tight); }
+.filter-section-body { padding: 8px var(--inset-tight) 12px; }
 /* A list filter in the toolbar keeps the width of the select it replaced, so the row keeps its shape:
    the words are cut at the edge, the chevron sits at the right. */
 .filter-dropdown { justify-content: space-between; min-width: 0; }
@@ -1798,6 +1824,10 @@ tbody tr:hover { background: var(--bg-glass); }
   font-weight: 600;
   color: var(--text-muted);
 }
+/* Words in place of the count (`detail`): cut, and slid by OverflowText, before the name gives way. */
+.group-heading-detail,
+.group-heading-detail-shown { display: flex; min-width: 0; }
+.group-heading-detail { flex-shrink: 100; }
 
 
 /* Monospace is a typeface, not a cue: it takes the text colour. Accent marks a real link. */
