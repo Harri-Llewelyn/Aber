@@ -30,6 +30,10 @@ import { useClockTick } from '../../hooks/useClockTick'
 import {
   ALL_TIME, TIME_PRESETS, calendarTicks, clockWords, timeWindow, windowBounds
 } from '../../utils/timeWindow'
+import CopyableId from '../common/CopyableId'
+import { RouteLink } from '../common/RouteLink'
+import { entityUrl, identityUrl, personUrl } from '../../routes'
+import { TABS, tabIsVisible } from '../../navigation'
 
 /**
  * `actor_source` names the kind of actor; `changed_by` only says which principal it was, and is set
@@ -436,6 +440,15 @@ function StepButton({ label, glyph, glyphAfter = false, keyName, tip, atEnd, onS
   )
 }
 
+/** The kinds with a page of their own, as `entityUrl` names them, and that page's name. */
+const ENTITY_PAGES = {
+  AREA:    { type: 'area',    page: 'Areas' },
+  CELL:    { type: 'cell',    page: 'Cells' },
+  GATEWAY: { type: 'gateway', page: 'Gateways' },
+  DEVICE:  { type: 'device',  page: 'Devices' },
+  SCHEMA:  { type: 'schema',  page: 'Schemas' },
+}
+
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
 const FALLBACK_SECTION_ICON = IconHistory
 
@@ -712,46 +725,44 @@ export function causationSiblings(event, events) {
 }
 
 /**
- * Rendered whenever the row carries a transaction, siblings or not. Two numbers decide what it
+ * Rendered when the act wrote something besides this row, or may have. Two numbers decide what it
  * says: `event.transaction_rows`, how many rows the transaction wrote, counted by
  * audit_trail_page() over the whole table; and `siblings`, drawn from the loaded,
- * filtered set. One row, and there is nothing to offer; every row loaded, and the list is
- * complete; rows missing, how many, and the control that loads them. Without the count (a row
- * from a response that lacks it) the section hedges instead, because a group whose other members
- * are outside the filter then looks identical to a single-row act.
+ * filtered set. A count of one is an act that wrote this row alone, and draws nothing; every row
+ * loaded, and the list is complete; rows missing, how many, and the control that loads them.
+ * Without the count (a row from a response that lacks it) the section hedges instead, because a
+ * group whose other members are outside the filter then looks identical to a single-row act.
  *
  * `isolated` means the search already IS this transaction, so the control would do what has been
- * done; rows still missing then are on pages not yet fetched.
+ * done; rows still missing then are on pages not yet fetched, and with none loaded and no count
+ * the act wrote this row alone.
  */
 function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransaction, isolated }) {
   if (!event?.causation_id) return null
 
   const known = Number.isFinite(event.transaction_rows)
   const loaded = siblings.length
+  if (known ? event.transaction_rows <= 1 : (isolated && loaded === 0)) return null
   // The other rows the act wrote, and how many of them are not on this page.
-  const others = known ? Math.max(0, event.transaction_rows - 1) : null
+  const others = known ? event.transaction_rows - 1 : null
   const missing = known ? Math.max(0, others - loaded) : null
 
   const some = (n) => (n === 1 ? 'One other change' : `${n} other changes`)
   const hint = !known
     ? (isolated
-        ? (loaded === 0
-            ? 'Nothing else was written by this act.'
-            : `${some(loaded)} written by this act, and this is all of them.`)
+        ? `${some(loaded)} written by this act, and this is all of them.`
         : (loaded === 0
             ? 'Nothing else written by this act is loaded — which is not the same as there '
               + 'being nothing else.'
             : `${some(loaded)} ${loaded === 1 ? 'was' : 'were'} written by the same act. `
               + 'Limited to the events currently loaded and filtered.'))
-    : (others === 0
-        ? 'Nothing else was written by this act.'
-        : missing === 0
-          ? `${some(others)} written by this act, and this is all of them.`
-          : `${some(others)} ${others === 1 ? 'was' : 'were'} written by this act. `
-            + `${missing === 1 ? 'One' : missing} of them ${missing === 1 ? 'is' : 'are'} not loaded: `
-            + (isolated
-                ? 'on a page not yet fetched.'
-                : 'outside the current filters, or on a page not yet fetched.'))
+    : (missing === 0
+        ? `${some(others)} written by this act, and this is all of them.`
+        : `${some(others)} ${others === 1 ? 'was' : 'were'} written by this act. `
+          + `${missing === 1 ? 'One' : missing} of them ${missing === 1 ? 'is' : 'are'} not loaded: `
+          + (isolated
+              ? 'on a page not yet fetched.'
+              : 'outside the current filters, or on a page not yet fetched.'))
 
   // Offered when there is something to load. Not once the search is this transaction: a control
   // that would do what has been done reads as though it might do something more.
@@ -1516,6 +1527,57 @@ export function AuditTrailTab({ userRole, showToast }) {
     ? (SECTION_ICONS[entityKind(selected.entity_type)] || FALLBACK_SECTION_ICON)
     : null
 
+  /** Whether this viewer may open Access Control, as the rail decides: where a principal links to. */
+  const canOpenAccessControl = useMemo(() => {
+    const page = TABS.find(t => t.id === 'access-control')
+    return Boolean(page) && tabIsVisible(page, () => true, userRole)
+  }, [userRole])
+
+  /**
+   * The drawer's User ID or Machine identity field: who it is, by name, and the id, which copies.
+   * For a viewer who may open Access Control the name links to their row there, a removed person's
+   * included; for anyone else it is text. A link and a copy cannot share one click, so the id is a
+   * chip of its own beside the name.
+   */
+  const actorField = (event) => {
+    const id = String(event.changed_by)
+    const machine = isMachineRow(event, machinePrincipals)
+    const label = machine ? 'Machine identity' : 'User ID'
+    const name = entityNames.get(id)
+    const to = canOpenAccessControl && name ? (machine ? identityUrl(id) : personUrl(id)) : null
+    return {
+      label,
+      value: (
+        <div className="trail-actor-field">
+          {name && (to
+            ? (
+              <RouteLink
+                className="count-link"
+                to={to}
+                title={`Open ${name} on Access Control › ${machine ? 'Machine identities' : 'People'}`}
+              >
+                {name}
+              </RouteLink>
+            )
+            : <span>{name}</span>)}
+          <CopyableId value={id} label={label.toLowerCase()} onNotify={showToast} className="copyable-id-wrap" />
+        </div>
+      ),
+    }
+  }
+
+  /**
+   * The drawer's one action: the entity on its own page, named for the page ("View in Devices").
+   * Only while the live lookup holds it, so a deleted entity, which has no page, gets none.
+   */
+  const entityPage = selected ? ENTITY_PAGES[entityKind(selected.entity_type)] : null
+  const drawerActions = entityPage && entityNames.has(selected.entity_id) ? [{
+    label: `View in ${entityPage.page}`,
+    icon: SelectedIcon && <SelectedIcon size={13} />,
+    to: entityUrl(entityPage.type, selected.entity_id),
+    title: `Open ${drawerName} on the ${entityPage.page} page`,
+  }] : []
+
   /**
    * The open lane's events, oldest first and in write order inside a transaction (byTimeThenId):
    * Previous goes back in time and Next forward. The lane rather than the entity, because a device,
@@ -2048,11 +2110,21 @@ export function AuditTrailTab({ userRole, showToast }) {
         onCopy={showToast}
         title={drawerName}
         subtitle={selected && (
-          /* One flex item laid out internally as rows; `.context-panel-subtitle` is a wrapping row
-             shared with other pages. */
+          <div className="trail-drawer-nav-badges">
+            <Tooltip text="The audit event type">
+              <span className="badge badge-warning">{selected.event_type}</span>
+            </Tooltip>
+            <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
+              <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>
+                {MARKERS[selectedAnalysis?.kind]?.label}
+              </span>
+            </Tooltip>
+          </div>
+        )}
+        nav={selected && (
+          /* At the drawer's full width under its header, above the fields it changes: the place,
+             the step buttons in their two rows, and the line that says what a step opened. */
           <div className="trail-drawer-nav">
-            {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
-                above the metadata. */}
             <Tooltip text="Its place in this entity's history, oldest first, and among the entities on the trail">
               <div className="trail-drawer-nav-pos">
                 Event {selectedIndex + 1} of {selectedLaneEvents.length}
@@ -2115,17 +2187,6 @@ export function AuditTrailTab({ userRole, showToast }) {
             <div className="sr-only" role="status" aria-live="polite">
               {stepNews.eventId != null && String(stepNews.eventId) === String(selectedEventId) ? stepNews.text : ''}
             </div>
-
-            <div className="trail-drawer-nav-badges">
-              <Tooltip text="The audit event type">
-                <span className="badge badge-warning">{selected.event_type}</span>
-              </Tooltip>
-              <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
-                <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>
-                  {MARKERS[selectedAnalysis?.kind]?.label}
-                </span>
-              </Tooltip>
-            </div>
           </div>
         )}
         fields={selected ? [
@@ -2135,26 +2196,8 @@ export function AuditTrailTab({ userRole, showToast }) {
             value: actorLabel(selected, machinePrincipals),
             help: actorTitle(selected, machinePrincipals)
           },
-          // Only when the row names a principal: a user's id, or the machine identity's name
-          // (its id where nothing here names it).
-          ...(selected.changed_by
-            ? [isMachineRow(selected, machinePrincipals)
-              ? {
-                label: 'Machine identity',
-                value: selected.changed_by,
-                display: entityNames.get(selected.changed_by),
-                copyable: true,
-                mono: true
-              }
-              : {
-                label: 'User ID',
-                value: selected.changed_by,
-                // The person, by name and email, where this viewer may read them; the id is copied.
-                display: entityNames.get(selected.changed_by),
-                copyable: true,
-                mono: true
-              }]
-            : []),
+          // Only when the row names a principal: a person, or a machine identity.
+          ...(selected.changed_by ? [actorField(selected)] : []),
           {
             label: 'Entity ID',
             value: selected.entity_id,
@@ -2186,10 +2229,11 @@ export function AuditTrailTab({ userRole, showToast }) {
             : []),
           { label: 'Description', value: selected.description, full: true }
         ] : []}
+        actions={drawerActions}
         beforeActions={selected && selectedAnalysis && (
           <>
-            {/* Above the diff, for the reason the subtitle nav is: a control that changes what the
-                drawer shows belongs above it. */}
+            {/* Above the diff, for the reason the step buttons are above the fields: a control
+                that changes what the drawer shows belongs above it. */}
             <CausationGroup
               event={selected}
               siblings={selectedSiblings}

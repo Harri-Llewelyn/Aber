@@ -210,6 +210,26 @@ describe('ContextPanel component', () => {
     render(<ContextPanel {...baseProps} open onClose={vi.fn()} actions={[{ label: 'B' }, { label: 'A' }]} />)
     expect([...document.querySelectorAll('.context-action')].map(b => b.textContent.trim())).toEqual(['B', 'A'])
   })
+
+  it('draws `nav` at its full width under the header, above the fields, outside the scrolling body', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} nav={<button type="button">Next</button>} />)
+    const slot = document.querySelector('.context-panel-nav')
+    const header = document.querySelector('.context-panel-header')
+    // A sibling of the header, not inside it beside the close button, and before the body.
+    expect(slot.parentElement).toBe(document.querySelector('.context-panel-inner'))
+    expect(slot.previousElementSibling).toBe(header)
+    expect(slot.nextElementSibling).toHaveClass('context-panel-body')
+    expect(within(slot).getByRole('button', { name: 'Next' })).toBeInTheDocument()
+    // The header gives its rule to the slot, so the two read as one band.
+    expect(header).toHaveClass('context-panel-header-nav')
+    expect(APP_CSS.match(/\n\.context-panel-nav \{([\s\S]*?)\n\}/)?.[1]).toMatch(/flex-shrink:\s*0/)
+  })
+
+  it('draws no slot and keeps the header as it was without `nav`', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} />)
+    expect(document.querySelector('.context-panel-nav')).toBeNull()
+    expect(document.querySelector('.context-panel-header')).not.toHaveClass('context-panel-header-nav')
+  })
 })
 
 describe('A row that opens a panel shows a chevron', () => {

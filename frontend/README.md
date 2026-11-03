@@ -462,6 +462,21 @@ Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gate
 actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
 height is not known, and above the actions it could push Edit Details off the drawer.
 
+- **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
+  under its header and above the fields. It continues the header's band, takes the header's rule,
+  and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
+  rows under the position line ("Event 3 of 7 · Entity 2 of 9"). In the header's subtitle they
+  stopped short of the close button.
+- **A person or a machine identity links where the viewer can follow it.** In the Audit Trail's
+  drawer, User ID and Machine identity are the name as a link to Access Control › People
+  (`personUrl`, which opens a removed person too) or › Machine identities (`identityUrl`, by the
+  principal id), for a viewer the rail shows Access Control to (`tabIsVisible`). For anyone else
+  the name is text. The id's `CopyableId` chip sits beside the name, since a link and a copy cannot
+  share one click.
+- **An entity's own page is one action away**, named for the page: "View in Devices" (`entityUrl`).
+  The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
+  deleted entity gets none.
+
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.
   Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they take 220px.
