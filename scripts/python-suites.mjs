@@ -1188,15 +1188,15 @@ export const SUITES = {
   'supabase/functions/aas-api/test_aas_api.py': {
     lanes: ['unit', 'stack'],
     why:
-      'The IDTA 02001/02002 read surface. Nine of its forty-six checks run offline and guard what is ' +
-      'true of the SOURCE regardless of a stack -- above all that this function is never granted ' +
-      'the service-role key, which is the entire security argument for it being a separate ' +
-      'function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches the same ' +
-      'asset through aas-export and through aas-api and asserts the two describe it identically. ' +
-      'That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, and it is ' +
-      'the property that would rot silently -- an ERP reading a live submodel and a partner ' +
-      'reading a shipped .aasx would disagree, with both endpoints reporting success. The live ' +
-      'layer also reads as the Read-only API client with no apikey, and revokes its token.',
+      'The IDTA-01002 (AAS Part 2) read surface. Nine of its forty-six checks run offline and ' +
+      'guard what is true of the SOURCE regardless of a stack -- above all that this function is ' +
+      'never granted the service-role key, which is the entire security argument for it being a ' +
+      'separate function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches ' +
+      'the same asset through aas-export and through aas-api and asserts the two describe it ' +
+      'identically. That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, ' +
+      'and it is the property that would rot silently -- an ERP reading a live submodel and a ' +
+      'partner reading a shipped .aasx would disagree, with both endpoints reporting success. The ' +
+      'live layer also reads as the Read-only API client with no apikey, and revokes its token.',
   },
   'supabase/functions/fplus-directory/test_fplus_directory.py': {
     lanes: ['unit', 'stack'],

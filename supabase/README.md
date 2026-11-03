@@ -5538,7 +5538,7 @@ refuses a missing or wrong token or secret.
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends the door's GoTrue session, then sends the browser to the dashboard's `/sign-out` (`FRONTEND_PUBLIC_URL`) |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
-| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
+| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA-01002 (AAS Part 2) read API over the mapping `aas-export` uses; queries as the caller, and every caller reads the same shells — see [Connecting an AAS client](#connecting-an-aas-client) |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
 | [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
@@ -5694,6 +5694,47 @@ read-as-the-caller property above does not survive the move. RLS decides what ea
 a retained topic has one copy for every subscriber, so on MQTT the broker ACL is the whole of the
 access control. Everything else about it follows from that.
 
+### Connecting an AAS client
+
+`aas-api` is the live AAS repository. A client written against IDTA-01002 (AAS Part 2, the API)
+reads shells and submodels from it, with nothing exported first.
+
+**The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
+`http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
+`/submodels` and `/description` after it.
+
+**What a request sends** is a bearer token in `Authorization`, and nothing else:
+
+- **a person's token**, from **Profile → Copy Token**. It acts as them and lasts at most an hour.
+- **a machine identity's token**, issued on **Access Control**. For a client you keep, issue one
+  for the Read-only API client. It lasts up to 90 days, and revoking it refuses it from the next
+  request ([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)).
+
+No `apikey`: the gateway exempts `/functions/v1/aas-api/` from its key check
+([API Gateway](#api-gateway-envoyyaml)). `/description` needs no token at all. A browser client
+also needs its origin in `global.corsExtraOrigins`, as any browser client of the API does.
+
+**Every caller reads the same shells.** Every relation a shell is read from is
+`SELECT TO authenticated USING (true)`, so the token decides whether a caller is let in, not what
+it sees.
+
+**What is not served:**
+
+- the Registry and Discovery interfaces;
+- concept descriptions, although the JSON export carries them;
+- writes: every route is a `GET`, and the advertised profiles are the read-only SSP-002 pair;
+- the `$metadata`, `$reference` and `$path` modifiers, which answer `404`. Only `/$value`
+  is handled;
+- a search. `GET /shells` reads only `limit` and `cursor`, so a client that asks by
+  `assetIds` or `idShort` gets every shell;
+- a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
+  submodel of each.
+
+**A shell's history link has requirements of its own.** The Time Series submodel carries a
+`LinkedSegment` whose endpoint is PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`),
+queried by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the
+`apikey` as well as a person's or a machine identity's token.
+
 ### Getting a shell into a third-party AAS server
 
 Two routes to the same destination, and it is worth having both before you need either.
@@ -5702,8 +5743,18 @@ Two routes to the same destination, and it is worth having both before you need 
 in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
 it has been produced.
 
-**The REST push.** `npm run aas:push-basyx -- --device=Sim_CNC_Mill_01` exports the JSON
-environment and POSTs it into a running server's `/submodels` and `/shells`.
+**The REST push.** `npm run aas:push-basyx -- --device=<device name>` exports the JSON
+environment and POSTs it into a running server's `/submodels` and `/shells`. Before you run it:
+
+1. Run `npm run dev:forward`. The script reads the gateway at `SUPABASE_URL`, which is
+   `http://127.0.0.1:54321` unless set, and on Windows Node cannot resolve `api.localhost`.
+2. Set `AAS_TEST_EMAIL` and `AAS_TEST_PASSWORD` to an account whose role may export. Unset, the
+   script signs in as the seeded `admin@aber.local`.
+3. Point `--basyx` at BaSyx's AAS Environment, not its Web UI. They are different ports, and the
+   Web UI serves no `/shells`.
+
+To view the result, set the BaSyx Web UI's repository addresses to the AAS Environment, and allow
+the Web UI's origin in BaSyx's own CORS setting.
 
 The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
 valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will

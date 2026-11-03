@@ -1,5 +1,5 @@
 """
-Tests for the aas-api Edge Function -- the IDTA 02001/02002 read surface.
+Tests for the aas-api Edge Function -- the IDTA-01002 (AAS Part 2) read surface.
 
 Two layers, deliberately in one file, matching test_aas_export.py:
 
@@ -7,8 +7,9 @@ Two layers, deliberately in one file, matching test_aas_export.py:
     whether a stack is up -- above all that this function is never granted the service-role key,
     which is the entire security argument for it being a separate function.
 
-  * Live checks exercise the deployed function against `Sim_CNC_Mill_01` and validate what comes
-    back against the vendored IDTA metamodel schema. They skip when no stack is reachable.
+  * Live checks exercise the deployed function against the device this suite provisions
+    (test-harness/aas_fixture.py), as a person and as the Read-only API client, and validate what
+    comes back against the vendored IDTA metamodel schema. They skip when no stack is reachable.
 
 THE TEST THAT MATTERS MOST is TestExportAgreement: it fetches the same asset through aas-export and
 through aas-api and asserts the two describe it identically. That agreement is the whole reason the
@@ -54,7 +55,7 @@ except ImportError:  # pragma: no cover - reported, never silently skipped
 
 
 def b64url(value: str) -> str:
-    """IDTA 02002 encodes every Identifier in a path this way. Unpadded, as the specification shows."""
+    """IDTA-01002 encodes every Identifier in a path this way, unpadded as the specification shows."""
     return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
 
 

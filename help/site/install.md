@@ -99,7 +99,7 @@ five questions:
 | Administrator's email | The email the first administrator signs in with |
 | Site name | A short name for the site, such as `plant1`. Every gateway's settings carry it, so it can never change |
 | This machine's address | Its address on the site network, which gateways connect to. The installer suggests one |
-| Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](../guides/glossary.md#asset-administration-shell-aas) has been exported |
+| Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](../guides/glossary.md#asset-administration-shell-aas) has been exported or read through the AAS API |
 
 It shows your answers and asks before it changes anything. Then it installs k3s, Helm and Node.js
 where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it
@@ -261,7 +261,7 @@ ingestion:
   sparkplugGroup: plant1
 supabaseFunctions:
   aas:
-    baseIri: https://plant.example/ids/asset/   # permanent once a shell is exported
+    baseIri: https://plant.example/ids/asset/   # permanent once a shell is exported or read
 ingress:
   tls:
     enabled: true
@@ -278,7 +278,7 @@ EOF
 | Setting | What to put |
 | :--- | :--- |
 | `primaryHostId`, `sparkplugGroup` | A short name for the site. Every gateway's settings carry it, so it can never change |
-| `baseIri` | A web address under a domain your organisation controls. Every exported [asset shell](../guides/glossary.md#asset-administration-shell-aas) is identified by it, so it cannot change once one has been exported |
+| `baseIri` | A web address under a domain your organisation controls. Every [asset shell](../guides/glossary.md#asset-administration-shell-aas), exported or read through the AAS API, is identified by it, so it cannot change once one has left the site |
 | `extraIpSans` | The machine's address. Gateways connect to the broker at it, and the broker's certificate has to name it |
 | The rest | Leave as written: they turn on HTTPS and the broker's TLS, using the internal CA from step 4 |
 
@@ -404,6 +404,7 @@ On a site, every part of Aber is a host under the domain you gave `npm run setup
 | Forge (Gitea) | `https://git.<domain>` | http://git.localhost |
 | API reference (Swagger UI) | `https://docs.<domain>` | http://docs.localhost |
 | i3X | `https://i3x.<domain>` | http://i3x.localhost |
+| AAS API, for [AAS](../guides/glossary.md#asset-administration-shell-aas) clients | `https://api.<domain>/functions/v1/aas-api` | http://api.localhost/functions/v1/aas-api |
 | Supabase Studio, `Administrator` only | off by default; [Running the server, *Reaching the stack*](running-the-server.md#reaching-the-stack) | http://studio.localhost |
 | MQTT broker | the machine's address: 8883 (TLS), which gateways use, and 1883 | `localhost`: 8883 and 1883 |
 | Prometheus | `kubectl -n aber port-forward svc/prometheus 9090` | `npm run dev:forward`, then http://localhost:9090 |

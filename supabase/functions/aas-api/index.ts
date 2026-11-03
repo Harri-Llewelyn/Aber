@@ -1,14 +1,15 @@
 /**
- * aas-api: the IDTA 02001/02002 REST surface over live database state, for an ERP, PLM or MES that
- * wants one submodel now and again in ten minutes rather than a whole file. No service-role key: it
- * authenticates the caller and queries as them, so RLS decides what they see; `aas-export` holds
- * that key, which is why these are two functions with separate environments. The mapping is shared
- * with the exporter (`../_shared/aas/shell.ts`). Identifiers are derived
+ * aas-api: the IDTA-01002 (AAS Part 2) REST surface over live database state, for an ERP, PLM or
+ * MES that wants one submodel now and again in ten minutes rather than a whole file. No
+ * service-role key: it authenticates the caller and queries as them, so RLS applies. Every relation
+ * a shell is read from admits every signed-in caller, so every caller sees the same shells.
+ * `aas-export` holds that key, which is why these are two functions with separate environments.
+ * The mapping is shared with the exporter (`../_shared/aas/shell.ts`). Identifiers are derived
  * (`${BASE_IRI}${sparkplug_id}/submodel/...`), so an identifier is parsed back to a `sparkplug_id`
  * rather than looked up; changing AAS_BASE_IRI changes every identifier this deployment has
  * published. Not served: writes (the dashboard is the authoring interface, with its own audit
- * trail), inlined telemetry values (`LinkedSegment` points at the historian), and `.aasx`
- * (aas-export).
+ * trail), inlined telemetry values (`LinkedSegment` points at the historian), `.aasx`
+ * (aas-export), concept descriptions, and the Registry and Discovery interfaces.
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -47,7 +48,7 @@ const problem = (status: number, text: string, code = String(status), correlatio
 // Identifiers
 
 /**
- * base64url, as IDTA 02002 requires for every Identifier in a path: `/` in plain base64 would split
+ * base64url, as IDTA-01002 requires for every Identifier in a path: `/` in plain base64 would split
  * one identifier across two segments. Padding is accepted whether or not the caller sent it.
  */
 function b64urlDecode(value: string): string | null {
@@ -82,7 +83,7 @@ function assetOf(identifier: string): string | null {
 // data changes.
 
 const DEFAULT_LIMIT = 20;
-/** Each device on a page costs seven queries and one shell construction. That is the reason. */
+/** Each device on a page costs up to ten queries and one shell construction. That is the reason. */
 const MAX_LIMIT = 100;
 
 function pageSize(url: URL): number | Response {
@@ -103,7 +104,7 @@ function paged(result: unknown[], cursor: string | null) {
   };
 }
 
-// ValueOnly serialisation ($value): IDTA 02002's form that strips the metamodel down to the values,
+// ValueOnly serialisation ($value): IDTA-01002's form that strips the metamodel down to the values,
 // so reading a serial number is `body.SerialNumber`.
 
 // deno-lint-ignore no-explicit-any

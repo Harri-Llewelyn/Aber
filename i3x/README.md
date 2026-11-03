@@ -50,7 +50,9 @@ worth adopting:
 tables, and it is why i3X costs a read-side adapter where AAS cost an exporter plus a metamodel.
 
 AAS and i3X are kept side by side because they are different artefacts, not rival formats: **an AAS
-shell is a document handed over** (a snapshot, self-contained), **i3X is a live endpoint queried**.
+shell describes one asset**, as a document handed over (a snapshot, self-contained) or read live
+from `aas-api`; **i3X is an address space queried** for values and their changes, across every
+asset.
 
 ## Why it is a separate long-lived service
 

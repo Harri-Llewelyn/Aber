@@ -4578,38 +4578,83 @@ paths:
             application/json:
               schema:
                 type: object
+                description: The Environment is under `aas`, beside what was exported and how it went.
+                required: [success, device, stats, aas]
                 properties:
-                  assetAdministrationShells: { type: array, items: { type: object } }
-                  submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
-                  stats: { type: object }
+                  success: { type: boolean, enum: [true] }
+                  device:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                      sparkplug_id: { type: string }
+                  stats: { type: object, description: 'Counts of submodels, attached schemas, telemetry and KPI metrics, unmapped semantic ids and concept descriptions, and `has_3d_model`. `model_url_resolves_only_on_this_host: true` is present when the 3D model reference points at this host.' }
+                  warning: { type: string, description: 'Present only when the shell''s 3D model reference resolves on this host alone, naming `AAS_MODEL_PUBLIC_BASE`. The shell is still valid.' }
+                  aas:
+                    type: object
+                    description: The AAS V3 Environment (IDTA-01001 Part 1).
+                    properties:
+                      assetAdministrationShells: { type: array, items: { type: object } }
+                      submodels: { type: array, items: { type: object } }
+                      conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
             application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
-        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '500':
+          description: |
+            Either the function failed (`FunctionFailure`: a fixed sentence and a request id), or,
+            for `aasx` and `bundle`, it refused to package a device whose 3D model it could not
+            bundle while the fallback URL points at this host. That refusal is `{error, hint}`:
+            `error` names `AAS_MODEL_PUBLIC_BASE` and its value, and `hint` says to bring the model
+            under `AAS_MAX_BUNDLED_MODEL_BYTES` instead. Set `AAS_MODEL_PUBLIC_BASE` to an address
+            other machines reach, or shrink the model, and export again.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    required: [error, hint]
+                    properties:
+                      error: { type: string }
+                      hint: { type: string }
 
   /functions/v1/aas-api:
     get:
       tags: [Edge Functions]
       summary: AAS repository root — the routes this service serves
       description: |
-        The IDTA 02001/02002 **read-only** repository surface, served live from the database over
-        the same mapping `aas-export` uses (`supabase/functions/_shared/aas/shell.ts`). A shipped
-        `.aasx` and this endpoint therefore cannot describe the same machine differently — the
-        agreement is asserted by `test_aas_api.py`.
+        The **read-only** AAS repository surface of IDTA-01002 (AAS Part 2, the API), served live
+        from the database over the same mapping `aas-export` uses
+        (`supabase/functions/_shared/aas/shell.ts`). A shipped `.aasx` and this endpoint therefore
+        cannot describe the same machine differently — the agreement is asserted by
+        `test_aas_api.py`.
+
+        **What a client sends.** A bearer token and nothing else: a person's, from **Profile →
+        Copy Token**, or a machine identity's, from **Access Control**. No `apikey`. On a site the
+        base URL is `https://api.<domain>/functions/v1/aas-api`; on the development stack,
+        `http://api.localhost/functions/v1/aas-api`.
+
+        **Not served:** the Registry and Discovery interfaces, concept descriptions (the JSON
+        export carries them), writes, and the `$metadata`, `$reference` and `$path` modifiers,
+        which answer `404`; only `/$value` is handled. `GET /shells` reads `limit` and
+        `cursor` alone, so a search by `assetIds` or `idShort` gets every shell.
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
         somebody who found this URL in a config file. Start at `/description`. The root alone
         still needs the `apikey`: the gateway exempts the paths below it.
 
-        **Reads as the caller and holds no service-role key**, unlike `aas-export`. RLS decides
-        what comes back, which is why it is a separate function: `main/index.ts` forwards only
-        the environment each worker's registry entry names, so the separation is enforced by the
-        runtime rather than by care.
+        **Reads as the caller and holds no service-role key**, unlike `aas-export`, which is why it
+        is a separate function: `main/index.ts` forwards only the environment each worker's
+        registry entry names, so the separation is enforced by the runtime rather than by care.
+        Every relation a shell is read from admits every signed-in caller, so every caller, person
+        or machine identity, sees the same shells.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
         `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
@@ -4631,7 +4676,7 @@ paths:
     get:
       tags: [Edge Functions]
       security: []
-      summary: AAS repository self-description (IDTA 02002)
+      summary: AAS repository self-description (IDTA-01002)
       description: |
         The service profiles this deployment implements. It reports profiles and nothing about
         the fleet.
@@ -4667,10 +4712,14 @@ paths:
         the **same mapping `aas-export` uses** (`supabase/functions/_shared/aas/shell.ts`), so a
         shipped `.aasx` and this endpoint cannot describe the same machine differently.
 
-        **Reads as the caller, and holds no service-role key.** RLS decides what comes back. That
-        is the difference from `aas-export`, which composes a document under the service role
-        after checking the caller's role, and it is why these are two functions rather than two
-        routes: `main/index.ts` forwards only the environment each worker's registry entry names.
+        **Reads as the caller, and holds no service-role key.** Every relation a shell is read from
+        admits every signed-in caller, so every caller sees the same shells. That is the
+        difference from `aas-export`, which composes a document under the service role after
+        checking the caller's role, and it is why these are two functions rather than two routes:
+        `main/index.ts` forwards only the environment each worker's registry entry names.
+
+        **`limit` and `cursor` are the only parameters read.** `assetIds` and `idShort` are
+        ignored, so a client searching by asset id gets every shell, a page at a time.
 
         **Pagination.** `limit` (default 20, capped at 100) and an opaque `cursor`. A cursor names
         the next *device*, so a page carries every item belonging to the devices it covers — the
@@ -4680,7 +4729,7 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-          description: Each device on a page costs seven queries and one shell construction.
+          description: Each device on a page costs up to ten queries and one shell construction.
         - name: cursor
           in: query
           schema: { type: string }
@@ -4709,7 +4758,7 @@ paths:
         - bearerAuth: []
       summary: Get one Asset Administration Shell
       description: |
-        **`aasIdentifier` is base64url-encoded**, as IDTA 02002 requires for every Identifier in
+        **`aasIdentifier` is base64url-encoded**, as IDTA-01002 requires for every Identifier in
         a path. Not plain base64: `/` is legal there and is a path separator, so an identifier
         containing one would split across two segments and the route would silently not match.
         Padding is optional.
@@ -4844,15 +4893,17 @@ paths:
         - bearerAuth: []
       summary: List submodels
       description: |
-        Every submodel across every shell. Same pagination as `/shells`.
+        Every submodel across every shell. Same pagination as `/shells`, so **`limit` counts
+        devices, not submodels**: a page holds every submodel of up to `limit` devices.
 
-        Append **`/$value`** for IDTA 02002's ValueOnly serialisation — the metamodel stripped
+        Append **`/$value`** for IDTA-01002's ValueOnly serialisation — the metamodel stripped
         down to values, which is the shape an ERP actually wants: `body.SerialNumber` rather than
         a walk through `submodelElements[]` matching on `idShort`.
       parameters:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: How many devices' submodels a page holds.
         - name: cursor
           in: query
           schema: { type: string }
