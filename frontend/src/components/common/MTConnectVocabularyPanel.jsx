@@ -29,9 +29,9 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
     searchPlaceholder: 'Search the vocabulary…',
     sections,
     isUsed: item => adopted.has(item.name),
-    tooltipFor: item => {
+    idFor: item => {
       const semanticId = semanticIds.get(item.name)
-      return semanticId ? `${item.name} — ${semanticId}` : item.name
+      return semanticId ? { label: 'Semantic ID', value: semanticId } : null
     },
     // Only data item types are actionable: a component or a unit is not a metric on its own, so
     // prefilling the form with one would produce nothing useful.

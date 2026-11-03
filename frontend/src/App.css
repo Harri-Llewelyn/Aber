@@ -1972,12 +1972,9 @@ td.row-actions, th.row-actions {
   overflow-wrap: anywhere;
 }
 
-/* A cut chip's full value, in its tooltip: in the chip's face, and broken anywhere, since an id
-   longer than the bubble has no space to break at. */
-.copyable-id-full {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-}
+/* An id in a tooltip, in the face it has where it is written: a cut chip's full value, or a
+   vocabulary entry's NodeId or semantic id. The bubble breaks it where it has to. */
+.copyable-id-full { font-family: var(--font-mono); }
 
 .copyable-id-icon { flex-shrink: 0; }
 
@@ -6152,10 +6149,15 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   letter-spacing: normal;
   text-transform: none;
   /* `pre-line` so a tip can carry a second paragraph (Cold telemetry's only-copy warning); spaces
-     and wrapping still collapse. */
+     and wrapping still collapse. A word wider than the bubble, such as an id, breaks anywhere rather
+     than running past its edge; a word that fits is never broken. */
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
+
+/* A line of its own inside a bubble: an id under its description, or the hint that ends a tip. */
+.tooltip-line { display: block; margin-top: 4px; }
 
 /* The point at the trigger, drawn as the popovers' are (Popover arrows): a square turned 45 degrees
    on the border facing the trigger, the half inside hiding the border. --arrow-x is the trigger's
