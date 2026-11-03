@@ -307,7 +307,7 @@ describe('AuditTrailTab section coverage', () => {
 
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
-    expect(screen.getAllByRole('separator')).toHaveLength(3)
+    expect(document.querySelectorAll('.trail-section')).toHaveLength(3)
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)')).toHaveLength(3)
     expect(screen.getByText('All 3 shown.')).toBeInTheDocument()
   })
@@ -425,9 +425,11 @@ describe('AuditTrailTab total', () => {
     const count = await screen.findByText('2 of 467')
     expect(count.parentElement).toHaveClass('list-foot')
     expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
-    // The row above the timeline holds the key alone, with the scroller directly under it.
+    // The row above the timeline holds the key and Collapse all, with the scroller directly under it.
     const header = document.querySelector('.trail-header')
-    expect([...header.children].map(c => c.className)).toEqual(['trail-legend'])
+    expect(header.children).toHaveLength(2)
+    expect(header.children[0]).toHaveClass('trail-legend')
+    expect(header.children[1]).toHaveTextContent('Collapse all')
     expect(header.nextElementSibling).toHaveClass('trail-scroll')
     // And not in the corner, which is only the spacer that lines the ticks up.
     expect(document.querySelector('.trail-axis-corner').textContent).toBe('')

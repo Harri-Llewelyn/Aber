@@ -2,7 +2,7 @@
 
 The Audit Trail records what changed, who changed it, and what it looked like before. Use it to find out when something was changed, and by whom. Every modelling action in Aber is a row here: creating a gateway, assigning a schema, archiving a device or editing a setting. Rows cannot be edited or deleted afterwards.
 
-Each entity has a lane on the timeline, and each change is a marker on that lane.
+Each entity has a lane on the timeline, and each change is a marker on that lane. The lanes are grouped in sections, one for each kind of entity.
 
 ## What the controls do
 
@@ -19,11 +19,14 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **Export CSV** saves the events loaded on the page. The changes are flattened into one column. Its number says how many events are loaded and, when more match, how many match in all. To export them all, load the rest first.
 - **The key** above the timeline says what each marker means. Each kind has its own shape as well as its own colour, so you can tell them apart without colour vision. A circle is **Operational**, the most common. A square is **Created**, and a diamond is **Configuration**. A triangle is **Lifecycle**: deletes and archives.
 - **Grouped** is a violet badge with a count. It replaces markers too close together to draw apart. Hover over it for a breakdown, or narrow the time window and the markers separate.
-- **The event drawer** opens when you click a marker. It shows when the change was recorded, the actor, the entity ID, the mutation ID, the transaction ID and the description. **Previous** and **Next**, or ← and →, step through that lane's history. **Previous Entity** and **Next Entity**, or ↑ and ↓, move to the entity above or below, at the same point in time. Above the buttons, "Event 3 of 7 · Entity 4 of 23" says where you are.
+- **A section heading**, such as **Devices · 12**, names a kind of entity and counts its lanes. Select it to close the section, and again to open it. A closed section keeps one track, holding every change of its lanes. Select a marker or a badge on that track to open the change, and the section opens with it.
+- **Collapse all**, at the end of the key's row, closes every section. While every section is closed it reads **Expand all**, and opens them all. Every section starts open. Aber remembers which sections you closed in this browser, so they stay closed when you come back.
+- **A lane's name** opens the drawer on the newest change to that entity. Then **Previous**, or ←, steps back through its history. An entity with no name is labelled by a short form of its ID. Point at a lane's name to see the whole name and the entity's ID. A name too long for its column is cut short, and slides to show the rest while you point at it.
+- **The event drawer** opens when you click a marker. It shows when the change was recorded, the actor, the entity ID, the mutation ID, the transaction ID and the description. **Previous** and **Next**, or ← and →, step through that lane's history. **Previous Entity** and **Next Entity**, or ↑ and ↓, move to the entity above or below, at the same point in time. They skip the entities in a closed section. Above the buttons, "Event 3 of 7 · Entity 4 of 23" says where you are.
 - **Property** and **Previous** in the drawer show the field that changed and the value it held before. Together they answer "when did this become wrong?".
 - **Same transaction** lists the other rows written by the same act. **Show whole transaction** loads all of them, by searching for the transaction ID.
 - **Raw audit payload** opens the entry exactly as it was recorded, for when the summary is not enough.
-- **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded.
+- **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded. Under **All time** the page loads 200 events at first. Any other window loads every event in it by itself, up to 2,000, as [Moving through time](#moving-through-time) says.
 - The page **refreshes itself** every 60 seconds, unless an Administrator changed that on the Settings page. A refresh adds new events at the top, and keeps the pages you already loaded.
 
 ## Moving through time
@@ -43,7 +46,9 @@ Under a rolling or custom range, no span is chosen. The arrows are called **Earl
 
 **›** is greyed out while the window reaches now, and both arrows are greyed out under **All time**. Point at an arrow, or move to it with Tab, to see why.
 
-When the window runs on past now, as today's does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**. When a window holds more events than are loaded, its start is hatched and says **Older events not loaded**. **Show more** at the foot loads them.
+When the window runs on past now, as today's does, the axis shows **Now** and the time. The part after it is hatched and says **Nothing recorded yet**.
+
+A window loads every event in it by itself, 200 at a time, up to 2,000 events. The foot says **Loading…** until it has them. A window that holds more than 2,000 loads the newest 2,000. Its start is then hatched and says **Older events not loaded: more than 2,000 in this window**, or **Not loaded: over 2,000** where the hatched part is narrow. **Show more** at the foot loads older ones, 200 at a time. The page stops at 2,000 so that a busy month stays quick to draw.
 
 The address keeps the window, so a link you share opens the same one.
 
@@ -51,7 +56,7 @@ The address keeps the window, so a link you share opens the same one.
 
 **The Audit Trail is deliberately not the logs.** Entries here are only ever added, each is linked to an actor, and none can be changed once written. Container and pod logs are none of those things. They are for diagnosing faults, and they are lost when the container is recreated. Anything that matters for audit is recorded here as a row.
 
-**Captures and playbacks have lanes of their own.** Recordings, Captures and Playbacks record who started or stopped a recording, stored, downloaded or deleted a capture, and started or stopped a playback. A capture's deletion says why it went: deleted, replaced, or deleted with its gateway or device. Each lane is named after the machine that was recorded, with a short ID beside the name. Their progress is not recorded.
+**Captures and playbacks have lanes of their own.** Recordings, Captures and Playbacks record who started or stopped a recording, stored, downloaded or deleted a capture, and started or stopped a playback. A capture's deletion says why it went: deleted, replaced, or deleted with its gateway or device. Each lane is named after the machine that was recorded, followed by when that recording, capture or playback began, so two recordings of one machine can be told apart. In a window of one day the time is a clock time alone; in a wider window the date comes first. Two that began in the same minute show the seconds too. Point at the name to see the lane's own ID. Their progress is not recorded.
 
 **Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 

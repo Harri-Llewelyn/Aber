@@ -294,6 +294,46 @@ So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the p
 **Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
 slowness, so the list names every value the predicate reads, in the order it reads them.
 
+### A group of rows opens and closes under one heading
+
+`common/GroupHeading.jsx` is the heading of a group of rows a reader can close. It is a disclosure
+button (the WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the group's name and its
+count: "Devices · 12". The chevron points up while open and down while closed, as a table's group
+rows do, and the name takes `.table-group-label`'s look.
+
+```jsx
+<GroupHeading open={open} onToggle={() => toggle(kind)} label="Devices" count={12}
+  countLabel="12 lanes" icon={<IconCpu size={12} />} controls={lanesId} />
+```
+
+- **The page keeps the state.** The button only reports a press. The page decides which groups are
+  open, hides the element named in `controls` while its group is closed, and lays out the row the
+  button sits in. A screen reader hears the name and `countLabel`: "Devices, 12 lanes".
+- **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
+  row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
+  event there opens the section too. The History page is to group its lanes by area and cell
+  under the same heading.
+- **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
+  closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
+  `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
+  (`ExpandAllToggle`, outlined) sit at the end of the key's row.
+
+### Cut text slides on hover or focus
+
+`common/OverflowText.jsx` draws one line that may not fit, cut with an ellipsis at rest. While the
+pointer is on it, or on the button or link it sits in, or that control has keyboard focus, text
+that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
+slides back when they leave.
+
+- It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
+  control's tooltip must carry the whole text.
+- It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
+  drawer opening needs no listener.
+- The whole text is always in the DOM, so a screen reader hears all of it.
+
+The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
+[#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+
 ### A page's summary is one row of cards
 
 Backups and Cold Storage sum up their list in one row of `common/SummaryCard.jsx` cards between the
@@ -531,9 +571,14 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   rows of one transaction, which share a time, in the order they were written.
 - **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
   section headings, and open its event nearest in time to the one open (`nearestInTime`; the
-  earlier of two as near). The order is the one on screen when the key is pressed, so a poll that
-  re-ranks the lanes moves the next press with it. Neither pair wraps. While the drawer is open the
-  page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and Page Down still do.
+  earlier of two as near). A closed section's lanes are skipped. An event open in a closed section
+  stays lit on that section's summary track, ← and → still step along its lane there, and ↑ and ↓
+  leave it for the drawn lanes either side. The order is the one on screen when the key is pressed,
+  so a poll that re-ranks the lanes moves the next press with it. Neither pair wraps. While the
+  drawer is open the page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and
+  Page Down still do.
+- **A lane's name opens its newest loaded event,** the change a reader most often wants, and ←
+  steps back from there. The name is the label's button, named "Open the latest change to Line 1".
 - **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
   a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
   not character keys, so the Single-key shortcuts setting does not cover them.
@@ -545,8 +590,9 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   Updated, 14:02, Press 4"). It is drawn with the drawer and speaks after a step only, by key or
   button, so opening the drawer reads as it does on every page.
 - **The marker follows.** After every step the selected marker is scrolled into view (`nearest`).
-  Its `scroll-margin` keeps it clear of the pinned axis row, the section heading and the label
-  column.
+  Its `scroll-margin` keeps it clear of the pinned axis row and the section heading. The timeline
+  never scrolls sideways: the label column is a share of the width (140px to 260px) and the track
+  takes the rest, however much the drawer takes.
 
 ### What the Access Control page claims, and how it says so
 
@@ -1233,8 +1279,15 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
 - **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
   is the window itself, with calendar ticks at local hours, days, weeks or quarters
   (`calendarTicks`). A window that runs on past now draws "Now 15:20" there (`.trail-now`). The
-  part after it is hatched and says "Nothing recorded yet" (`.trail-shade`). While older events in
-  the window are not loaded, the part before the oldest loaded one is hatched and says so.
+  part after it is hatched and says "Nothing recorded yet" (`.trail-shade`).
+- **A bounded window loads everything in it.** Under any window but All time the Audit Trail asks
+  for page after page by itself, until no page is left or `WINDOW_EVENT_CAP` (2,000) events are
+  loaded. Each page is a request that scans the whole match, and every event is a marker to lay out
+  and cluster, so a busy month stops there. Only then, when loading stopped short of the window's
+  start, is the part before the oldest loaded event hatched, and it says when the cap stopped it.
+  Show more goes on from there a page at a time. A page that fails, or adds nothing, stops the loop,
+  and a page asked for under an older filter is dropped when it lands. All time loads one page and
+  keeps Show more.
 
 ---
 

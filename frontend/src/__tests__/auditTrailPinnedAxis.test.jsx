@@ -61,9 +61,9 @@ describe('the timeline scrolls inside the card', () => {
     expect(ruleFor('.trail-timeline > .trail-scroll')).toMatch(/min-height:\s*0/)
   })
 
-  it('scrolls the lanes in both directions rather than the page', () => {
+  it('scrolls the lanes down rather than the page, and never sideways', () => {
     const rule = ruleFor('.trail-scroll')
-    expect(rule).toMatch(/overflow-x:\s*auto/)
+    expect(rule).toMatch(/overflow-x:\s*hidden/)
     expect(rule).toMatch(/overflow-y:\s*auto/)
     expect(rule).not.toMatch(/overflow-y:\s*hidden/)
   })
@@ -73,7 +73,10 @@ describe('the timeline scrolls inside the card', () => {
     await waitFor(() => expect(screen.getByText('Press_01')).toBeInTheDocument())
     expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
     const body = document.querySelector('.trail-timeline')
-    expect(body).toHaveClass('card-body', 'card-fill-scroll')
+    expect(body).toHaveClass('card-fill-scroll')
+    // Not a padded card body: the rows run to the card's edges, as a table's do.
+    expect(body).not.toHaveClass('card-body')
+    expect(ruleFor('.card-fill > .trail-timeline')).not.toMatch(/padding/)
     expect(body.querySelector('.trail-scroll')).toBeTruthy()
   })
 })
@@ -114,7 +117,7 @@ describe('the axis row stays in view', () => {
   it('keeps every marker under the labels and the headings it passes', () => {
     /* Badges carry z-index 3 and the active ring 4, the same numbers as the heading and above the
        label's 2, and in one stacking context the later element wins -- so a badge scrolling under
-       a pinned heading or sideways under a sticky label painted over it. Each track is its own
+       a pinned heading, or overhanging the label beside it, painted over it. Each track is its own
        stacking context, which keeps those numbers inside the track. */
     expect(ruleFor('.trail-track')).toMatch(/isolation:\s*isolate/)
     expect(zIndex(ruleFor('.trail-track'))).toBeNaN()
