@@ -6309,7 +6309,7 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6325,7 +6325,7 @@ components:
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
-                 SERVICE_LOGS_READ]
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6349,7 +6349,10 @@ components:
             `record_broker_account_deleted()` (0218). `SERVICE_LOGS_READ` (0225) is an
             Administrator reading a service's log lines on the System page, in that service's
             `service_logs` lane, written by `record_service_logs_read()` when the read differs
-            from their last.
+            from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
+            written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
+            `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
+            alert about its token.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

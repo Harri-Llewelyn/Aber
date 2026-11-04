@@ -932,6 +932,15 @@ python supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py
 # writer whose kind or action cannot be read fails it. Each pair's classes are audit_event_class()'s.
 # Read-only.
 python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py
+# A person acknowledges an alert (0231, 0232). An Operator, a Shopfloor Manager and an
+# Administrator each acknowledge a firing alert with a reason; an Auditor and a machine identity are
+# refused, and a machine identity's alert is not there for anyone but an Administrator. A resolved,
+# superseded or acknowledged occurrence is refused, the last naming who and when, and so is Other
+# without a note. The acknowledger, a Shopfloor Manager or an Administrator withdraws. A new
+# occurrence inherits the acknowledgement while the one before is firing, and nothing once the
+# fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
+# machine identity's own in the security lane. Every test rolls back.
+python supabase/migrations/test_a_person_acknowledges_an_alert.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

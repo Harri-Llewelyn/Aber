@@ -1169,7 +1169,9 @@ function edgeFunctionNames() {
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
-    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
+    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts there, the lane of an alert\'s acknowledgement, which an Operator, a Shopfloor Manager or an Administrator makes',
+    'public.audit_event_class': '0232 answers operational for ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane\'s rule, so a machine identity\'s alert acknowledged in that identity\'s lane is the same class as any other; it rebuilds the class indexes while a row they could hold wrongly exists (check 199)',
+    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
@@ -2735,7 +2737,8 @@ const OPERATOR_PAIRS = [
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
 // CellWrite, and no code reads it. The Audit Trail's configuration fields, which past rows carry,
-// are audit_event_class()'s (0228), which reads it out of a snapshot as `-> 'grafana_url'` alone.
+// are audit_event_class()'s (0228, and a later file that redeclares it), which reads it out of a
+// snapshot as `-> 'grafana_url'` alone.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
@@ -2748,7 +2751,8 @@ const OPERATOR_PAIRS = [
 
   for (const f of files.filter((name) => name !== DROPPER && name !== MOVER)) {
     const sql = read(`${dir}/${f}`);
-    const named = f === CLASSIFIER ? sql.replace(/-> 'grafana_url'/g, '') : sql;
+    const classifier = f === CLASSIFIER || /CREATE OR REPLACE FUNCTION public\.audit_event_class\(/.test(sql);
+    const named = classifier ? sql.replace(/-> 'grafana_url'/g, '') : sql;
     if (/\bgrafana_url\b/.test(named)) offences.push(`${f} names grafana_url`);
   }
   if (files.includes(MOVER)) {

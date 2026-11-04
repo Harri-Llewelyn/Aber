@@ -1183,6 +1183,15 @@ export const SUITES = {
       'can produce, read from the catalog, and no other, and that each pair carries the classes ' +
       'audit_event_class() answers for it. The Audit Trail narrows its filters by its mirror.',
   },
+  'supabase/migrations/test_a_person_acknowledges_an_alert.py': {
+    lanes: ['db'],
+    why:
+      '0231 and 0232 -- that an Operator, a Shopfloor Manager and an Administrator acknowledge a ' +
+      'firing alert they may read, with a reason from the closed set, and that a resolved, superseded ' +
+      'or acknowledged one, Other without a note and every other role are refused; who withdraws; ' +
+      'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
+      'audit rows, their lane, their class and who reads them.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
