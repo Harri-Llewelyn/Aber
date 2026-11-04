@@ -48,6 +48,12 @@ const alert = (overrides = {}) => ({
   ...overrides
 })
 
+// The same alert, acknowledged by somebody.
+const acknowledged = (overrides = {}) => alert({
+  fingerprint: 'fp-1', acknowledged_at: '2026-11-04T09:05:00Z', acknowledged_by: 'a0d17231-0000-4000-8000-0000000231a1',
+  acknowledged_by_email: 'op@aber.local', acknowledgement_reason: 'investigating', ...overrides,
+})
+
 const routeGet = (devices = []) => (path) => {
   if (path.startsWith('/api/v1/cells')) return Promise.resolve([CELL])
   if (path.startsWith('/api/v1/areas')) return Promise.resolve([AREA])
@@ -82,15 +88,31 @@ beforeEach(() => { vi.clearAllMocks() })
 // The legend
 
 describe('shopfloor legend categories', () => {
-  it('names four categories, the fourth being the alert state', async () => {
+  it('names five categories, the last two being the alert states', async () => {
     renderMap()
 
     await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
     const legend = document.querySelector('.shopfloor-legend')
 
-    for (const label of ['Online', 'Needs attention', 'Nothing live', 'Alert firing']) {
+    for (const label of ['Online', 'Needs attention', 'Nothing live', 'Alert firing', 'Alert acknowledged']) {
       expect(within(legend).getByText(label, { exact: false })).toBeInTheDocument()
     }
+  })
+
+  /* The acknowledged entry is the alert's chip hollow, with a tick: a shape of its own, not a
+     second shade of red. */
+  it('draws Alert acknowledged as a hollow chip with a tick', async () => {
+    renderMap()
+
+    await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
+    const legend = document.querySelector('.shopfloor-legend')
+    const swatch = legend.querySelector('.legend-chip-acknowledged')
+    expect(swatch).toBeInTheDocument()
+    expect(swatch).toHaveClass('legend-chip')
+    expect(swatch).not.toHaveClass('legend-chip-danger')
+    expect(swatch.querySelector('svg')).toBeTruthy()
+    expect(tooltipOf(getByTooltip(/^Alert acknowledged — /))).toBe(
+      'Alert acknowledged — an alert against a device here has been acknowledged')
   })
 
   /* The swatch is a chip, not a dot: the three dots roll up connectivity, and an alert belongs to
@@ -124,14 +146,13 @@ describe('shopfloor legend categories', () => {
     expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-normal')
   })
 
-  it('says who raised the alert, since that is what permits red here at all', async () => {
+  it('names no evaluator, since more than one thing raises alerts', async () => {
     renderMap()
 
     await waitFor(() => expect(screen.getAllByText('North Shop').length).toBeGreaterThan(0))
-    const entry = getByTooltip(/^Alert firing — /)
-
-    // The colour relays Grafana's verdict; the map evaluates no threshold of its own.
-    expect(tooltipOf(entry)).toMatch(/Grafana/)
+    // The colour relays an alert; the map evaluates no threshold of its own, and does not say who did.
+    expect(tooltipOf(getByTooltip(/^Alert firing — /))).toBe('Alert firing — an alert is firing against a device here')
+    expect(tooltipOf(getByTooltip(/^Alert acknowledged — /))).not.toMatch(/Grafana/)
   })
 })
 
@@ -154,6 +175,26 @@ describe('alerting cell pin', () => {
   it('does not go red for an alert on an archived device', async () => {
     renderMap({ devices: [device({ is_archived: true })], activeAlerts: [alert({ severity: 'critical' })] })
     expect((await pin()).className).not.toMatch(/area-plan-pin-alert/)
+  })
+
+  it('shows Alert acknowledged once the alert is acknowledged, and the card is not alerting', async () => {
+    renderMap({ devices: [device()], activeAlerts: [acknowledged()] })
+    const el = await pin()
+    expect(el.className).toMatch(/area-plan-pin-acknowledged/)
+    expect(el.className).not.toMatch(/area-plan-pin-alert/)
+    expect(tooltipOf(el)).toMatch(/Alert acknowledged/)
+    const card = el.closest('.area-card')
+    expect(card).not.toHaveClass('area-card-alerting')
+    expect(card.querySelector('.area-card-header .tile-dot')).toHaveClass('tile-dot-acknowledged')
+  })
+
+  it('stays Alert firing while any alert on its devices is unacknowledged', async () => {
+    renderMap({
+      devices: [device(), device({ asset_id: 'dev-2', asset_name: 'Simulated_CNC_02', sparkplug_id: 'spb-cnc-02' })],
+      activeAlerts: [acknowledged({ severity: 'critical' }),
+        alert({ fingerprint: 'fp-2', entity_id: 'dev-2', sparkplug_id: 'spb-cnc-02', severity: 'info' })],
+    })
+    expect((await pin()).className).toMatch(/area-plan-pin-alert/)
   })
 })
 
@@ -181,6 +222,16 @@ describe('alerting device chip', () => {
 
     // One device must not answer to two different names on two pages.
     expect(await chip()).toHaveTextContent('ALARM')
+  })
+
+  it('flags an acknowledged alert as ACKNOWLEDGED, with a hollow dot, and says so in the panel', async () => {
+    renderMap({ devices: [device()], activeAlerts: [acknowledged({ severity: 'critical' })] })
+
+    const el = await chip()
+    expect(el).toHaveTextContent('ACKNOWLEDGED')
+    expect(el).not.toHaveTextContent(/ALARM|WARNING/)
+    expect(el.querySelector('.badge-dot').style.background).toBe('transparent')
+    expect(screen.getByText(/Alerts firing \(1\)/).closest('.context-field, div').parentElement).toHaveTextContent(/acknowledged/)
   })
 
   // Archived wins: the device is out of service, so the cell neither lists it nor relays its alert.

@@ -88,7 +88,7 @@ Your picture shows at a glance whose session is open. That helps on a shared PC,
 
 ## Your sessions
 
-A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED, Studio and the forge, and any program that signs in as you.
+A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED and the forge, Studio where your site runs it, and any program that signs in as you.
 
 The **Sessions** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
 
@@ -138,7 +138,7 @@ What happens when you sign in:
 
 ## Apps you have allowed
 
-Some apps sign you in with your Aber account: Grafana, Node-RED, Studio and the forge. The first time one does, it asks you to allow it. You answer once, and it remembers.
+Some apps sign you in with your Aber account: Grafana, Node-RED and the forge, and Studio where your site runs it. The first time one does, it asks you to allow it. You answer once, and it remembers.
 
 The **Allowed Apps** tab lists the apps you have allowed, and nobody else's. The newest comes first.
 

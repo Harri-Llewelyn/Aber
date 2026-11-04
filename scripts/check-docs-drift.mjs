@@ -1169,7 +1169,9 @@ function edgeFunctionNames() {
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
-    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
+    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts there, the lane of an alert\'s acknowledgement, which an Operator, a Shopfloor Manager or an Administrator makes',
+    'public.audit_event_class': '0232 answers operational for ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane\'s rule, so a machine identity\'s alert acknowledged in that identity\'s lane is the same class as any other; it rebuilds the class indexes while a row they could hold wrongly exists (check 199)',
+    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
@@ -2735,7 +2737,8 @@ const OPERATOR_PAIRS = [
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
 // CellWrite, and no code reads it. The Audit Trail's configuration fields, which past rows carry,
-// are audit_event_class()'s (0228), which reads it out of a snapshot as `-> 'grafana_url'` alone.
+// are audit_event_class()'s (0228, and a later file that redeclares it), which reads it out of a
+// snapshot as `-> 'grafana_url'` alone.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
@@ -2748,7 +2751,8 @@ const OPERATOR_PAIRS = [
 
   for (const f of files.filter((name) => name !== DROPPER && name !== MOVER)) {
     const sql = read(`${dir}/${f}`);
-    const named = f === CLASSIFIER ? sql.replace(/-> 'grafana_url'/g, '') : sql;
+    const classifier = f === CLASSIFIER || /CREATE OR REPLACE FUNCTION public\.audit_event_class\(/.test(sql);
+    const named = classifier ? sql.replace(/-> 'grafana_url'/g, '') : sql;
     if (/\bgrafana_url\b/.test(named)) offences.push(`${f} names grafana_url`);
   }
   if (files.includes(MOVER)) {
@@ -4979,6 +4983,132 @@ const OPERATOR_PAIRS = [
     );
   } else {
     pass('Grafana keeps alert state history in the logs datasource\'s Loki, so the alert counter\'s history link has a page to open');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 214. The Site Map's help names each state its legend draws, and neither alert state names what
+// raised the alert. STATUS_WORD in SiteMapTab.jsx is the legend's words; the help's "What the states
+// mean" gives each a bullet in bold and says how many the legend names. More than one thing writes
+// platform_alerts, so STATUS_LABEL's two alert entries, the help's two bullets and the counter's
+// footer name no evaluator.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/SiteMapTab.jsx';
+  const PILL = 'frontend/src/components/common/AlertPill.jsx';
+  const HELP = 'help/pages/site-map.md';
+  const NUMBER = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const tab = read(TAB);
+  const help = read(HELP);
+  const problems214 = [];
+  // One literal pattern per object: a RegExp built from a name is a Semgrep finding (detect-non-literal-regexp).
+  const pairs = (body) => Object.fromEntries([...(body ?? '').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const words = pairs(tab.match(/const STATUS_WORD = \{([\s\S]*?)\n\s*\}/)?.[1]);
+  const labels = pairs(tab.match(/const STATUS_LABEL = \{([\s\S]*?)\n\s*\}/)?.[1]);
+  if (!words.alert || !words.acknowledged) problems214.push(`${TAB}: STATUS_WORD has no alert or acknowledged entry`);
+  const states = help.slice(help.indexOf('## What the states mean'), help.indexOf('\n## ', help.indexOf('## What the states mean') + 1));
+  for (const word of Object.values(words)) {
+    if (!states.includes(`- **${word}**`)) problems214.push(`${HELP}: "What the states mean" has no bullet for **${word}**`);
+  }
+  const count = Object.keys(words).length;
+  if (!help.includes(`names the ${NUMBER[count] ?? count} states below`)) {
+    problems214.push(`${HELP}: the legend's bullet does not say it names the ${NUMBER[count] ?? count} states`);
+  }
+  const named = (text) => /Grafana|evaluat/i.test(text);
+  for (const key of ['alert', 'acknowledged']) {
+    if (named(labels[key] ?? '')) problems214.push(`${TAB}: STATUS_LABEL.${key} names what raised the alert`);
+    const bullet = states.split('\n').find((l) => l.startsWith(`- **${words[key]}**`)) ?? '';
+    if (named(bullet)) problems214.push(`${HELP}: the **${words[key]}** bullet names what raised the alert`);
+  }
+  const pill = read(PILL);
+  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('Alert history in Grafana'));
+  if (!foot || /Evaluated by|silences/i.test(foot.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))) {
+    problems214.push(`${PILL}: the counter's footer names an evaluator or says where silences live`);
+  }
+  if (problems214.length) {
+    fail('the Site Map help and the alert states disagree:\n' + problems214.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Site Map help names the ${count} states its legend draws, and no alert state or the counter's footer names an evaluator`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 215. The reasons for acknowledging an alert are named alike in the help and the API reference.
+// ALERT_ACKNOWLEDGEMENT_REASONS (utils/alertAcknowledgement.js) is the dialog's list, which mirror
+// check 45 holds to the database. The Site Map help's steps name each label in bold, and
+// docs/openapi.yaml gives acknowledge_alert's p_reason and DeviceAlert's acknowledgement_reason
+// the values. The note's limit is stated alike in the util, the CHECK and the reference.
+// -------------------------------------------------------------------------------------------------
+{
+  const UTIL = 'frontend/src/utils/alertAcknowledgement.js';
+  const HELP = 'help/pages/site-map.md';
+  const SPEC = 'docs/openapi.yaml';
+  const util = read(UTIL);
+  const spec = read(SPEC);
+  const problems215 = [];
+  const reasons = [...(util.match(/export const ALERT_ACKNOWLEDGEMENT_REASONS = \[([\s\S]*?)\n\]/)?.[1] ?? '')
+    .matchAll(/value: '([a-z_]+)', label: '([^']+)'/g)].map((m) => ({ value: m[1], label: m[2] }));
+  if (!reasons.length) problems215.push(`${UTIL}: could not read ALERT_ACKNOWLEDGEMENT_REASONS`);
+  const help = read(HELP);
+  const step = help.split('\n').find((l) => /^\d+\. Choose a reason: /.test(l)) ?? '';
+  if (!step) problems215.push(`${HELP}: no "Choose a reason" step`);
+  for (const r of reasons) {
+    if (step && !step.includes(`**${r.label}**`)) problems215.push(`${HELP}: the reasons step does not name **${r.label}**`);
+  }
+  const values = reasons.map((r) => r.value).join(', ');
+  const entry = spec.slice(spec.indexOf('\n  /rest/v1/rpc/acknowledge_alert:'), spec.indexOf('\n  /rest/v1/rpc/withdraw_alert_acknowledgement:'));
+  if (!entry.includes(`p_reason: { type: string, enum: [${values}] }`)) {
+    problems215.push(`${SPEC}: acknowledge_alert's p_reason does not list ${values}`);
+  }
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  if (!schema.includes(`enum: [${values}]`)) problems215.push(`${SPEC}: DeviceAlert's acknowledgement_reason does not list ${values}`);
+  const max = util.match(/export const ALERT_ACKNOWLEDGEMENT_NOTE_MAX = (\d+)/)?.[1];
+  const sql = read('supabase/migrations/0231_a_person_acknowledges_an_alert.sql');
+  if (!max || !sql.includes(`(char_length(acknowledgement_note) <= ${max})`) || !entry.includes(`maxLength: ${max}`)) {
+    problems215.push(`the note's limit (${max ?? 'unread'} in ${UTIL}) is not the CHECK's and the API reference's`);
+  }
+  if (problems215.length) {
+    fail('the reasons for acknowledging an alert are named otherwise than the dialog lists them:\n' +
+      problems215.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and the API reference name the ${reasons.length} reasons for acknowledging an alert, and the note's limit of ${max}, as the dialog does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 216. The API reference documents the acknowledgement as the migration declares it: both
+// functions under their own paths, each column on DeviceAlert, and both actions on
+// AuditTrailEntry. A function missing from the reference is one an API client never learns of.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const MIGRATION = 'supabase/migrations/0231_a_person_acknowledges_an_alert.sql';
+  const spec = read(SPEC);
+  const sql = read(MIGRATION);
+  const problems216 = [];
+  const granted = new Set([...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\([^)]*\) TO authenticated/g)].map((m) => m[1]));
+  const functions = [...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(/g)].map((m) => m[1])
+    .filter((fn) => granted.has(fn));
+  if (functions.length !== 2) problems216.push(`${MIGRATION}: expected two functions granted to authenticated, found ${functions.join(', ') || 'none'}`);
+  for (const fn of functions) {
+    if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems216.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
+  }
+  const columns = [...(sql.match(/-- 1\. The columns[\s\S]*?-- 2\./)?.[0] ?? '')
+    .matchAll(/COMMENT ON COLUMN public\.platform_alerts\.(\w+) IS/g)].map((m) => m[1]);
+  if (columns.length !== 5) problems216.push(`${MIGRATION}: expected five column comments, found ${columns.length}`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const c of columns) {
+    if (!new RegExp(`^ {8}${c}:`, 'm').test(schema)) problems216.push(`${SPEC}: DeviceAlert does not document ${c}`);
+  }
+  const actions = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const action of ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN']) {
+    if (!actions.includes(action)) problems216.push(`${SPEC}: AuditTrailEntry does not list ${action}`);
+  }
+  if (problems216.length) {
+    fail('the API reference does not document the acknowledgement as 0231 declares it:\n' +
+      problems216.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/openapi.yaml documents ${functions.join(' and ')}, the ${columns.length} acknowledgement columns and both audit actions`);
   }
 }
 
@@ -8808,6 +8938,46 @@ const OPERATOR_PAIRS = [
       problems196.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`the help and frontend/README.md state the Audit Trail's window loading: ${pageSize} a page, up to ${cap} events`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 211. How narrow a zoom goes, and how far a press moves to be a drag, are stated as the code holds
+// them. Zoom in stops at ZOOM_FLOOR_MS (utils/timeWindow.js), and a press is a drag from
+// BAND_DRAG_PX (AuditTrailTab.jsx). The Audit Trail's help, frontend/README.md and Zoom in's own
+// tooltip give them; a floor stated wrong reads as a broken button.
+// -------------------------------------------------------------------------------------------------
+{
+  const UTIL = 'frontend/src/utils/timeWindow.js';
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const CONTROL = 'frontend/src/components/common/TimeWindowControl.jsx';
+  const UNITS = { SECOND: ['second', 1], MINUTE: ['minute', 60], HOUR: ['hour', 3600] };
+  const floor = read(UTIL).match(/^export const ZOOM_FLOOR_MS = (?:(\d+) \* )?(SECOND|MINUTE|HOUR)$/m);
+  const px = Number(read(TAB).match(/^export const BAND_DRAG_PX = (\d+)$/m)?.[1]);
+  const problems211 = [];
+  if (!floor || !Number.isFinite(px)) {
+    problems211.push(`could not read ZOOM_FLOOR_MS out of ${UTIL} or BAND_DRAG_PX out of ${TAB}; their shape changed`);
+  } else {
+    const n = Number(floor[1] ?? 1);
+    const words = n === 1 ? `one ${UNITS[floor[2]][0]}` : `${n} ${UNITS[floor[2]][0]}s`;
+    const help = read('help/pages/audit-trail.md');
+    for (const phrase of [`stops at a window of ${words}`, `shorter than ${words} opens as ${words}`,
+      `A drag must move at least ${px} pixels`]) {
+      if (!help.includes(phrase)) problems211.push(`help/pages/audit-trail.md does not say "${phrase}"`);
+    }
+    const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+    for (const phrase of [`\`ZOOM_FLOOR_MS\` (${words})`, `\`BAND_DRAG_PX\` (${px}px)`]) {
+      if (!readme.includes(phrase)) problems211.push(`frontend/README.md does not give ${phrase}`);
+    }
+    if (!read(CONTROL).includes(`is ${words} long, the narrowest a zoom goes`)) {
+      problems211.push(`${CONTROL}'s Zoom in tooltip does not name the floor as ${words}`);
+    }
+  }
+  if (problems211.length) {
+    fail('how far the Audit Trail zooms is stated otherwise than the code holds it:\n' +
+      problems211.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help, frontend/README.md and Zoom in's tooltip state the zoom floor and the ${px}px drag as the code holds them`);
   }
 }
 

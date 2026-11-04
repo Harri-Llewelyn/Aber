@@ -20,12 +20,12 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`mosquitto/README.md`](../mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
-| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; a multipart boundary over 70 characters refused before storage-api; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
-| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
+| **Supabase Studio** | Off by default, with postgres-meta. Where a site runs it: behind the gateway's `studio` listener, an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`), and off the Ingress unless `ingress.routes.studio` |
 | **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway; the edge functions reach its API through the gateway's `forge-api` listener, which serves `/api/` alone and removes the identity headers |
 
 **An error tells the caller what to fix, never how the platform is built.** A refusal the caller
@@ -80,6 +80,11 @@ it is what a human debugging the FDW connects through.
 
 `timescaledb/test_historian_role_grants.py` asserts both halves for both roles — what they can do,
 and what they must not.
+
+**Supabase Studio is off in a default install,** with postgres-meta, which serves it alone: Aber's
+dashboard does the site's work. What follows holds where a site turns both on. Then a
+NetworkPolicy, rendered whatever `networkPolicy.enabled` says, lets only the gateway reach Studio's
+port and only Studio reach postgres-meta, which runs any SQL as `supabase_admin` with no login.
 
 **Supabase Studio is a database console with no login, roles or session of its own.** Whoever
 reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for

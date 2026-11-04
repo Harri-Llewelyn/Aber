@@ -5,7 +5,8 @@ import { ALL_TIME, SPAN_IDS, TIME_PRESETS, WINDOW_KEYS, windowFromQuery, windowT
 /**
  * A page's time window, held in the address as `span` and `at`, `range`, or `from` and `to`
  * (utils/timeWindow.js). Returns `[win, setWin]`, as useUrlState does, and a change replaces the
- * history entry, so Back does not replay each step. The page's `fallback` writes nothing, and an
+ * history entry, so Back does not replay each step. `setWin(next, { replace: false })` adds an
+ * entry instead, as a zoom does, so Back undoes it. The page's `fallback` writes nothing, and an
  * address written another way (the older `since` and `until`, a value the page does not offer) is
  * tidied to the one way. Pass module-level constants: the window is memoised on them.
  *
@@ -32,7 +33,7 @@ export function useTimeWindow({ ranges = TIME_PRESETS, allTime = false, fallback
   }, [tidy, win, fallback])
 
   const setWin = useCallback(
-    (next) => navigate(withQuery(windowToQuery(next, fallback)), { replace: true }),
+    (next, { replace = true } = {}) => navigate(withQuery(windowToQuery(next, fallback)), { replace }),
     [fallback]
   )
 

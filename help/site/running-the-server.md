@@ -409,19 +409,34 @@ is meant only for the operations team:
 helm upgrade ... --set ingress.routes.docs=false
 ```
 
-**`studio` goes the other way: it is off by default and turning it on is the deliberate act.** To
-turn it on:
+**`studio` goes the other way: Studio is off by default, and turning it on is the deliberate act.**
+Supabase Studio is the database administrator's console: tables, SQL, storage and accounts, as the
+database owner. Aber's dashboard does the site's own work, so a default install runs no Studio. Nor
+does it run postgres-meta, which serves Studio's database pages and nothing else.
+
+To run Studio and publish it at `studio.<domain>`:
 
 ```bash
 helm upgrade ... \
+  --set supabaseStudio.enabled=true \
+  --set supabaseMeta.enabled=true \
   --set ingress.routes.studio=true \
   --set secrets.studioOAuthClientSecret=$(openssl rand -hex 32) \
   --set secrets.studioProxyHmacSecret=$(openssl rand -hex 32)
 ```
 
+Studio and postgres-meta are on or off together, and the render fails if only one is on. The route
+needs Studio on.
+
 Both secrets are required, and if either is missing the **render fails naming them**. Without that
 check, the route would be published with no registered client for its sign-in. It would then look
 like a broken proxy rather than two empty values.
+
+Without the route, Studio runs inside the cluster only. Reach it with a port-forward:
+
+```bash
+kubectl -n aber port-forward svc/supabase-studio 54323:3000
+```
 
 With `secrets.existingSecret`, put the two keys in that Secret instead (`STUDIO_OAUTH_CLIENT_SECRET`
 and `STUDIO_PROXY_HMAC_SECRET`) and leave out the two `--set secrets.studio...` lines. The chart
@@ -434,8 +449,9 @@ cannot see that Secret, so it does not check them.
 The route publishes `supabase-envoy:8001`, the gateway's studio listener, which runs an OAuth
 sign-in against Aber's own GoTrue and admits `Administrator` alone. It never publishes
 `supabase-studio:3000`, which is a database console with no login of its own, running as the
-database owner. The NetworkPolicy follows the same shape. The ingress controller may reach the
-gateway on `8001`, the gateway may reach Studio on `3000`, and nothing else may reach Studio at all.
+database owner. A NetworkPolicy holds the same shape whether or not `networkPolicy.enabled` is on.
+Only the gateway may reach Studio on `3000`. Only Studio may reach postgres-meta on `8080`, because
+postgres-meta runs any SQL as `supabase_admin` with no login. A port-forward to Studio still works.
 
 This does **not** give Studio MFA, or a per-user audit trail of what was run in the SQL
 editor. It controls *who may open the console*, and everything inside it still runs as the

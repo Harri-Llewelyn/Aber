@@ -934,6 +934,15 @@ python supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py
 # writer whose kind or action cannot be read fails it. Each pair's classes are audit_event_class()'s.
 # Read-only.
 python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py
+# A person acknowledges an alert (0231, 0232). An Operator, a Shopfloor Manager and an
+# Administrator each acknowledge a firing alert with a reason; an Auditor and a machine identity are
+# refused, and a machine identity's alert is not there for anyone but an Administrator. A resolved,
+# superseded or acknowledged occurrence is refused, the last naming who and when, and so is Other
+# without a note. The acknowledger, a Shopfloor Manager or an Administrator withdraws. A new
+# occurrence inherits the acknowledgement while the one before is firing, and nothing once the
+# fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
+# machine identity's own in the security lane. Every test rolls back.
+python supabase/migrations/test_a_person_acknowledges_an_alert.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
@@ -1441,7 +1450,8 @@ layer on.
 
 **No CI job installs with the layer off**, though that is the chart's default and what most sites
 run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
-is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+is the only one a default install renders. With Studio on, Studio's and postgres-meta's join it,
+each admitting its one caller, and still admit only that caller with the layer on. Every developer's `npm run dev:up` installs without the layer. A second,
 smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
 configuration that differs from the one CI runs only in its NetworkPolicy objects.
 
@@ -1552,7 +1562,8 @@ arrive with no CI result.
 not something this repository can act on, and failing on it would train everyone to ignore the job.
 Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
-nothing wrong".
+nothing wrong". The optional workloads are rendered on, except Studio and postgres-meta, which stay
+off as in a default install: a site that runs them takes on two images the scan does not cover.
 
 **The workflow runs [`scripts/scan-images.mjs`](../scripts/scan-images.mjs), which is `npm run
 scan:images` on a laptop**: the same images, Trivy in the pinned container `scan:config` uses

@@ -143,10 +143,13 @@ describe('AlertPill', () => {
       expect(screen.getByText('dev220000000000400080000')).toBeInTheDocument()
     })
 
-    it('says where the evaluation happened, so nobody looks for the threshold here', () => {
+    it('names no evaluator, since more than one thing raises alerts, and says what is counted', () => {
       render(<AlertPill alerts={[alert()]} />)
       fireEvent.click(pill())
-      expect(screen.getByText(/Evaluated by Grafana/i)).toBeInTheDocument()
+      const foot = document.querySelector('.alert-pill-foot')
+      expect(foot).toHaveTextContent(/An acknowledged alert stays listed and is not counted until it resolves/)
+      expect(foot.textContent).not.toMatch(/Evaluated by|silences/i)
+      expect(tooltipOf(pill())).not.toMatch(/Grafana/)
     })
 
     /**

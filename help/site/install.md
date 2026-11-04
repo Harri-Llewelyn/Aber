@@ -405,7 +405,7 @@ On a site, every part of Aber is a host under the domain you gave `npm run setup
 | API reference (Swagger UI) | `https://docs.<domain>` | http://docs.localhost |
 | i3X | `https://i3x.<domain>` | http://i3x.localhost |
 | AAS API, for [AAS](../guides/glossary.md#asset-administration-shell-aas) clients | `https://api.<domain>/functions/v1/aas-api` | http://api.localhost/functions/v1/aas-api |
-| Supabase Studio, `Administrator` only | off by default; [Running the server, *Reaching the stack*](running-the-server.md#reaching-the-stack) | http://studio.localhost |
+| Supabase Studio, `Administrator` only | off by default, Studio and its route both; [Running the server, *Reaching the stack*](running-the-server.md#reaching-the-stack) | http://studio.localhost |
 | MQTT broker | the machine's address: 8883 (TLS), which gateways use, and 1883 | `localhost`: 8883 and 1883 |
 | Prometheus | `kubectl -n aber port-forward svc/prometheus 9090` | `npm run dev:forward`, then http://localhost:9090 |
 
