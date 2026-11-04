@@ -88,6 +88,31 @@ Envoy semantics that produce a stack that looks fine and is not are listed in th
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant
 from the Host label, per-route credential hiding, and the Directory routes keeping their path.
 
+## An app's token
+
+A token GoTrue's OAuth server issued to an app names the app in its `client_id` claim. On the API
+listener it reaches `/auth/v1/` and the functions its own app calls, and nothing else
+([`docs/security-model.md`](security-model.md#an-apps-token-reaches-only-its-own-routes)). Two
+filters decide it, after the key check and before the router:
+
+- **`jwt_authn` verifies the bearer and records its claims, and refuses nothing.** Its requirement
+  is `allow_missing_or_failed`: no token, a key, an expired token or one that does not verify goes
+  on as before, and its upstream answers it. It checks no audience and no issuer, so a token's
+  `client_id` is read whatever else it says, against the JWKS the other two browser listeners use.
+  It reads the bearer in every spelling an upstream accepts: any scheme, a tab, or none, since
+  Storage takes all three. The bearer is forwarded.
+- **`rbac` decides on the verified `client_id` alone.** A token with none passes everywhere. One
+  with it passes on `/auth/v1/`, where every app's functions check its session, and on
+  `/functions/v1/grafana-userinfo` for Grafana's client and `/functions/v1/nodered-userinfo` for
+  Node-RED's. Everything else answers `403 {"message":"This token was issued to an app, and reaches
+  only that app's own routes"}`, the key check's shape, from `local_reply_config`.
+
+Because it runs after the key check, a request that check refuses keeps its 401. The Studio and
+forge doors have no function here: they call theirs from their own listeners, straight to the edge
+runtime. An app the stack does not register is in no policy, so it reaches `/auth/v1/` alone.
+`APP_ROUTES` in `check-gateway-surface.mjs` holds the policies, and mirror check 48 holds their
+client ids to `stack_app_ids()`.
+
 ## The client's address
 
 The API listener works out each caller's address, and the sign-in limit below and GoTrue's own
@@ -175,13 +200,14 @@ The API listener writes one line per request to stdout. Alloy ships it to Loki w
 container's log, labelled `service="supabase-envoy"`:
 
 ```text
-aber-api method=POST path=/auth/v1/token status=429 flags=RL upstream=auth-v1 duration_ms=0 request_id=6f2c... client=192.0.2.40 key=-
+aber-api method=POST path=/auth/v1/token status=429 flags=RL upstream=auth-v1 duration_ms=0 request_id=6f2c... client=192.0.2.40 key=- app=-
 ```
 
 `path` is the path the caller sent, without its query: the query can carry the `apikey`.
 `upstream` is the cluster the route names. `flags` are Envoy's response flags; `RL` marks a request
 the sign-in limit refused. `client` is the address above. `key` is `publishable` or `secret` for
-the key a gated route admitted, and `-` elsewhere. No header that carries a credential is written.
+the key a gated route admitted, and `-` elsewhere. `app` is the `client_id` of a verified token
+GoTrue issued to an app, and `-` for any other. No header that carries a credential is written.
 The studio and forge listeners write the same kind of line, prefixed `aber-studio` and
 `aber-forge`.
 
@@ -214,14 +240,14 @@ cover the keys, which come from the Secret: rotating one needs
 
 ## The signing keys
 
-The studio and forge listeners verify GoTrue's session token themselves, with `jwt_authn`, against
+The API, studio and forge listeners verify GoTrue's tokens themselves, with `jwt_authn`, against
 the JWKS the initContainer substitutes for `__SUPABASE_JWT_JWKS__`: `SUPABASE_JWT_JWKS` from the
 Secret, the public key under its `kid`. `jwt_authn` checks an ES256 token by its `kid`, and
-refuses an HS256 one. The initContainer makes the JWKS one line, and refuses one holding a quote,
+verifies no HS256 one: the doors refuse it, and the API listener passes it on as unverified. The initContainer makes the JWKS one line, and refuses one holding a quote,
 backslash, ampersand or bar, because `sed` substitutes it into a single-quoted YAML string.
 
 **It also refuses an `oct` key**, and the gateway does not start. Such a key would let PostgREST,
-GoTrue and these two listeners take a token signed with `SUPABASE_JWT_SECRET`. The render refuses
+GoTrue and these three listeners take a token signed with `SUPABASE_JWT_SECRET`. The render refuses
 one where it can see the Secret; under `secrets.existingSecret` rendered with `helm template`, as a
 GitOps tool renders it, it cannot, and this is where it is caught.
 
@@ -244,7 +270,10 @@ The runtime pass asserts posture, not configuration: gated routes refused before
 open ones through, a valid key accepted by header and by query, an unregistered key refused, and
 on a route that hides credentials the header and query forms indistinguishable upstream. With the
 key, it also posts an empty OAuth client registration, which GoTrue must refuse as disabled
-(`0197`, in `supabase/README.md`). It also checks the response headers, and sends wrong-password grants from one address until the gateway
+(`0197`, in `supabase/README.md`), and presents a token naming an app that verifies against no
+key, which must reach PostgREST and a userinfo function rather than the app check's 403. A token
+GoTrue really issued to an app is the stack lane's:
+`supabase/test_each_app_s_token_reaches_only_its_own_routes.py` signs in to each of the four. It also checks the response headers, and sends wrong-password grants from one address until the gateway
 answers `429`, then a grant from another address and a refresh, which must reach GoTrue. Those
 addresses are named in `X-Forwarded-For`, so run it against a port-forward, as above: through the
 ingress, Traefik replaces them with yours. CI runs it against the k3d stack. `validate.py`'s check 14 adds the refusal the probe cannot see from

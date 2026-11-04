@@ -1403,9 +1403,9 @@ GoTrue runs an OAuth 2.1 server for the stack's own clients: Grafana, Node-RED, 
 forge doors. `0002` seeds all four, with `registration_type` `manual`. Up to 1.5.0 the chart also
 left GoTrue's dynamic client registration on, so anyone holding the publishable key could register a
 client of their own at `/auth/v1/oauth/clients/register`. That key is public by design: every browser
-is served it. A token issued to any client carries its person's whole role, because `has_role()`
-reads `auth.uid()` and not the client the token was issued to. So a registered client was one
-approval on the consent page away from a token as capable as the person who approved it.
+is served it. Until `0235`, a token issued to any client carried its person's whole role, because
+`has_role()` read `auth.uid()` and not the client the token was issued to. So a registered client was
+one approval on the consent page away from a token as capable as the person who approved it.
 
 The chart now sets `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION` to `"false"`. It is not a chart
 value: nothing the stack uses registers itself.
@@ -3157,6 +3157,76 @@ that the classifier is still an inlinable `IMMUTABLE` SQL function, each class i
 three of `0228`'s rules answer as before. `test-harness/fixtures/audit-event-classes.json` holds the
 two lanes' answers, and `test_a_person_acknowledges_an_alert.py` reads both kinds back through the
 Operational class.
+
+### An app's token reaches only its own routes (0235)
+
+GoTrue's OAuth server signs a person in to an app: Grafana, Node-RED, and the Studio and forge
+doors today. The access token it issues names the person, and `has_role()` and `has_authority()`
+looked the caller up by `auth.uid()`. So the token reached PostgREST, Storage, Realtime and the edge
+functions with everything the person may do, whichever app held it. GoTrue writes the app's
+`client_id` into that token (and its `scope`), and nothing read it. An outside app, which #1036 lets
+an Administrator register, could then change anything the person who allowed it can.
+
+**A token with a `client_id` is refused in three places.** Together they touch no policy.
+
+- **`auth_pre_request()` refuses it**, before every other arm, with `insufficient_privilege`, which
+  PostgREST answers 403: the message `this token was issued to an app, and reaches only that app's
+  own routes`, the client in the detail, and a hint naming what to call the API with instead. The
+  hook sees every PostgREST request, whoever relays it: i3X, `aas-api` and the Directory send the
+  caller's token through the gateway, and the gateway cannot tell a relayed request from a direct
+  one. No other state lifts this refusal, so it answers first and needs no lookup.
+- **`has_role()` and `has_authority()` answer false** for it:
+  `coalesce(auth.jwt() ->> 'client_id', '') = ''` comes before the lookup. Storage and Realtime
+  verify the token themselves and never run the hook, so this is what closes the rows a role gates
+  there. `has_authority()`'s machine arm is behind the same test, though GoTrue never issues a
+  machine identity's token.
+- **The gateway admits it only on `/auth/v1/` and its own app's functions**, and answers 403
+  everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The functions each app
+  calls are recorded in [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
+
+**What still passes.** A token with no `client_id`, or an empty or null one: the dashboard's
+sessions, scripts, machine identities, the i3X and MCP clients' tokens, and the publishable and
+secret keys. Each is served and answered as before. Realtime still delivers to an app's token the
+changes to rows any signed-in account reads, because the token is inside the join message, where
+the gateway cannot see it. That gap is accepted, in
+[`docs/security-model.md`](../docs/security-model.md#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account).
+
+**Each body is declared where it is stated, as `0227` declared its form.** `0001` declares
+`has_role()` and `has_authority()` in place, and `0205`, whose body is the one the API runs,
+declares `auth_pre_request()`'s arm. db-init replays every file on every boot, so a copy in `0235`
+would leave the older body from `0001` or `0205` serving until `0235` ran, on every boot. `0235`
+holds no body. `CREATE OR REPLACE` keeps each function's grants, volatility, `SECURITY DEFINER` and
+pinned `search_path`.
+
+**What it costs.** `test_role_checks_are_timed.py` was run on a freshly migrated test database with
+the old and the new bodies in turn, six rounds interleaved, on a laptop shared with four other
+sessions. The figures are µs per call, the median of six rounds, each the median of 5 × 10,000
+calls; the least round is in brackets. An app's token was timed on the new bodies alone, the median
+of three runs. The baseline is on issue #1194.
+
+| µs per call | before | after |
+| :--- | ---: | ---: |
+| the loop alone | 0.07 (0.06) | 0.07 (0.07) |
+| `has_role()` admitting | 18.13 (13.39) | 21.68 (20.48) |
+| `has_role()` refusing | 21.88 (15.09) | 19.37 (16.98) |
+| `has_authority()` admitting | 144.67 (122.15) | 142.66 (122.30) |
+| `has_role()`, an app's token | | 16.97 |
+| `has_authority()`, an app's token | | 30.52 |
+
+`has_role()` pays a few µs for the second read of the claims, which `auth.uid()` reads too. A
+policy calls it once per statement (`0177`), so a request pays it once. `has_authority()` shows no
+change: its machine-principal lookup costs more than the claim. The guarded read's plan is the
+same, and its median execution is 0.23-0.42 ms after against 0.19-0.43 ms before.
+
+The file's self-check asserts that each of the three reads the claim and keeps its language,
+volatility, `SECURITY DEFINER` and pin, and that the roles that run each may still execute it. It
+asserts that the hook refuses an app's token with that message and serves an empty `client_id`.
+Where a person is on record, it asserts that their role and a permission are theirs with their own
+claims and nobody's with an app's. `test_an_app_s_token_reaches_only_its_own_routes.py` holds the
+refusal for every app and every API role, its order, the role checks for a person and a machine,
+a row a role gates, the read the Realtime gap keeps, and an empty or null `client_id`.
+`test_each_app_s_token_reaches_only_its_own_routes.py`, in the stack lane, holds the same through
+the gateway with a real token for each of the four apps.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

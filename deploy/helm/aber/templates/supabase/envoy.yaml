@@ -117,7 +117,7 @@ spec:
         # It does NOT cover the API keys, which live in the Secret the chart may not own. Rotating
         # one needs `kubectl rollout restart deployment/supabase-envoy`.
         checksum/envoy-template: {{ $envoy | sha256sum }}
-        # And with a change to the signing set the studio and forge listeners verify with.
+        # And with a change to the signing set the API, studio and forge listeners verify with.
         checksum/signing-keys: {{ include "aber.signingChecksum" . }}
         {{- if .Values.supabaseEnvoy.metrics.enabled }}
         # The admin listener serves the scrape at /stats/prometheus, not /metrics.
@@ -197,7 +197,7 @@ spec:
               # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
 
-              # The JWKS the studio and forge listeners verify session tokens against: ES256 by kid.
+              # The JWKS the API, studio and forge listeners verify tokens against: ES256 by kid.
               # sed substitutes it into a single-quoted YAML string, so it is made one line and may
               # hold no quote, backslash, ampersand or bar; a JWK never needs them. An `oct` key is
               # refused: every service behind this gateway would take a token signed with its

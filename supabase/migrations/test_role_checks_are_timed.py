@@ -12,7 +12,9 @@ database both times. It signs in as one person, as `authenticated`, and prints:
   * the median microseconds per call over RUNS runs of CALLS calls, for has_role() admitting,
     has_role() refusing and has_authority() admitting, beside the same loop with no call in it;
   * EXPLAIN ANALYZE of one RLS-guarded read whose policy calls has_role(), with the median
-    execution time of RUNS runs.
+    execution time of RUNS runs;
+  * the same checks for a token GoTrue issued to an app, which carries a client_id and holds no
+    role (0235).
 
 It fails only when a check gives the wrong answer. A slow database prints a bigger number.
 Every test rolls back.
@@ -65,6 +67,13 @@ CASES = [
     ("has_role() admitting", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), True),
     ("has_role() refusing", loop("public.has_role(ARRAY['Auditor'])"), False),
     ("has_authority() admitting", loop("public.has_authority(ARRAY['audit_trail:read'])"), True),
+]
+
+# The same person's token as an app holds it: the claim test answers before the lookup.
+APP_CLIENT_ID = "c0ffee00-0000-4000-8000-000000000001"
+APP_CASES = [
+    ("has_role(), an app's token", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), False),
+    ("has_authority(), an app's token", loop("public.has_authority(ARRAY['audit_trail:read'])"), False),
 ]
 
 # user_roles' own policy calls has_role() beside a column comparison, so it shows both halves.
@@ -121,6 +130,18 @@ class TheRoleChecksAreTimed(unittest.TestCase):
     def test_each_check_is_timed_and_answers_as_before(self):
         print(f"\n  {CALLS} calls x {RUNS} runs, as {ADMIN_ID} (Administrator), median us per call:")
         for label, statement, expected in CASES:
+            per_call, answer = self.timed(statement)
+            self.assertEqual(answer, expected, label)
+            runs = ", ".join(f"{t:.2f}" for t in per_call)
+            print(f"    {label:28} {statistics.median(per_call):8.2f}   ({runs})")
+
+    def test_an_apps_token_is_timed_and_holds_nothing(self):
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true);",
+            (json.dumps({"sub": ADMIN_ID, "role": "authenticated", "client_id": APP_CLIENT_ID}),),
+        )
+        print(f"\n  {CALLS} calls x {RUNS} runs, as {ADMIN_ID} through {APP_CLIENT_ID}, median us per call:")
+        for label, statement, expected in APP_CASES:
             per_call, answer = self.timed(statement)
             self.assertEqual(answer, expected, label)
             runs = ", ".join(f"{t:.2f}" for t in per_call)
