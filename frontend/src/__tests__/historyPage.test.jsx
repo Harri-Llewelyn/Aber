@@ -478,6 +478,8 @@ describe('a state chart', () => {
     const box = figure.querySelector('.chart-box-states')
     expect(box.style.marginLeft).toBe(`${PLOT_LEFT_PX}px`)
     expect(box.style.marginRight).toBe(`${PLOT_RIGHT_PX}px`)
+    // Not .chart-box's width: 100%, which with the margins would run past the card.
+    expect(box.style.width).toBe('auto')
   })
 
   it('colours each value by the hue its text hashes to, the same wherever it appears, and keeps its name', async () => {

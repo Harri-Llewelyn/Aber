@@ -313,7 +313,7 @@ export function TimeSeriesChart({
         {isState && (
           <div
             className="chart-box chart-box-states"
-            style={{ marginLeft: PLOT_LEFT_PX, marginRight: PLOT_RIGHT_PX }}
+            style={{ marginLeft: PLOT_LEFT_PX, marginRight: PLOT_RIGHT_PX, width: 'auto' }}
             onPointerMove={pointAt}
             onPointerLeave={() => setRunHover(null)}
           >
