@@ -25,6 +25,14 @@ backupService:
 releaseCheck:
   enabled: true
 
+# Studio and postgres-meta, on or off together: the chart refuses one alone. Studio's route stays off,
+# as in the example.
+supabaseStudio:
+  enabled: true
+
+supabaseMeta:
+  enabled: true
+
 loadTest:
   enabled: true
 

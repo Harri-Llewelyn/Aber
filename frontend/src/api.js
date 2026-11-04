@@ -1757,6 +1757,28 @@ const apiMethods = {
   },
 
   // -------------------------------------------------------------------------------------------
+  // Acknowledging a firing alert (0231), from the alert counter. Each writes one Audit Trail row.
+  // The database's refusals are sentences, shown as they come: who acknowledged it first, or that
+  // it has resolved.
+  // -------------------------------------------------------------------------------------------
+
+  /** Acknowledge an occurrence with a reason and an optional note. Returns the row. */
+  acknowledgeAlert: async (alertId, reason, note) => {
+    const { data, error } = await supabase.rpc('acknowledge_alert', {
+      p_alert_id: alertId, p_reason: reason, p_note: note || null,
+    });
+    if (error) throw new Error(error.message || 'Could not acknowledge the alert');
+    return data;
+  },
+
+  /** Withdraw an occurrence's acknowledgement. Returns the row. */
+  withdrawAlertAcknowledgement: async (alertId) => {
+    const { data, error } = await supabase.rpc('withdraw_alert_acknowledgement', { p_alert_id: alertId });
+    if (error) throw new Error(error.message || 'Could not withdraw the acknowledgement');
+    return data;
+  },
+
+  // -------------------------------------------------------------------------------------------
   // Apps that sign people in with Aber, and who has allowed each (0217). An app is one of the
   // sign-in service's OAuth clients; an approval is a person's consent to one.
   // -------------------------------------------------------------------------------------------

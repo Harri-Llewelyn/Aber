@@ -2,11 +2,12 @@ import React, { useId, useState } from 'react'
 import { ToolbarPopover } from './FiltersPopover'
 import { SegmentedControl } from './SegmentedControl'
 import { Tooltip } from './Tooltip'
-import { IconCalendar, IconChevronLeft, IconChevronRight } from './Icons'
+import { IconCalendar, IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut } from './Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, chooseSpan, holdsNow, jumpTo, localMinute,
-  parseDay, parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds, windowWords
+  ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, canZoomIn, canZoomOut, chooseSpan, holdsNow,
+  jumpTo, localMinute, parseDay, parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds,
+  windowWords, zoomBounds, zoomIn, zoomOut
 } from '../../utils/timeWindow'
 
 /** How often the control looks at the clock, so the words and the › arrow follow it. */
@@ -14,12 +15,13 @@ const CLOCK_MS = 60 * 1000
 
 
 /**
- * One arrow. At an end it is `aria-disabled`, not `disabled`, as the Audit Trail drawer's step
- * buttons are: it keeps its Tab stop, a press does nothing, and its tooltip says why.
+ * One icon button: an arrow, or Zoom in or Zoom out. Off, it is `aria-disabled`, not `disabled`,
+ * as the Audit Trail drawer's step buttons are: it keeps its Tab stop, a press does nothing, and
+ * its tooltip says why. On, the tooltip is `tip`, or its name.
  */
-function StepArrow({ name, off, reason, onStep, children }) {
+function WindowButton({ name, tip = name, off, reason, onStep, children }) {
   return (
-    <Tooltip text={off ? reason : name}>
+    <Tooltip text={off ? reason : tip}>
       <button
         type="button"
         className={`btn btn-sm btn-ghost time-window-step${off ? ' btn-disabled' : ''}`}
@@ -129,9 +131,15 @@ function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
  * own length (Earlier and Later). › is off while the window holds now, and both under All time.
  * Each step is said in a polite status line. No key is bound: `[` and `]` change tab, and the
  * arrow keys step the Audit Trail's drawer.
+ *
+ * `zoom` adds Zoom in and Zoom out after the switch: half and twice the window about its middle,
+ * as a custom window. `extent` is the stretch the page's axis draws, which Zoom in halves where
+ * the window has no bounds of its own (All time). A zoom calls `onChange(next, { replace: false })`,
+ * so Back undoes it; everything else calls `onChange(next)`, which replaces the entry.
  */
 export function TimeWindowControl({
   value, onChange, ranges = TIME_PRESETS, allTime = false, spans = SPAN_IDS, label = 'Time window',
+  zoom = false, extent = null,
 }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
@@ -141,8 +149,8 @@ export function TimeWindowControl({
   const offered = SPANS.filter(s => spans.includes(s.id))
 
   /** Show `next`, and say so in the status line: the arrows and the switch keep focus, so nothing else would. */
-  const show = (next) => {
-    onChange(next)
+  const show = (next, ...options) => {
+    onChange(next, ...options)
     setNews(`Showing ${windowWords(next, now)}`)
   }
 
@@ -153,18 +161,23 @@ export function TimeWindowControl({
     ? 'This window already reaches now, so nothing later is recorded yet.'
     : stuck
 
+  const zoomable = !!zoomBounds(value, now, extent)
+  const unzoomable = value.kind === 'all' ? 'Nothing is drawn yet to zoom into.' : 'Set both ends of the custom range to zoom it.'
+  const inReason = zoomable ? 'This window is one minute long, the narrowest a zoom goes.' : unzoomable
+  const outReason = value.kind === 'all' ? 'All time already shows every event, so there is nothing wider.' : unzoomable
+
   return (
     <div className="time-window" role="group" aria-label={label}>
       {/* The arrows never part from the words; the switch may wrap under them. */}
       <span className="time-window-nav">
-        <StepArrow
+        <WindowButton
           name={names.earlier}
           off={!canStep(value, -1, now)}
           reason={stuck}
           onStep={() => show(stepWindow(value, -1, now))}
         >
           <IconChevronLeft size={15} aria-hidden="true" />
-        </StepArrow>
+        </WindowButton>
 
         <ToolbarPopover
           label="Choose a time window"
@@ -184,14 +197,14 @@ export function TimeWindowControl({
           )}
         </ToolbarPopover>
 
-        <StepArrow
+        <WindowButton
           name={names.later}
           off={!canStep(value, 1, now)}
           reason={laterReason}
           onStep={() => show(stepWindow(value, 1, now))}
         >
           <IconChevronRight size={15} aria-hidden="true" />
-        </StepArrow>
+        </WindowButton>
       </span>
 
       <SegmentedControl
@@ -200,6 +213,30 @@ export function TimeWindowControl({
         value={span}
         onChange={(next) => show(chooseSpan(value, next, now))}
       />
+
+      {/* In the expanded plan's order, Zoom in first. */}
+      {zoom && (
+        <span className="time-window-zoom" role="group" aria-label="Zoom">
+          <WindowButton
+            name="Zoom in"
+            tip="Show the middle half of this window. Back undoes a zoom."
+            off={!canZoomIn(value, now, extent)}
+            reason={inReason}
+            onStep={() => show(zoomIn(value, now, extent), { replace: false })}
+          >
+            <IconZoomIn size={15} aria-hidden="true" />
+          </WindowButton>
+          <WindowButton
+            name="Zoom out"
+            tip="Show twice as long a window about the same middle, ending no later than now. Back undoes a zoom."
+            off={!canZoomOut(value, now, extent)}
+            reason={outReason}
+            onStep={() => show(zoomOut(value, now, extent), { replace: false })}
+          >
+            <IconZoomOut size={15} aria-hidden="true" />
+          </WindowButton>
+        </span>
+      )}
 
       <div className="sr-only" role="status" aria-live="polite">{news}</div>
     </div>

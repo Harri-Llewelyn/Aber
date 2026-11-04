@@ -3053,6 +3053,111 @@ every pair those writers produce and no other, and that each pair's classes are 
 asserts who may run it and that no pair is listed twice or with a class the classifier does not
 answer.
 
+### A person acknowledges an alert (0231)
+
+An alert nobody could mark as seen stayed red for everyone: two people investigated the same one,
+and an alert everyone knew about trained people to ignore red. An acknowledgement says who has seen
+it, when, and why it fired. It is a role-gated act by a named person against one row, as every other
+write here is, so it goes through a function and the Audit Trail records it.
+
+- **Five nullable columns, not a status.** `acknowledged_at`, `acknowledged_by`,
+  `acknowledged_by_email`, `acknowledgement_reason` and `acknowledgement_note`. `status` stays
+  `firing` or `resolved`, Grafana's two states, so no reader of `status` changes meaning, and an
+  acknowledgement never resolves a row: only its writer does. `0001` states the columns and selects
+  them in `platform_alerts_active`, as it did for `0220`'s, and its guard drops the view once when
+  the column list differs ([An alert keeps its rule's uid, labels and values](#an-alert-keeps-its-rules-uid-labels-and-values-0220)).
+- **A closed set of reasons.** `investigating`, `known_cause`, `planned_work`,
+  `sensor_or_model_fault`, `threshold_wrong` and `other`, held by
+  `platform_alerts_acknowledgement_reason_valid`. A closed set is what makes the reasons countable
+  later; the note is what makes people use it. The note is trimmed and 1 to 200 characters, as a
+  backup's note is in the dashboard, and `other` needs one (`platform_alerts_acknowledgement_note_valid`).
+  `platform_alerts_acknowledgement_is_whole` keeps the time, the person and the reason together.
+- **The email is stamped from the token**, as `0222` stamps a decider's. Every reader of the alert
+  sees who acknowledged it, and `display_names_for()` names nobody for this.
+- **An Operator's second write.** Filing a proposal was the first ([The approvals queue](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)),
+  and this is not a write to an asset table either: it marks an alert, through one function, and
+  every asset table's write policies are unchanged.
+- **`acknowledge_alert(p_alert_id, p_reason, p_note)`** is `SECURITY DEFINER`. An Operator, a
+  Shopfloor Manager or an Administrator may call it; every other caller is `42501`, a machine
+  identity included, since `user_roles` gives one no role. It checks the select policy's own
+  predicate: a `service_identity` alert is the Administrator's alone (`0204`), and a row the caller
+  cannot read is a 404, the same as one that does not exist. It locks the row, so two people
+  acknowledging at once are taken in turn. A resolved occurrence, or one a newer occurrence has
+  replaced, is `23514`. One already acknowledged is `23505`, naming who and when: two people never
+  overwrite each other silently. A reason outside the set, a long note, and `other` without a note
+  are `22023`.
+- **`withdraw_alert_acknowledgement(p_alert_id)`**: the acknowledger, or a Shopfloor Manager or an
+  Administrator, on a firing occurrence they may read. A resolved occurrence keeps its
+  acknowledgement as its record, so it is refused.
+- **An acknowledgement holds for the fingerprint until it resolves.** The table is keyed on
+  occurrences, `(fingerprint, starts_at)`, so `trg_platform_alerts_inherit_acknowledgement`, a
+  `BEFORE INSERT` trigger, copies the acknowledgement onto a new firing occurrence from the newest
+  earlier occurrence of its fingerprint, while that one is still firing and acknowledged. The
+  newest earlier one, not the newest firing one: a later resolved occurrence supersedes a firing
+  one, as in `platform_alerts_active`, so a resolve that never arrived cannot carry an
+  acknowledgement past a resolve that did. Any writer gets it without changing, and
+  `grafana-alert-webhook` does not change. On the webhook's upsert the trigger fires for a row that
+  then conflicts too, but the update sets only the columns the webhook sends, so an occurrence's own
+  acknowledgement is never overwritten and a withdrawn one never comes back. Inheriting writes no
+  audit row: nobody acted.
+- **Each act writes one audit row**, `ALERT_ACKNOWLEDGED` or `ALERT_ACKNOWLEDGEMENT_WITHDRAWN`,
+  through `alert_audit_identity()`: the alert's name, its severity, when it started, the occurrence,
+  the fingerprint and the subject (kind, id, name and Sparkplug id). `old_data` is the alert and
+  `new_data` the alert with the reason and the note, so the drawer shows those as what changed; a
+  withdrawal holds the acknowledgement it took back, and whose it was, in `old_data`. The row is in
+  the alert's lane, `platform_alerts` with the md5 of the fingerprint as its id, one lane per alert
+  across its occurrences. `name` is the alert and the device or gateway it is about, so two
+  machines' alerts of one rule are two lanes that read apart. A machine identity's alert is
+  recorded in that identity's lane, `service_principals`. `0232` files both.
+
+**Realtime carries it.** `platform_alerts` is in the `supabase_realtime` publication with
+`REPLICA IDENTITY FULL`, publishing updates, and the dashboard's counter subscribes to every event
+on it. An acknowledgement is an `UPDATE`, so it reaches every open dashboard whose reader may see the
+row, and the publication needs no change.
+
+The file's self-check asserts the five columns, that the view returns them under
+`security_invoker`, that `authenticated` reads them and writes none, the three CHECKs, the trigger,
+both functions' `SECURITY DEFINER`, pin and grants, and that a request with no identity is refused
+by both. `test_a_person_acknowledges_an_alert.py` holds each role's acknowledgement and withdrawal,
+the refusals, the inheritance, the audit rows and who reads them.
+
+### The Audit Trail files an alert's acknowledgement (0232)
+
+`0231`'s two actions need a lane, a class and a place in the map of kinds.
+
+- **The lane.** `audit_domain_for()` files `platform_alerts` in the asset lane: the people who
+  acknowledge are an Operator, a Shopfloor Manager and an Administrator, and the asset lane's
+  readers are the roles that read the Audit Trail. A machine identity's alert is acknowledged in
+  that identity's lane, `service_principals`, which stays in the security lane: only an
+  Administrator may read the alert, so only an Administrator and an Auditor read the act. Filing it
+  under `platform_alerts` would have shown a Shopfloor Manager an alert `0204` keeps from them.
+- **The class.** `audit_event_class()` answers `operational` for both actions, after the reads and
+  before the security lane's rule. Without the rule, an acknowledgement in the security lane would
+  be Configuration, and one in the asset lane would be decided by its snapshots, so the map would
+  have to offer it under Configuration and Lifecycle too.
+- **The map.** `audit_trail_action_kinds()` lists both actions on both kinds, `operational` only,
+  and `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43).
+
+Each function is redeclared whole, unchanged but for those lines: `0001`, `0168`, `0193`, `0228`
+and `0229` replay first on every boot, and the last declaration stands. For `audit_domain_for()` the
+moment between them files nothing wrongly that matters: a row stamped then lands in the security
+lane, the fail-closed side.
+
+**The class indexes are rebuilt only when they could be wrong.** Each class's partial index keeps
+the class a row had when it was indexed, and check 199 (`scripts/check-docs-drift.mjs`) refuses a
+redeclaration of the classifier without a `REINDEX` of all five. The new rule changes the class of
+one kind of row only: an acknowledgement in the security lane. Such a row can be indexed under the
+old rules only if it was written on a boot, between `0228`'s declaration and this file's. So the
+file asks whether any such row exists, with `\gset`, and rebuilds the five indexes under `\if` only
+then. A site with none, every fresh install included, rebuilds nothing; one with some rebuilds on
+each boot, which is correct and costs a few seconds on a large trail.
+
+The file's self-check asserts both lanes, the class of both actions on both kinds, the map's rows,
+that the classifier is still an inlinable `IMMUTABLE` SQL function, each class index valid, and that
+three of `0228`'s rules answer as before. `test-harness/fixtures/audit-event-classes.json` holds the
+two lanes' answers, and `test_a_person_acknowledges_an_alert.py` reads both kinds back through the
+Operational class.
+
 ### An app's token reaches only its own routes (0235)
 
 GoTrue's OAuth server signs a person in to an app: Grafana, Node-RED, and the Studio and forge

@@ -2,7 +2,7 @@
  * Access Control > Apps: every app that signs people in with Aber, for an Administrator. A row is
  * the app, how and when it was registered, where it sends people back to, its type and how many
  * people allow it. Its drawer lists the people who allowed it, each with Revoke, and offers Remove
- * App, which Aber's own four refuse. Each act asks first, says what ended in a toast that links to
+ * App, which Aber's own refuse. Each act asks first, says what ended in a toast that links to
  * the app, and reads the lists again.
  */
 import React from 'react'

@@ -476,7 +476,7 @@ objects' own framing that the estimate does not reconstruct.
 ## 4. Supabase control plane and the ordering problem
 
 Nine Deployments (`envoy`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,
-`swagger-ui`), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the gateway
+`swagger-ui`; `meta` and `studio` only where Studio is on), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the gateway
 template and the storage-init script. The OpenAPI specifications are not among them: swagger-ui
 is their only reader, so they are baked into its image (swagger-ui/Dockerfile) and the ConfigMap
 that carried them is gone -- it was the largest object in the release Secret.

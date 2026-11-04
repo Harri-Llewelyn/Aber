@@ -75,6 +75,16 @@ const EXPECTED = [
     probe: '/realtime/v1/', marker: null,
     authMarker: null, hides: false },
 
+  // Refusals, not routes to an upstream: the gateway answers 400, after the key check, to multipart
+  // storage-api's parser must not see. Above both storage routes (assertion 6); the multipart pass
+  // of --authenticated probes them.
+  { service: 'storage-v1', route: 'storage-v1-long-boundary', paths: ['/storage/v1/'], strip: false,
+    auth: 'refused', probe: null, marker: null,
+    unprobeable: 'answers a multipart Content-Type only; the multipart pass of --authenticated sends one' },
+  { service: 'storage-v1', route: 'storage-v1-unreadable-multipart', paths: ['/storage/v1/'], strip: false,
+    auth: 'refused', probe: null, marker: null,
+    unprobeable: 'answers a multipart Content-Type only; the multipart pass of --authenticated sends one' },
+
   { service: 'storage-v1-public', route: 'storage-v1-public-routes',
     paths: ['/storage/v1/object/public/'], strip: true,
     auth: 'open', exemption: 'public-objects',
@@ -120,6 +130,33 @@ const EXPECTED = [
     auth: 'key-auth',
     probe: '/functions/v1/fplus-directory/ping', marker: '"service":"fplus-directory"' ,
     authMarker: 'fplus-directory', hides: true},
+];
+
+/**
+ * Content-Types for the two multipart refusals, and whether the gateway must refuse each. A boundary
+ * is 1 to 70 characters (RFC 2046 5.1.1). storage-api's parser, busboy, also reads one spelt with
+ * spaces, quotes or `boundary*=charset''`, and stalls on one of exactly 252 bytes.
+ */
+const a = (n) => 'a'.repeat(n);
+const MULTIPART_CASES = [
+  { name: 'a browser\'s', contentType: 'multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW', refused: false },
+  { name: '70 characters', contentType: `multipart/form-data; boundary=${a(70)}`, refused: false },
+  { name: '70 quoted, with a space', contentType: `multipart/form-data; boundary="${a(30)} ${a(39)}"`, refused: false },
+  { name: '70 quoted, then a charset', contentType: `multipart/form-data; boundary="${a(70)}"; charset=utf-8`, refused: false },
+  { name: 'exactly 200 characters', contentType: `multipart/form-data; boundary=abc; x=${a(163)}`, refused: false },
+  { name: 'not multipart', contentType: `text/plain; x=${a(300)}`, refused: false },
+  { name: '71 characters', contentType: `multipart/form-data; boundary=${a(71)}`, refused: true },
+  { name: '71 quoted', contentType: `multipart/form-data; boundary="${a(71)}"`, refused: true },
+  { name: '71 in capitals', contentType: `MULTIPART/FORM-DATA; BOUNDARY=${a(71)}`, refused: true },
+  { name: 'the 252 that stalls busboy', contentType: `multipart/form-data; boundary=${a(252)}`, refused: true },
+  { name: 'boundary*=utf-8\'\'', contentType: `multipart/form-data; boundary*=utf-8''${a(252)}`, refused: true },
+  { name: 'boundary*=ucs2\'\', which busboy widens', contentType: `multipart/form-data; boundary*=ucs2''${a(160)}`, refused: true },
+  { name: 'a quoted semicolon', contentType: `multipart/form-data; boundary="${a(120)};${a(131)}"`, refused: true },
+  { name: 'spaces, which busboy drops', contentType: `multipart/form-data; boundary=${Array(26).fill(a(10)).join(' ')}`, refused: true },
+  { name: 'empty quotes, which busboy drops', contentType: `multipart/form-data; boundary=${Array(63).fill(a(4)).join('""')}`, refused: true },
+  { name: 'a spaced-out key', contentType: `multipart/form-data; b o u n d a r y = ${Array(26).fill(a(10)).join(' ')}`, refused: true },
+  { name: 'a byte outside ASCII', contentType: 'multipart/form-data; boundary=abc\xffdef', refused: true },
+  { name: '201 characters', contentType: `multipart/form-data; boundary=abc; x=${a(164)}`, refused: true },
 ];
 
 /**
@@ -505,6 +542,54 @@ if (RUNTIME) {
       }
     }
 
+    // The multipart pass (assertion 6 of the template mode). Each request carries the key, so the
+    // gate admits it. Refused ones must be answered by the gateway, without an upstream timing
+    // header. A 70-character boundary must reach storage-api, which reads the form and then refuses
+    // the anonymous upload itself. The S3 protocol, which reads a form before any credential, must
+    // answer storage-api's 404 because the chart turns it off.
+    {
+      const UPLOAD = '/storage/v1/object/asset-3d-models/__gateway_probe__.bin';
+      const S3 = '/storage/v1/s3/asset-3d-models';
+      const form = (boundary) => [`--${boundary}`,
+        'Content-Disposition: form-data; name="file"; filename="probe.bin"',
+        'Content-Type: application/octet-stream', '', 'probe', `--${boundary}--`, ''].join('\r\n');
+      const send = (path, contentType, boundary) => probeOnce(`${base}${path}`,
+        { apikey: anonKey, 'Content-Type': contentType }, { method: 'POST', body: form(boundary) });
+      const upstream = (r) => r.headers['x-envoy-upstream-service-time'] !== undefined;
+      const b70 = 'a'.repeat(70);
+      const b71 = 'a'.repeat(71);
+      const b252 = 'a'.repeat(252);
+      const checks = [
+        ['a 71-character boundary to an upload', await send(UPLOAD, `multipart/form-data; boundary=${b71}`, b71),
+          (r) => r.status === 400 && !upstream(r) && r.body.includes('longer than 70'), 'the gateway\'s 400'],
+        ['the 252-character boundary busboy loops on, to the S3 protocol', await send(S3, `multipart/form-data; boundary=${b252}`, b252),
+          (r) => r.status === 400 && !upstream(r) && r.body.includes('longer than 70'), 'the gateway\'s 400'],
+        ['a 201-character multipart Content-Type', await send(UPLOAD, `multipart/form-data; boundary=${b70}; x=${'a'.repeat(97)}`, b70),
+          (r) => r.status === 400 && !upstream(r) && r.body.includes('printable ASCII'), 'the gateway\'s 400'],
+        ['a 70-character boundary to an upload', await send(UPLOAD, `multipart/form-data; boundary=${b70}`, b70),
+          (r) => upstream(r) && r.status >= 400 && r.body.includes('statusCode'), 'storage-api\'s own refusal of an anonymous upload'],
+        ['a 70-character boundary to the S3 protocol', await send(S3, `multipart/form-data; boundary=${b70}`, b70),
+          (r) => upstream(r) && r.status === 404, 'storage-api\'s 404: the S3 protocol is off'],
+      ];
+      for (const [what, r, okay, want] of checks) {
+        if (r.error) authProblems.push(`multipart pass, ${what}: ${r.error}`);
+        else if (!okay(r)) {
+          authProblems.push(
+            `multipart pass: ${what} answered HTTP ${r.status}${upstream(r) ? ' from storage-api' : ' from the gateway'} `
+            + `(${r.body.slice(0, 120)}), not ${want}. See supabase/envoy.yaml, storage-v1-long-boundary.`
+          );
+        }
+      }
+      if (!checks.some(([, r, okay]) => r.error || !okay(r))) {
+        authOk.push('multipart: boundaries over 70 characters and oversized Content-Types are refused by the gateway, '
+          + 'a 70-character one reaches storage-api, and its S3 protocol is off');
+      }
+    }
+
+    // Every OAuth client the stack uses is seeded, and a token issued to any client carries its
+    // person's whole role. An empty registration is refused whether or not registration is on, so
+    // this creates nothing; only the refusal's reason tells the two apart.
+
     // An app's token reaches only its own routes, decided on the VERIFIED client_id: a token that
     // names Grafana's client and verifies against no key goes on, as any unverifiable token does, to
     // be refused by its upstream. On PostgREST, which answers it itself, and on Node-RED's userinfo,
@@ -824,7 +909,69 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   }
 }
 
-// ---- 6. An app's token reaches only its own routes. ---------------------------------------------
+// ---- 6. Multipart storage-api's parser must not see is refused above every route to it. --------
+// busboy loops on a 252-byte boundary; the two refusals keep every boundary within RFC 2046's 70,
+// and the chart turns off the S3 protocol, which parses a form before any credential.
+{
+  const before = problems.length;
+  const REFUSALS = ['storage-v1-long-boundary', 'storage-v1-unreadable-multipart'];
+  const STORAGE_CHART = 'deploy/helm/aber/templates/supabase/storage.yaml';
+  const toStorage = routeNames.filter((n) => /\bcluster: storage-v1\b/.test(routeText(n)));
+  const offListener = (template.match(/\bcluster: storage-v1\b/g) || []).length - toStorage.length;
+  if (offListener) {
+    fail(`${ENVOY_TEMPLATE} routes to storage-v1 from ${offListener} place(s) off the API listener, where no multipart refusal stands.`);
+  }
+
+  const patterns = [];
+  for (const name of REFUSALS) {
+    if (!routeNames.includes(name)) {
+      fail(`${ENVOY_TEMPLATE}: the API listener has no ${name} route, so a multipart boundary busboy loops on reaches storage-api.`);
+      continue;
+    }
+    const first = toStorage.filter((n) => routeNames.indexOf(n) < routeNames.indexOf(name));
+    if (first.length) {
+      fail(`${ENVOY_TEMPLATE}: ${first.join(', ')} comes before ${name}. Routes are first-match, so storage-api sees the request first.`);
+    }
+    const text = routeText(name);
+    for (const [fragment, what] of [
+      ['prefix: "/storage/v1/"', 'it covers every path to storage-api'],
+      ['- name: "content-type"', 'it reads the Content-Type'],
+      ['status: 400', 'the gateway answers 400 itself'],
+    ]) {
+      if (!text.includes(fragment)) fail(`${ENVOY_TEMPLATE}: ${name}: ${what} (expected ${JSON.stringify(fragment)}).`);
+    }
+    // RE2 matches a header in full; these patterns read the same in JavaScript.
+    const m = text.match(/regex: '((?:[^']|'')*)'/);
+    if (m) patterns.push({ name, re: new RegExp(`^(?:${m[1].replace(/''/g, "'")})$`) });
+    else fail(`${ENVOY_TEMPLATE}: ${name} matches the Content-Type with no single-quoted safe_regex this script can read.`);
+  }
+  if (patterns.length === REFUSALS.length) {
+    for (const c of MULTIPART_CASES) {
+      const by = patterns.filter((p) => p.re.test(c.contentType)).map((p) => p.name);
+      if (Boolean(by.length) !== c.refused) {
+        fail(
+          `${ENVOY_TEMPLATE}: a Content-Type with ${c.name} (${c.contentType.length} characters) is `
+          + `${by.length ? `refused by ${by.join(' and ')}` : 'passed to storage-api'}; it must be ${c.refused ? 'refused' : 'passed'}.`
+        );
+      }
+    }
+  }
+  if (!template.includes('re2.max_program_size.error_level:')) {
+    fail(`${ENVOY_TEMPLATE}: the refusals' regexes exceed RE2's default program size, and Envoy refuses the config without re2.max_program_size.error_level.`);
+  }
+  if (!/- name: S3_PROTOCOL_ENABLED\s+value: "false"/.test(read(STORAGE_CHART))) {
+    fail(`${STORAGE_CHART} must set S3_PROTOCOL_ENABLED to "false": storage-api's S3 protocol parses a multipart form before any credential.`);
+  }
+  if (problems.length === before) {
+    pass(
+      `the ${REFUSALS.length} multipart refusals come before every route to storage-api and refuse `
+      + `${MULTIPART_CASES.filter((c) => c.refused).length} of the ${MULTIPART_CASES.length} fixture Content-Types, `
+      + 'passing every conforming one; the S3 protocol is off'
+    );
+  }
+}
+
+// ---- 7. An app's token reaches only its own routes. ---------------------------------------------
 // jwt_authn verifies the bearer and records its claims without refusing anything; rbac then admits a
 // token with no client_id anywhere, every app's on /auth/v1/, and each app's on APP_ROUTES' functions.
 {

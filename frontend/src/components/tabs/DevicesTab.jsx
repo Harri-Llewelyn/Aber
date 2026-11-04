@@ -1,4 +1,5 @@
-import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
+import { reasonLabel } from '../../utils/alertAcknowledgement'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { approvalsForUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
@@ -81,6 +82,7 @@ import {
   IconAlertTriangle,
   IconPlay,
   IconAlertCircle,
+  IconCheck,
   IconDownload,
   IconRadio,
   IconLayoutDashboard,
@@ -1057,8 +1059,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                     {badge.label}
                                   </Badge>
                                   {/* The alert sits beside the lifecycle state, not instead of it:
-                                      an overheating machine is still ONLINE. */}
-                                  {alert && (
+                                      an overheating machine is still ONLINE. Acknowledged, it is
+                                      the hollow badge with a tick: still firing, but somebody has it. */}
+                                  {alert && alertState(alert) === 'acknowledged' && (
+                                    <Badge
+                                      tone="danger"
+                                      size="sm"
+                                      className="badge-acknowledged"
+                                      icon={<IconCheck size={11} />}
+                                      title={`${alert.alert_name} — acknowledged by ${alert.acknowledged_by_email || 'someone'}: ${reasonLabel(alert.acknowledgement_reason)}`}
+                                    >
+                                      ACKNOWLEDGED
+                                    </Badge>
+                                  )}
+                                  {alert && alertState(alert) === 'alert' && (
                                     <Badge
                                       tone={alert.severity === 'critical' ? 'danger' : 'warning'}
                                       size="sm"

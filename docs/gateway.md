@@ -70,6 +70,20 @@ static check fails if it moves below. The cost is the Directory's: anyone who re
 can start an `aas-api` worker without a key. The publishable key was never a secret, since every
 browser receives it in `/config.js`.
 
+**Two refusals sit above both storage routes.** storage-api's multipart parser, busboy, loops on a
+boundary of exactly 252 bytes (CVE-2026-19484). A conforming boundary is 1 to 70 characters (RFC
+2046, section 5.1.1), so the gateway answers `400` itself, after the key check, to either of these:
+
+- a multipart `Content-Type` whose boundary is longer than 70 characters;
+- a multipart `Content-Type` over 200 characters or outside printable ASCII.
+
+The second rule covers the other spellings busboy reads: spaces, quotes and `boundary*=charset''`.
+None of them can reach 252 bytes in 200 characters. Both rules use regexes longer than RE2's
+default program size, so the template raises `re2.max_program_size.error_level`. The chart also
+turns storage-api's S3 protocol off (`S3_PROTOCOL_ENABLED`): nothing here uses it, and its routes
+read a form before checking any credential. The static check tests both regexes against fixtures,
+and `--authenticated` sends them.
+
 Envoy semantics that produce a stack that looks fine and is not are listed in the template's
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant
 from the Host label, per-route credential hiding, and the Directory routes keeping their path.

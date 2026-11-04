@@ -28,7 +28,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Role** is shown on each row, and in the person's drawer. Each person holds one role. To change it, select **Change Role** in their drawer.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
-- **Operator** reads the shopfloor and its live readings, and can propose changes.
+- **Operator** reads the shopfloor and its live readings, and can propose changes and acknowledge an alert.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
 - Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View Their Changes**, and **Remove Access** or **Restore Access**.
@@ -74,7 +74,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 An app such as Grafana can sign a person in with their Aber account. The first time it does, it asks the person to allow it. They answer once, and it remembers. **Apps** lists every app that can do this, and who has allowed each.
 
 - **App** is the app's name. The name it was registered with is shown under it.
-- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own four apps: Grafana, Node-RED, Studio and the forge. **Added by hand** is an app added through the sign-in service's admin API.
+- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own apps: Grafana, Node-RED and the forge, and Studio where your site runs it. **Added by hand** is an app added through the sign-in service's admin API.
 - **Sends people back to** lists the addresses the sign-in service may send a person to after they sign in. It refuses any other.
 - **Type** is **Confidential** for an app that holds a secret, on a server. A **Public** app holds none.
 - **People** is how many people allow the app now.
@@ -89,7 +89,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - A person can revoke their own approval on their **Profile** page, on the **Allowed Apps** tab.
 - **View Audit Trail**, in the app's drawer, opens the Audit Trail on the app's own history: when it was registered, removed or restored. A person allowing an app, or that approval being revoked, is in that person's history instead.
 - **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
-- **Aber's own four apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
+- **Aber's own apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
 - Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.
 
 ## The other tabs

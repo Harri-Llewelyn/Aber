@@ -90,6 +90,8 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
 - **Upgrading to 1.8.0?** Add the signing values it needs, and list the tokens to mint again,
   first: see [*every token is signed ES256*](#from-180-every-token-is-signed-es256).
+- **Use Supabase Studio?** Turn it and postgres-meta on in your values first: see
+  [*Studio and postgres-meta are off by default*](#from-180-studio-and-postgres-meta-are-off-by-default).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -1668,6 +1670,34 @@ The reasons, and how to rotate the key pair later, are in
 [supabase/README.md](../../supabase/README.md#signing-with-es256).
 
 ---
+
+### From 1.8.0, Studio and postgres-meta are off by default
+
+`supabaseStudio.enabled` and `supabaseMeta.enabled` now default to `false` (#1354). Up to 1.7.x
+the chart ran both on every site, though Studio's route was off by default. Aber's dashboard does the
+site's own work, and Studio carried most of the image scan's findings.
+
+The upgrade removes the `supabase-studio` and `supabase-meta` Deployments on a site that never set
+the keys. It also removes the gateway's studio listener, its port and its Secret keys. Studio keeps
+nothing on a volume, so nothing is lost: its saved SQL snippets went with each replaced pod.
+
+To keep Studio, set both keys before upgrading. Keep `ingress.routes.studio` and its two secrets as
+they were:
+
+```yaml
+supabaseStudio:
+  enabled: true
+supabaseMeta:
+  enabled: true
+```
+
+The two are on or off together, and the render fails if only one is on. So does
+`ingress.routes.studio: true` with Studio off.
+
+- **Studio's sign-in stays registered.** A site that ran Studio keeps its OAuth client, though
+  nothing uses it with Studio off. Aber registers it again only while Studio is on.
+- **The System page** shows Studio's row with no image recorded, as for any service the chart does
+  not deploy.
 
 ## Backups
 

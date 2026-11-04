@@ -47,9 +47,9 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { plural } from '../../utils/format'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
-import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
@@ -698,15 +698,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 <div className="context-device-list">
                   {selectedCellDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
+                    const alert = alertForDevice(alerts, d)
                     return (
                       <RouteLink
                         key={d.asset_id}
                         className="chip chip-link"
                         to={deviceUrl(d.asset_id)}
                         onNavigate={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
+                        title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}`}
                       >
-                        <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
+                        {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
+                        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
                         <span className="chip-name">{d.asset_name}</span>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>

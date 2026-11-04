@@ -1774,7 +1774,7 @@ paths:
         `deleted_at`, as GoTrue's admin `DELETE /auth/v1/admin/oauth/clients/{id}` does, and in the
         same transaction revokes every approval of it and deletes every session it holds, so no
         refresh token it was issued works. An `APP_REMOVED` row in the app's lane, and an
-        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own four apps are refused:
+        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own apps are refused:
         `0002` registers them again on every boot. Administrator only.
       requestBody:
         required: true
@@ -1960,6 +1960,72 @@ paths:
               schema: { type: integer, nullable: true }
         '400': { description: 'A level, range, service name, filter or window outside the rule (`22023`): a range or two ends, not both, the ends in order and at most 169 hours apart.' }
         '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/acknowledge_alert:
+    post:
+      tags: [Registry]
+      summary: Acknowledge a firing alert, with a reason
+      description: |
+        Marks one firing occurrence in `platform_alerts` as seen by you, with a reason and an
+        optional note (`0231`). It stays firing: the dashboard keeps it listed and stops counting
+        it. A new occurrence of the same fingerprint inherits the acknowledgement until the alert
+        resolves.
+
+        An Operator, a Shopfloor Manager or an Administrator may call it, on a row they may read:
+        an alert about a machine identity is an Administrator's alone, and any other caller gets
+        the 404 a missing row gets. Writes one `ALERT_ACKNOWLEDGED` row in the Audit Trail, in the
+        alert's `platform_alerts` lane, or the identity's `service_principals` lane for an alert
+        about its token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_alert_id, p_reason]
+              properties:
+                p_alert_id: { type: string, format: uuid, description: 'The occurrence: `id` from `platform_alerts_active`.' }
+                p_reason: { type: string, enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other] }
+                p_note: { type: string, nullable: true, maxLength: 200, description: 'Trimmed; blank is none. Required with `other`.' }
+      responses:
+        '200':
+          description: The row, acknowledged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAlert' }
+        '400': { description: 'A resolved occurrence, or one a newer occurrence has replaced (`23514`); a reason outside the set, a note over 200 characters, or `other` without a note (`22023`).' }
+        '403': { description: 'Not an Operator, a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No alert with that id that you may read.' }
+        '409': { description: 'Already acknowledged (`23505`). The message names who and when.' }
+
+  /rest/v1/rpc/withdraw_alert_acknowledgement:
+    post:
+      tags: [Registry]
+      summary: Withdraw an alert's acknowledgement
+      description: |
+        Clears the acknowledgement of one firing occurrence, so the dashboard counts it again
+        (`0231`). The person who acknowledged it may withdraw it, and so may a Shopfloor Manager or
+        an Administrator. A resolved occurrence keeps its acknowledgement as its record. Writes one
+        `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` row in the Audit Trail, whose `old_data` holds the
+        acknowledgement and whose it was.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_alert_id]
+              properties:
+                p_alert_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The row, unacknowledged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAlert' }
+        '400': { description: 'Not acknowledged, or resolved (`23514`).' }
+        '403': { description: 'Not the acknowledger, a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No alert with that id that you may read.' }
 
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
@@ -2528,6 +2594,13 @@ paths:
         Each row written since 0220 keeps the uid of the rule that raised it (`rule_uid`) and the
         alert's `labels` and `values` as Grafana sent them. The upsert key is still
         `(fingerprint, starts_at)`.
+
+        **An occurrence can be acknowledged (0231)**: who, when, a reason and a note, in five
+        columns. `status` stays `firing` or `resolved`, and an acknowledgement never resolves a
+        row. Write them through `/rest/v1/rpc/acknowledge_alert` and
+        `/rest/v1/rpc/withdraw_alert_acknowledgement`; no role may write them here. A new
+        occurrence of a fingerprint takes the acknowledgement of the one before it while that one
+        is still firing, so an acknowledgement holds until the alert resolves.
       parameters:
         - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
         - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
@@ -3153,7 +3226,9 @@ paths:
         A `service_identity` row is returned to an Administrator alone, as from `platform_alerts`.
 
         It returns `rule_uid`, `labels` and `values` as `platform_alerts` does (0220). The dashboard
-        links each alert to its rule by `rule_uid`.
+        links each alert to its rule by `rule_uid`. An acknowledged alert is still firing, so it is
+        still returned, with its acknowledgement (0231); the dashboard counts only the rows whose
+        `acknowledged_at` is null.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -6309,7 +6384,7 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6325,7 +6400,7 @@ components:
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
-                 SERVICE_LOGS_READ]
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6349,7 +6424,10 @@ components:
             `record_broker_account_deleted()` (0218). `SERVICE_LOGS_READ` (0225) is an
             Administrator reading a service's log lines on the System page, in that service's
             `service_logs` lane, written by `record_service_logs_read()` when the read differs
-            from their last.
+            from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
+            written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
+            `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
+            alert about its token.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -7123,6 +7201,21 @@ components:
             Null on a row written before 0220, when Grafana sent none, or for a rule Grafana could
             not evaluate (it sends -1 for each).
           example: { A: 74.5, B: 74.5, C: 1 }
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When a person acknowledged this occurrence, or the earlier occurrence it inherited the
+            acknowledgement from (0231). Null while unacknowledged. Written only by
+            `/rest/v1/rpc/acknowledge_alert` and `/rest/v1/rpc/withdraw_alert_acknowledgement`.
+        acknowledged_by: { type: string, format: uuid, nullable: true, description: 'The `auth.users` id of the person who acknowledged it.' }
+        acknowledged_by_email: { type: string, nullable: true, description: 'Their email address as their token carried it when they acknowledged.' }
+        acknowledgement_reason:
+          type: string
+          nullable: true
+          enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other]
+        acknowledgement_note: { type: string, nullable: true, maxLength: 200, description: 'Their own words, trimmed. Required with the reason `other`.' }
 
     DeviceNameplate:
       type: object

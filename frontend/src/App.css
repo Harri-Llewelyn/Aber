@@ -2268,6 +2268,14 @@ td.row-actions, th.row-actions {
   gap: 4px;
 }
 
+/* An alert somebody has acknowledged: the danger badge hollow, bordered, with a tick in front, so
+   it reads apart from an unacknowledged ALARM or WARNING by shape as well as words. */
+.badge-acknowledged {
+  background: transparent;
+  border: 1px solid var(--danger);
+  gap: 4px;
+}
+
 .badge-dot {
   width: 6px;
   height: 6px;
@@ -3530,6 +3538,7 @@ span.area-plan-pin { cursor: inherit; }
 .area-plan-pin-attention { --pin-colour: var(--warning); }
 .area-plan-pin-idle      { --pin-colour: var(--text-dim); }
 .area-plan-pin-alert     { --pin-colour: var(--danger); }
+.area-plan-pin-acknowledged { --pin-colour: var(--danger); }
 .area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
 /* The Site Map's grid sets --pin-size by its column count; 40px elsewhere, and the largest drawn. */
@@ -3600,6 +3609,46 @@ span.area-plan-pin { cursor: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .area-plan-pin-alert .area-plan-pin-disc::after { animation: none; opacity: 0.6; }
+}
+
+/* An acknowledged alert: the red ring without the pulse, and a tick on the disc's corner, so it
+   differs from Alert firing by shape and motion as well as by the tooltip's words. The badge is
+   ::after and the tick, two borders turned, is ::before above it. */
+.area-plan-pin-acknowledged .area-plan-pin-disc::after,
+.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  content: '';
+  position: absolute;
+}
+.area-plan-pin-acknowledged .area-plan-pin-disc::after {
+  right: -5px;
+  bottom: -5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  z-index: 1;
+  right: 0;
+  bottom: -1px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bg-card);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.area-plan-pin-small.area-plan-pin-acknowledged .area-plan-pin-disc::after {
+  right: -4px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+}
+.area-plan-pin-small.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  right: -1px;
+  bottom: -2px;
+  width: 2px;
+  height: 4px;
+  border-width: 0 1.5px 1.5px 0;
 }
 
 /* Under the grid of areas: the cells filed in no area, which no plan can draw. */
@@ -3733,9 +3782,11 @@ span.area-plan-pin { cursor: inherit; }
 .tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
 /* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
 .tile-dot-idle      { background: var(--text-dim); }
-/* An area whose device Grafana has raised an alert against: the one red dot, and only on an area
-   card, where a pin inside is red for the same reason. The legend keeps the chip swatch. */
+/* An area with an alert firing against a device in it: the one red dot, and only on an area card,
+   where a pin inside is red for the same reason. The legend keeps the chip swatch. */
 .tile-dot-alert     { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+/* Every alert there acknowledged: the same red as a ring, with no glow. */
+.tile-dot-acknowledged { background: transparent; box-shadow: inset 0 0 0 2px var(--danger); }
 
 /* Legend chip swatch: the alert entry describes a chip, not a dot, since an alert fires against one
    device while the dots roll up a whole lane or area. Sized to sit on the same 8px optical line as
@@ -3750,6 +3801,15 @@ span.area-plan-pin { cursor: inherit; }
 /* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: var(--danger-tint); }
+/* An acknowledged alert's chip, hollow, with the tick its flag carries. */
+.legend-chip-acknowledged {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger-text);
+}
 
 /* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. An <a>
    when it opens another page (Ctrl-click opens a new tab), a <button> when it acts on this one.
@@ -3981,7 +4041,7 @@ a.chip { text-decoration: none; }
 
 .alert-pill-item {
   display: flex;
-  gap: 9px;
+  flex-direction: column;
   padding: 0;
   border-bottom: 1px solid var(--border);
 }
@@ -4015,8 +4075,11 @@ a.chip { text-decoration: none; }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
    alert's sparkplug_id happens not to resolve to a device. */
-.alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }
-.alert-pill-item > .alert-pill-item-body { padding: 10px 12px 10px 0; }
+.alert-pill-item-static {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+}
 
 .alert-pill-dot {
   width: 7px;
@@ -4029,6 +4092,31 @@ a.chip { text-decoration: none; }
 .alert-pill-dot-critical { background: var(--danger); }
 .alert-pill-dot-warning  { background: var(--warning); }
 .alert-pill-dot-info     { background: var(--accent); }
+/* Acknowledged: the same hue as a ring, so the row reads apart from an unacknowledged one by shape. */
+.alert-pill-dot.alert-pill-dot-acknowledged {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.alert-pill-dot-warning.alert-pill-dot-acknowledged { box-shadow: inset 0 0 0 1.5px var(--warning); }
+.alert-pill-dot-info.alert-pill-dot-acknowledged    { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* Under an alert's name: Acknowledge, or who acknowledged it, when and why, with Withdraw. Indented
+   to the name, past the dot: 12px of row padding, the 7px dot and its 9px gap. */
+.alert-pill-ack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 12px 10px 28px;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.alert-pill-ack-words { display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
+.alert-pill-ack-tick { flex-shrink: 0; margin-top: 1px; color: var(--success-text); }
+.alert-pill-ack-note { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
+.alert-pill-ack .btn-sm { padding: 2px 8px; font-size: 11px; }
 
 .alert-pill-item-body { min-width: 0; }
 .alert-pill-item-name { font-size: 12px; font-weight: 600; }
@@ -4581,6 +4669,8 @@ a.chip { text-decoration: none; }
 /* --danger-text and --chip-offline-text, not --danger and --text-muted: both measure under AA on the
    fill their chip paints. */
 .chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
+/* An acknowledged alert: the danger chip hollow, its ACKNOWLEDGED flag carrying the tick. */
+.chip-acknowledged { border-color: var(--danger); background: var(--bg-card); color: var(--text-primary); font-weight: 600; }
 .chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--chip-offline-text); font-weight: 500; }
 
 /* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
@@ -5250,11 +5340,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 /* ===== Time window control ===== */
-/* ‹ the window in words ›, Today and the span switch (common/TimeWindowControl.jsx), in a toolbar
-   after the search box. One flex item, so a toolbar that wraps moves it to a line of its own whole;
-   only on a line narrower than itself do Today and the switch go under the arrows, which never
-   part from the words. The words keep a minimum width, so › stays put under the pointer while a
-   week or a day is stepped. */
+/* ‹ the window in words ›, the span switch, and Zoom in and Zoom out where a page asks for them
+   (common/TimeWindowControl.jsx), in a toolbar after the search box. One flex item, so a toolbar
+   that wraps moves it to a line of its own whole; only on a line narrower than itself do the switch
+   and the zoom go under the arrows, which never part from the words. The words keep a minimum
+   width, so › stays put under the pointer while a week or a day is stepped. */
 .time-window {
   display: inline-flex;
   align-items: center;
@@ -5270,6 +5360,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 .time-window-step { padding-left: 7px; padding-right: 7px; }
+
+/* Zoom in and Zoom out, after the switch, a pair that wraps together. */
+.time-window-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .time-window-pick {
   min-width: 12.5rem;
@@ -5678,6 +5775,49 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   justify-content: flex-end;
   border-right: 1px dashed var(--text-dim);
 }
+
+/* A drag across a track zooms to the band it shades. Nothing in a track is text to select, so a
+   drag never selects the ticks it crosses; a marker keeps its own pointer. */
+.trail-swimlanes .trail-track {
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* The band, drawn where the hatched parts are: on the axis, on each section heading and in the
+   layer behind the rows. A translucent accent with an edge each side, so it reads on both themes
+   and over a hatch. */
+.trail-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+/* What a release sets, "10:05 – 10:40, 35 min", on the axis, which stays in view. Opaque over the
+   ticks, centred on the band and held inside the track near either end, as the now marker is; an
+   outline rather than the now marker's fill, so the two are not read as one. */
+.trail-band-words {
+  position: absolute;
+  top: 3px;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.trail-band-words-start { transform: none; }
+.trail-band-words-end   { transform: translateX(-100%); }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
