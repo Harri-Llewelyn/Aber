@@ -4987,6 +4987,130 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 214. The Site Map's help names each state its legend draws, and neither alert state names what
+// raised the alert. STATUS_WORD in SiteMapTab.jsx is the legend's words; the help's "What the states
+// mean" gives each a bullet in bold and says how many the legend names. More than one thing writes
+// platform_alerts, so STATUS_LABEL's two alert entries, the help's two bullets and the counter's
+// footer name no evaluator.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/SiteMapTab.jsx';
+  const PILL = 'frontend/src/components/common/AlertPill.jsx';
+  const HELP = 'help/pages/site-map.md';
+  const NUMBER = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const tab = read(TAB);
+  const help = read(HELP);
+  const problems214 = [];
+  const block = (name) => tab.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\s*\\}`))?.[1] ?? '';
+  const words = Object.fromEntries([...block('STATUS_WORD').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const labels = Object.fromEntries([...block('STATUS_LABEL').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  if (!words.alert || !words.acknowledged) problems214.push(`${TAB}: STATUS_WORD has no alert or acknowledged entry`);
+  const states = help.slice(help.indexOf('## What the states mean'), help.indexOf('\n## ', help.indexOf('## What the states mean') + 1));
+  for (const word of Object.values(words)) {
+    if (!states.includes(`- **${word}**`)) problems214.push(`${HELP}: "What the states mean" has no bullet for **${word}**`);
+  }
+  const count = Object.keys(words).length;
+  if (!help.includes(`names the ${NUMBER[count] ?? count} states below`)) {
+    problems214.push(`${HELP}: the legend's bullet does not say it names the ${NUMBER[count] ?? count} states`);
+  }
+  const named = (text) => /Grafana|evaluat/i.test(text);
+  for (const key of ['alert', 'acknowledged']) {
+    if (named(labels[key] ?? '')) problems214.push(`${TAB}: STATUS_LABEL.${key} names what raised the alert`);
+    const bullet = states.split('\n').find((l) => l.startsWith(`- **${words[key]}**`)) ?? '';
+    if (named(bullet)) problems214.push(`${HELP}: the **${words[key]}** bullet names what raised the alert`);
+  }
+  const pill = read(PILL);
+  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('Alert history in Grafana'));
+  if (!foot || /Evaluated by|silences/i.test(foot.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))) {
+    problems214.push(`${PILL}: the counter's footer names an evaluator or says where silences live`);
+  }
+  if (problems214.length) {
+    fail('the Site Map help and the alert states disagree:\n' + problems214.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Site Map help names the ${count} states its legend draws, and no alert state or the counter's footer names an evaluator`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 215. The reasons for acknowledging an alert are named alike in the help and the API reference.
+// ALERT_ACKNOWLEDGEMENT_REASONS (utils/alertAcknowledgement.js) is the dialog's list, which mirror
+// check 45 holds to the database. The Site Map help's steps name each label in bold, and
+// docs/openapi.yaml gives acknowledge_alert's p_reason and DeviceAlert's acknowledgement_reason
+// the values. The note's limit is stated alike in the util, the CHECK and the reference.
+// -------------------------------------------------------------------------------------------------
+{
+  const UTIL = 'frontend/src/utils/alertAcknowledgement.js';
+  const HELP = 'help/pages/site-map.md';
+  const SPEC = 'docs/openapi.yaml';
+  const util = read(UTIL);
+  const spec = read(SPEC);
+  const problems215 = [];
+  const reasons = [...(util.match(/export const ALERT_ACKNOWLEDGEMENT_REASONS = \[([\s\S]*?)\n\]/)?.[1] ?? '')
+    .matchAll(/value: '([a-z_]+)', label: '([^']+)'/g)].map((m) => ({ value: m[1], label: m[2] }));
+  if (!reasons.length) problems215.push(`${UTIL}: could not read ALERT_ACKNOWLEDGEMENT_REASONS`);
+  const help = read(HELP);
+  const step = help.split('\n').find((l) => /^\d+\. Choose a reason: /.test(l)) ?? '';
+  if (!step) problems215.push(`${HELP}: no "Choose a reason" step`);
+  for (const r of reasons) {
+    if (step && !step.includes(`**${r.label}**`)) problems215.push(`${HELP}: the reasons step does not name **${r.label}**`);
+  }
+  const values = reasons.map((r) => r.value).join(', ');
+  const entry = spec.slice(spec.indexOf('\n  /rest/v1/rpc/acknowledge_alert:'), spec.indexOf('\n  /rest/v1/rpc/withdraw_alert_acknowledgement:'));
+  if (!entry.includes(`p_reason: { type: string, enum: [${values}] }`)) {
+    problems215.push(`${SPEC}: acknowledge_alert's p_reason does not list ${values}`);
+  }
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  if (!schema.includes(`enum: [${values}]`)) problems215.push(`${SPEC}: DeviceAlert's acknowledgement_reason does not list ${values}`);
+  const max = util.match(/export const ALERT_ACKNOWLEDGEMENT_NOTE_MAX = (\d+)/)?.[1];
+  const sql = read('supabase/migrations/0231_a_person_acknowledges_an_alert.sql');
+  if (!max || !sql.includes(`(char_length(acknowledgement_note) <= ${max})`) || !entry.includes(`maxLength: ${max}`)) {
+    problems215.push(`the note's limit (${max ?? 'unread'} in ${UTIL}) is not the CHECK's and the API reference's`);
+  }
+  if (problems215.length) {
+    fail('the reasons for acknowledging an alert are named otherwise than the dialog lists them:\n' +
+      problems215.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and the API reference name the ${reasons.length} reasons for acknowledging an alert, and the note's limit of ${max}, as the dialog does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 216. The API reference documents the acknowledgement as the migration declares it: both
+// functions under their own paths, each column on DeviceAlert, and both actions on
+// AuditTrailEntry. A function missing from the reference is one an API client never learns of.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const MIGRATION = 'supabase/migrations/0231_a_person_acknowledges_an_alert.sql';
+  const spec = read(SPEC);
+  const sql = read(MIGRATION);
+  const problems216 = [];
+  const functions = [...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(/g)].map((m) => m[1])
+    .filter((fn) => new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${fn}\\([^)]*\\) TO authenticated`).test(sql));
+  if (functions.length !== 2) problems216.push(`${MIGRATION}: expected two functions granted to authenticated, found ${functions.join(', ') || 'none'}`);
+  for (const fn of functions) {
+    if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems216.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
+  }
+  const columns = [...(sql.match(/-- 1\. The columns[\s\S]*?-- 2\./)?.[0] ?? '')
+    .matchAll(/COMMENT ON COLUMN public\.platform_alerts\.(\w+) IS/g)].map((m) => m[1]);
+  if (columns.length !== 5) problems216.push(`${MIGRATION}: expected five column comments, found ${columns.length}`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const c of columns) {
+    if (!new RegExp(`^ {8}${c}:`, 'm').test(schema)) problems216.push(`${SPEC}: DeviceAlert does not document ${c}`);
+  }
+  const actions = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const action of ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN']) {
+    if (!actions.includes(action)) problems216.push(`${SPEC}: AuditTrailEntry does not list ${action}`);
+  }
+  if (problems216.length) {
+    fail('the API reference does not document the acknowledgement as 0231 declares it:\n' +
+      problems216.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/openapi.yaml documents ${functions.join(' and ')}, the ${columns.length} acknowledgement columns and both audit actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 92. A nested address loads the dashboard.
 //
 // A page's tab is the second path segment (`/devices/quarantine`, frontend/README.md Routing), so a

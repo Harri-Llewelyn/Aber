@@ -73,6 +73,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
+| `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
 
 Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
 `sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
@@ -1792,6 +1793,19 @@ passes `{ record: false }`, as a Grafana alert does.
 - **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
   the `role="alert"` region. The summary is in the alert counter's list.
+- **The counter counts what nobody has acknowledged** (`common/AlertPill.jsx`, 0231). The pill's
+  number, the tab title and the favicon count the firing alerts with no acknowledgement
+  (`unacknowledgedAlerts()` in `utils/alertAcknowledgement.js`, which `App` passes to the title and
+  the favicon). The list keeps an acknowledged alert, after the others, with a hollow dot, a tick and
+  who acknowledged it, when, the reason and the note. **Acknowledge** opens `AcknowledgeAlertModal`:
+  a reason from the closed set, unchosen to start, and a note Other requires. **Withdraw** asks
+  first, and is offered to the acknowledger, a Shopfloor Manager and an Administrator. Both write an
+  Audit Trail row, so each ends with a success toast that is recorded and links to what the alert is
+  about (`alertSubjectUrl()`). The dialogs are drawn inside the counter's wrapper, so a click in one
+  is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
+  `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
+  acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
+  outranks any acknowledged one.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
@@ -1840,11 +1854,11 @@ passes `{ record: false }`, as a Grafana alert does.
   reason: OAuth consent's Allow, which leaves the dashboard. Rows nobody writes from the dashboard
   (the backup service, the cron, ingestion, a machine's edge function) have nobody to toast to.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
-  it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
-  count drops when the list is opened. One badge cannot follow both: if opening the list cleared
-  it, a critical alert still firing would vanish from the bar, and if it did not, routine messages
-  would add to the alarm's number. So each counts its own, and an alert is counted once, by the
-  pill.
+  it drops when the alert resolves or a person acknowledges it. The history says what the dashboard
+  said, and its count drops when the list is opened. One badge cannot follow both: if opening the
+  list cleared it, a critical alert still firing would vanish from the bar, and if it did not,
+  routine messages would add to the alarm's number. So each counts its own, and an alert is counted
+  once, by the pill.
 
 ---
 
