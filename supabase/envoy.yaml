@@ -38,7 +38,8 @@ static_resources:
                     "@type": type.googleapis.com/envoy.extensions.request_id.uuid.v3.UuidRequestIdConfig
                     pack_trace_reason: false
                 # One line per request. The path without its query (which can carry the apikey), and no header that
-                # carries a credential; key= is the kind of key a gated route admitted.
+                # carries a credential; key= is the kind of key a gated route admitted, app= the client_id of a
+                # verified token GoTrue issued to an app.
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
@@ -49,7 +50,7 @@ static_resources:
                             typed_config:
                               "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
                         text_format_source:
-                          inline_string: "aber-api method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% upstream=%UPSTREAM_CLUSTER% duration_ms=%DURATION% request_id=%REQ(X-REQUEST-ID)% client=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% key=%DYNAMIC_METADATA(aber:key)%\n"
+                          inline_string: "aber-api method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% upstream=%UPSTREAM_CLUSTER% duration_ms=%DURATION% request_id=%REQ(X-REQUEST-ID)% client=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% key=%DYNAMIC_METADATA(aber:key)% app=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:client_id)%\n"
                 # The sign-in limit's 429 in GoTrue's shape, so a client reads it as the limit it already knows. Only
                 # the limit answers 429 from the gateway itself.
                 local_reply_config:
@@ -62,6 +63,26 @@ static_resources:
                       body_format_override:
                         text_format_source:
                           inline_string: '{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}'
+                        content_type: application/json
+                    # An app's token off its own routes, in the key check's shape: the gateway's own 403 to a
+                    # verified token carrying a client_id, which only the rbac filter below answers. The rbac
+                    # filter records its verdict after it replies, so the reply is matched on the token instead.
+                    - filter:
+                        and_filter:
+                          filters:
+                            - status_code_filter:
+                                comparison:
+                                  op: EQ
+                                  value: { default_value: 403, runtime_key: gateway.app_route_refusal_status }
+                            - metadata_filter:
+                                matcher:
+                                  filter: envoy.filters.http.jwt_authn
+                                  path: [{ key: jwt_payload }, { key: client_id }]
+                                  value: { string_match: { safe_regex: { regex: "(?s).+" } } }
+                                match_if_key_not_found: false
+                      body_format_override:
+                        text_format_source:
+                          inline_string: '{"message":"This token was issued to an app, and reaches only that app''s own routes"}'
                         content_type: application/json
                 # Realtime is a WebSocket upstream.
                 upgrade_configs:
@@ -496,6 +517,69 @@ static_resources:
                                 end
                               end
                             end
+
+                  # AN APP'S TOKEN REACHES ONLY ITS OWN ROUTES. A token GoTrue's OAuth server issued carries the
+                  # app's client_id. This verifies the bearer and records its claims, and refuses nothing: no
+                  # token, a key, an expired or unverifiable token all go on as before, to be answered upstream.
+                  # After the key check, so its refusals keep their 401. No audience or issuer, so the client_id
+                  # alone decides. Every spelling an upstream reads a bearer in: any scheme, a tab, or none.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        gotrue:
+                          forward: true
+                          from_headers:
+                            - { name: authorization, value_prefix: " " }
+                            - { name: authorization, value_prefix: "\t" }
+                            - { name: authorization }
+                          local_jwks:
+                            inline_string: '__SUPABASE_JWT_JWKS__'
+                          payload_in_metadata: jwt_payload
+                      rules:
+                        - match: { prefix: "/" }
+                          requires: { allow_missing_or_failed: {} }
+                  # The decision, on the verified client_id: a token without one passes everywhere; one with it
+                  # passes on /auth/v1/ and on the functions its own app calls, and is 403 everywhere else. The
+                  # Studio and forge doors call theirs from their own listeners, so they have none here. Plain
+                  # paths, matched as the routes match them. Mirror check 48 holds the ids to stack_app_ids().
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: ALLOW
+                        policies:
+                          a-token-issued-to-no-app:
+                            permissions: [{ any: true }]
+                            principals:
+                              - not_id:
+                                  sourced_metadata:
+                                    metadata_source: DYNAMIC
+                                    metadata_matcher:
+                                      filter: envoy.filters.http.jwt_authn
+                                      path: [{ key: jwt_payload }, { key: client_id }]
+                                      value: { string_match: { safe_regex: { regex: "(?s).+" } } }
+                          every-app-signs-in:
+                            permissions: [{ url_path: { path: { prefix: "/auth/v1/" } } }]
+                            principals: [{ any: true }]
+                          grafana-userinfo:
+                            permissions: [{ url_path: { path: { exact: "/functions/v1/grafana-userinfo" } } }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000001 } }
+                          nodered-userinfo:
+                            permissions: [{ url_path: { path: { exact: "/functions/v1/nodered-userinfo" } } }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000002 } }
 
                   - name: envoy.filters.http.router
                     typed_config:
