@@ -558,9 +558,10 @@ class TheAuditRows(AcknowledgementBase):
         self.acknowledge(OPERATOR_ID, alert)
         machine = self.machine_alert()
         self.acknowledge(ADMIN_ID, machine)
+        # From this transaction's start, so a used database's own acknowledgements are not counted.
         page = self.as_person(ADMIN_ID,
                               "SELECT public.audit_trail_page(p_limit => 50, p_action => ARRAY['ALERT_ACKNOWLEDGED'],"
-                              " p_class => ARRAY['operational']);")[0][0]
+                              " p_class => ARRAY['operational'], p_since => now());")[0][0]
         kinds = sorted(e["entity_type"] for e in page["events"])
         self.assertEqual(kinds, ["platform_alerts", "service_principals"])
         self.assertTrue(all(e["class"] == "operational" for e in page["events"]))
