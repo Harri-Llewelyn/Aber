@@ -17,7 +17,14 @@ You can also start from a device. On the Devices page, open the device and selec
 
 The time window works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time). Choose **Day**, **Week**, **Month** or **Year** to see a whole span, and **‹** or **›** to step back or forward. Select the words between the arrows to jump to a day, or to pick a rolling or custom range. There is no **All time**, because a chart must fit a size you can read.
 
-The address keeps the device and the window, so a link you share opens the same charts. **Refresh** reads the readings again.
+The address keeps the device and the window, so a link you share opens the same charts.
+
+## Refreshing
+
+1. Select **Refresh** to read the readings again now. The charts stay on screen while it reads.
+2. To refresh by itself, choose how often in the list joined to **Refresh**: **Off**, **30 s**, **1 min** or **5 min**. It starts at **Off**.
+
+Refreshing by itself works only while the window reaches now, such as **Last 24 hours** or today. A window that has ended, such as last Tuesday, cannot gain a reading, so the list is off and says why. **Refresh** still works.
 
 ## What a chart shows
 

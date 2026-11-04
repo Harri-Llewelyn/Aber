@@ -41,6 +41,22 @@ describe('the refresh control', () => {
     expect(within(container).getByRole('combobox', { name: 'Refresh automatically' })).toHaveDisplayValue('30 s')
   })
 
+  it('turns the interval half off with its reason, and still reads again on the button', () => {
+    const { onRefresh, group } = draw({ everyDisabledReason: 'This window has ended, so nothing new can arrive.' })
+    const select = within(group).getByRole('combobox', { name: 'Refresh automatically' })
+    expect(select).toBeDisabled()
+    expect(select).toHaveAccessibleDescription('This window has ended, so nothing new can arrive.')
+    fireEvent.click(within(group).getByRole('button', { name: 'Refresh' }))
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the interval half on without a reason, as Logs draws it', () => {
+    const { group } = draw()
+    const select = within(group).getByRole('combobox', { name: 'Refresh automatically' })
+    expect(select).toBeEnabled()
+    expect(select).not.toHaveAttribute('aria-describedby')
+  })
+
   it('holds the button while a read runs, and leaves the interval free', () => {
     const { group } = draw({ busy: true })
     expect(within(group).getByRole('button', { name: 'Refresh' })).toBeDisabled()

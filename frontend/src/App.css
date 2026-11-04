@@ -2063,7 +2063,10 @@ td.row-actions, th.row-actions {
   border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent);
 }
 .refresh-split-now:hover:not(:disabled),
-.refresh-split-every:hover { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+.refresh-split-every:hover:not(:has(select:disabled)) { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+/* Off with a reason: dimmed, and the pointer passes to the half, whose tooltip says why. */
+.refresh-split-every:has(select:disabled) { opacity: 0.6; }
+.refresh-split-every select:disabled { cursor: default; pointer-events: none; }
 .refresh-split-every select {
   appearance: none;
   border: 0;

@@ -18,6 +18,17 @@ export const HISTORY_SPANS = SPAN_IDS
 /** The window History opens on, Last 24 hours. */
 export const DEFAULT_HISTORY_WINDOW = rollingWindow('24h', HISTORY_RANGES)
 
+/** How often History may read again by itself, in seconds; 0 is off. Each read redraws every chart. */
+export const HISTORY_REFRESH_EVERY = [
+  { value: 0, label: 'Off' },
+  { value: 30, label: '30 s' },
+  { value: 60, label: '1 min' },
+  { value: 300, label: '5 min' },
+]
+
+/** Why the timer is off for a window that has ended: nothing new can arrive in it. */
+export const ENDED_WINDOW_REASON = 'This window has ended, so nothing new can arrive in it. Refresh still reads it again.'
+
 /**
  * How many buckets of `minutes` the read lays over [start, end): from the bucket holding `start`,
  * on the epoch grid the rollups use, so a window opening inside a bucket counts that bucket.

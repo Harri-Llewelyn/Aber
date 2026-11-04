@@ -1214,8 +1214,9 @@ the source and fails on an outlined button written into one.
 **Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
 Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
 right half sets how often it happens by itself: Off, then the page's intervals. A page that
-refreshes both by hand and on a timer uses it, not a button and a select apart. System › Logs is
-the first.
+refreshes both by hand and on a timer uses it, not a button and a select apart: System › Logs and
+History. `everyDisabledReason`, a sentence, turns the interval half off and is its tooltip, while
+the Refresh half still reads; History passes one while its window has ended.
 
 **Every list filter takes several values, through one shared part**, `common/FilterChecklist.jsx`,
 as Home Assistant's entity filters do. A filter that picks from a list is never a `<select>`; a
@@ -1395,6 +1396,11 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 - **The metrics** are those the device's last birth declared and those its schemas model
   (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
   (`validRanges()`), and its unit the catalog's.
+- **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
+  since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
+  it outlasts a change of device. `usePolling` runs it only while the window reaches now
+  (`holdsNow()`); for a window that has ended the interval half is off with the reason. A read in
+  flight keeps the charts on screen, and only the newest read lands.
 - **The address** is `/history/device/<id>` with the window's keys; `/history` is the picker.
   `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.

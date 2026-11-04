@@ -9,7 +9,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
 
-const { plots } = vi.hoisted(() => ({ plots: [] }))
+const { plots, polls } = vi.hoisted(() => ({ plots: [], polls: [] }))
+
+// The refresh timer as the page sets it: the read, the interval and whether it runs.
+vi.mock('../hooks/usePolling', () => ({
+  usePolling: (callback, intervalMs, enabled) => { polls.push({ callback, intervalMs, enabled }) },
+}))
+const lastPoll = () => polls[polls.length - 1]
 
 vi.mock('uplot', () => {
   class FakePlot {
@@ -72,6 +78,7 @@ const visit = async (address) => {
 beforeEach(() => {
   vi.clearAllMocks()
   plots.length = 0
+  polls.length = 0
   api.get.mockImplementation(routeGet)
   api.readCarriedTelemetry.mockImplementation(readings)
   document.documentElement.setAttribute('data-theme', 'dark')
@@ -229,5 +236,64 @@ describe("a device's charts", () => {
     const option = within(panel).getByRole('link', { name: /Press 1/ })
     expect(option).toHaveAttribute('href', `/history/device/${PRESS}?range=1h`)
     expect(within(panel).getByRole('link', { name: /Lathe 3/ })).toHaveAttribute('aria-current', 'true')
+  })
+})
+
+describe('refreshing', () => {
+  const control = () => screen.getByRole('group', { name: 'Refresh' })
+  const interval = () => within(control()).getByRole('combobox', { name: 'Refresh automatically' })
+
+  it('offers Off, 30 s, 1 min and 5 min, and starts Off', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await waitFor(() => expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(1))
+    expect([...interval().options].map(o => o.textContent)).toEqual(['Off', '30 s', '1 min', '5 min'])
+    expect(interval()).toHaveDisplayValue('Off')
+    expect(lastPoll()).toMatchObject({ enabled: false })
+  })
+
+  it('reads again on the timer while the window reaches now', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await waitFor(() => expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(1))
+    fireEvent.change(interval(), { target: { value: '60' } })
+    expect(lastPoll()).toMatchObject({ intervalMs: 60000, enabled: true })
+    await act(async () => { await lastPoll().callback(new AbortController().signal) })
+    expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the timer off, and says why, for a window that has ended; Refresh still reads', async () => {
+    await visit(`/history/device/${LATHE}?span=day&at=2026-11-02`)
+    await waitFor(() => expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(1))
+    expect(interval()).toBeDisabled()
+    expect(interval()).toHaveAccessibleDescription(/This window has ended, so nothing new can arrive in it/)
+    expect(lastPoll()).toMatchObject({ enabled: false })
+    fireEvent.click(within(control()).getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(2))
+  })
+
+  it('stops the timer when the window moves into the past, and starts it again back at now', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await waitFor(() => expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(1))
+    fireEvent.change(interval(), { target: { value: '30' } })
+    expect(lastPoll()).toMatchObject({ intervalMs: 30000, enabled: true })
+    act(() => { window.history.pushState({}, '', `/history/device/${LATHE}?span=day&at=2026-11-02`); window.dispatchEvent(new PopStateEvent('popstate')) })
+    await waitFor(() => expect(interval()).toBeDisabled())
+    expect(lastPoll()).toMatchObject({ enabled: false })
+    expect(interval()).toHaveDisplayValue('Off')
+    act(() => { window.history.pushState({}, '', `/history/device/${LATHE}`); window.dispatchEvent(new PopStateEvent('popstate')) })
+    await waitFor(() => expect(interval()).toBeEnabled())
+    expect(interval()).toHaveDisplayValue('30 s')
+    expect(lastPoll()).toMatchObject({ intervalMs: 30000, enabled: true })
+  })
+
+  it('keeps the charts on screen while it reads again', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await screen.findAllByRole('figure')
+    let finish
+    api.readCarriedTelemetry.mockImplementation((args) => new Promise(resolve => { finish = () => resolve(readings(args)) }))
+    fireEvent.click(within(control()).getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByText(/reading again…/)).toBeInTheDocument()
+    expect(screen.getAllByRole('figure')).toHaveLength(2)
+    await act(async () => { finish() })
+    await waitFor(() => expect(screen.queryByText(/reading again…/)).not.toBeInTheDocument())
   })
 })

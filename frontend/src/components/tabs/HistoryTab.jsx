@@ -85,6 +85,8 @@ export function HistoryTab() {
   const [search, setSearch] = useUrlState('search', '')
   const [loaded, setLoaded] = useState(null)
   const [error, setError] = useState(null)
+  // The refresh timer, in seconds, as Logs keeps it: in the page, not the address.
+  const [every, setEvery] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -133,6 +135,8 @@ export function HistoryTab() {
                 catalog={loaded.catalog}
                 win={win}
                 setWin={setWin}
+                every={every}
+                setEvery={setEvery}
               />
             ) : (
               <EmptyState icon={<IconCpu size={36} />} message="No device answers to this address. It may have been deleted.">
