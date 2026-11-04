@@ -31,7 +31,7 @@ import { OverflowText } from './OverflowText'
 import { clockWords } from '../../utils/timeWindow'
 import {
   chartPalette, chartTitle, latestWords, momentWords, nowFraction, readingWords, runWords, shareWords, splitCarried,
-  stateKey, stateRuns, stateShares, validRangeWords,
+  stateHue, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
 const DAY_S = 24 * 60 * 60
@@ -155,15 +155,15 @@ function BandMark({ band }) {
   )
 }
 
-/** The tone class of a state's runs: its place in the key, or the neutral tone of the others. */
-const toneOf = (tones, state) => `chart-tone-${tones.get(state) ?? 'other'}`
+/** A value's hue for App.css to colour it with, through the CSSOM: `--state-hue` (stateHue()). */
+const hueOf = (state) => ({ '--state-hue': stateHue(state) })
 
 /**
  * A state metric as runs of its value across the window: text, which no line can draw. Each value
- * has a colour from the theme's categorical tokens and keeps its name, and a carried stretch is
- * hatched, as a number chart dashes one.
+ * takes the hue its text hashes to, at the theme's lightness and chroma, and keeps its name, and a
+ * carried stretch is hatched, as a number chart dashes one.
  */
-function StateStrip({ runs, tones, start, end }) {
+function StateStrip({ runs, start, end }) {
   const span = end - start
   const part = (from, to, of) => ({ left: `${((from - of.from) / of.span) * 100}%`, width: `${((to - from) / of.span) * 100}%` })
   const whole = { from: start, span }
@@ -172,7 +172,7 @@ function StateStrip({ runs, tones, start, end }) {
       {runs.map(r => {
         const own = { from: r.startMs, span: r.endMs - r.startMs }
         return (
-          <span key={r.from} className={`chart-state ${toneOf(tones, r.state)}`} style={part(r.startMs, r.endMs, whole)}>
+          <span key={r.from} className="chart-state" style={{ ...part(r.startMs, r.endMs, whole), ...hueOf(r.state) }}>
             {r.carried.map(c => (
               <span key={c.startMs} className="chart-state-carried" style={part(c.startMs, c.endMs, own)} />
             ))}
@@ -189,21 +189,21 @@ function StateKey({ stateKey: key, carried }) {
   return (
     <ul className="chart-state-key">
       {key.shown.map(s => (
-        <li key={s.state} className={toneOf(key.tones, s.state)}>
+        <li key={s.state} className="chart-state-key-value" style={hueOf(s.state)}>
           <span className="chart-state-swatch" aria-hidden="true" />
           <OverflowText className="chart-state-key-name">{s.state}</OverflowText>
           <span className="chart-state-share">{shareWords(s.share)}</span>
         </li>
       ))}
       {key.others && (
-        <li className="chart-tone-other">
+        <li className="chart-state-key-plain">
           <span className="chart-state-swatch" aria-hidden="true" />
           <span className="chart-state-key-name">{`${key.others.count} other${key.others.count === 1 ? '' : 's'}`}</span>
           <span className="chart-state-share">{shareWords(key.others.share)}</span>
         </li>
       )}
       {carried && (
-        <li className="chart-tone-other">
+        <li className="chart-state-key-plain">
           <span className="chart-state-swatch chart-state-swatch-carried" aria-hidden="true" />
           <span className="chart-state-key-name">carried forward</span>
         </li>
@@ -303,7 +303,7 @@ export function TimeSeriesChart({
         {drawn && <div ref={boxRef} className="chart-box" style={{ height }} hidden={failed} />}
         {isState && (
           <div className="chart-box chart-box-states" onPointerMove={pointAt} onPointerLeave={() => setRunHover(null)}>
-            <StateStrip runs={runs} tones={key.tones} start={start} end={end} />
+            <StateStrip runs={runs} start={start} end={end} />
             {(fraction !== null || band) && (
               <div className="chart-overlay">
                 {fraction !== null && <NowMarker fraction={fraction} now={now} />}

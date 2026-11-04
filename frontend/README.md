@@ -1465,12 +1465,19 @@ flag steps between false and true, and a state is a strip of its runs in text.
 - **The head** reads the bucket under the pointer, and otherwise the latest reading
   (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
   value and the bucket's start, since a bucket is not a reading's timestamp.
-- **A state** is `stateRuns()`, clipped to the window and to now. Each value takes a tone,
-  `--chart-cat-1` to `--chart-cat-6` (App.css, both themes, a categorical order checked for
-  colour-blind separation), in the order of its share of the time (`stateShares()`), and keeps its
-  name, so colour is never the only cue. A carried stretch inside a run is hatched. Under the strip,
-  `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time and counts the rest as
-  others, in the neutral tone. The head reads the run under the pointer (`runWords()`). The data
+- **A state** is `stateRuns()`, clipped to the window and to now. Each value's colour comes from
+  its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
+  not land a degree apart) to a hue, which the box carries as `--state-hue` through React's style,
+  the CSSOM, so the CSP is unchanged. App.css draws it as `oklch()` of the theme's
+  `--chart-state-l` and `--chart-state-c` and that hue, with a stronger edge. The same value is the
+  same colour on every chart, device, refresh and session, and a value never seen before has one.
+  At those tokens every hue is inside sRGB, the label clears 7.4:1 (dark) and 13:1 (light) on its
+  box, and the edge 3:1 on the card; `themeContrast.test.js` walks all 360 hues. A hash is not a
+  meaning: two values can land near each other (about one pair in twelve within 15°), and IDLE is
+  not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
+  allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
+  is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). The data
   read is the same as a number's: a state held only inside one bucket is not shown.
 
 | Prop | What it is |

@@ -91,14 +91,12 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
-  /* A chart's categorical colours, in a fixed order: a state chart's values, most time first. Each
-     dark step clears 3:1 on --bg-card; checked as a set for colour-blind separation. */
-  --chart-cat-1:  #3987e5;
-  --chart-cat-2:  #d95926;
-  --chart-cat-3:  #199e70;
-  --chart-cat-4:  #c98500;
-  --chart-cat-5:  #d55181;
-  --chart-cat-6:  #008300;
+  /* A state chart's box: an OKLCH lightness and chroma, the hue the value's own (stateHue()). Every
+     hue stays inside sRGB at these, the label clears 7.4:1 on the box and the edge 5.9:1 on the card. */
+  --chart-state-l:      0.40;
+  --chart-state-c:      0.065;
+  --chart-state-edge-l: 0.70;
+  --chart-state-edge-c: 0.115;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
@@ -197,13 +195,11 @@
   --cluster:      #7e22ce;
   --cluster-bg:   rgba(147, 51, 234, 0.12);
   --cluster-text: #6b21a8;
-  /* The same six hues stepped for the light card. Three sit under 3:1, so a value keeps its name. */
-  --chart-cat-1:  #2a78d6;
-  --chart-cat-2:  #eb6834;
-  --chart-cat-3:  #1baf7a;
-  --chart-cat-4:  #eda100;
-  --chart-cat-5:  #e87ba4;
-  --chart-cat-6:  #008300;
+  /* The light card's box: the label clears 13:1 on it at every hue, and the edge 3.7:1 on the card. */
+  --chart-state-l:      0.90;
+  --chart-state-c:      0.045;
+  --chart-state-edge-l: 0.60;
+  --chart-state-edge-c: 0.10;
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
@@ -5925,15 +5921,15 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   color: var(--text-muted);
 }
 /* A state metric: each run of one value is a box across its stretch of the window, named in text,
-   tinted with its value's tone (the key's order), the text in the text colour. A carried stretch
-   inside it is hatched instead of tinted, as a number chart dashes one. */
-.chart-tone-1 { --tone: var(--chart-cat-1); }
-.chart-tone-2 { --tone: var(--chart-cat-2); }
-.chart-tone-3 { --tone: var(--chart-cat-3); }
-.chart-tone-4 { --tone: var(--chart-cat-4); }
-.chart-tone-5 { --tone: var(--chart-cat-5); }
-.chart-tone-6 { --tone: var(--chart-cat-6); }
-.chart-tone-other { --tone: var(--text-dim); }
+   filled with its value's colour: the hue the element carries (`--state-hue`, its text's hash) at
+   the theme's lightness and chroma, the edge a lighter or darker step, the text in the text colour.
+   A carried stretch inside it is hatched instead of filled, as a number chart dashes one. */
+.chart-state,
+.chart-state-key-value {
+  --tone: oklch(var(--chart-state-edge-l) var(--chart-state-edge-c) var(--state-hue));
+  --tone-fill: oklch(var(--chart-state-l) var(--chart-state-c) var(--state-hue));
+}
+.chart-state-key-plain { --tone: var(--text-dim); }
 .chart-box-states { height: 34px; }
 .chart-states { position: absolute; inset: 4px 0; }
 .chart-state {
@@ -5945,9 +5941,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   min-width: 0;
   overflow: hidden;
   padding: 0 6px;
-  border: 1px solid color-mix(in srgb, var(--tone) 70%, transparent);
+  border: 1px solid var(--tone);
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--tone) 28%, var(--bg-card));
+  background: var(--tone-fill);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);

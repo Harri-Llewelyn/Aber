@@ -8,7 +8,7 @@ import { render, screen, waitFor, within, fireEvent, act } from '@testing-librar
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
-import { momentWords } from '../utils/history'
+import { momentWords, stateHue } from '../utils/history'
 import { PERMISSION_UUIDS } from '../constants'
 
 const { plots, polls } = vi.hoisted(() => ({ plots: [], polls: [] }))
@@ -459,12 +459,15 @@ describe('a state chart', () => {
     return screen.findByRole('figure', { name: 'Controller/EXECUTION' })
   }
 
-  it('gives each value a colour of its own and keeps its name, the most time first', async () => {
+  it('colours each value by the hue its text hashes to, the same wherever it appears, and keeps its name', async () => {
     const figure = await open()
     const runs = [...figure.querySelectorAll('.chart-state')]
-    expect(runs.map(r => [r.textContent, r.className])).toEqual([
-      ['RUNNING', 'chart-state chart-tone-1'], ['IDLE', 'chart-state chart-tone-2'], ['RUNNING', 'chart-state chart-tone-1'],
+    const hue = (el) => el.style.getPropertyValue('--state-hue')
+    expect(runs.map(r => [r.textContent, hue(r)])).toEqual([
+      ['RUNNING', String(stateHue('RUNNING'))], ['IDLE', String(stateHue('IDLE'))], ['RUNNING', String(stateHue('RUNNING'))],
     ])
+    const key = [...figure.querySelectorAll('.chart-state-key-value')]
+    expect(key.map(li => hue(li))).toEqual([String(stateHue('RUNNING')), String(stateHue('IDLE'))])
   })
 
   it('hatches each stretch that was carried forward', async () => {

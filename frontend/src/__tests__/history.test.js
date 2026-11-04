@@ -7,7 +7,7 @@ import {
   bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
-  shareWords, stateKey, stateRuns, stateShares,
+  shareWords, stateHue, stateKey, stateRuns, stateShares,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -345,15 +345,35 @@ describe("a state chart's runs and key", () => {
     expect(keyWords(stateKey(shares))).toBe('C 50%, A 38%, B 13%')
   })
 
-  it('names at most six values in the key, each its tone in that order, and counts the rest as others', () => {
+  it('names at most six values in the key, the most time first, and counts the rest as others', () => {
     expect(STATE_KEY_MAX).toBe(6)
     const values = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
     const key = stateKey(stateShares(stateRuns(series(values), starts, span)))
-    expect(key.shown.map(s => [s.state, s.tone])).toEqual([['A', '1'], ['B', '2'], ['C', '3'], ['D', '4'], ['E', '5'], ['F', '6']])
-    expect(key.others).toMatchObject({ count: 4, tone: 'other' })
+    expect(key.shown.map(s => s.state)).toEqual(['A', 'B', 'C', 'D', 'E', 'F'])
+    expect(key.others).toMatchObject({ count: 4 })
     expect(key.others.share).toBeCloseTo(0.4)
-    expect(key.tones.get('G')).toBeUndefined()
     expect(keyWords(key)).toBe('A 10%, B 10%, C 10%, D 10%, E 10%, F 10%, 4 others 40%')
+  })
+
+  it("takes a value's hue from its text alone, the same on every call", () => {
+    // Pinned, so a change to the hash, which would recolour every value people know, is seen.
+    expect(['RUNNING', 'IDLE', 'FAULT', 'PICK_BIN_A', 'PICK_BIN_B'].map(stateHue)).toEqual([127, 301, 10, 26, 305])
+    expect(stateHue('RUNNING')).toBe(stateHue(`RUN${'NING'}`))
+    expect(stateHue('')).toBeGreaterThanOrEqual(0)
+    for (const v of ['O1000', 'Ünïcode ✓', 'a'.repeat(500)]) {
+      expect(Number.isInteger(stateHue(v)) && stateHue(v) >= 0 && stateHue(v) < 360, v).toBe(true)
+    }
+  })
+
+  it('spreads values that differ by one character across the wheel, not a degree apart', () => {
+    const bins = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(c => stateHue(`PICK_BIN_${c}`))
+    expect(new Set(bins.map(h => Math.floor(h / 30))).size).toBeGreaterThanOrEqual(10)
+    const programs = Array.from({ length: 1200 }, (_, i) => stateHue(`O${1000 + i}`))
+    const perSector = new Array(12).fill(0)
+    for (const h of programs) perSector[Math.floor(h / 30)] += 1
+    // A uniform spread puts 100 in each; none here is under 60 or over 140.
+    expect(Math.min(...perSector)).toBeGreaterThan(60)
+    expect(Math.max(...perSector)).toBeLessThan(140)
   })
 
   it('says a sliver of a share as under one per cent', () => {

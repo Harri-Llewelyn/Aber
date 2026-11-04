@@ -627,6 +627,40 @@ describe('toast opacity', () => {
   )
 })
 
+/** OKLCH to sRGB, 0 to 255, or null where the colour falls outside sRGB. */
+const oklchRgb = (l, c, hue) => {
+  const h = (hue * Math.PI) / 180
+  const [a, b] = [c * Math.cos(h), c * Math.sin(h)]
+  const [l_, m_, s_] = [l + 0.3963377774 * a + 0.2158037573 * b, l - 0.1055613458 * a - 0.0638541728 * b, l - 0.0894841775 * a - 1.2914855480 * b]
+    .map(v => v ** 3)
+  const linear = [
+    4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+    -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+    -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+  ]
+  if (linear.some(v => v < -1e-6 || v > 1 + 1e-6)) return null
+  return linear.map(v => Math.max(0, Math.min(1, v))).map(v => 255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055))
+}
+
+describe("a state chart's colour, at every hue its values can hash to", () => {
+  it.each(Object.entries(THEMES))('%s: the box is inside sRGB, its label clears AA on it, and its edge 3:1 on the card', (_, t) => {
+    const num = (k) => Number(t[k])
+    const card = rgb(t['--bg-card'])
+    const label = rgb(t['--text-primary'])
+    let worstLabel = Infinity
+    let worstEdge = Infinity
+    for (let hue = 0; hue < 360; hue++) {
+      const fill = oklchRgb(num('--chart-state-l'), num('--chart-state-c'), hue)
+      const edge = oklchRgb(num('--chart-state-edge-l'), num('--chart-state-edge-c'), hue)
+      expect(fill && edge, `hue ${hue} falls outside sRGB`).toBeTruthy()
+      worstLabel = Math.min(worstLabel, contrast(label, fill))
+      worstEdge = Math.min(worstEdge, contrast(edge, card))
+    }
+    expect(worstLabel).toBeGreaterThanOrEqual(AA_TEXT)
+    expect(worstEdge).toBeGreaterThanOrEqual(AA_LARGE)
+  })
+})
+
 describe('theme token hygiene', () => {
   it('defines the same token names in both themes', () => {
     // A token present in one theme and missing in the other resolves to nothing at runtime,

@@ -14,8 +14,10 @@ const SRC = path.resolve(__dirname, '..')
 const APP_CSS_PATH = path.join(SRC, 'App.css')
 const APP_CSS = fs.readFileSync(APP_CSS_PATH, 'utf8')
 
-// A hex colour or a colour function. color-mix() is not one: it mixes what it is given.
-const LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi
+// A hex colour or a colour function. color-mix() is not one: it mixes what it is given. Nor is an
+// oklch() of three tokens, which writes no value: a state chart's box takes the theme's lightness
+// and chroma and the hue its value hashes to.
+const LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|color)\(|\boklch\((?!\s*var\(--[\w-]+\)\s+var\(--[\w-]+\)\s+var\(--[\w-]+\)\s*\))/gi
 
 /** Source files under a directory, leaving out the tests and their helpers. */
 const filesUnder = (dir, wanted) =>
@@ -86,8 +88,9 @@ describe('colour literals', () => {
   it('catches each literal form, and only outside the skipped ranges', () => {
     const css = '.a { color: #fff; }\n.b { background: rgba(0, 0, 0, 0.5); }\n.c { border-color: hsl(0 0% 0%); }\n'
       + '.d { background: color-mix(in srgb, var(--x) 5%, transparent); }\n/* #000 in a comment */\n'
-    expect(cssLiterals(css).map(f => Number(f.split(':')[0]))).toEqual([1, 2, 3])
-    expect(cssLiterals(css, [{ start: 0, end: css.indexOf('.c') }]).map(f => Number(f.split(':')[0]))).toEqual([3])
+      + '.e { --t: oklch(var(--l) var(--c) var(--state-hue)); }\n.f { --t: oklch(0.4 var(--c) var(--state-hue)); }\n'
+    expect(cssLiterals(css).map(f => Number(f.split(':')[0]))).toEqual([1, 2, 3, 7])
+    expect(cssLiterals(css, [{ start: 0, end: css.indexOf('.c') }]).map(f => Number(f.split(':')[0]))).toEqual([3, 7])
     const jsx = "<div style={{ color: 'var(--x)' }} />\n<div style={{\n  background: 'rgba(255,0,0,0.1)' }} />"
     expect(inlineStyles(jsx).filter(s => s.text.match(LITERAL)).map(s => s.line)).toEqual([2])
   })

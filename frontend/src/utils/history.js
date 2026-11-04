@@ -291,16 +291,30 @@ export function stateShares(runs) {
 }
 
 /**
- * The key under a state chart: the `max` values with the most time, each with its tone, 1 first,
- * and the rest as one `others` entry (null when there is none), whose runs take the neutral tone.
+ * The key under a state chart: the `max` values with the most time, most first, and the rest as
+ * one `others` entry, null when there is none.
  */
 export function stateKey(shares, max = STATE_KEY_MAX) {
-  const shown = shares.slice(0, max).map((s, i) => ({ ...s, tone: String(i + 1) }))
   const rest = shares.slice(max)
   const others = rest.length
-    ? { count: rest.length, ms: rest.reduce((a, s) => a + s.ms, 0), share: rest.reduce((a, s) => a + s.share, 0), tone: 'other' }
+    ? { count: rest.length, ms: rest.reduce((a, s) => a + s.ms, 0), share: rest.reduce((a, s) => a + s.share, 0) }
     : null
-  return { shown, others, tones: new Map(shown.map(s => [s.state, s.tone])) }
+  return { shown: shares.slice(0, max), others }
+}
+
+/**
+ * The hue a state's value is drawn in, 0 to 359, from its text alone, so a value has the same
+ * colour on every chart, device, refresh and session, and a value never seen before has one too.
+ * djb2 over the text's code points, then murmur3's finaliser, since djb2 alone moves with the last
+ * character and would put PICK_BIN_A and PICK_BIN_B a degree apart. Two values can still land on
+ * near hues; each box keeps its name.
+ */
+export function stateHue(text) {
+  let h = 5381
+  for (const ch of String(text)) h = (Math.imul(h, 33) + ch.codePointAt(0)) >>> 0
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0
+  return ((h ^ (h >>> 16)) >>> 0) % 360
 }
 
 /** A share in words: a whole percentage, or "<1%" for a sliver that is there. */
