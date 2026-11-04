@@ -718,7 +718,11 @@ describe("the charts' groups", () => {
   it('opens and closes every group from Collapse all and Expand all', async () => {
     await visit(`/history/device/${CELL}`)
     await screen.findAllByRole('figure')
-    fireEvent.click(screen.getByRole('button', { name: /Collapse all/ }))
+    // At the start of the row above the charts, as on the Audit Trail, and not in the toolbar.
+    const toggle = screen.getByRole('button', { name: /Collapse all/ })
+    expect(document.querySelector('.history-header').firstElementChild).toContainElement(toggle)
+    expect(document.querySelector('.filter-bar')).not.toContainElement(toggle)
+    fireEvent.click(toggle)
     expect(screen.queryAllByRole('figure')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: /Expand all/ }))
     expect(screen.getAllByRole('figure')).toHaveLength(5)

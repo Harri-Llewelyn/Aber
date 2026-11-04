@@ -378,13 +378,6 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           tip="Chart only the metrics you choose. Fewer metrics fit finer buckets."
         />
         <BucketChoice value={bucket} options={bucketOptions(auto)} onChange={setBucket} />
-        <ExpandAllToggle
-          anyOpen={groups.some(g => !closedGroups.has(g.key))}
-          onExpandAll={() => setGroupsOpen(groups.map(g => g.key), true)}
-          onCollapseAll={() => setGroupsOpen(groups.map(g => g.key), false)}
-          noun="groups"
-          disabled={groups.length === 0}
-        />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           <ActionButton
@@ -423,10 +416,22 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         />
       ) : (
         <>
-          <p className="history-meta" role="status">
-            {metaWords({ names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads })}
-            {reading.loading && ' · reading again…'}
-          </p>
+          {/* One row above the charts, as the Audit Trail has above its sections: the control that
+              opens or closes every group first, over the group headings it acts on, then the line
+              saying what is shown. */}
+          <div className="history-header">
+            <ExpandAllToggle
+              anyOpen={groups.some(g => !closedGroups.has(g.key))}
+              onExpandAll={() => setGroupsOpen(groups.map(g => g.key), true)}
+              onCollapseAll={() => setGroupsOpen(groups.map(g => g.key), false)}
+              noun="groups"
+              disabled={groups.length === 0}
+            />
+            <p className="history-meta" role="status">
+              {metaWords({ names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads })}
+              {reading.loading && ' · reading again…'}
+            </p>
+          </div>
           {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
           <div className="history-groups" onPointerDown={startBand}>
             {chartGroups.map(g => {

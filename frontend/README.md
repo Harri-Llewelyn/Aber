@@ -1447,7 +1447,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
   integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
   does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
-  `ExpandAllToggle` in the toolbar does every group, as on the Audit Trail and Metrics. A closed
+  `ExpandAllToggle` does every group from the start of the row above the charts (`history-header`), as the Audit Trail has it over its sections. A closed
   group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
   written in try/catch), not in the address. The Metrics dropdown's options carry the same

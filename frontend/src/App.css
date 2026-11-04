@@ -5881,9 +5881,17 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
 }
 
+/* The row above the charts: Expand all or Collapse all at its start, as .trail-header has it, then
+   the line saying what is shown. */
+.history-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px var(--inset) 0;
+}
 .history-meta {
   margin: 0;
-  padding: 8px var(--inset) 0;
   font-size: 12px;
   color: var(--text-muted);
 }

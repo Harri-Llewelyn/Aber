@@ -33,7 +33,7 @@ The address keeps the device, the window, the metrics and the bucket size, so a 
 
 1. Select a group's name, such as **String**, to close it. Its charts are hidden.
 2. Select the name again to open it.
-3. Select **Collapse all** or **Expand all** in the toolbar to close or open every group.
+3. Select **Collapse all** or **Expand all**, at the start of the line above the charts, to close or open every group.
 
 The charts are grouped by the type of value each metric holds, as the Metrics page names it, in this order: **Double**, **Float**, the whole numbers (**Int8** to **UInt64**), **Boolean**, **String** and **Text**, then any other type. A metric the Metrics page does not list is under **Other**, last. Each group's name says how many charts it holds.
 
