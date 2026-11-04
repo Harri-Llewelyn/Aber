@@ -1309,12 +1309,16 @@ a.tab-strip-tab { text-decoration: none; }
 
 /* The toolbar's right-hand group: Clear filters first, then secondary buttons such as Export, then
    the page's main button last. The margin is on the group rather than its first child, so the end
-   stays stable when a control is conditional. */
+   stays stable when a control is conditional. On a narrow screen the group wraps, from the right,
+   rather than pushing the page sideways. */
 .filter-bar-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 /* The three widths of a filter control, selects and search alike. The doubled selector beats
@@ -6009,8 +6013,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-picker-badge { margin-left: 8px; }
 /* The export dialog's first line: the device, the metrics and the window it exports. */
 .telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
-/* Buckets: its size in the toolbar, its choices a column in the popover. */
-.history-bucket-pick { justify-content: flex-start; min-width: 0; }
+/* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a
+   column in the popover. */
+.history-bucket-pick { justify-content: space-between; min-width: 0; }
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
 .history-bucket-choices .btn { justify-content: flex-start; }
 
