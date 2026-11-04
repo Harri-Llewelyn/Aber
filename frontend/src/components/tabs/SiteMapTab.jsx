@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
-import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { api } from '../../api'
 import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -36,7 +36,7 @@ import {
   deviceLifecycleStatus,
   deviceChipClass,
   deviceStatusTitle,
-  deviceDotColor,
+  deviceDotStyle,
   devicesOnlineLabel,
   rollupDeviceStatus
 } from '../../utils/deviceStatus'
@@ -49,6 +49,7 @@ import {
   IconBot,
   IconAlertTriangle,
   IconAlertCircle,
+  IconCheck,
   IconZap,
   IconRadio,
   IconCpu
@@ -200,20 +201,30 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     [SOURCE_SIMULATED]: liveAssets.filter(a => a.location_source === SOURCE_SIMULATED)
   }), [liveAssets])
 
+  // Neither alert state names what raised the alert: the map relays one and evaluates no threshold
+  // of its own, and more than one thing writes them.
   const STATUS_LABEL = {
     attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
     normal: 'Normal — at least one device here is online',
     idle: 'Nothing live — no device here is currently reporting',
-    // Says who raised it: the map relays a Grafana verdict and evaluates no threshold of its own.
-    alert: 'Alert firing — Grafana has raised an alert against a device here'
+    alert: 'Alert firing — an alert is firing against a device here',
+    acknowledged: 'Alert acknowledged — an alert against a device here has been acknowledged'
   }
-  const STATUS_WORD = { attention: 'Needs attention', normal: 'Online', idle: 'Nothing live', alert: 'Alert firing' }
+  const STATUS_WORD = {
+    attention: 'Needs attention', normal: 'Online', idle: 'Nothing live', alert: 'Alert firing',
+    acknowledged: 'Alert acknowledged'
+  }
 
-  /** The pin state of a set of devices: the connectivity rollup, or alert when Grafana says so. */
+  /**
+   * The pin state of a set of devices: alert while any alert on them is nobody's, acknowledged
+   * while every one is somebody's, and otherwise the connectivity rollup.
+   */
   const stateOf = (devices) => {
-    const alert = devices.some(d => alertForDevice(alerts, d))
+    const states = devices.map(d => alertState(alertForDevice(alerts, d)))
+    const alert = states.includes('alert')
+    const acknowledged = !alert && states.includes('acknowledged')
     const status = rollupDeviceStatus(devices)
-    return { status, alert, pin: alert ? 'alert' : status }
+    return { status, alert, acknowledged, pin: alert ? 'alert' : acknowledged ? 'acknowledged' : status }
   }
 
   const cellGatewaysOf = (cell) => liveGateways.filter(g => g.cell_id === cell.cell_id)
@@ -231,7 +242,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         to={deviceUrl(a.asset_id)}
         onNavigate={() => onSelectDevice?.(a.asset_id)}
         style={{ userSelect: 'none' }}
-        title={`${a.asset_name} [${a.asset_id}] — ${alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
+        title={`${a.asset_name} [${a.asset_id}] — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
         <IconCpu size={11} />
         <span className="chip-name">{a.asset_name}</span>
@@ -244,7 +255,15 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         {/* An alert carries a flag as well as a hue: never colour alone. The glyph and wording are
             DevicesTab's, so a device does not answer to two names on two pages. */}
         {/* The alert's name is in the chip's tooltip, so the flag carries none of its own. */}
-        {alert && (
+        {alertState(alert) === 'acknowledged' && (
+          <span
+            className="chip-flag"
+            style={{ color: 'var(--danger-text)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+          >
+            <IconCheck size={10} /> ACKNOWLEDGED
+          </span>
+        )}
+        {alertState(alert) === 'alert' && (
           <span
             className="chip-flag"
             style={{ color: 'var(--danger-text)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
@@ -293,7 +312,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           className={`chip chip-link${selectedCellId === c.cell_id ? ' is-selected' : ''}`}
           onClick={() => toggleCell(c.cell_id)}
         >
-          <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
+          {/* A ring for an acknowledged alert, as the tile dot and the device chips draw it. */}
+          <span className="badge-dot" style={state.pin === 'acknowledged'
+            ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' }
+            : { background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
           <Icon size={11} />
           <span className="chip-name">{c.cell_name}</span>
           {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
@@ -315,12 +337,14 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const status = deviceLifecycleStatus(d)
     const alert = alertForDevice(alerts, d)
     return (
-      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `ALERT: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
-        <span className="badge-dot" style={{ background: deviceDotColor(d, alert) }} />
+      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
+        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
         <IconCpu size={11} />
         <span className="chip-name">{d.asset_name}</span>
         {alert && (
-          <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
+          <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>
+            {alertState(alert) === 'acknowledged' ? 'ACKNOWLEDGED' : alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
+          </span>
         )}
         {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
       </RouteLink>
@@ -505,9 +529,22 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     ? cellDevicesOf(selectedCell).map(d => ({ device: d, alert: alertForDevice(alerts, d) })).filter(x => x.alert)
     : []
 
-  /** The status badge of a drawer's subtitle: an alert firing outranks the connectivity rollup. */
+  /**
+   * The status badge of a drawer's subtitle: an alert firing outranks the connectivity rollup. An
+   * acknowledged one is the hollow badge with a tick, as on the Devices page.
+   */
   const stateBadge = (state, devices) => {
-    const critical = state.alert && devices.some(d => alertForDevice(alerts, d)?.severity === 'critical')
+    if (state.pin === 'acknowledged') {
+      return (
+        <Badge tone="danger" size="sm" className="badge-acknowledged" icon={<IconCheck size={11} />} title={STATUS_LABEL.acknowledged}>
+          {STATUS_WORD.acknowledged}
+        </Badge>
+      )
+    }
+    const critical = state.alert && devices.some(d => {
+      const alert = alertForDevice(alerts, d)
+      return alertState(alert) === 'alert' && alert.severity === 'critical'
+    })
     const tone = state.pin === 'alert' ? (critical ? 'danger' : 'warning') : state.status === 'normal' ? 'success' : 'neutral'
     return <Badge tone={tone} size="sm" title={STATUS_LABEL[state.pin]}>{STATUS_WORD[state.pin]}</Badge>
   }
@@ -638,12 +675,13 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             {selectedAlerts.map(({ device, alert }) => (
               <div key={device.asset_id} style={{ fontSize: '12px' }}>
                 <strong style={{ color: 'var(--danger-text)' }}>{alert.alert_name}</strong> — {device.asset_name}{alert.summary ? `: ${alert.summary}` : ''}
+                {alertState(alert) === 'acknowledged' && <> <IconCheck size={10} aria-hidden="true" /> acknowledged</>}
               </div>
             ))}
           </div>
         ),
         full: true,
-        help: 'Raised by Grafana against devices in this cell'
+        help: 'Firing against devices in this cell. Acknowledge one from the alert counter in the top bar.'
       },
       {
         label: 'Gateways',
@@ -683,6 +721,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
           for it while the dots roll up a whole tile. */}
       <Tooltip text={STATUS_LABEL.alert}><span tabIndex={0}><span className="legend-chip legend-chip-danger" /> Alert firing</span></Tooltip>
+      {/* The same chip hollow, with a tick: an acknowledged alert still fires, and somebody has it. */}
+      <Tooltip text={STATUS_LABEL.acknowledged}><span tabIndex={0}><span className="legend-chip legend-chip-acknowledged"><IconCheck size={7} aria-hidden="true" /></span> Alert acknowledged</span></Tooltip>
     </div>
   )
 

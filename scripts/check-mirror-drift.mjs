@@ -943,6 +943,50 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 45. An alert's acknowledgement reasons, one closed set in three places (0231): the CHECK on
+// platform_alerts, acknowledge_alert()'s own refusal, and the dialog's list. A reason the dialog
+// offers and the database lacks is refused on every save; one the database admits and the dialog
+// lacks can never be chosen. Compared in order, so the dialog lists them as the CHECK does.
+{
+  const check = need(SCHEMA, /ADD CONSTRAINT platform_alerts_acknowledgement_reason_valid CHECK \(\(acknowledgement_reason = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'platform_alerts_acknowledgement_reason_valid in the migrations');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.acknowledge_alert(', '$$;', 'acknowledge_alert()');
+  const js = need(read('frontend/src/utils/alertAcknowledgement.js'),
+    /export const ALERT_ACKNOWLEDGEMENT_REASONS = \[([\s\S]*?)\n\]/, 'ALERT_ACKNOWLEDGEMENT_REASONS in utils/alertAcknowledgement.js');
+  const refused = fn && need(fn.body, /NOT p_reason = ANY \(ARRAY\[([^\]]*)\]\)/, `acknowledge_alert()'s list of reasons (${fn.file})`);
+  if (check && refused && js) {
+    const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+    const offered = [...js[1].matchAll(/value: '([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+    compare('alertAcknowledgementReasons', 'the reasons the CHECK admits and the dialog offers', offered, words(check[1]));
+    compare('alertAcknowledgementReasons', `the reasons acknowledge_alert() admits (${fn.file}) and the dialog offers`,
+      offered, words(refused[1]));
+  }
+}
+
+// 46. Who may acknowledge an alert, and who may withdraw anyone's acknowledgement (0231). The alert
+// counter offers Acknowledge and Withdraw by ALERT_ACKNOWLEDGE_ROLES and ALERT_WITHDRAW_ANY_ROLES; the
+// functions decide by has_role(). A role the counter offers and the database refuses meets an
+// error on every click; one it leaves out never sees the button.
+{
+  const ack = lastDefinition('CREATE OR REPLACE FUNCTION public.acknowledge_alert(', '$$;', 'acknowledge_alert()');
+  const withdraw = lastDefinition('CREATE OR REPLACE FUNCTION public.withdraw_alert_acknowledgement(', '$$;',
+    'withdraw_alert_acknowledgement()');
+  const js = read('frontend/src/utils/alertAcknowledgement.js');
+  const jsAck = need(js, /export const ALERT_ACKNOWLEDGE_ROLES = \[([^\]]*)\]/, 'ALERT_ACKNOWLEDGE_ROLES');
+  const jsAny = need(js, /export const ALERT_WITHDRAW_ANY_ROLES = \[([^\]]*)\]/, 'ALERT_WITHDRAW_ANY_ROLES');
+  const roles = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).sort().join(', ');
+  if (ack && withdraw && jsAck && jsAny) {
+    const ackSql = need(ack.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/, `acknowledge_alert()'s roles (${ack.file})`);
+    const gateSql = need(withdraw.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/,
+      `withdraw_alert_acknowledgement()'s callers (${withdraw.file})`);
+    const anySql = need(withdraw.body, /IS DISTINCT FROM v_uid\s+AND NOT public\.has_role\(ARRAY\[([^\]]*)\]\)/,
+      `withdraw_alert_acknowledgement()'s roles that withdraw anyone's (${withdraw.file})`);
+    if (ackSql) compare('alertAcknowledgementRoles', 'the roles that may acknowledge', roles(jsAck[1]), roles(ackSql[1]));
+    if (gateSql) compare('alertAcknowledgementRoles', 'the roles that may withdraw their own', roles(jsAck[1]), roles(gateSql[1]));
+    if (anySql) compare('alertAcknowledgementRoles', "the roles that may withdraw anyone's", roles(jsAny[1]), roles(anySql[1]));
+  }
+}
+
 // -------------------------------------------------------------------------------------------------
 // 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect row of the example metrics carries (#457):

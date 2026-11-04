@@ -28,7 +28,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Role** is shown on each row, and in the person's drawer. Each person holds one role. To change it, select **Change Role** in their drawer.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
-- **Operator** reads the shopfloor and its live readings, and can propose changes.
+- **Operator** reads the shopfloor and its live readings, and can propose changes and acknowledge an alert.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
 - Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View Their Changes**, and **Remove Access** or **Restore Access**.

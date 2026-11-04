@@ -47,7 +47,8 @@ export function usePlatformAlerts(showToast) {
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from('platform_alerts_active')
-      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels')
+      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels, '
+        + 'acknowledged_at, acknowledged_by, acknowledged_by_email, acknowledgement_reason, acknowledgement_note')
       .order('starts_at', { ascending: false })
 
     if (error) {
