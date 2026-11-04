@@ -12,7 +12,8 @@
  * 25 October 25. Weeks start on Monday. frontend/README.md, "One time control for every period".
  */
 
-const MINUTE = 60 * 1000
+const SECOND = 1000
+const MINUTE = 60 * SECOND
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
@@ -238,13 +239,29 @@ export function stepNames(win) {
 const dayWords = (d, withYear) =>
   d.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}) })
 
+/** "15:20", or "15:20:37" with `seconds`, in the browser's locale. */
+const timeWords = (d, seconds) =>
+  d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
+
 /** "15:20" in the browser's locale. */
-export const clockWords = (d) => d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
+export const clockWords = (d) => timeWords(d, false)
 
 /** "Mon 26 Oct – Sun 1 Nov": the year on both ends when they differ, on the last when it is not this one. */
 function daysWords(first, last, thisYear) {
   const crosses = first.getFullYear() !== last.getFullYear()
   return `${dayWords(first, crosses)} – ${dayWords(last, crosses || last.getFullYear() !== thisYear)}`
+}
+
+/**
+ * "10:05 – 14:20" within a day, and "Mon 2 Nov, 22:00 – Tue 3 Nov, 02:00" across one, with the
+ * year where it is not this one, and the seconds where either end has them. `withDay` puts the
+ * day before a range within one day as well.
+ */
+function rangeWords(from, to, thisYear, withDay) {
+  const seconds = !!(from.getSeconds() || to.getSeconds())
+  const at = (d) => `${dayWords(d, d.getFullYear() !== thisYear)}, ${timeWords(d, seconds)}`
+  if (localDay(from) !== localDay(to)) return `${at(from)} – ${at(to)}`
+  return `${withDay ? at(from) : timeWords(from, seconds)} – ${timeWords(to, seconds)}`
 }
 
 /**
@@ -273,12 +290,105 @@ export function windowWords(win, now = Date.now()) {
         const last = addDays(to, -1)
         return localDay(from) === localDay(last) ? dayWords(from, ofYear(from)) : daysWords(from, last, thisYear)
       }
-      return localDay(from) === localDay(to) ? `${at(from)} – ${clockWords(to)}` : `${at(from)} – ${at(to)}`
+      return rangeWords(from, to, thisYear, true)
     }
     if (from) return `From ${at(from)}`
     if (to) return `Until ${at(to)}`
   }
   return 'All time'
+}
+
+/**
+ * The narrowest window a zoom shows. Under an hour the axis prints seconds (the Audit Trail's
+ * tickFormatter), so a minute still labels its ticks apart.
+ */
+export const ZOOM_FLOOR_MS = MINUTE
+
+const toSecond = (ms) => Math.round(ms / SECOND) * SECOND
+
+/** [start, end] in ms, `length` long (at least the floor) about `centre`, to the second. */
+function around(centre, length) {
+  const ms = Math.max(ZOOM_FLOOR_MS, toSecond(length))
+  const start = toSecond(centre - ms / 2)
+  return [start, start + ms]
+}
+
+const zoomed = (start, end) => customWindow(new Date(start), new Date(end))
+
+/**
+ * What a zoom acts on, as Dates, or null: the window's own bounds, a rolling window's from the
+ * current minute as a step takes them, or else `extent`, the stretch the page's axis draws, for a
+ * window without both bounds. All time is one: its axis is the events'.
+ */
+export function zoomBounds(win, now = Date.now(), extent = null) {
+  if (win?.kind === 'rolling') {
+    const minute = Math.floor(now / MINUTE) * MINUTE
+    return { start: new Date(minute - win.ms), end: new Date(minute) }
+  }
+  const { start, end } = windowBounds(win, now)
+  if (start && end && end > start) return { start, end }
+  const [from, to] = [extent?.start, extent?.end].map(v => (v === null || v === undefined ? NaN : new Date(v).getTime()))
+  return Number.isFinite(from) && Number.isFinite(to) && to > from ? { start: new Date(from), end: new Date(to) } : null
+}
+
+/** Whether Zoom in can narrow the window: there is a stretch to halve, and it is longer than the floor. */
+export function canZoomIn(win, now = Date.now(), extent = null) {
+  const b = zoomBounds(win, now, extent)
+  return !!b && b.end - b.start > ZOOM_FLOOR_MS
+}
+
+/** Whether Zoom out can widen the window: never under All time, which shows everything already. */
+export const canZoomOut = (win, now = Date.now(), extent = null) =>
+  !!win && win.kind !== 'all' && !!zoomBounds(win, now, extent)
+
+/** The middle half of the window, as a custom window, and never under a minute. */
+export function zoomIn(win, now = Date.now(), extent = null) {
+  if (!canZoomIn(win, now, extent)) return win
+  const { start, end } = zoomBounds(win, now, extent)
+  return zoomed(...around((start.getTime() + end.getTime()) / 2, (end - start) / 2))
+}
+
+/**
+ * The window twice as long about the same middle, as a custom window. One that would end past the
+ * current minute is moved back to end with it, so it holds now and half of it is not future.
+ */
+export function zoomOut(win, now = Date.now(), extent = null) {
+  if (!canZoomOut(win, now, extent)) return win
+  const { start, end } = zoomBounds(win, now, extent)
+  const [from, to] = around((start.getTime() + end.getTime()) / 2, 2 * (end - start))
+  const edge = Math.floor(now / MINUTE) * MINUTE + MINUTE
+  return to > edge ? zoomed(edge - (to - from), edge) : zoomed(from, to)
+}
+
+/**
+ * The window a band dragged from `start` to `end` (ms, either way round) sets: to the minute on an
+ * axis `axisMs` an hour long or more, to the second under that, as the axis prints its ticks, and
+ * widened about its middle to the floor.
+ */
+export function bandWindow(start, end, axisMs) {
+  const unit = axisMs >= HOUR ? MINUTE : SECOND
+  const snap = (ms) => Math.round(ms / unit) * unit
+  const [from, to] = [Math.min(start, end), Math.max(start, end)].map(snap)
+  return to - from < ZOOM_FLOOR_MS ? zoomed(...around((from + to) / 2, ZOOM_FLOOR_MS)) : zoomed(from, to)
+}
+
+/** A length of time in words: "45 s", "35 min", "7 min 28 s", "3 h 5 min" or "2 d 4 h". */
+export function lengthWords(ms) {
+  const s = Math.max(0, Math.round(ms / SECOND))
+  const and = (n, unit) => (n ? ` ${n} ${unit}` : '')
+  if (s < 60) return `${s} s`
+  if (s < 3600) return `${Math.floor(s / 60)} min${and(s % 60, 's')}`
+  if (s < 86400) return `${Math.floor(s / 3600)} h${and(Math.floor((s % 3600) / 60), 'min')}`
+  return `${Math.floor(s / 86400)} d${and(Math.floor((s % 86400) / 3600), 'h')}`
+}
+
+/**
+ * A band's bounds and length in words: "10:05 – 10:40, 35 min". A band across days names each end's
+ * day, as the control's words do, and seconds show where either end has them.
+ */
+export function bandWords(start, end, now = Date.now()) {
+  const [from, to] = [new Date(Math.min(start, end)), new Date(Math.max(start, end))]
+  return `${rangeWords(from, to, new Date(now).getFullYear(), false)}, ${lengthWords(to - from)}`
 }
 
 /**

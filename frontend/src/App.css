@@ -5250,11 +5250,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 /* ===== Time window control ===== */
-/* ‹ the window in words ›, Today and the span switch (common/TimeWindowControl.jsx), in a toolbar
-   after the search box. One flex item, so a toolbar that wraps moves it to a line of its own whole;
-   only on a line narrower than itself do Today and the switch go under the arrows, which never
-   part from the words. The words keep a minimum width, so › stays put under the pointer while a
-   week or a day is stepped. */
+/* ‹ the window in words ›, the span switch, and Zoom in and Zoom out where a page asks for them
+   (common/TimeWindowControl.jsx), in a toolbar after the search box. One flex item, so a toolbar
+   that wraps moves it to a line of its own whole; only on a line narrower than itself do the switch
+   and the zoom go under the arrows, which never part from the words. The words keep a minimum
+   width, so › stays put under the pointer while a week or a day is stepped. */
 .time-window {
   display: inline-flex;
   align-items: center;
@@ -5270,6 +5270,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 .time-window-step { padding-left: 7px; padding-right: 7px; }
+
+/* Zoom in and Zoom out, after the switch, a pair that wraps together. */
+.time-window-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .time-window-pick {
   min-width: 12.5rem;
@@ -5678,6 +5685,49 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   justify-content: flex-end;
   border-right: 1px dashed var(--text-dim);
 }
+
+/* A drag across a track zooms to the band it shades. Nothing in a track is text to select, so a
+   drag never selects the ticks it crosses; a marker keeps its own pointer. */
+.trail-swimlanes .trail-track {
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* The band, drawn where the hatched parts are: on the axis, on each section heading and in the
+   layer behind the rows. A translucent accent with an edge each side, so it reads on both themes
+   and over a hatch. */
+.trail-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+/* What a release sets, "10:05 – 10:40, 35 min", on the axis, which stays in view. Opaque over the
+   ticks, centred on the band and held inside the track near either end, as the now marker is; an
+   outline rather than the now marker's fill, so the two are not read as one. */
+.trail-band-words {
+  position: absolute;
+  top: 3px;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.trail-band-words-start { transform: none; }
+.trail-band-words-end   { transform: translateX(-100%); }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --

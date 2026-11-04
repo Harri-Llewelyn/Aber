@@ -7,9 +7,9 @@
  */
 import { describe, it, expect, afterAll } from 'vitest'
 import {
-  ALL_TIME, SPAN_IDS, TIME_PRESETS, calendarTicks, canStep, chooseSpan, holdsNow, jumpTo, parseLocal,
-  rollingWindow, stepNames, stepWindow, timeWindow, windowBounds, windowFromQuery, windowToQuery,
-  windowWords
+  ALL_TIME, SPAN_IDS, TIME_PRESETS, ZOOM_FLOOR_MS, bandWindow, bandWords, calendarTicks, canStep,
+  canZoomIn, canZoomOut, chooseSpan, holdsNow, jumpTo, lengthWords, parseLocal, rollingWindow, stepNames,
+  stepWindow, timeWindow, windowBounds, windowFromQuery, windowToQuery, windowWords, zoomIn, zoomOut
 } from '../utils/timeWindow'
 
 const MACHINE_TZ = process.env.TZ
@@ -291,5 +291,124 @@ describe('the window in the address', () => {
     expect(parseLocal('2026-11-02T24:00')).toBeNull()
     expect(parseLocal('0002-11-02')).toBeNull()
     expect(parseLocal('2026-11-02T10:05')).toEqual(new Date(local(2026, 11, 2, 10, 5)))
+  })
+})
+
+describe('Zoom in halves the window about its middle', () => {
+  const custom = (from, to) => ({ kind: 'custom', from, to })
+
+  it('shows the middle half of a day, an hour or a rolling range, as a custom window', () => {
+    expect(zoomIn(day('2026-11-01'), NOW)).toEqual(custom('2026-11-01T06:00', '2026-11-01T18:00'))
+    expect(zoomIn(custom('2026-11-02T10:00', '2026-11-02T11:00'), NOW)).toEqual(custom('2026-11-02T10:15', '2026-11-02T10:45'))
+    // A rolling range is measured from the current minute, as a step measures it: 14:20 to 15:20.
+    expect(zoomIn(rollingWindow('1h'), NOW)).toEqual(custom('2026-11-02T14:35', '2026-11-02T15:05'))
+  })
+
+  it('halves the time, not the clock: the 25-hour Sunday the clocks went back keeps 12½ hours', () => {
+    const middle = zoomIn(day('2026-10-25'), NOW)
+    expect(middle).toEqual(custom('2026-10-25T05:15', '2026-10-25T17:45'))
+    expect(length(middle, NOW)).toBe(12.5)
+  })
+
+  it('stops at a minute: a window of 90 seconds narrows to one, and one of a minute not at all', () => {
+    expect(ZOOM_FLOOR_MS).toBe(60 * 1000)
+    expect(zoomIn(custom('2026-11-02T10:00', '2026-11-02T10:01:30'), NOW))
+      .toEqual(custom('2026-11-02T10:00:15', '2026-11-02T10:01:15'))
+    const minute = custom('2026-11-02T10:00', '2026-11-02T10:01')
+    expect(canZoomIn(minute, NOW)).toBe(false)
+    expect(zoomIn(minute, NOW)).toBe(minute)
+  })
+
+  it('reaches the floor from an hour in six presses, to the second on the way', () => {
+    let win = custom('2026-11-02T10:00', '2026-11-02T11:00')
+    let presses = 0
+    while (canZoomIn(win, NOW)) { win = zoomIn(win, NOW); presses += 1 }
+    expect(presses).toBe(6)
+    expect(length(win, NOW) * HOUR).toBe(ZOOM_FLOOR_MS)
+    expect(win.from).toMatch(/^2026-11-02T10:29:\d\d$/)
+  })
+
+  it('halves the axis drawn under All time, and the result is a fixed window', () => {
+    const axis = { start: local(2026, 11, 2, 9), end: local(2026, 11, 2, 13) }
+    expect(canZoomIn(ALL_TIME, NOW)).toBe(false)
+    expect(zoomIn(ALL_TIME, NOW)).toBe(ALL_TIME)
+    expect(canZoomIn(ALL_TIME, NOW, axis)).toBe(true)
+    expect(zoomIn(ALL_TIME, NOW, axis)).toEqual(custom('2026-11-02T10:00', '2026-11-02T12:00'))
+    // So does a custom range with an end left out, whose axis is the events' too.
+    expect(zoomIn(custom('2026-11-02T09:00', ''), NOW, axis)).toEqual(custom('2026-11-02T10:00', '2026-11-02T12:00'))
+  })
+})
+
+describe('Zoom out doubles the window about its middle', () => {
+  const custom = (from, to) => ({ kind: 'custom', from, to })
+
+  it('shows twice as long a window, Zoom in undone', () => {
+    expect(zoomOut(custom('2026-11-02T10:15', '2026-11-02T10:45'), NOW)).toEqual(custom('2026-11-02T10:00', '2026-11-02T11:00'))
+    expect(zoomOut(span('week', '2026-10-12'), NOW)).toEqual(custom('2026-10-08T12:00', '2026-10-22T12:00'))
+  })
+
+  it('moves a window that would end past now back to end at the current minute, holding now', () => {
+    const doubled = zoomOut(custom('2026-11-02T14:00', '2026-11-02T15:00'), NOW)
+    expect(doubled).toEqual(custom('2026-11-02T13:21', '2026-11-02T15:21'))
+    expect(holdsNow(doubled, NOW)).toBe(true)
+    expect(canStep(doubled, 1, NOW)).toBe(false)
+    // Today runs to midnight; twice it, ending now, is the 48 hours to 15:21.
+    expect(zoomOut(day('2026-11-02'), NOW)).toEqual(custom('2026-10-31T15:21', '2026-11-02T15:21'))
+    expect(zoomOut(rollingWindow('1h'), NOW)).toEqual(custom('2026-11-02T13:21', '2026-11-02T15:21'))
+  })
+
+  it('has no upper limit', () => {
+    const years = zoomOut(span('year', '2020-06-01'), NOW)
+    expect(canZoomOut(years, NOW)).toBe(true)
+    expect(length(years, NOW)).toBe(2 * length(span('year', '2020-06-01'), NOW))
+  })
+
+  it('is off under All time, which already shows everything', () => {
+    const axis = { start: local(2026, 11, 2, 9), end: local(2026, 11, 2, 13) }
+    expect(canZoomOut(ALL_TIME, NOW, axis)).toBe(false)
+    expect(zoomOut(ALL_TIME, NOW, axis)).toBe(ALL_TIME)
+  })
+})
+
+describe('a band dragged across a timeline', () => {
+  const custom = (from, to) => ({ kind: 'custom', from, to })
+
+  it('sets its stretch, to the minute on an axis of an hour or more, either way round', () => {
+    const [a, b] = [local(2026, 11, 2, 10, 4, 50), local(2026, 11, 2, 10, 40, 10)]
+    expect(bandWindow(a, b, 24 * HOUR)).toEqual(custom('2026-11-02T10:05', '2026-11-02T10:40'))
+    expect(bandWindow(b, a, 24 * HOUR)).toEqual(custom('2026-11-02T10:05', '2026-11-02T10:40'))
+  })
+
+  it('sets it to the second under an hour, as the axis prints seconds there', () => {
+    expect(bandWindow(local(2026, 11, 2, 10, 5, 12) + 400, local(2026, 11, 2, 10, 12, 40), HOUR / 2))
+      .toEqual(custom('2026-11-02T10:05:12', '2026-11-02T10:12:40'))
+  })
+
+  it('widens one shorter than a minute to a minute about its middle', () => {
+    expect(bandWindow(local(2026, 11, 2, 10, 0, 0), local(2026, 11, 2, 10, 0, 20), HOUR / 2))
+      .toEqual(custom('2026-11-02T09:59:40', '2026-11-02T10:00:40'))
+  })
+
+  it('says its bounds and length: "10:05 – 10:40, 35 min"', () => {
+    expect(bandWords(local(2026, 11, 2, 10, 5), local(2026, 11, 2, 10, 40), NOW)).toBe('10:05 – 10:40, 35 min')
+    expect(bandWords(local(2026, 11, 2, 10, 5, 12), local(2026, 11, 2, 10, 12, 40), NOW)).toBe('10:05:12 – 10:12:40, 7 min 28 s')
+  })
+
+  it('names each end\'s day across days, as the control words a window, with a year not this one', () => {
+    expect(bandWords(local(2026, 11, 2, 22), local(2026, 11, 3, 2), NOW)).toBe('Mon 2 Nov, 22:00 – Tue 3 Nov, 02:00, 4 h')
+    expect(windowWords(custom('2026-11-02T22:00', '2026-11-03T02:00'), NOW)).toBe('Mon 2 Nov, 22:00 – Tue 3 Nov, 02:00')
+    expect(bandWords(local(2025, 12, 30, 22), local(2025, 12, 31, 23, 30), NOW))
+      .toBe('Tue, 30 Dec 2025, 22:00 – Wed, 31 Dec 2025, 23:30, 1 d 1 h')
+  })
+
+  it('words a length in seconds, minutes, hours and days', () => {
+    expect(lengthWords(45 * 1000)).toBe('45 s')
+    expect(lengthWords(HOUR)).toBe('1 h')
+    expect(lengthWords(3 * HOUR + 5 * 60 * 1000)).toBe('3 h 5 min')
+    expect(lengthWords(52 * HOUR)).toBe('2 d 4 h')
+  })
+
+  it('leaves the control naming the seconds of a zoomed window that has them', () => {
+    expect(windowWords(custom('2026-11-02T10:29:29', '2026-11-02T10:30:29'), NOW)).toBe('Mon 2 Nov, 10:29:29 – 10:30:29')
   })
 })
