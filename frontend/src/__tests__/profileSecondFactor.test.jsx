@@ -72,14 +72,17 @@ const renderMfa = (props = {}) => {
 const factorRows = () => [...document.querySelectorAll('tr[data-factor]')]
 
 describe('the MFA tab', () => {
-  it('is a tab of its own, after Sessions, with an About tip, and offers Add Authenticator to every role', async () => {
+  it('is a tab of its own, after Sessions, and offers Add Authenticator to every role, filled in its toolbar', async () => {
     renderMfa({ userRole: 'Auditor' })
-    const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
     expect(tabLink('MFA')).toHaveAttribute('aria-current', 'page')
-    expect(headings).toEqual(['Multi-factor authentication (MFA)'])
-    expect(screen.getByRole('button', { name: 'About MFA' })).toBeInTheDocument()
     expect(await screen.findByText('You have not set up MFA. Your password alone signs you in.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Add Authenticator/ })).toBeEnabled()
+    const add = screen.getByRole('button', { name: /Add Authenticator/ })
+    expect(add).toBeEnabled()
+    // The tab explains itself in its tooltip: no heading, About tip or line under the bar.
+    expect(screen.queryAllByRole('heading', { level: 4 })).toEqual([])
+    expect(screen.queryByRole('button', { name: /^About / })).toBeNull()
+    expect(add.closest('.filter-bar-actions')).toBeTruthy()
+    expect(add).toHaveClass('btn-primary')
   })
 
   it('lists verified factors by name, and leaves a half-made one out', async () => {
