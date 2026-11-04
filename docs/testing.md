@@ -1415,7 +1415,8 @@ layer on.
 
 **No CI job installs with the layer off**, though that is the chart's default and what most sites
 run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
-is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+is the only one a default install renders. With Studio on, Studio's and postgres-meta's join it,
+each admitting its one caller, and still admit only that caller with the layer on. Every developer's `npm run dev:up` installs without the layer. A second,
 smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
 configuration that differs from the one CI runs only in its NetworkPolicy objects.
 

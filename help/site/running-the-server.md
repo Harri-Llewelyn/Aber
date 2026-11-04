@@ -449,8 +449,9 @@ cannot see that Secret, so it does not check them.
 The route publishes `supabase-envoy:8001`, the gateway's studio listener, which runs an OAuth
 sign-in against Aber's own GoTrue and admits `Administrator` alone. It never publishes
 `supabase-studio:3000`, which is a database console with no login of its own, running as the
-database owner. The NetworkPolicy follows the same shape. The ingress controller may reach the
-gateway on `8001`, the gateway may reach Studio on `3000`, and nothing else may reach Studio at all.
+database owner. A NetworkPolicy holds the same shape whether or not `networkPolicy.enabled` is on.
+Only the gateway may reach Studio on `3000`. Only Studio may reach postgres-meta on `8080`, because
+postgres-meta runs any SQL as `supabase_admin` with no login. A port-forward to Studio still works.
 
 This does **not** give Studio MFA, or a per-user audit trail of what was run in the SQL
 editor. It controls *who may open the console*, and everything inside it still runs as the

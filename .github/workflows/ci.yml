@@ -1096,6 +1096,92 @@ jobs:
           print("The forge is not reachable by an arbitrary pod on a default install.")
           PY
 
+      # Studio and postgres-meta are off by default; where a site turns them on, one policy each renders
+      # whatever networkPolicy.enabled says (#1360). postgres-meta runs any SQL as supabase_admin with
+      # no login, and Studio's own port skips the gateway's sign-in, so each admits its one caller. With
+      # the layer on, the generated pairs must not widen either.
+      - name: Verify Studio And postgres-meta Admit Only Their One Caller
+        run: |
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true > /tmp/netpol-studio-off.yaml
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
+            --set networkPolicy.enabled=true --set backup.enabled=true --set e2e.enabled=true \
+            > /tmp/netpol-studio-on.yaml
+          python3 - /tmp/netpol-studio-off.yaml /tmp/netpol-studio-on.yaml <<'PY'
+          import sys, yaml
+          COMP = 'app.kubernetes.io/component'
+          ANY = '*'
+          errors = []
+
+          def policies(path):
+              return [d for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                      if d and d.get('kind') == 'NetworkPolicy']
+
+          def selects(doc, component):
+              # Whether the policy's podSelector picks the component's pods. A selector on other labels alone
+              # picks every pod of the release; an expression on another key is read as matching.
+              sel = doc['spec'].get('podSelector') or {}
+              comp = (sel.get('matchLabels') or {}).get(COMP)
+              if comp is not None and comp != component:
+                  return False
+              for e in sel.get('matchExpressions') or []:
+                  if e.get('key') != COMP:
+                      continue
+                  op, values = e.get('operator'), e.get('values') or []
+                  if (op == 'In' and component not in values) or (op == 'NotIn' and component in values) \
+                          or op == 'DoesNotExist':
+                      return False
+              return True
+
+          def admitted(docs, component):
+              # Every peer admitted to the component, by port, across EVERY policy that selects it: policies
+              # add up, so the union is what reaches the pod. A rule with no `from`, or no `ports`, is open.
+              allowed = {}
+              for d in docs:
+                  if not selects(d, component) or 'Ingress' not in (d['spec'].get('policyTypes') or ['Ingress']):
+                      continue
+                  for rule in d['spec'].get('ingress') or []:
+                      peers = rule.get('from')
+                      who = {ANY} if not peers else {
+                          ((p.get('podSelector') or {}).get('matchLabels', {}).get(COMP)
+                           or (p.get('ipBlock') or {}).get('cidr')
+                           or ('namespace' if p.get('namespaceSelector') is not None else ANY))
+                          for p in peers}
+                      for p in rule.get('ports') or [{'port': ANY}]:
+                          allowed.setdefault(p['port'], set()).update(who)
+              return allowed
+
+          WANT = {'supabase-meta': {8080: {'supabase-studio'}}, 'supabase-studio': {3000: {'supabase-envoy'}}}
+
+          # The layer off, Studio and postgres-meta on: one policy each, beside the forge's, and nothing else.
+          off = policies(sys.argv[1])
+          names = sorted(d['metadata']['name'] for d in off)
+          if names != ['aber-forge-identity-header', 'aber-meta-studio-only', 'aber-studio-gateway-only']:
+              errors.append(f"with the layer off and Studio on, expected the forge's, meta's and Studio's policies; got {names}")
+          for comp, want in WANT.items():
+              own = [d for d in off if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == comp]
+              for d in own:
+                  if d['spec'].get('policyTypes') != ['Ingress'] or d['spec'].get('egress'):
+                      errors.append(f"{d['metadata']['name']} must be Ingress-only, with no egress rule")
+              got = admitted(off, comp)
+              if got != want:
+                  errors.append(f"with the layer off, {comp} must admit {want} and nothing else; got {got}")
+
+          # The layer on, Studio on: the generated pairs add no peer and no port to either.
+          on = policies(sys.argv[2])
+          for comp, want in WANT.items():
+              got = admitted(on, comp)
+              if got != want:
+                  errors.append(f"with the layer on, {comp} admits {got}; it must admit {want} alone, as with it off")
+
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+          print("  ok  postgres-meta admits Studio alone on 8080, and Studio the gateway alone on 3000, with the layer off or on")
+          PY
+
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice. e2e is on because e2e-validate is one of the clients asserted, and its

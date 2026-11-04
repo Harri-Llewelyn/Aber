@@ -82,7 +82,9 @@ it is what a human debugging the FDW connects through.
 and what they must not.
 
 **Supabase Studio is off in a default install,** with postgres-meta, which serves it alone: Aber's
-dashboard does the site's work. What follows holds where a site turns both on.
+dashboard does the site's work. What follows holds where a site turns both on. Then a
+NetworkPolicy, rendered whatever `networkPolicy.enabled` says, lets only the gateway reach Studio's
+port and only Studio reach postgres-meta, which runs any SQL as `supabase_admin` with no login.
 
 **Supabase Studio is a database console with no login, roles or session of its own.** Whoever
 reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for
