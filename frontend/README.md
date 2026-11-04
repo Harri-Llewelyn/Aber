@@ -1443,6 +1443,15 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   have is dropped from the address, so a device switched to keeps the names it shares.
 - **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
   the buckets. The device is the page's subject, not a filter, and stays.
+- **The charts are grouped by catalog datatype** (`metricGroups()`), each group named as the
+  Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
+  integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
+  does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
+  `ExpandAllToggle` in the toolbar does every group, as on the Audit Trail and Metrics. A closed
+  group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
+  are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
+  written in try/catch), not in the address. The Metrics dropdown's options carry the same
+  `group`, so its checklist draws them under the same headings.
 - **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
   since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
   it outlasts a change of device. `usePolling` runs it only while the window reaches now

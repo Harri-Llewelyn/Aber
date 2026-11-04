@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -12,6 +12,8 @@ import { ActionButton } from '../common/ActionButton'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { Tooltip } from '../common/Tooltip'
+import { GroupHeading } from '../common/GroupHeading'
+import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
@@ -25,7 +27,7 @@ import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords 
 import {
   DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
   HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, chartSeries, chartSummary, datatypeKind, deviceMatches,
-  deviceMetrics, inReads, pickResolution, pickedAddress, readPlan, readableResolution, validRanges,
+  deviceMetrics, inReads, metricGroups, pickResolution, pickedAddress, readPlan, readableResolution, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -114,6 +116,28 @@ const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?
  */
 const CHART_BAND = { track: '.u-over, .chart-box-states' }
 
+/** Which groups this browser's viewer closed, by datatype. Not in the address: a link opens them all. */
+export const CLOSED_GROUPS_KEY = 'aber_history_closed_groups'
+
+/** The closed groups, or none where storage is refused or holds something else. */
+function readClosedGroups() {
+  try {
+    const keys = JSON.parse(window.localStorage.getItem(CLOSED_GROUPS_KEY) || '[]')
+    return new Set(Array.isArray(keys) ? keys.filter(k => typeof k === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeClosedGroups(keys) {
+  try {
+    if (keys.size) window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...keys]))
+    else window.localStorage.removeItem(CLOSED_GROUPS_KEY)
+  } catch {
+    // Refused storage: the groups open again on the next visit, which is the default anyway.
+  }
+}
+
 /** No metric chosen: every metric is charted. Hoisted: useUrlList's default is compared, not copied. */
 const ALL_METRICS = Object.freeze([])
 
@@ -146,6 +170,10 @@ const WIDTH_SETTLE_MS = 300
  * The window zooms as the Audit Trail's does: Zoom in and Zoom out in the time control, and a drag
  * across any chart, which shades the band on every chart and sets it as the window on release, as a
  * new history entry, so Back undoes it.
+ *
+ * The charts are grouped by their catalog datatype (metricGroups()), each group under a heading that
+ * opens and closes it. A closed group only hides its charts: the reads, the row cap and the Metrics
+ * filter are the same. Which are closed is kept in this browser (CLOSED_GROUPS_KEY).
  */
 export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, hasPermission, showToast }) {
   useClockTick(CLOCK_MS)
@@ -159,6 +187,8 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   const names = useMemo(() => (chosen.length ? metrics.filter(m => chosen.includes(m)) : metrics), [metrics, chosen])
   const [reading, setReading] = useState(null)
   const [exporting, setExporting] = useState(null)
+  const [closedGroups, setClosedGroups] = useState(readClosedGroups)
+  const groupsId = useId()
   const bodyRef = useRef(null)
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
@@ -275,6 +305,19 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     setExporting({ names, from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at) })
   }
 
+  // The groups of the metrics chosen, and which are open; the Metrics list is grouped the same way.
+  const groups = useMemo(() => metricGroups(names, catalog), [names, catalog])
+  const metricOptions = useMemo(
+    () => metricGroups(metrics, catalog).flatMap(g => g.names.map(m => ({ value: m, label: m, group: g.label }))),
+    [metrics, catalog]
+  )
+  const setGroupsOpen = (keys, open) => setClosedGroups(prev => {
+    const next = new Set(prev)
+    for (const k of keys) if (open) next.delete(k); else next.add(k)
+    writeClosedGroups(next)
+    return next
+  })
+
   const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), chosen.length > 0, bucket !== 'auto'].filter(Boolean).length
   const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(ALL_METRICS); setBucket('auto') }
 
@@ -297,6 +340,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       }
     })
   }, [reading, units, ranges])
+  const chartGroups = useMemo(() => {
+    const byName = new Map(charts.map(c => [c.name, c]))
+    return metricGroups(charts.map(c => c.name), catalog).map(g => ({ ...g, charts: g.names.map(n => byName.get(n)) }))
+  }, [charts, catalog])
 
   const busy = Boolean(reading?.loading) || reading === null
 
@@ -323,7 +370,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           label="Metrics"
           noun="metric"
           plural="metrics"
-          options={metrics.map(m => ({ value: m, label: m }))}
+          options={metricOptions}
           value={chosen}
           onChange={setChosen}
           words={v => (v.length === 0 ? 'All metrics' : null)}
@@ -331,6 +378,13 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           tip="Chart only the metrics you choose. Fewer metrics fit finer buckets."
         />
         <BucketChoice value={bucket} options={bucketOptions(auto)} onChange={setBucket} />
+        <ExpandAllToggle
+          anyOpen={groups.some(g => !closedGroups.has(g.key))}
+          onExpandAll={() => setGroupsOpen(groups.map(g => g.key), true)}
+          onCollapseAll={() => setGroupsOpen(groups.map(g => g.key), false)}
+          noun="groups"
+          disabled={groups.length === 0}
+        />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           <ActionButton
@@ -374,24 +428,45 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             {reading.loading && ' · reading again…'}
           </p>
           {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
-          <div className="history-charts" onPointerDown={startBand}>
-            {charts.map(c => (
-              <TimeSeriesChart
-                key={c.name}
-                metric={c.name}
-                unit={c.unit}
-                starts={c.starts}
-                series={c.series}
-                start={reading.start}
-                end={reading.end}
-                now={now}
-                minutes={c.resolution.minutes}
-                validRange={c.validRange}
-                summary={c.summary}
-                syncKey={`history-${device.asset_id}`}
-                band={shownBand}
-              />
-            ))}
+          <div className="history-groups" onPointerDown={startBand}>
+            {chartGroups.map(g => {
+              const open = !closedGroups.has(g.key)
+              const id = `${groupsId}-${g.key}`
+              const shown = g.charts
+              return (
+                <section key={g.key} className="history-group" aria-label={g.label}>
+                  <div className="history-group-head">
+                    <GroupHeading
+                      open={open}
+                      onToggle={() => setGroupsOpen([g.key], !open)}
+                      label={g.label}
+                      count={shown.length}
+                      countLabel={`${shown.length} ${shown.length === 1 ? 'chart' : 'charts'}`}
+                      controls={id}
+                    />
+                  </div>
+                  <div id={id} className="history-charts" hidden={!open}>
+                    {open && shown.map(c => (
+                      <TimeSeriesChart
+                        key={c.name}
+                        metric={c.name}
+                        unit={c.unit}
+                        starts={c.starts}
+                        series={c.series}
+                        start={reading.start}
+                        end={reading.end}
+                        now={now}
+                        minutes={c.resolution.minutes}
+                        validRange={c.validRange}
+                        summary={c.summary}
+                        syncKey={`history-${device.asset_id}`}
+                        band={shownBand}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )
+            })}
           </div>
         </>
       )}

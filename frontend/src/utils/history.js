@@ -6,6 +6,7 @@
 import { HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
 import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
+import { datatypeLabel } from './sparkplugDatatype'
 import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers } from './sparkplugId'
 import { SPAN_IDS, TIME_PRESETS, clockWords, rollingWindow, windowToQuery } from './timeWindow'
@@ -103,6 +104,36 @@ export function datatypeKind(code) {
   if (code === 11) return 'flag'
   if (code === 12 || code === 14 || code === 15) return 'text'
   return 'number'
+}
+
+/**
+ * The order of History's groups, by Sparkplug datatype code: Double and Float, then the integers,
+ * then Boolean, then String and Text. Any other datatype follows by its code, then Other.
+ */
+const GROUP_ORDER = [10, 9, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14]
+
+/** The group of the metrics the catalog does not know. */
+export const OTHER_GROUP = 'Other'
+
+/**
+ * `names` grouped by their catalog datatype, each group named as the Metrics page names the type
+ * ("Double", "Boolean") and in GROUP_ORDER, the names in each in the order given: `[{ key, label,
+ * names }]`. A name the catalog does not know is in Other, last.
+ */
+export function metricGroups(names, catalog) {
+  const code = new Map((catalog || []).map(m => [m.name, m.datatype]))
+  const groups = new Map()
+  for (const name of names) {
+    const c = code.get(name)
+    const known = c !== null && c !== undefined
+    const key = known ? String(c) : 'other'
+    if (!groups.has(key)) {
+      const at = GROUP_ORDER.indexOf(c)
+      groups.set(key, { key, label: known ? datatypeLabel(c) : OTHER_GROUP, names: [], rank: !known ? Infinity : at >= 0 ? at : 100 + c })
+    }
+    groups.get(key).names.push(name)
+  }
+  return [...groups.values()].sort((a, b) => a.rank - b.rank).map(({ rank, ...g }) => g)
 }
 
 /** The narrowest a text chart's bucket is drawn under Auto, in pixels, so its words stay readable. */

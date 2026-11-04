@@ -29,6 +29,16 @@ Choosing fewer metrics gives smaller buckets, and so finer detail. Under **Auto*
 
 The address keeps the device, the window, the metrics and the bucket size, so a link you share opens the same charts. When you chart another device, it keeps the metrics it also has.
 
+## Charts grouped by type
+
+1. Select a group's name, such as **String**, to close it. Its charts are hidden.
+2. Select the name again to open it.
+3. Select **Collapse all** or **Expand all** in the toolbar to close or open every group.
+
+The charts are grouped by the type of value each metric holds, as the Metrics page names it, in this order: **Double**, **Float**, the whole numbers (**Int8** to **UInt64**), **Boolean**, **String** and **Text**, then any other type. A metric the Metrics page does not list is under **Other**, last. Each group's name says how many charts it holds.
+
+Closing a group only hides its charts. The **Metrics** filter, the bucket size and what the page reads stay the same. This browser remembers which groups you closed, on every device's page, but a link you share opens them all. The **Metrics** list in the toolbar is grouped the same way.
+
 ## Zooming in on a stretch
 
 1. Press on a chart, or on a state's strip, and drag across the stretch you want. A shaded band follows the pointer, on every chart.

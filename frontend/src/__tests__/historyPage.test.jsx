@@ -4,9 +4,10 @@
  * not have, so a stand-in records what each chart was built with and gives it a plot area.
  */
 import React from 'react'
-import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent, act, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
+import { CLOSED_GROUPS_KEY } from '../components/tabs/HistoryDevice'
 import { api } from '../api'
 import { momentWords, stateHue } from '../utils/history'
 import { PERMISSION_UUIDS } from '../constants'
@@ -650,5 +651,98 @@ describe("a text chart's buckets under Auto", () => {
     await visit(`/history/device/${LATHE}`)
     await screen.findByText('2 metrics, in 1-minute buckets')
     expect(readsOf()).toEqual([[['Spindle/LOAD', 'Spindle/SPEED'], 1]])
+  })
+})
+
+describe("the charts' groups", () => {
+  const CELL = '2b3e0c4a-6666-4000-8000-000000000006'
+  const cellDevice = {
+    asset_id: CELL, asset_name: 'Cell 6 robot',
+    last_birth_metrics: ['Arm/TORQUE', 'Axis/COUNT', 'Controller/EXECUTION', 'Door/OPEN', 'Misc/THING'],
+  }
+  const groupCatalog = [
+    { name: 'Arm/TORQUE', datatype: 10 }, { name: 'Axis/COUNT', datatype: 3 },
+    { name: 'Controller/EXECUTION', datatype: 12 }, { name: 'Door/OPEN', datatype: 11 },
+  ]
+  beforeEach(() => {
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/devices')) return Promise.resolve([cellDevice])
+      if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(groupCatalog)
+      return Promise.resolve([])
+    })
+  })
+  afterEach(() => { window.localStorage.removeItem(CLOSED_GROUPS_KEY) })
+
+  const heading = (name) => screen.getByRole('button', { name: new RegExp(`^${name}, \\d+ charts?$`) })
+  const groupNames = () => [...document.querySelectorAll('.history-group')].map(g => g.getAttribute('aria-label'))
+  const chartsIn = (name) => [...document.querySelector(`.history-group[aria-label="${name}"]`).querySelectorAll('figure')]
+    .map(f => f.getAttribute('aria-labelledby') && f.querySelector('.history-chart-title').textContent)
+
+  it('groups the charts by datatype, as the Metrics page names it, numbers first and Other last, each with its count', async () => {
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    expect(groupNames()).toEqual(['Double', 'Int32', 'Boolean', 'String', 'Other'])
+    expect(chartsIn('Double')).toEqual(['Arm/TORQUE'])
+    expect(chartsIn('Other')).toEqual(['Misc/THING'])
+    expect(heading('Double')).toHaveAttribute('aria-expanded', 'true')
+    expect(heading('Double')).toHaveTextContent('Double· 1')
+  })
+
+  it('closes a group from its heading, hiding its charts and nothing else, and keeps it closed in this browser', async () => {
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    const reads = api.readCarriedTelemetry.mock.calls.length
+    const address = window.location.pathname + window.location.search
+    fireEvent.click(heading('String'))
+    expect(heading('String')).toHaveAttribute('aria-expanded', 'false')
+    expect(chartsIn('String')).toEqual([])
+    expect(screen.getAllByRole('figure')).toHaveLength(4)
+    // Closing a group is not a filter: the line still counts every metric.
+    expect(screen.getByText('5 metrics, in 5-minute buckets; text in 1-hour buckets')).toBeInTheDocument()
+    expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(reads)
+    expect(window.location.pathname + window.location.search).toBe(address)
+    expect(JSON.parse(window.localStorage.getItem(CLOSED_GROUPS_KEY))).toEqual(['12'])
+
+    cleanup()
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    expect(heading('String')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(heading('String'))
+    expect(chartsIn('String')).toEqual(['Controller/EXECUTION'])
+    expect(window.localStorage.getItem(CLOSED_GROUPS_KEY)).toBeNull()
+  })
+
+  it('opens and closes every group from Collapse all and Expand all', async () => {
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    fireEvent.click(screen.getByRole('button', { name: /Collapse all/ }))
+    expect(screen.queryAllByRole('figure')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: /Expand all/ }))
+    expect(screen.getAllByRole('figure')).toHaveLength(5)
+  })
+
+  it('goes on with every group open where this browser refuses storage', async () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    expect(groupNames()).toHaveLength(5)
+    fireEvent.click(heading('Boolean'))
+    expect(heading('Boolean')).toHaveAttribute('aria-expanded', 'false')
+    getItem.mockRestore()
+    setItem.mockRestore()
+  })
+
+  it('lists the Metrics filter under the same groups', async () => {
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    fireEvent.click(screen.getByRole('button', { name: /^Metrics: / }))
+    const panel = await screen.findByRole('dialog', { name: 'Metrics' })
+    const sections = [...panel.querySelectorAll('.filter-checklist-section')]
+      .map(sec => [sec.querySelector('.filter-checklist-group').textContent, [...sec.querySelectorAll('.filter-checklist-option')].map(o => o.textContent)])
+    expect(sections).toEqual([
+      ['Double', ['Arm/TORQUE']], ['Int32', ['Axis/COUNT']], ['Boolean', ['Door/OPEN']],
+      ['String', ['Controller/EXECUTION']], ['Other', ['Misc/THING']],
+    ])
   })
 })

@@ -8,6 +8,7 @@ import {
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
   shareWords, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
+  OTHER_GROUP, metricGroups,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -128,6 +129,23 @@ describe("a text chart's buckets", () => {
 
   it('refuses a window too long for one series even in day buckets', () => {
     expect(readPlan(T0, T0 + 5001 * DAY, { names: ['A'], textNames: new Set() })).toMatchObject({ problem: true })
+  })
+})
+
+describe("the charts' groups", () => {
+  it('groups by catalog datatype, named as the Metrics page names it: numbers, then Boolean, then text, then Other', () => {
+    const catalog = [
+      { name: 'a/STATE', datatype: 12 }, { name: 'b/DOOR', datatype: 11 }, { name: 'c/COUNT', datatype: 3 },
+      { name: 'd/TEMP', datatype: 10 }, { name: 'e/NOTE', datatype: 14 }, { name: 'f/RATIO', datatype: 9 },
+      { name: 'g/WHEN', datatype: 13 }, { name: 'h/TEMP2', datatype: 10 },
+    ]
+    const names = ['a/STATE', 'b/DOOR', 'c/COUNT', 'd/TEMP', 'e/NOTE', 'f/RATIO', 'g/WHEN', 'h/TEMP2', 'z/UNKNOWN']
+    expect(metricGroups(names, catalog).map(g => [g.label, g.names])).toEqual([
+      ['Double', ['d/TEMP', 'h/TEMP2']], ['Float', ['f/RATIO']], ['Int32', ['c/COUNT']], ['Boolean', ['b/DOOR']],
+      ['String', ['a/STATE']], ['Text', ['e/NOTE']], ['DateTime', ['g/WHEN']], [OTHER_GROUP, ['z/UNKNOWN']],
+    ])
+    expect(metricGroups(names, catalog).map(g => g.key)).toEqual(['10', '9', '3', '11', '12', '14', '13', 'other'])
+    expect(metricGroups([], catalog)).toEqual([])
   })
 })
 
