@@ -335,7 +335,7 @@ is unchanged.
 
 | Surface | A token GoTrue issued to an app |
 | :--- | :--- |
-| GoTrue (`/auth/v1/`) | Reached: every app's functions check its session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` |
+| GoTrue (`/auth/v1/`) | Reached, as the person's own session reaches it: every app's functions check the session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` |
 | Its own app's functions | Reached, on the API listener: `grafana-userinfo` for Grafana, `nodered-userinfo` for Node-RED |
 | Every other function, gated or exempt | 403 at the gateway |
 | PostgREST, directly or relayed by i3X, `aas-api` or the Directory | 403 at the gateway. `auth_pre_request()` refuses it too, before every other check, since the gateway cannot tell a relayed request from a direct one |
@@ -357,7 +357,8 @@ exchanges and refreshes its token with its own client secret, not with the token
 | The forge's door | `c0ffee00-0000-4000-8000-000000000004` | `forge-membership` on every request, which asks GoTrue for `/auth/v1/user`, and `forge-signout` at Gitea's Sign Out, which ends the session at `/auth/v1/logout` | from its own listener, straight to the edge runtime; the functions reach GoTrue through the API listener |
 
 So the doors reach `/auth/v1/` alone on the API listener. An app an Administrator registers that is
-not one of these four reaches `/auth/v1/` alone too, so it can ask who signed in and nothing more.
+not one of these four reaches `/auth/v1/` alone too: GoTrue's endpoints for the person's own
+account, and none of Aber's data or functions.
 The routes are fixed in the gateway's configuration (`supabase/envoy.yaml`, the API listener's
 `rbac` filter). `scripts/check-gateway-surface.mjs` holds them as `APP_ROUTES`, and mirror check 48
 holds their client ids to the apps the stack registers and their functions to the ones that exist.
