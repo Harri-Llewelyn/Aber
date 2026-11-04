@@ -65,8 +65,9 @@ static_resources:
                           inline_string: '{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}'
                         content_type: application/json
                     # An app's token off its own routes, in the key check's shape: the gateway's own 403 to a
-                    # verified token carrying a client_id, which only the rbac filter below answers. The rbac
-                    # filter records its verdict after it replies, so the reply is matched on the token instead.
+                    # verified token carrying a client_id, which only the rbac filter below answers. Matched on the
+                    # token, because the rbac filter's verdict is not yet in the metadata when its reply is mapped
+                    # (measured).
                     - filter:
                         and_filter:
                           filters:
