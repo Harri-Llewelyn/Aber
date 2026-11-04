@@ -605,17 +605,17 @@ describe("a text chart's buckets under Auto", () => {
     get() { return this.classList?.contains('chart-box') ? px : this.classList?.contains('history-body') ? px + 32 : 0 },
   })
 
-  it('reads text apart, in buckets each at least 5 px wide, and says so', async () => {
+  it('reads text apart, in buckets each at least 3 px wide, and says so', async () => {
     await visit(`/history/device/${ROBOT}`)
-    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 1-hour buckets')).toBeInTheDocument()
-    // 960 px across a day: 24 hourly buckets are 40 px; 288 five-minute ones would be 3.3.
-    expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 60]])
-    expect(screen.getByRole('img', { name: 'Controller/EXECUTION' })).toHaveAccessibleDescription(/, in 1-hour buckets\./)
+    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument()
+    // 960 px across a day: 288 five-minute buckets are 3.3 px; 1,440 one-minute ones would be 0.7.
+    expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
+    expect(screen.getByRole('img', { name: 'Controller/EXECUTION' })).toHaveAccessibleDescription(/, in 5-minute buckets\./)
     expect(screen.getByRole('img', { name: 'Arm/TORQUE (N·m)' })).toHaveAccessibleDescription(/, in 1-minute buckets\./)
   })
 
   it('measures the page: a narrower one gives text wider buckets', async () => {
-    widthIs(200)
+    widthIs(150)
     await visit(`/history/device/${ROBOT}?range=1h`)
     expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument()
     expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
@@ -634,7 +634,7 @@ describe("a text chart's buckets under Auto", () => {
     await new Promise(r => setTimeout(r, 400))
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
     // Narrower, in three steps: one read, of the text, at 5 minutes, once the steps settle.
-    widthIs(200)
+    widthIs(150)
     act(() => { page.cb([]); page.cb([]); watchers.forEach(w => w.cb([])) })
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
     await waitFor(() => expect(screen.getByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument())

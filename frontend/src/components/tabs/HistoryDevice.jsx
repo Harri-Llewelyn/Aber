@@ -41,7 +41,7 @@ function DeviceSwitcher({ device, devices, win, chosen, bucket }) {
     <ToolbarPopover
       label="Choose a device"
       buttonLabel={`Device: ${device.asset_name}`}
-      buttonClass="btn btn-sm btn-ghost control-lg history-device-pick"
+      buttonClass="btn btn-sm btn-ghost control-md history-device-pick"
       tip="Chart another device"
       button={<><IconCpu size={13} aria-hidden="true" /><OverflowText>{device.asset_name}</OverflowText></>}
     >
@@ -82,7 +82,7 @@ function BucketChoice({ value, options, onChange }) {
     <ToolbarPopover
       label="Choose the bucket size"
       buttonLabel={`Buckets: ${chosen.label}`}
-      buttonClass="btn btn-sm btn-ghost control-md history-bucket-pick"
+      buttonClass="btn btn-sm btn-ghost control-sm history-bucket-pick"
       tip="Auto takes the finest buckets that fit one read of the metrics chosen"
       button={<OverflowText>{chosen.label}</OverflowText>}
     >

@@ -137,7 +137,7 @@ export function metricGroups(names, catalog) {
 }
 
 /** The narrowest a text chart's bucket is drawn under Auto, in pixels, so its words stay readable. */
-export const TEXT_BUCKET_MIN_PX = 5
+export const TEXT_BUCKET_MIN_PX = 3
 
 /** The chart width assumed when there is none to measure yet. */
 export const DEFAULT_CHART_PX = 960

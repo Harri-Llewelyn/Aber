@@ -98,13 +98,15 @@ describe("a text chart's buckets", () => {
     expect(datatypeKind(null)).toBeNull()
   })
 
-  it('takes the finest whose buckets are each at least 5 px across the chart, within the row cap', () => {
-    expect(TEXT_BUCKET_MIN_PX).toBe(5)
-    // A day at 960 px: 1,440 one-minute and 288 five-minute buckets are too narrow; 24 hourly are 40 px.
-    expect(readableResolution(T0, T0 + DAY, 1, 960)).toMatchObject({ id: '1h' })
-    // An hour: 60 one-minute buckets are 16 px at 960, and 3.3 px at 200, where 12 five-minute are 16.
+  it('takes the finest whose buckets are each at least 3 px across the chart, within the row cap', () => {
+    expect(TEXT_BUCKET_MIN_PX).toBe(3)
+    // A day at 960 px: 1,440 one-minute buckets are 0.7 px; 288 five-minute ones are 3.3.
+    expect(readableResolution(T0, T0 + DAY, 1, 960)).toMatchObject({ id: '5m' })
+    // A day at 800 px: five-minute buckets are 2.8 px, too narrow; 24 hourly ones are 33.
+    expect(readableResolution(T0, T0 + DAY, 1, 800)).toMatchObject({ id: '1h' })
+    // An hour: 60 one-minute buckets are 16 px at 960, and 2.5 px at 150, where 12 five-minute are 12.5.
     expect(readableResolution(T0, T0 + HOUR, 1, 960)).toMatchObject({ id: '1m' })
-    expect(readableResolution(T0, T0 + HOUR, 1, 200)).toMatchObject({ id: '5m' })
+    expect(readableResolution(T0, T0 + HOUR, 1, 150)).toMatchObject({ id: '5m' })
     // Wide enough is not enough: 300 one-minute buckets at 6,000 px are 20 px, but 20 metrics pass the cap.
     expect(readableResolution(T0, T0 + 300 * MINUTE, 20, 6000)).toMatchObject({ id: '5m' })
     // Too narrow for any: the coarsest.
@@ -113,9 +115,11 @@ describe("a text chart's buckets", () => {
 
   it('reads text apart under Auto, and the rest as before', () => {
     const plan = readPlan(T0, T0 + DAY, { names: ['A', 'B', 'S'], textNames: new Set(['S']), widthPx: 960 })
-    expect(plan.groups.map(g => [g.names, g.resolution.id, Boolean(g.text)])).toEqual([[['A', 'B'], '1m', false], [['S'], '1h', true]])
+    expect(plan.groups.map(g => [g.names, g.resolution.id, Boolean(g.text)])).toEqual([[['A', 'B'], '1m', false], [['S'], '5m', true]])
     expect(plan.refused).toBeNull()
-    expect(readPlan(T0, T0 + DAY, { names: ['S'], textNames: new Set(['S']) }).groups.map(g => g.resolution.id)).toEqual(['1h'])
+    expect(readPlan(T0, T0 + DAY, { names: ['S'], textNames: new Set(['S']) }).groups.map(g => g.resolution.id)).toEqual(['5m'])
+    // Narrower than 864 px, a day's five-minute buckets are under 3 px, so text reads hourly.
+    expect(readPlan(T0, T0 + DAY, { names: ['S'], textNames: new Set(['S']), widthPx: 800 }).groups.map(g => g.resolution.id)).toEqual(['1h'])
   })
 
   it('reads every metric at a Buckets choice, text included, and apart again when the choice is too fine', () => {
@@ -124,7 +128,7 @@ describe("a text chart's buckets", () => {
     // Four metrics over a day are too many at 1 minute, so Auto reads them, text apart.
     const refused = readPlan(T0, T0 + DAY, { names: ['A', 'B', 'C', 'S'], textNames: new Set(['S']), bucket: '1m', widthPx: 960 })
     expect(refused.refused).toMatchObject({ id: '1m' })
-    expect(refused.groups.map(g => g.resolution.id)).toEqual(['1m', '1h'])
+    expect(refused.groups.map(g => g.resolution.id)).toEqual(['1m', '5m'])
   })
 
   it('refuses a window too long for one series even in day buckets', () => {

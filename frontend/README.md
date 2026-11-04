@@ -1429,7 +1429,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 - **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
   its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
   numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
-  `TEXT_BUCKET_MIN_PX` (5px) across the chart and whose rows fit the cap, since one-minute buckets
+  `TEXT_BUCKET_MIN_PX` (3px) across the chart and whose rows fit the cap, since one-minute buckets
   over a day run a strip's words together. The width is a chart box's, measured at each read; a
   change of width settles for 300 ms and reads the text again only when it changes their pick.
   Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
