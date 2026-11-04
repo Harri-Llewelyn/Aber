@@ -6015,7 +6015,7 @@ import map, and code imports the bare names (`@supabase/supabase-js`, `fflate`, 
 modules djwt imports by content hash.
 
 - **The image resolves them.** The Dockerfile's `modules` stage runs `deno cache --frozen` with
-  Deno 2.1.4, the Deno that edge-runtime v1.77.0 embeds (`edge-runtime --version`), and copies the
+  Deno 2.1.4, the Deno that edge-runtime v1.77.4 embeds (`edge-runtime --version`), and copies the
   module cache into the image as `DENO_DIR=/home/deno/deno-dir`. `--frozen` fails the build when the
   lock does not cover the module graph; bytes that differ from the lock fail its integrity check.
 - **The build proves it.** The `offline-check` stage boots every function directory under

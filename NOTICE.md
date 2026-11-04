@@ -42,7 +42,7 @@ one.
 | :--- | :--- | :--- | :--- |
 | `aber/timescaledb` | `timescale/timescaledb:2.31.0-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
 | `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
-| `aber/edge-runtime` | `supabase/edge-runtime:v1.77.0`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
+| `aber/edge-runtime` | `supabase/edge-runtime:v1.77.4`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
@@ -371,13 +371,13 @@ one the project's repository declares at the tag the chart or a Dockerfile pins.
 | Component | Licence | Project, at the pinned tag |
 | :--- | :--- | :--- |
 | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own | [`supabase/postgres`](https://github.com/supabase/postgres) `17.6.1.175` |
-| `postgrest/postgrest:v14.17` | MIT | [`PostgREST/postgrest`](https://github.com/PostgREST/postgrest) `v14.17` |
+| `postgrest/postgrest:v14.18` | MIT | [`PostgREST/postgrest`](https://github.com/PostgREST/postgrest) `v14.18` |
 | `supabase/gotrue:v2.197.0` | MIT | [`supabase/auth`](https://github.com/supabase/auth) `v2.197.0` |
-| `supabase/realtime:v2.134.10` | Apache 2.0 | [`supabase/realtime`](https://github.com/supabase/realtime) `v2.134.10` |
-| `supabase/storage-api:v1.74.0` | Apache 2.0 | [`supabase/storage`](https://github.com/supabase/storage) `v1.74.0` |
-| `supabase/edge-runtime:v1.77.0` | MIT | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.0` |
-| `supabase/postgres-meta:v0.99.0` | Apache 2.0 | [`supabase/postgres-meta`](https://github.com/supabase/postgres-meta) `v0.99.0` |
-| `supabase/studio:2026.09.28-sha-5e59b60` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
+| `supabase/realtime:v2.143.3` | Apache 2.0 | [`supabase/realtime`](https://github.com/supabase/realtime) `v2.143.3` |
+| `supabase/storage-api:v1.81.0` | Apache 2.0 | [`supabase/storage`](https://github.com/supabase/storage) `v1.81.0` |
+| `supabase/edge-runtime:v1.77.4` | MIT | [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime) `v1.77.4` |
+| `supabase/postgres-meta:v0.100.0` | Apache 2.0 | [`supabase/postgres-meta`](https://github.com/supabase/postgres-meta) `v0.100.0` |
+| `supabase/studio:2026.10.12-sha-3699278` | Apache 2.0 | [`supabase/supabase`](https://github.com/supabase/supabase), on its default branch: the tag's commit is not in its public history |
 | `envoyproxy/envoy:v1.40.2` | Apache 2.0 | [`envoyproxy/envoy`](https://github.com/envoyproxy/envoy) `v1.40.2` |
 | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0 | [`swagger-api/swagger-ui`](https://github.com/swagger-api/swagger-ui) `v5.34.1` |
 | `grafana/loki:3.7.9` | **AGPL-3.0** ([above](#grafana-and-loki--agpl-30)) | [`grafana/loki`](https://github.com/grafana/loki) `v3.7.9` |
