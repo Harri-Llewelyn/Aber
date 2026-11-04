@@ -115,7 +115,7 @@ secrets:
   giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
   giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret
   giteaWebhookSecret: change-me-gitea-webhook-secret
-  # Studio's door: on here because ingress.routes.studio is, below.
+  # Studio's door, for a developer who turns Studio on (below).
   studioOAuthClientSecret: change-me-studio-oauth-client-secret
   studioProxyHmacSecret: change-me-studio-proxy-hmac-secret
 
@@ -132,11 +132,8 @@ secrets:
   # Break-glass path stays shut by default.
   noderedAdminToken: ""
 
-# Studio's route is off by default as an exposure decision (values.yaml). On a loopback domain
-# there is nothing to expose, and with it on the System page's Studio link works.
-ingress:
-  routes:
-    studio: true
+# Studio and postgres-meta are off, as in values.yaml. To try Studio here, at studio.localhost:
+#   --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true --set ingress.routes.studio=true
 
 # Small volumes: a laptop k3s is usually running on the same disk as everything else, and
 # local-path takes the space from the node's filesystem immediately.

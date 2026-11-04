@@ -14,8 +14,10 @@ Control plane
   {{ .Values.realtime.serviceName }}       :{{ .Values.realtime.port }}   Realtime — named for the TENANT, do not rename
   supabase-storage   :5000   object storage ({{ .Values.supabaseStorage.backend }} backend)
   supabase-functions :9000   edge runtime, functions baked into the image
-  supabase-meta      :8080   postgres-meta
-  supabase-studio    :3000   Studio
+{{- if .Values.supabaseStudio.enabled }}
+  supabase-meta      :8080   postgres-meta, for Studio alone
+  supabase-studio    :3000   Studio{{ if eq (index .Values.ingress.routes "studio") true }}, behind the gateway's login on :8001{{ else }}, no route (kubectl port-forward){{ end }}
+{{- end }}
   swagger-ui         :8080   API reference
 
 Init hooks, in order (post-install and post-upgrade):
@@ -135,7 +137,7 @@ if these are missing the PVC must be destroyed, not the pod restarted):
 {{- if not .Values.global.publicBaseDomain }}
 
   ⚠  global.publicBaseDomain is unset, so every browser-facing URL is EMPTY. GoTrue's
-     GOTRUE_SITE_URL, Studio's SUPABASE_PUBLIC_URL and the OAuth redirect_uris registered by
+     GOTRUE_SITE_URL and the OAuth redirect_uris registered by
      db-init are all derived from it. Set it and upgrade — db-init is a post-upgrade hook, so it
      re-registers both OAuth clients in the same operation.
 {{- end }}
@@ -159,8 +161,8 @@ if these are missing the PVC must be destroyed, not the pod restarted):
 {{- end }}
 {{- if and .Values.ingress.enabled (not .Values.ingress.tls.enabled) }}
 
-  ⚠  The ingress is serving PLAIN HTTP. Every session token, including the service-role key if
-     anyone uses Studio, crosses the network in clear. Set global.scheme=https,
+  ⚠  The ingress is serving PLAIN HTTP. Every session token crosses the network in clear{{ if .Values.supabaseStudio.enabled }},
+     including the service-role key if anyone uses Studio{{ end }}. Set global.scheme=https,
      ingress.tls.enabled=true and a cert-manager clusterIssuer before this is reachable from
      anything but a trusted network.
 {{- end }}

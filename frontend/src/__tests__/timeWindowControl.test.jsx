@@ -5,7 +5,7 @@
  * 2026 at 15:20, so every word is fixed.
  */
 import React from 'react'
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, within, act, waitFor, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { TimeWindowControl } from '../components/common/TimeWindowControl'
 import { useTimeWindow } from '../hooks/useTimeWindow'
@@ -240,6 +240,106 @@ describe('a page offering some spans', () => {
     expect(within(screen.getByRole('radiogroup', { name: 'Span' })).getAllByRole('radio').map(r => r.textContent))
       .toEqual(['Day', 'Week', 'Month', 'Year'])
     expect(words()).toHaveTextContent('2026')
+  })
+})
+
+describe('Zoom in and Zoom out', () => {
+  /** A page that asks for the buttons, its axis drawing 09:00 to 13:00 under All time. */
+  const AXIS = { start: new Date(2026, 10, 2, 9).getTime(), end: new Date(2026, 10, 2, 13).getTime() }
+  function Zooming({ extent = AXIS }) {
+    const [win, setWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
+    return <TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime zoom extent={extent} />
+  }
+  const zooming = (search = '', props = {}) => {
+    window.history.replaceState(null, '', `/audit-trail${search}`)
+    render(<Zooming {...props} />)
+  }
+  const zoom = (name) => within(within(group()).getByRole('group', { name: 'Zoom' })).getByRole('button', { name })
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it('are offered only to a page that asks, after the span switch, with a tooltip each', () => {
+    show('?span=day&at=2026-11-01')
+    expect(within(group()).queryByRole('button', { name: 'Zoom in' })).toBeNull()
+    cleanup()
+
+    zooming('?span=day&at=2026-11-01')
+    const order = [...group().querySelectorAll('button')].map(b => b.getAttribute('aria-label') || b.textContent)
+    expect(order.slice(-6)).toEqual(['Day', 'Week', 'Month', 'Year', 'Zoom in', 'Zoom out'])
+    expect(tooltipOf(zoom('Zoom in'))).toMatch(/middle half/)
+    expect(tooltipOf(zoom('Zoom out'))).toMatch(/twice as long/)
+  })
+
+  it('halve and double the window, say so, and each adds a history entry, so Back undoes it', async () => {
+    zooming('?span=day&at=2026-11-01')
+    const push = vi.spyOn(window.history, 'pushState')
+    const replace = vi.spyOn(window.history, 'replaceState')
+
+    fireEvent.click(zoom('Zoom in'))
+    expect(window.location.search).toBe('?from=2026-11-01T06%3A00&to=2026-11-01T18%3A00')
+    expect(words()).toHaveTextContent('Sun 1 Nov, 06:00 – 18:00')
+    expect(status()).toHaveTextContent('Showing Sun 1 Nov, 06:00 – 18:00')
+    fireEvent.click(zoom('Zoom out'))
+    expect(window.location.search).toBe('?from=2026-11-01T00%3A00&to=2026-11-02T00%3A00')
+    expect(push).toHaveBeenCalledTimes(2)
+    expect(replace).not.toHaveBeenCalled()
+
+    act(() => { window.history.back() })
+    await waitFor(() => expect(words()).toHaveTextContent('Sun 1 Nov, 06:00 – 18:00'))
+    act(() => { window.history.back() })
+    await waitFor(() => expect(window.location.search).toBe('?span=day&at=2026-11-01'))
+    expect(span('Day')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('leave a step replacing the entry, as it did', () => {
+    zooming('?span=day&at=2026-11-01')
+    fireEvent.click(zoom('Zoom in'))
+    const push = vi.spyOn(window.history, 'pushState')
+    const entries = window.history.length
+
+    fireEvent.click(arrow('Earlier'))
+    expect(window.location.search).toBe('?from=2026-10-31T18%3A00&to=2026-11-01T06%3A00')
+    fireEvent.click(span('Day'))
+    expect(push).not.toHaveBeenCalled()
+    expect(window.history.length).toBe(entries)
+  })
+
+  it('turn Zoom in off at a minute, focusable and saying why, and leave Zoom out on', () => {
+    zooming('?from=2026-11-02T10%3A00&to=2026-11-02T10%3A01')
+    const zoomInButton = zoom('Zoom in')
+    expect(zoomInButton).toHaveAttribute('aria-disabled', 'true')
+    expect(zoomInButton).not.toBeDisabled()
+    expect(tooltipOf(zoomInButton)).toMatch(/one minute long, the narrowest/)
+    fireEvent.click(zoomInButton)
+    expect(window.location.search).toBe('?from=2026-11-02T10%3A00&to=2026-11-02T10%3A01')
+
+    expect(zoom('Zoom out')).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(zoom('Zoom out'))
+    expect(window.location.search).toBe('?from=2026-11-02T09%3A59%3A30&to=2026-11-02T10%3A01%3A30')
+    expect(zoom('Zoom in')).not.toHaveAttribute('aria-disabled')
+  })
+
+  it('move a zoom out that would pass now back to end at the current minute', () => {
+    zooming('?span=day&at=2026-11-02')
+    fireEvent.click(zoom('Zoom out'))
+    expect(window.location.search).toBe('?from=2026-10-31T15%3A21&to=2026-11-02T15%3A21')
+    expect(arrow('Later')).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('under All time, zoom in to the middle half of the axis drawn, and zoom out not at all', () => {
+    zooming()
+    expect(zoom('Zoom out')).toHaveAttribute('aria-disabled', 'true')
+    expect(tooltipOf(zoom('Zoom out'))).toMatch(/nothing wider/)
+
+    fireEvent.click(zoom('Zoom in'))
+    expect(window.location.search).toBe('?from=2026-11-02T10%3A00&to=2026-11-02T12%3A00')
+    expect(zoom('Zoom out')).not.toHaveAttribute('aria-disabled')
+  })
+
+  it('under All time with nothing drawn, have nothing to zoom into', () => {
+    zooming('', { extent: null })
+    expect(zoom('Zoom in')).toHaveAttribute('aria-disabled', 'true')
+    expect(tooltipOf(zoom('Zoom in'))).toMatch(/Nothing is drawn/)
   })
 })
 

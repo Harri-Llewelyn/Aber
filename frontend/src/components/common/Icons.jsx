@@ -692,7 +692,7 @@ export const IconFlaskConical = ({ size = 16, className = "", style = {}, ...res
 )
 
 /* The expanded view of an area's plan or a device's 3D model: the button that opens it, and the
-   plan's zoom controls. */
+   plan's zoom controls, which the time control's Zoom in and Zoom out share. */
 export const IconMaximize2 = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <path d="M15 3h6v6" /><path d="m21 3-7 7" />

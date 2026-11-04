@@ -73,6 +73,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
+| `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
 
 Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
 `sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
@@ -571,7 +572,8 @@ so a commissioning burst of five or six rows lands on one pixel. Two fixes were 
 
 Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
 count. Grouping is by **pixel** distance, not by time, so the time window acts as a zoom and a
-cluster dissolves into its members as the same events move apart on screen. The badge sits at the
+cluster dissolves into its members as the same events move apart on screen. A drag across the trail
+or Zoom in narrows the window ([One time control](#one-time-control-for-every-period)). The badge sits at the
 mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
@@ -684,7 +686,7 @@ people allow it. A click or Enter opens its drawer, `?app=<id>` (`appUrl()`), in
 as a person's. The drawer reads `app_approvals()` when it opens and draws the people in
 `components/common/AppApprovalsTable.jsx`, the table Profile's list of approvals shares; Revoke calls
 `revoke_app_approval()` and Remove App `remove_app()`, each after a dialog that says what ends.
-Remove App is disabled for Aber's own four, which db-init registers again on every boot.
+Remove App is disabled for Aber's own apps, which db-init registers again on every boot.
 
 **Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
 `utils/passwords.js` sends the current password with the new one in one
@@ -1340,7 +1342,8 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
 - **A span a page does not offer is passed over** in the address, which then falls back, and Jump
   to lands on Day, or on the first span offered where Day is not.
 - **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
-  `SegmentedControl`. Today is in the popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
+  `SegmentedControl`, then Zoom in and Zoom out where the page asks for them. Today is in the
+  popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
   not wrap inside itself, so a toolbar that wraps moves it whole.
 - **The words open a `ToolbarPopover`**, the frame `FiltersPopover` is drawn in: the same place,
   arrow, Escape and click-outside rules, and the chevron every popover's button ends in. Focus moves to the panel's first control as it opens,
@@ -1362,8 +1365,30 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   today). A rolling one is `range`. A custom one is `from` and `to`, local `YYYY-MM-DDTHH:mm`, and
   `to` is the first minute outside the window. The Audit Trail's older `since` and `until` are read
   as `from` and `to`, and the address is rewritten that way. The old `until` included its whole
-  minute, so its `to` is a minute later and the same rows come back. A change replaces the history
-  entry.
+  minute, so its `to` is a minute later and the same rows come back. A step, a span or a choice in
+  the popover replaces the history entry; a zoom adds one.
+- **Zoom is opt-in: `zoom`.** It adds Zoom in and Zoom out after the switch, in the expanded plan's
+  order and with its glyphs (`IconZoomIn`, `IconZoomOut`). Zoom in shows the middle half of the
+  window and Zoom out twice it about the same middle, each as a custom window to the second
+  (`zoomIn`, `zoomOut`). Zoom in stops at `ZOOM_FLOOR_MS` (one minute), since under an hour the axis
+  prints seconds. Zoom out has no limit, but a window that would end past the current minute is
+  moved back to end with it, so it holds now. A rolling window is measured from the current minute,
+  as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
+  an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
+  off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
+  are. The Audit Trail passes `zoom`; System › Logs does not.
+- **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
+  setter then adds a history entry (`navigate()` without `replace`). Everything else calls
+  `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
+  argument on.
+- **A drag across the Audit Trail zooms too.** A mouse or pen press on the axis or an empty part of a
+  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`). It is drawn on the
+  axis, on each section heading and in the gridlines layer, as the hatched parts are. The axis words
+  it with `bandWords` ("10:05 – 10:40, 35 min"), and a release sets `bandWindow(start, end,
+  axisMs)`: to the minute on an axis of an hour or more, to the second under one, and never under
+  the floor. A press on a marker or a badge starts no band, so it still opens; nor does touch, so a
+  finger scrolls the page. Escape drops a band, and keeps the key from the drawer. Both functions
+  take times, not pixels, so another timeline's drag can use them.
 - **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
   language setting can pass its own. No date library.
 - **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
@@ -1880,6 +1905,19 @@ passes `{ record: false }`, as a Grafana alert does.
 - **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
   the `role="alert"` region. The summary is in the alert counter's list.
+- **The counter counts what nobody has acknowledged** (`common/AlertPill.jsx`, 0231). The pill's
+  number, the tab title and the favicon count the firing alerts with no acknowledgement
+  (`unacknowledgedAlerts()` in `utils/alertAcknowledgement.js`, which `App` passes to the title and
+  the favicon). The list keeps an acknowledged alert, after the others, with a hollow dot, a tick and
+  who acknowledged it, when, the reason and the note. **Acknowledge** opens `AcknowledgeAlertModal`:
+  a reason from the closed set, unchosen to start, and a note Other requires. **Withdraw** asks
+  first, and is offered to the acknowledger, a Shopfloor Manager and an Administrator. Both write an
+  Audit Trail row, so each ends with a success toast that is recorded and links to what the alert is
+  about (`alertSubjectUrl()`). The dialogs are drawn inside the counter's wrapper, so a click in one
+  is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
+  `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
+  acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
+  outranks any acknowledged one.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
@@ -1928,11 +1966,11 @@ passes `{ record: false }`, as a Grafana alert does.
   reason: OAuth consent's Allow, which leaves the dashboard. Rows nobody writes from the dashboard
   (the backup service, the cron, ingestion, a machine's edge function) have nobody to toast to.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
-  it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
-  count drops when the list is opened. One badge cannot follow both: if opening the list cleared
-  it, a critical alert still firing would vanish from the bar, and if it did not, routine messages
-  would add to the alarm's number. So each counts its own, and an alert is counted once, by the
-  pill.
+  it drops when the alert resolves or a person acknowledges it. The history says what the dashboard
+  said, and its count drops when the list is opened. One badge cannot follow both: if opening the
+  list cleared it, a critical alert still firing would vanish from the bar, and if it did not,
+  routine messages would add to the alarm's number. So each counts its own, and an alert is counted
+  once, by the pill.
 
 ---
 

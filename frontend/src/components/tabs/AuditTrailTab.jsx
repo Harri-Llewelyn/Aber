@@ -34,7 +34,7 @@ import { useSetting } from '../../hooks/useSettings'
 import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  ALL_TIME, TIME_PRESETS, calendarTicks, clockWords, timeWindow, windowBounds
+  ALL_TIME, TIME_PRESETS, bandWindow, bandWords, calendarTicks, clockWords, timeWindow, windowBounds
 } from '../../utils/timeWindow'
 import CopyableId from '../common/CopyableId'
 import { RouteLink } from '../common/RouteLink'
@@ -346,6 +346,79 @@ export function clusterEvents(events, xOf, trackWidth) {
   if (current.length) groups.push(current)
 
   return groups.map(item)
+}
+
+/** How far a press must move, in pixels, to be a drag: a shorter one is a click. */
+export const BAND_DRAG_PX = 4
+
+/**
+ * A band dragged across the timeline's tracks, by mouse or pen. A press on the axis or an empty
+ * part of a track starts one; a press on a marker or a badge, or by touch, starts none, so the
+ * marker still opens and a finger still scrolls the page. `band` is `{ a, b }`, fractions of the
+ * track from the press to the pointer, while one is drawn. A release at least BAND_DRAG_PX from the
+ * press calls `onBand(a, b)`; Escape drops the band, and keeps the key from the drawer under it.
+ * Positions are measured against the pressed track's 14px end padding, as offsetForFraction places.
+ */
+function useBandDrag(onBand) {
+  const [band, setBand] = useState(null)
+  const latest = useRef(onBand)
+  latest.current = onBand
+  const stopRef = useRef(null)
+  useEffect(() => () => stopRef.current?.(), [])
+
+  const onPointerDown = useCallback((e) => {
+    if (e.pointerType === 'touch' || e.button !== 0) return
+    const track = e.target.closest?.('.trail-track')
+    if (!track || e.target.closest('.trail-node, .trail-cluster')) return
+    stopRef.current?.()
+    const fractionAt = (x) => {
+      const r = track.getBoundingClientRect()
+      const inner = r.width - 28
+      return inner > 0 ? Math.min(1, Math.max(0, (x - r.left - 14) / inner)) : 0
+    }
+    const { pointerId, clientX: x0 } = e
+    const a = fractionAt(x0)
+    const far = (x) => Math.abs(x - x0) >= BAND_DRAG_PX
+    let drawn = false
+
+    const move = (ev) => {
+      if (ev.pointerId !== pointerId) return
+      // No button held: the release was missed (outside the window), so the press is over.
+      if (ev.buttons === 0) { stop(); return }
+      if (!drawn && !far(ev.clientX)) return
+      drawn = true
+      setBand({ a, b: fractionAt(ev.clientX) })
+    }
+    const up = (ev) => {
+      if (ev.pointerId !== pointerId) return
+      const set = drawn && far(ev.clientX)
+      stop()
+      if (set) latest.current(a, fractionAt(ev.clientX))
+    }
+    const key = (ev) => {
+      if (ev.key !== 'Escape') return
+      if (drawn) { ev.preventDefault(); ev.stopPropagation() }
+      stop()
+    }
+    function stop() {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('keydown', key, true)
+      stopRef.current = null
+      setBand(null)
+    }
+    // The track keeps the pointer, so the release reaches it even outside the browser window.
+    try { track.setPointerCapture?.(pointerId) } catch { /* a pointer the browser no longer has */ }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', stop)
+    // Captured at the window, so it is heard before the drawer's Escape on the document.
+    window.addEventListener('keydown', key, true)
+    stopRef.current = stop
+  }, [])
+
+  return { band, onPointerDown }
 }
 
 /**
@@ -1741,6 +1814,25 @@ export function AuditTrailTab({ userRole, showToast }) {
         ? `Older events not loaded: more than ${capWords} in this window`
         : `Not loaded: over ${capWords}`
 
+  /**
+   * A drag across the tracks zooms to the stretch it covers: a custom window, and a new history
+   * entry, so Back undoes it as it does the control's Zoom in and Zoom out.
+   */
+  const atFraction = (f) => domain.min + domain.span * f
+  const { band, onPointerDown: startBand } = useBandDrag((a, b) => {
+    if (domain) setTimeWin(bandWindow(atFraction(a), atFraction(b), domain.span), { replace: false })
+  })
+  /** The band as drawn: its ends as fractions, and the window a release sets, in words. */
+  const shownBand = band && domain ? (() => {
+    const lo = Math.min(band.a, band.b)
+    const hi = Math.max(band.a, band.b)
+    const { start, end } = windowBounds(bandWindow(atFraction(lo), atFraction(hi), domain.span))
+    return { lo, hi, mid: (lo + hi) / 2, words: bandWords(start, end, nowMs) }
+  })() : null
+  const bandStyle = shownBand
+    ? { left: offsetForFraction(shownBand.lo), width: `calc((100% - 28px) * ${shownBand.hi - shownBand.lo})` }
+    : null
+
   // Resolved fresh every render: a refresh replaces every event object. If the selected event drops
   // out of the filter, the drawer closes.
   const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
@@ -2044,8 +2136,15 @@ export function AuditTrailTab({ userRole, showToast }) {
           />
 
           {/* The window is a query parameter, so a narrower one does not spend the row budget
-              outside it. */}
-          <TimeWindowControl value={timeWin} onChange={setTimeWin} ranges={TIME_PRESETS} allTime />
+              outside it. Zoom in halves the axis drawn, which under All time is the events'. */}
+          <TimeWindowControl
+            value={timeWin}
+            onChange={setTimeWin}
+            ranges={TIME_PRESETS}
+            allTime
+            zoom
+            extent={domain ? { start: domain.min, end: domain.max } : null}
+          />
 
           {/* The secondary filters: the kinds of entity, the actions, who made the change, and
               whether deleted entities are shown. Search and the time window stay in the bar. */}
@@ -2206,12 +2305,24 @@ export function AuditTrailTab({ userRole, showToast }) {
           ) : (
             <>
               <div className="trail-scroll">
-                <div className="trail-swimlanes">
+                {/* A press on the axis or an empty part of a track and a drag zooms (useBandDrag). */}
+                <div className="trail-swimlanes" onPointerDown={startBand}>
                   <div className="trail-lane trail-axis">
                     {/* The corner is a spacer now: it holds the lane labels' width so the ticks
                         line up with the tracks beside them, and nothing else. */}
                     <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
                     <div className="trail-track trail-axis-track" ref={axisTrackRef}>
+                      {/* Divs, as the now marker is, so the ticks stay the spans of their type. */}
+                      {shownBand && <div className="trail-band" aria-hidden="true" style={bandStyle} />}
+                      {shownBand && (
+                        <div
+                          className={`trail-band-words${shownBand.mid > 0.85 ? ' trail-band-words-end' : shownBand.mid < 0.15 ? ' trail-band-words-start' : ''}`}
+                          aria-hidden="true"
+                          style={{ left: offsetForFraction(shownBand.mid > 0.85 ? shownBand.hi : shownBand.mid < 0.15 ? shownBand.lo : shownBand.mid) }}
+                        >
+                          {shownBand.words}
+                        </div>
+                      )}
                       {ticks.map(t => (
                         <Tooltip key={t.f} text={t.title}>
                           <span className="trail-tick" style={{ left: offsetForFraction(t.f) }}>
@@ -2258,6 +2369,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                             {/* The hatched parts carry their words here, as the headings are pinned
                                 in view and opaque over the layer behind the rows. */}
                             <div className="trail-track">
+                              {shownBand && <div className="trail-band" aria-hidden="true" style={bandStyle} />}
                               {unloadedF !== null && (
                                 <span className="trail-shade trail-shade-unloaded" aria-hidden="true" style={{ width: offsetForFraction(unloadedF) }}>
                                   {unloadedWords}
@@ -2331,7 +2443,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                         behind the rows, rather than once per lane; placed last so the first
                         section stays the body's first child. Positioned by the same helper as
                         the ticks and the markers. Nothing here is content. The hatched parts of
-                        the window are in the same layer. */}
+                        the window, and a band being dragged, are in the same layer. */}
                     <div className="trail-gridlines" aria-hidden="true">
                       {ticks.map(t => (
                         <span key={t.f} className="trail-gridline" style={{ left: offsetForFraction(t.f) }} />
@@ -2342,6 +2454,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                       {nowF !== null && (
                         <span className="trail-shade trail-shade-future" style={{ left: offsetForFraction(nowF) }} />
                       )}
+                      {shownBand && <div className="trail-band" style={bandStyle} />}
                     </div>
                   </div>
                 </div>

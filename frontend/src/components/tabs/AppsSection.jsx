@@ -39,8 +39,8 @@ const personOf = (r) => r.display_name || r.email || r.user_id
  * (`list_apps()`, 0217). Each row is the app, how and when it was registered, where it sends people
  * back to, its client type and how many people allow it. A click or Enter opens its drawer
  * (`?app=<id>`), which lists the people who allowed it (`app_approvals()`) with Revoke for each
- * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own four apps are
- * marked and cannot be removed: they are registered again each time Aber starts.
+ * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own apps are marked
+ * and cannot be removed: they are registered again each time Aber starts.
  *
  * `drawerHost` is the element the drawer is drawn into, beside the page's card. `canReadTrail` offers
  * View Audit Trail, the app's own lane.
@@ -220,7 +220,7 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
             <ClearFilters count={query ? 1 : 0} onClear={() => setSearch('')} />
             <HelpTip
               label="About apps"
-              text="An app signs people in with their Aber account, and each person allows it once. Aber's own four are Grafana, Node-RED, Studio and the forge. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
+              text="An app signs people in with their Aber account, and each person allows it once. Aber's own are Grafana, Node-RED and the forge, and Studio where the site runs it. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
             />
           </div>
         </div>

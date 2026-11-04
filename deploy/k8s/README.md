@@ -385,7 +385,8 @@ Run `npm run dev:test`. The port-forwards give `DB_HOST`, `SUPABASE_DB_HOST`, `M
 | `supabase-envoy`, `supabase-auth`, `supabase-rest` | deployed |
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
-| `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
+| `swagger-ui` | deployed |
+| `supabase-studio`, `supabase-meta` | off by default; `supabaseStudio.enabled` and `supabaseMeta.enabled` turn both on |
 | `db-roles-init`, `db-init`, `storage-policies`, `storage-init`, `timescaledb-maintenance` hooks | deployed |
 | `mosquitto` + `mosquitto-external`, `ingestion`, `playback` | deployed |
 | `node-red`, `frontend` | deployed |
@@ -729,8 +730,15 @@ through the gateway's `forge-api` listener (8003), which removes the identity he
 is the container's: a policy matches the port after the Service has translated it, so it is 22
 whatever `gitea.ssh.external.port` publishes.
 
-Everything else in this section stays opt-in. Turning the layer on replaces this policy with the
-generated pair.
+**Studio and postgres-meta get one each too, where a site runs them** (#1360). postgres-meta runs
+any SQL as `supabase_admin` and asks for no login, so its policy admits Studio's pods on 8080 and
+nothing else. Studio's own port skips the gateway's sign-in, so its policy admits the gateway on
+3000 and nothing else. Both cover ingress only, and both stay with the layer on: the generated pairs
+admit the same peers, so nothing is widened. A `kubectl port-forward` to Studio still works, because
+it connects inside the pod.
+
+Everything else in this section stays opt-in. Turning the layer on replaces the forge's policy with
+the generated pair.
 
 The reason is that Gitea runs with reverse-proxy authentication. It signs in whoever the
 `X-WEBAUTH-USER` header names, from any peer. (`REVERSE_PROXY_TRUSTED_PROXIES` governs

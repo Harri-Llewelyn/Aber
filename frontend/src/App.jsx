@@ -85,6 +85,7 @@ import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
+import { unacknowledgedAlerts } from './utils/alertAcknowledgement'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
@@ -568,8 +569,11 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
-  // visible whichever page is open. Each alert's toast links to its rule in Grafana.
+  // visible whichever page is open. Each alert's toast links to its rule in Grafana. The counter,
+  // the title and the favicon count the ones nobody has acknowledged; the pages and the counter's
+  // list are handed them all.
   const firingAlerts = usePlatformAlerts(showToast)
+  const unacknowledgedCount = unacknowledgedAlerts(firingAlerts).length
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
   // under the bar and the tab title.
@@ -579,8 +583,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // page differ, and the pill's count, so the tab and the bar never disagree. The icon's red dot
   // follows the same count, for a pinned tab that shows no title.
   const url = useUrl()
-  useDocumentTitle(pageTitleOf(tab, url), firingAlerts.length, connection.status !== CONNECTION_OK)
-  useAlertFavicon(firingAlerts.length)
+  useDocumentTitle(pageTitleOf(tab, url), unacknowledgedCount, connection.status !== CONNECTION_OK)
+  useAlertFavicon(unacknowledgedCount)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
@@ -691,6 +695,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             alerts={firingAlerts}
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
+            userRole={userRole}
+            userId={session?.user?.id}
+            showToast={showToast}
           />
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count

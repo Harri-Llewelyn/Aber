@@ -119,6 +119,10 @@ export const AUDIT_TRAIL_ACTIONS = {
   // one when the read's service, level, filter or range differs from their last, so a refresh
   // writes none.
   SERVICE_LOGS_READ:       'Logs read',
+  // A person acknowledging a firing alert from the alert counter, or withdrawing it (0231): in the
+  // alert's lane, or a machine identity's alert in the identity's.
+  ALERT_ACKNOWLEDGED:              'Alert acknowledged',
+  ALERT_ACKNOWLEDGEMENT_WITHDRAWN: 'Acknowledgement withdrawn',
 };
 
 /**
@@ -140,6 +144,8 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset', group: 'plant' },
   { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset', group: 'plant' },
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset', group: 'plant' },
+  // An alert's acknowledgements (0231), one lane per alert across its occurrences (0232).
+  { kind: 'ALERT',            table: 'platform_alerts',    label: 'Alerts',             domain: 'asset', group: 'plant' },
   // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
   // reader meets it: who holds what, what the machines are, then the contracts and settings that
   // shape both.
@@ -196,6 +202,7 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     label: 'The plant and the model',
     actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
   },
+  { label: 'Alerts', actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN'] },
   {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
@@ -296,6 +303,9 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   ['BACKUP_PRUNED', ['backups'], ['configuration']],
   // The System page.
   ['SERVICE_LOGS_READ', ['service_logs'], ['read']],
+  // Alerts, in the alert's lane, or a machine identity's alert in the identity's.
+  ['ALERT_ACKNOWLEDGED', ['platform_alerts', 'service_principals'], ['operational']],
+  ['ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ['platform_alerts', 'service_principals'], ['operational']],
 ];
 
 /**

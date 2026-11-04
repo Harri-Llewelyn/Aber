@@ -117,7 +117,8 @@ const FORWARDS = [
   { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian', relay: true },
   { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres', relay: true },
   { local: 54321, service: 'supabase-envoy', remote: 8000, what: 'Supabase API (the gateway)' },
-  { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login' },
+  // Only where the gateway has the port: Studio is off unless a developer turns it on.
+  { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login', optional: true },
   { local: 3003, service: 'supabase-envoy', remote: 8002, what: 'the forge, behind the gateway' },
   { local: 1880, service: 'node-red', remote: 1880, what: 'Node-RED' },
   { local: 3002, service: 'grafana', remote: 3000, what: 'Grafana' },
@@ -762,12 +763,22 @@ export function wantedForwards ({ tls, published }) {
   return [...FORWARDS, ...LB_FORWARDS.filter(f => (tls || !f.tlsOnly) && !published(f.local))]
 }
 
+/** The ports a Service declares, or none when it is absent. */
+function servicePorts (service) {
+  const r = kubectl('get', 'service', service, '-o', 'jsonpath={.spec.ports[*].port}')
+  return r.ok ? r.out.split(/\s+/).filter(Boolean).map(Number) : []
+}
+
 async function openForwards ({ tls }) {
   const wanted = wantedForwards({ tls, published: lbPublishes })
   const handles = []
   const close = () => handles.forEach(h => h.close())
   const opened = []
   for (const f of wanted) {
+    if (f.optional && !servicePorts(f.service).includes(f.remote)) {
+      console.log(`  ${c.dim(`${f.service} has no port ${f.remote}; not forwarded (${f.what})`)}`)
+      continue
+    }
     if (await portOpen(f.local)) {
       console.log(`  ${c.dim(`${f.local} is already listening on this machine; not forwarded (${f.what})`)}`)
       continue
