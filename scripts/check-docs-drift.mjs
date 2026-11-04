@@ -5001,9 +5001,10 @@ const OPERATOR_PAIRS = [
   const tab = read(TAB);
   const help = read(HELP);
   const problems214 = [];
-  const block = (name) => tab.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\s*\\}`))?.[1] ?? '';
-  const words = Object.fromEntries([...block('STATUS_WORD').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
-  const labels = Object.fromEntries([...block('STATUS_LABEL').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  // One literal pattern per object: a RegExp built from a name is a Semgrep finding (detect-non-literal-regexp).
+  const pairs = (body) => Object.fromEntries([...(body ?? '').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const words = pairs(tab.match(/const STATUS_WORD = \{([\s\S]*?)\n\s*\}/)?.[1]);
+  const labels = pairs(tab.match(/const STATUS_LABEL = \{([\s\S]*?)\n\s*\}/)?.[1]);
   if (!words.alert || !words.acknowledged) problems214.push(`${TAB}: STATUS_WORD has no alert or acknowledged entry`);
   const states = help.slice(help.indexOf('## What the states mean'), help.indexOf('\n## ', help.indexOf('## What the states mean') + 1));
   for (const word of Object.values(words)) {
@@ -5085,8 +5086,9 @@ const OPERATOR_PAIRS = [
   const spec = read(SPEC);
   const sql = read(MIGRATION);
   const problems216 = [];
+  const granted = new Set([...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\([^)]*\) TO authenticated/g)].map((m) => m[1]));
   const functions = [...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(/g)].map((m) => m[1])
-    .filter((fn) => new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${fn}\\([^)]*\\) TO authenticated`).test(sql));
+    .filter((fn) => granted.has(fn));
   if (functions.length !== 2) problems216.push(`${MIGRATION}: expected two functions granted to authenticated, found ${functions.join(', ') || 'none'}`);
   for (const fn of functions) {
     if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems216.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
