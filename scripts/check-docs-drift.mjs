@@ -5126,7 +5126,8 @@ const OPERATOR_PAIRS = [
   const VITE = 'frontend/vite.config.js';
   const fallback = /location \/ \{[^}]*try_files \$uri \$uri\/ \/index\.html;/.test(read(NGINX));
   // Comments are blanked, as check 49 does, not removed: what is left cannot close up into a new one.
-  const uncommented = read(INDEX).replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  // <!-{2} and -{2}>, not the markers: Semgrep's parser, not Node, reads a regex opening with one as a comment.
+  const uncommented = read(INDEX).replace(/<!-{2}[\s\S]*?-{2}>/g, (c) => c.replace(/[^\n]/g, ' '));
   const relative = [...uncommented.matchAll(/\s(?:src|href)="([^"]*)"/g)]
     .map((m) => m[1])
     .filter((url) => !url.startsWith('/') && !/^[a-z]+:/i.test(url));
@@ -5333,8 +5334,9 @@ const OPERATOR_PAIRS = [
     }
     return '';
   };
-  const using = at < 0 ? '' : inside(policies, policies.indexOf('USING (', at) + 'USING '.length);
-  const roles = using.indexOf('AND (') < 0 ? '' : inside(using, using.indexOf('AND (') + 'AND '.length);
+  // Not named `using`: Semgrep's parser, not Node, refuses that name where an expression reads it.
+  const usingClause = at < 0 ? '' : inside(policies, policies.indexOf('USING (', at) + 'USING '.length);
+  const roles = usingClause.indexOf('AND (') < 0 ? '' : inside(usingClause, usingClause.indexOf('AND (') + 'AND '.length);
   const arms = [];
   let depth = 0;
   let from = 0;
@@ -8284,8 +8286,9 @@ const OPERATOR_PAIRS = [
     ['@import', /@import\s+(?:url\(\s*)?["']?\s*(?:https?:)?\/\//gi],
     ['url()', /(?<!@import\s+)\burl\(\s*["']?\s*(?:https?:)?\/\//gi],
   ];
-  // A comment keeps its newlines, so a line number still points at the source.
-  const blank = (text) => text.replace(/<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+  // A comment keeps its newlines, so a line number still points at the source. <!-{2} and -{2}>, not
+  // the markers: Semgrep's parser, not Node, reads a regex opening with one as a comment.
+  const blank = (text) => text.replace(/<!-{2}[\s\S]*?-{2}>|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
 
   const offences = [];
   for (const file of PAGES) {

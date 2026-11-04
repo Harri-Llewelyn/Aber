@@ -107,10 +107,17 @@ python supabase/functions/manage-people/test_account_pictures_stack.py
 # The seeded Operator signs in to Grafana's client as Grafana does (the code flow with PKCE, the
 # consent page's approval, the code exchanged with the secret) and the app's refresh token works.
 # Then the person revokes through GoTrue, and in a second round an Administrator revokes through
-# revoke_app_approval(): each time the refresh token is refused, the API refuses the app's access
-# token, the next sign-in asks again, the person's dashboard is still served, and the Audit Trail
-# names who revoked it.
+# revoke_app_approval(): each time the refresh token is refused, Grafana's userinfo function refuses
+# the app's access token, the next sign-in asks again, the person's dashboard is still served, and
+# the Audit Trail names who revoked it.
 python supabase/test_revoking_an_app_ends_its_refresh_token.py
+# Each app's token reaches only its own routes (0235). Needs the stack up, with each app's client
+# secret. The seeded Shopfloor Manager signs in to Grafana, Node-RED and the Studio and forge doors
+# as each does, and each app's token reaches /auth/v1/user and its own userinfo function, and is
+# refused with the gateway's 403 on a PostgREST read, a Storage read and every other function. The
+# person's dashboard token reaches all of them, and an app's ID token is not served as the person.
+# An app whose client is not registered (Studio's when Studio is off) is skipped, with the reason.
+python supabase/test_each_app_s_token_reaches_only_its_own_routes.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -374,7 +381,9 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
 # command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
-# repository's branches, never from its pull request head, tag or stash. And the signing set
+# repository's branches, never from its pull request head, tag or stash. And the half of
+# `scripts/scan-source.mjs` that needs no Docker: which of Semgrep's errors fail the scan, a tracked
+# file it could not parse, whole or in part, beyond its named exceptions. And the signing set
 # (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
 # `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
 # it keeps, and that a second run changes nothing.
@@ -423,8 +432,9 @@ python supabase/migrations/test_user_roles_rls.py
 # refuses as before, and a machine principal is refused. Every test rolls back.
 python supabase/migrations/test_user_roles_name_their_person_by_uuid.py
 # What has_role() and has_authority() cost per call (median of 5 runs of 10,000), beside the loop
-# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards. Printed, never asserted: run it on
-# the same database before and after a change to either function or the table they read.
+# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards, and the two for an app's token
+# (0235). Printed, never asserted: run it on the same database before and after a change to either
+# function or the table they read.
 python supabase/migrations/test_role_checks_are_timed.py
 # The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
@@ -797,6 +807,12 @@ python supabase/migrations/test_service_principal_revocation.py
 # person's other sessions, and every token that names no session, are still served. A removed
 # person is told their access was removed. Every test rolls back.
 python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py
+# An app's token (0235): the client_id arm of the same hook, and the two role checks. A token GoTrue
+# issued to an app is refused before every other arm, for every app and every API role, and holds
+# no role or permission, a machine's arm included, so a row a role gates is closed to it; a row any
+# signed-in account reads is not, the gap Realtime keeps. A token with no client_id, or an empty or
+# null one, is served and answered as before. Every test rolls back.
+python supabase/migrations/test_an_app_s_token_reaches_only_its_own_routes.py
 # A person's own sessions (0206). list_my_sessions() returns the caller's and nobody else's, the
 # one their token names first, a service's by its name, refreshed_at read as UTC, and no address
 # or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses

@@ -16,7 +16,8 @@
 -- -------------------------------------------------------------------------------------------------
 -- 0170's body unchanged but for the `session_id` claim it parses and the arm after the removed
 -- person's. auth.sessions is keyed by id, so the arm is one primary-key probe for a request whose
--- token names a session. CREATE OR REPLACE keeps 0001's grants.
+-- token names a session. CREATE OR REPLACE keeps 0001's grants. 0235's arm, for a token issued to an
+-- app, is declared here in place, before the others.
 CREATE OR REPLACE FUNCTION public.auth_pre_request() RETURNS void
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public'
@@ -26,6 +27,7 @@ DECLARE
   v_jti     text;
   v_sub     text;
   v_session text;
+  v_client  text;
 BEGIN
   -- NO CLAIMS IS THE COMMON CASE, NOT AN ANOMALY. Every unauthenticated request arrives here with
   -- this GUC unset -- the `true` argument is what makes that return NULL instead of raising.
@@ -38,6 +40,7 @@ BEGIN
     v_jti     := (v_claims::jsonb) ->> 'jti';
     v_sub     := (v_claims::jsonb) ->> 'sub';
     v_session := (v_claims::jsonb) ->> 'session_id';
+    v_client  := (v_claims::jsonb) ->> 'client_id';
   EXCEPTION WHEN others THEN
     -- CLAIMS THAT WILL NOT PARSE ARE NOT THIS FUNCTION'S BUSINESS. PostgREST has already validated
     -- the signature to get here, so malformed JSON in this GUC is a PostgREST-side surprise rather
@@ -45,6 +48,20 @@ BEGIN
     -- over a condition that has nothing to do with revocation.
     RETURN;
   END;
+
+  -- ------------------------------------------------------------------------------------------
+  -- A token GoTrue issued to an app (0235)
+  -- ------------------------------------------------------------------------------------------
+  -- Its client_id names the app. None of the API is an app's route, whoever relays the request, and
+  -- no other state lifts this refusal, so it answers first and needs no lookup.
+  IF v_client IS NOT NULL AND v_client <> '' THEN
+    RAISE EXCEPTION 'this token was issued to an app, and reaches only that app''s own routes'
+      USING ERRCODE = 'insufficient_privilege',
+            DETAIL = 'client ' || v_client,
+            HINT   = 'A token GoTrue''s OAuth server issued to an app reaches GoTrue and the app''s own '
+                     'functions, never the API. Call the API with the person''s own session or a '
+                     'machine identity''s token.';
+  END IF;
 
   -- ------------------------------------------------------------------------------------------
   -- The principal denylist, checked first
@@ -132,7 +149,7 @@ $$;
 
 ALTER FUNCTION public.auth_pre_request() OWNER TO postgres;
 
-COMMENT ON FUNCTION public.auth_pre_request() IS 'PostgREST db-pre-request hook: aborts the request when the caller''s JWT carries a revoked jti (0074), names a revoked service principal (0076), names a person whose access an Administrator removed, until it is restored (0170), or names a GoTrue session that has ended, with 401 session_not_found (0205). Returns quietly for every other condition -- no claims, unparseable claims, a token with no jti or session_id, a sub that is not a uuid -- because those are the ordinary majority and refusing them would take the whole API down.';
+COMMENT ON FUNCTION public.auth_pre_request() IS 'PostgREST db-pre-request hook: aborts the request when the caller''s JWT carries a revoked jti (0074), names a revoked service principal (0076), names a person whose access an Administrator removed, until it is restored (0170), or names a GoTrue session that has ended, with 401 session_not_found (0205), and refuses a token GoTrue issued to an app, which carries a client_id, before any of them (0235). Returns quietly for every other condition -- no claims, unparseable claims, a token with no jti or session_id, a sub that is not a uuid -- because those are the ordinary majority and refusing them would take the whole API down.';
 
 -- -------------------------------------------------------------------------------------------------
 -- Self-check: both person arms are there, the hook still runs for every API role, a token naming

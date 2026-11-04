@@ -95,6 +95,13 @@ Each key is chosen to survive unrelated edits:
 - **trivy** keys name the check and the resource (the container of a workload, or the Dockerfile),
   never a line number.
 
+A tracked file that Semgrep cannot parse, whole or in part, fails `scan:source`. Semgrep only warns
+about such a file, and no rule reads the part it could not parse, so a finding there would pass
+unseen. Rewrite the construct the parser stops at. A file left as it is, such as a working shell
+script that Semgrep's bash parser does not fully read, is named in
+[`scripts/scan-source.mjs`](../scripts/scan-source.mjs) with its reason and the number of places
+the parser stops. One more place fails the scan.
+
 ## Against a running stack
 
 Two scans read what the stack serves rather than its source, so neither is part of `npm run lint`:

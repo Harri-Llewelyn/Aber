@@ -6,14 +6,16 @@
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
  * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to the substituter, every
  * API route has a row in EXPECTED, each exemption sits above the gate it is carved out of, and the
- * API listener keeps its sign-in limit, response headers and access log. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
+ * API listener keeps its sign-in limit, response headers and access log, and admits an app's token
+ * on /auth/v1/ and APP_ROUTES alone. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
  * gated routes refused before their upstream and open ones through, the response headers present,
  * and a burst of password grants from one client address refused with 429 while another address
  * and a token refresh pass. The burst names its addresses in X-Forwarded-For, which the gateway
  * trusts from a direct caller only: run it against a port-forward. `--authenticated`: extends --runtime with
  * a credentialled pass, presenting a valid key by header and by query and an unregistered key,
  * and asserting that on a route which hides credentials the header and query forms are
- * indistinguishable upstream, and that GoTrue refuses dynamic OAuth client registration to the
+ * indistinguishable upstream, that a token naming an app which verifies against no key still
+ * reaches its upstream, and that GoTrue refuses dynamic OAuth client registration to the
  * publishable key. Both modes share EXPECTED so two inventories cannot drift.
  *
  * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
@@ -21,7 +23,7 @@
  * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
  * runtime modes use `node:http`; see probeOnce.
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -156,6 +158,23 @@ const MULTIPART_CASES = [
   { name: 'a byte outside ASCII', contentType: 'multipart/form-data; boundary=abc\xffdef', refused: true },
   { name: '201 characters', contentType: `multipart/form-data; boundary=abc; x=${a(164)}`, refused: true },
 ];
+
+/**
+ * What a token GoTrue's OAuth server issued to an app reaches on the API listener, by the app's
+ * client id: /auth/v1/, which every app's does, and these functions. Grafana and Node-RED call their
+ * userinfo function here. The Studio and forge doors call theirs from their own listeners, straight
+ * to the edge runtime, so they reach /auth/v1/ alone, as an app not listed does. Mirror check 48
+ * holds the ids to stack_app_ids() and the functions to the ones that exist.
+ */
+const APP_ROUTES = {
+  'c0ffee00-0000-4000-8000-000000000001': { app: 'Grafana', functions: ['grafana-userinfo'] },
+  'c0ffee00-0000-4000-8000-000000000002': { app: 'Node-RED', functions: ['nodered-userinfo'] },
+  'c0ffee00-0000-4000-8000-000000000003': { app: "Studio's door", functions: [] },
+  'c0ffee00-0000-4000-8000-000000000004': { app: "the forge's door", functions: [] },
+};
+
+/** The gateway's answer to an app's token off its own routes; clients and this script read it. */
+const APP_REFUSAL = '{"message":"This token was issued to an app, and reaches only that app\'s own routes"}';
 
 // Runtime mode: `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`. What survives a
 // gateway swap is the observable posture of each route, so the inventory above is shared. The
@@ -570,6 +589,40 @@ if (RUNTIME) {
     // Every OAuth client the stack uses is seeded, and a token issued to any client carries its
     // person's whole role. An empty registration is refused whether or not registration is on, so
     // this creates nothing; only the refusal's reason tells the two apart.
+
+    // An app's token reaches only its own routes, decided on the VERIFIED client_id: a token that
+    // names Grafana's client and verifies against no key goes on, as any unverifiable token does, to
+    // be refused by its upstream. On PostgREST, which answers it itself, and on Node-RED's userinfo,
+    // which is not Grafana's route and asks GoTrue. A real app's token is the stack lane's
+    // (supabase/test_each_app_s_token_reaches_only_its_own_routes.py): only GoTrue can issue one.
+    {
+      const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+      const unverifiable = [
+        b64({ alg: 'ES256', typ: 'JWT', kid: 'gateway-surface-probe' }),
+        b64({ sub: randomUUID(), role: 'authenticated', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 300,
+          client_id: Object.keys(APP_ROUTES)[0] }),
+        randomBytes(64).toString('base64url'),
+      ].join('.');
+      for (const [path, marker] of [['/rest/v1/cells?select=id', '"code":"PGRST'], ['/functions/v1/nodered-userinfo', '"error"']]) {
+        const res = await probeOnce(`${base}${path}`, { apikey: anonKey, Authorization: `Bearer ${unverifiable}` });
+        if (res.error) {
+          authProblems.push(`${path} with an unverifiable app token: ${res.error}`);
+        } else if (res.body.includes(APP_REFUSAL) || !res.body.includes(marker)) {
+          authProblems.push(
+            `${path}: a token naming an app that verifies against no key did not reach its upstream (HTTP ${res.status}: `
+            + `${res.body.slice(0, 120)}). The app check must decide on a verified client_id alone, or anyone can `
+            + 'have a request refused by writing one.'
+          );
+        } else {
+          authOk.push(`${path}: a token naming an app that verifies against no key reaches its upstream, which refuses it (HTTP ${res.status})`);
+        }
+      }
+      console.log("  --   an app's own token: issued by GoTrue alone, so the stack lane holds its routes");
+    }
+
+    // Every OAuth client the stack uses is seeded, and a client nobody reviewed should not exist to be
+    // approved. An empty registration is refused whether or not registration is on, so this creates
+    // nothing; only the refusal's reason tells the two apart.
     {
       const label = 'dynamic OAuth client registration (/auth/v1/oauth/clients/register)';
       const res = await probeOnce(
@@ -793,11 +846,12 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   need(gateway, 'pack_trace_reason: false', 'with it Envoy rewrites one character of a caller\'s 36-character request id');
 
   const filters = gateway.slice(filtersStart);
-  const order = ['cors', 'local_ratelimit', 'lua', 'router'].map((f) => filters.indexOf(`- name: envoy.filters.http.${f}`));
+  const order = ['cors', 'local_ratelimit', 'lua', 'jwt_authn', 'rbac', 'router'].map((f) => filters.indexOf(`- name: envoy.filters.http.${f}`));
   if (order.some((i) => i < 0) || order.some((i, n) => n > 0 && i < order[n - 1])) {
     fail(
-      `${ENVOY_TEMPLATE}: the API listener's filters must run CORS, the sign-in limit, the key check, then the `
-      + 'router; a limit before CORS would spend a token on every preflight, and none at all limits nothing.'
+      `${ENVOY_TEMPLATE}: the API listener's filters must run CORS, the sign-in limit, the key check, the token's `
+      + 'claims, the app check, then the router; a limit before CORS would spend a token on every preflight, '
+      + 'and an app check before the key check would answer 403 where the key check answers 401.'
     );
   }
 
@@ -913,6 +967,98 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
       `the ${REFUSALS.length} multipart refusals come before every route to storage-api and refuse `
       + `${MULTIPART_CASES.filter((c) => c.refused).length} of the ${MULTIPART_CASES.length} fixture Content-Types, `
       + 'passing every conforming one; the S3 protocol is off'
+    );
+  }
+}
+
+// ---- 7. An app's token reaches only its own routes. ---------------------------------------------
+// jwt_authn verifies the bearer and records its claims without refusing anything; rbac then admits a
+// token with no client_id anywhere, every app's on /auth/v1/, and each app's on APP_ROUTES' functions.
+{
+  const before = problems.length;
+  const need = (text, fragment, what) => {
+    if (!text.includes(fragment)) fail(`${ENVOY_TEMPLATE}: ${what} (expected ${JSON.stringify(fragment)}).`);
+  };
+  const filters = gateway.slice(filtersStart);
+  const between = (from, to) => {
+    const start = filters.indexOf(`- name: envoy.filters.http.${from}`);
+    return start < 0 ? '' : filters.slice(start, filters.indexOf(`- name: envoy.filters.http.${to}`, start));
+  };
+  const claims = between('jwt_authn', 'rbac');
+  const decision = between('rbac', 'router');
+
+  need(claims, 'requires: { allow_missing_or_failed: {} }',
+    'the API listener\'s jwt_authn records claims and refuses nothing, so no token, a key or an expired one go on as before');
+  for (const [fragment, what] of [
+    ['provider_name', 'a provider requirement would refuse every request without a valid token'],
+    ['audiences:', 'an audience would hide the client_id of a token with another audience'],
+    ['issuer:', 'an issuer would hide the client_id of a token GoTrue issued without one'],
+    ['from_params', 'no upstream reads a bearer from the query string'],
+  ]) {
+    if (claims.includes(fragment)) fail(`${ENVOY_TEMPLATE}: the API listener's jwt_authn names ${fragment} -- ${what}.`);
+  }
+  need(claims, 'forward: true', 'the bearer goes on to the upstream, which authenticates with it');
+  need(claims, 'payload_in_metadata: jwt_payload', 'the rbac filter reads the verified claims from jwt_authn\'s metadata');
+  need(claims, "inline_string: '__SUPABASE_JWT_JWKS__'", 'tokens verify against the key set GoTrue signs with');
+  for (const header of ['{ name: authorization, value_prefix: " " }', '{ name: authorization, value_prefix: "\\t" }', '{ name: authorization }']) {
+    need(claims, header, 'jwt_authn reads the bearer in every spelling an upstream accepts: any scheme, a tab, or none');
+  }
+
+  need(decision, 'action: ALLOW', 'the app check admits what its policies name and refuses the rest');
+  // Each policy: its name, and the text up to the next one at the same indent.
+  const lines = decision.split('\n');
+  const at = lines.findIndex((l) => /^\s*policies:\s*$/.test(l));
+  const indent = at < 0 ? -1 : lines[at].search(/\S/) + 2;
+  const policies = [];
+  for (const line of lines.slice(at + 1)) {
+    const name = line.length - line.trimStart().length === indent && line.match(/^\s*([a-z0-9-]+):\s*$/);
+    if (name) policies.push({ name: name[1], text: '' });
+    else if (policies.length) policies[policies.length - 1].text += `${line}\n`;
+  }
+  const clientIds = (text) => [...text.matchAll(/string_match: \{ exact: ([0-9a-f-]{36}) \}/g)].map((m) => m[1]);
+  const paths = (text) => [...text.matchAll(/url_path: \{ path: \{ (exact|prefix): "([^"]+)" \} \}/g)].map((m) => `${m[1]} ${m[2]}`);
+  const noApp = policies.filter((p) => p.text.includes('not_id:'));
+  const signIn = policies.filter((p) => paths(p.text).join() === 'prefix /auth/v1/' && p.text.includes('principals: [{ any: true }]'));
+  const perApp = policies.filter((p) => !noApp.includes(p) && !signIn.includes(p));
+  if (noApp.length !== 1 || !noApp[0].text.includes('permissions: [{ any: true }]')
+    || !noApp[0].text.includes('path: [{ key: jwt_payload }, { key: client_id }]')
+    || !noApp[0].text.includes('safe_regex: { regex: "(?s).+" }')) {
+    fail(`${ENVOY_TEMPLATE}: the app check has no single policy admitting, on every route, a token whose verified claims carry no non-empty client_id.`);
+  }
+  if (signIn.length !== 1) fail(`${ENVOY_TEMPLATE}: the app check has no single policy admitting every token on /auth/v1/, where every app checks its session.`);
+  const found = {};
+  for (const p of perApp) {
+    const ids = clientIds(p.text);
+    const routes = paths(p.text);
+    const fns = routes.map((r) => (r.match(/^exact \/functions\/v1\/([a-z0-9-]+)$/) || [])[1]);
+    if (ids.length !== 1 || !routes.length || fns.some((f) => !f) || p.text.includes('any: true')) {
+      fail(`${ENVOY_TEMPLATE}: app check policy ${p.name} must name one client_id and exact /functions/v1/<name> paths alone; it names [${ids.join(', ')}] and [${routes.join(', ')}].`);
+      continue;
+    }
+    found[ids[0]] = [...(found[ids[0]] || []), ...fns].sort();
+  }
+  const wanted = Object.fromEntries(Object.entries(APP_ROUTES).filter(([, r]) => r.functions.length).map(([id, r]) => [id, [...r.functions].sort()]));
+  const show = (m) => Object.entries(m).map(([id, fns]) => `${id} -> ${fns.join(', ')}`).sort().join('; ');
+  if (show(found) !== show(wanted)) {
+    fail(
+      `${ENVOY_TEMPLATE}: the app check admits ${show(found) || 'no app to any function'}, and APP_ROUTES says `
+      + `${show(wanted)}. An app's route is reviewed by changing both in the same change.`
+    );
+  }
+  for (const fn of Object.values(wanted).flat()) {
+    if (!routeNames.some((n) => routeText(n).includes(`match: { path: "/functions/v1/${fn}" }`))) {
+      fail(`${ENVOY_TEMPLATE}: APP_ROUTES names /functions/v1/${fn}, which no API route matches exactly.`);
+    }
+  }
+
+  need(gateway, APP_REFUSAL.replace(/'/g, "''"), 'an app\'s token off its routes is refused in the key check\'s JSON shape');
+  need(gateway, 'match_if_key_not_found: false', 'the refusal\'s body is matched on a verified client_id, so no other reply takes it');
+  need(gateway, 'app=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:client_id)%', 'the access log names the app a verified token was issued to');
+
+  if (problems.length === before) {
+    pass(
+      `an app's token reaches /auth/v1/ and its own functions alone (${Object.keys(wanted).length} app(s) with functions, `
+      + `${Object.keys(APP_ROUTES).length - Object.keys(wanted).length} with none), decided on the verified client_id`
     );
   }
 }
