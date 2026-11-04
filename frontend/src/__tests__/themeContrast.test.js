@@ -139,6 +139,9 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
+    // The Audit Trail's Read marker, a grey eye on the card, and its badge on the drawer's surface.
+    ['Read marker on card',           '--text-muted',   card,                              AA_LARGE],
+    ['Read badge in the drawer',      '--text-muted',   glass(surface),                    AA_TEXT],
     // A Site Map lane that holds something is filled with its hue. Its counts are --text-primary
     // on the fill, and its chevron, an icon, is --text-muted at the 3:1 an icon needs.
     ['--text-primary on site-wide lane', '--text-primary', on(paint('.site-lane-site'), card),      AA_TEXT],

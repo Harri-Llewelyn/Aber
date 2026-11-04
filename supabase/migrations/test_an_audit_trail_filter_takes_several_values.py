@@ -52,15 +52,16 @@ SCHEMA_FILE = HERE / "0168_every_schema_attached_to_a_device_counts.sql"
 ACTOR_FILTER = HERE / "0222_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.sql"
 MIGRATION = HERE / "0227_an_audit_trail_filter_takes_several_values.sql"
 
+# The list form as it is declared now: 0228 adds p_class and p_counts after the three lists.
 LIST_FORM = (
     "p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], "
     "p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, "
     "p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, "
-    "p_changed_by uuid[]"
+    "p_changed_by uuid[], p_class text[], p_counts boolean"
 )
 LIST_TYPES = (
     "integer, boolean, text[], text[], uuid[], timestamp with time zone, timestamp with time zone, "
-    "timestamp with time zone, bigint, text, uuid[]"
+    "timestamp with time zone, bigint, text, uuid[], text[], boolean"
 )
 SINGLE_VALUE_TYPES = (
     "integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, "

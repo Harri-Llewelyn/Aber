@@ -421,11 +421,12 @@ describe('AuditTrailTab total', () => {
     const count = await screen.findByText('2 of 467')
     expect(count.parentElement).toHaveClass('list-foot')
     expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
-    // The row above the timeline holds the key and Collapse all, with the scroller directly under it.
+    // The row above the timeline holds Collapse all and, at its right-hand end, the key, with the
+    // scroller directly under it.
     const header = document.querySelector('.trail-header')
     expect(header.children).toHaveLength(2)
-    expect(header.children[0]).toHaveClass('trail-legend')
-    expect(header.children[1]).toHaveTextContent('Collapse all')
+    expect(header.children[0]).toHaveTextContent('Collapse all')
+    expect(header.children[1]).toHaveClass('trail-legend')
     expect(header.nextElementSibling).toHaveClass('trail-scroll')
     // And not in the corner, which is only the spacer that lines the ticks up.
     expect(document.querySelector('.trail-axis-corner').textContent).toBe('')

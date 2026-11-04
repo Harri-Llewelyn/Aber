@@ -26,8 +26,9 @@ import { OverflowText } from '../common/OverflowText'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import {
-  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS, AUDIT_TRAIL_ENTITY_GROUPS, AUDIT_TRAIL_ENTITY_TYPES,
-  ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
+  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS, AUDIT_TRAIL_ACTION_KINDS, AUDIT_TRAIL_CLASSES,
+  AUDIT_TRAIL_ENTITY_GROUPS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND,
+  auditTrailEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
 import { useTimeWindow } from '../../hooks/useTimeWindow'
@@ -109,6 +110,22 @@ const ACTION_OPTIONS = AUDIT_TRAIL_ACTION_GROUPS.flatMap(g => g.actions.map(a =>
 })))
 const ACTION_VALUES = Object.keys(AUDIT_TRAIL_ACTIONS)
 
+/**
+ * The database's map of which kinds each action is written for (0229), a row per action and kind
+ * with the classes such a row can be in. Each list offers what can occur with the other two's
+ * choices, read from these rows.
+ */
+const ACTION_ROWS = AUDIT_TRAIL_ACTION_KINDS
+  .flatMap(([action, tables, classes]) => tables.map(table => ({ action, table, classes })))
+
+/** Whether a row can occur with these choices: a table of `tables`, any of `actions` and `classes`, none being any. */
+const rowFits = (row, { tables, actions, classes }) => tables.has(row.table)
+  && (actions.length === 0 || actions.includes(row.action))
+  && (classes.length === 0 || row.classes.some(c => classes.includes(c)))
+
+/** "Cells", or "these kinds" for several: what a chosen value's note says it cannot occur with. */
+const oneOrThese = (values, name, plural) => (values.length === 1 ? name(values[0]) : `these ${plural}`)
+
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
@@ -121,42 +138,34 @@ const entityKind = (t) =>
 const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
 
 /**
- * Fields whose change is a governance act (what the entity is declared to be) rather than an
- * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
- * `schema_id` stays for the devices rows recorded while a device carried one; the trail keeps them.
- */
-const GOVERNANCE_FIELDS = new Set([
-  'schema_id', 'asset_config', 'connection_method', 'grafana_url', 'access_url'
-])
-/* `identity_source` is deliberately absent: a device's first DBIRTH updates it alongside `status`,
-   and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
-   are cosmetic, not governance. */
-
-/** The capture lane's named acts, by the marker each gets. CAPTURE_DELETED is Lifecycle. */
-const CAPTURE_CREATIONS = new Set(['CAPTURE_STARTED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED', 'PLAYBACK_STARTED'])
-const CAPTURE_OPERATIONS = new Set(['CAPTURE_STOPPED', 'CAPTURE_DOWNLOAD_ISSUED', 'PLAYBACK_STOPPED'])
-
-/**
- * The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. Each has
- * a shape as well as a colour, so the classes stay apart without colour vision.
+ * The classes `audit_event_class()` sorts events into (0228), in the legend's order. The server
+ * names each event's class and the page draws the marker it is given. The key is a CSS suffix as
+ * well (`.trail-node-*`); each class has a shape as well as a colour, so the classes stay apart
+ * without colour vision. Mirror check 44 holds the keys to AUDIT_TRAIL_CLASSES.
  */
 export const MARKERS = {
-  creation:    { label: 'Created',       shape: 'square',   hint: 'Row created — provisioning, a first DBIRTH admitting the device, or a capture or playback begun' },
-  operational: { label: 'Operational',   shape: 'circle',   hint: 'State change — status, cell, another running-time property, or a capture stopped or downloaded' },
-  governance:  { label: 'Configuration', shape: 'diamond',  hint: 'Governance change — schema binding or declared configuration' },
-  critical:    { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
+  created:       { label: 'Created',       shape: 'square',   hint: 'Row created: provisioning, a first DBIRTH admitting the device, or a capture or playback begun' },
+  operational:   { label: 'Operational',   shape: 'circle',   hint: 'State change: status, cell, another running-time property, or a capture or playback stopped' },
+  configuration: { label: 'Configuration', shape: 'diamond',  hint: 'What an entity is declared to be: a schema bound or a configuration field, and every change to people, access or settings' },
+  lifecycle:     { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event: deleted, archived, deprecated, or quarantined' },
+  read:          { label: 'Read',          shape: 'eye',      hint: 'Something read and nothing changed: a service\'s logs read, a credential shown again, a download link issued, or a device exported' }
 }
+
+/** A class the page has no marker for draws as Operational, the commonest, rather than nothing. */
+const markerOf = (e) => (MARKERS[e?.class] ? e.class : 'operational')
 
 /**
  * Each shape's outline in the 13px box `CLUSTER_GAP_PX` is measured against, sized to carry about
  * the weight of the 9px circle: the square smaller, the diamond and the triangle larger, the
- * triangle raised a little so it does not sit low on the track.
+ * triangle raised a little so it does not sit low on the track. The eye is an almond with a ring cut
+ * out round its pupil, filled even-odd.
  */
 const MARKER_PATHS = {
   circle:   'M2 6.5a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z',
   square:   'M2.75 2.75h7.5v7.5h-7.5Z',
   diamond:  'M6.5 1L12 6.5L6.5 12L1 6.5Z',
-  triangle: 'M6.5 0.5L12.5 11.5H0.5Z'
+  triangle: 'M6.5 0.5L12.5 11.5H0.5Z',
+  eye:      'M0.5 6.5C3 2 10 2 12.5 6.5C10 11 3 11 0.5 6.5Z M4.3 6.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0Z M5.4 6.5a1.1 1.1 0 1 0 2.2 0a1.1 1.1 0 1 0 -2.2 0Z'
 }
 
 /**
@@ -177,8 +186,8 @@ export function TrailMarker({ kind, selected = false }) {
       aria-hidden="true"
       focusable="false"
     >
-      {selected && <path className="trail-node-ring" d={d} />}
-      <path className="trail-node-shape" d={d} />
+      {selected && <path className="trail-node-ring" d={d} fillRule="evenodd" />}
+      <path className="trail-node-shape" d={d} fillRule="evenodd" />
     </svg>
   )
 }
@@ -219,49 +228,6 @@ export function diffFields(oldData, newData) {
     .sort()
     .filter(k => !sameValue(before[k], after[k]))
     .map(k => ({ field: k, before: before[k], after: after[k] }))
-}
-
-/**
- * Which marker an event gets. `audit_trail.action` holds only INSERT / UPDATE / DELETE from the
- * trigger, so archiving, quarantining and a schema rebinding are derived from the diff.
- * SCHEMA_REJECTION is written by `record_ingestion_rejection()` with no diff, so the action itself
- * decides: governance, not critical. An INSERT is always creation, even of an already-quarantined
- * device, except a `device_submodels` row, which is a schema binding and governance whatever its
- * verb.
- */
-export function classifyEvent(event, diff) {
-  const action = String(event.event_type || event.action || '').toUpperCase()
-
-  // `audit_domain` is stamped at insert time; a security row is governance whatever its verb.
-  // Optional, because fixtures and older page states supply rows without it, which fall through to
-  // the derivation.
-  if (event.audit_domain === 'security') return 'governance'
-
-  if (action === 'SCHEMA_REJECTION') return 'governance'
-  // TOKEN_MINTED and TOKEN_REVOKED record who may reach the stack: governance, not creation and not
-  // critical. Named explicitly because rows without `audit_domain` still arrive.
-  if (action === 'TOKEN_MINTED' || action === 'TOKEN_REVOKED') return 'governance'
-  // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
-  // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
-  if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
-  // The capture lane's acts (0193). Each start makes the row its lane is about, so it is a
-  // creation; a deletion is the capture's lifecycle; a stop or a download link is operational.
-  if (CAPTURE_CREATIONS.has(action)) return 'creation'
-  if (action === 'CAPTURE_DELETED') return 'critical'
-  if (CAPTURE_OPERATIONS.has(action)) return 'operational'
-  // A device_submodels row is a schema binding: attaching or detaching one is a governance act,
-  // not a creation or a deletion of the device.
-  if (String(event.entity_type || '').toLowerCase() === 'device_submodels') return 'governance'
-  if (action === 'DELETE') return 'critical'
-  if (action === 'INSERT') return 'creation'
-
-  const changed = new Set(diff.map(d => d.field))
-  const roseTo = (field) => changed.has(field) && event.new_data?.[field] === true
-  // `deprecated` is a metric's retirement, as `is_archived` is an entity's.
-  if (roseTo('is_archived') || roseTo('is_quarantined') || roseTo('deprecated')) return 'critical'
-
-  for (const field of changed) if (GOVERNANCE_FIELDS.has(field)) return 'governance'
-  return 'operational'
 }
 
 /**
@@ -1061,6 +1027,8 @@ export function AuditTrailTab({ userRole, showToast }) {
   // Whose changes: the user ids the trail stamps in `changed_by`, people's or machine identities'.
   // Any id is kept, listed or not: the database's policies decide which of their rows come back.
   const [changedBy, setChangedBy] = useUrlList('changed_by', NONE, { allowed: isUuid })
+  // The classes the legend's toggles choose (`?class=lifecycle,read`), any of them; none is all.
+  const [classFilter, setClassFilter] = useUrlList('class', NONE, { allowed: AUDIT_TRAIL_CLASSES })
   // All time is the default: most arrivals are a handover for one entity whose last edit may be
   // years old, and any window would answer that with an empty timeline.
   const [timeWin, setTimeWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
@@ -1219,11 +1187,6 @@ export function AuditTrailTab({ userRole, showToast }) {
     ]
   }, [actorOptions, changedBy])
 
-  /** Entity's values: the kinds this role may ask for, under the groups the timeline's sections fall in. */
-  const kindOptions = useMemo(() => AUDIT_TRAIL_ENTITY_GROUPS.flatMap(g => entityTypes
-    .filter(e => e.group === g.id)
-    .map(e => ({ value: e.kind, label: e.label, group: g.label }))), [entityTypes])
-
   // Deleted entities: in the log, absent from every live table. The list endpoints do not filter
   // `is_archived`, so absent means gone rather than retired. The server counts them over everything
   // the filters select, not over the page; null means it did not say, which must not render as zero.
@@ -1233,6 +1196,61 @@ export function AuditTrailTab({ userRole, showToast }) {
   const [totalMatching, setTotalMatching] = useState(null)
   // Whether the row limit bit, which the page cannot tell otherwise.
   const [truncated, setTruncated] = useState(false)
+  // Each class's, kind's and action's events under every filter but its own, from the first page and
+  // the poll: `{ class, entity_type, action }`, or null where the response carried none.
+  const [counts, setCounts] = useState(null)
+
+  /** Entity's counts by kind (the server keys them by table) and Action's, or undefined before any. */
+  const kindCounts = useMemo(() => (counts?.entity_type
+    ? Object.fromEntries(Object.entries(counts.entity_type).map(([t, n]) => [ENTITY_KIND_BY_TABLE[t] || t, n]))
+    : undefined), [counts])
+  const actionCounts = counts?.action || undefined
+
+  /**
+   * What each list offers: a value that can occur with the other lists' choices, by the map; one
+   * that did occur, which the counts show; and one that is chosen. A chosen value that can do
+   * neither stays, with a note saying what it cannot occur with, so the empty timeline explains
+   * itself. With nothing chosen in Entity, an action is one this role's kinds can have.
+   */
+  const allowedTables = useMemo(() => new Set(entityTypes.map(e => e.table)), [entityTypes])
+  const chosenTables = useMemo(
+    () => new Set(entityTypeFilter.map(k => ENTITY_TABLE_BY_KIND[k]).filter(Boolean)), [entityTypeFilter])
+
+  /** Entity's values: the kinds this role may ask for, under the groups the timeline's sections fall in. */
+  const kindOptions = useMemo(() => {
+    const fits = new Set(ACTION_ROWS
+      .filter(r => rowFits(r, { tables: allowedTables, actions: actionFilter, classes: classFilter }))
+      .map(r => r.table))
+    const note = (table) => (
+      actionFilter.length && !ACTION_ROWS.some(r => r.table === table && actionFilter.includes(r.action))
+        ? `not with ${oneOrThese(actionFilter, a => AUDIT_TRAIL_ACTIONS[a] || a, 'actions')}`
+        : `never ${oneOrThese(classFilter, c => MARKERS[c].label, 'classes')}`)
+    return AUDIT_TRAIL_ENTITY_GROUPS.flatMap(g => entityTypes
+      .filter(e => e.group === g.id)
+      .filter(e => fits.has(e.table) || (kindCounts?.[e.kind] ?? 0) > 0 || entityTypeFilter.includes(e.kind))
+      .map(e => ({
+        value: e.kind, label: e.label, group: g.label,
+        ...(fits.has(e.table) || (kindCounts?.[e.kind] ?? 0) > 0 ? {} : { note: note(e.table) }),
+      })))
+  }, [entityTypes, allowedTables, actionFilter, classFilter, kindCounts, entityTypeFilter])
+
+  /** Action's values, under their groups, narrowed by the kinds and the classes chosen. */
+  const actionOptions = useMemo(() => {
+    const tables = chosenTables.size ? chosenTables : allowedTables
+    const fits = new Set(ACTION_ROWS
+      .filter(r => rowFits(r, { tables, actions: NONE, classes: classFilter }))
+      .map(r => r.action))
+    const kindLabel = (table) => AUDIT_TRAIL_ENTITY_TYPES.find(e => e.table === table)?.label || table
+    const note = (action) => (
+      chosenTables.size && !ACTION_ROWS.some(r => r.action === action && chosenTables.has(r.table))
+        ? `not with ${oneOrThese([...chosenTables], kindLabel, 'kinds')}`
+        : !ACTION_ROWS.some(r => r.action === action && allowedTables.has(r.table))
+          ? 'not in a lane you can read'
+          : `never ${oneOrThese(classFilter, c => MARKERS[c].label, 'classes')}`)
+    return ACTION_OPTIONS
+      .filter(o => fits.has(o.value) || (actionCounts?.[o.value] ?? 0) > 0 || actionFilter.includes(o.value))
+      .map(o => (fits.has(o.value) || (actionCounts?.[o.value] ?? 0) > 0 ? o : { ...o, note: note(o.value) }))
+  }, [chosenTables, allowedTables, classFilter, actionCounts, actionFilter])
 
   /**
    * How many deleted entities the current filters cover. The server's count wins; a response without
@@ -1304,6 +1322,9 @@ export function AuditTrailTab({ userRole, showToast }) {
     if (entityTypeFilter.length) url += `&entity_type=${encodeURIComponent(entityTypeFilter.join(','))}`
     if (actionFilter.length)     url += `&action=${encodeURIComponent(actionFilter.join(','))}`
     if (changedBy.length)        url += `&changed_by=${encodeURIComponent(changedBy.join(','))}`
+    if (classFilter.length)      url += `&class=${encodeURIComponent(classFilter.join(','))}`
+    // The counts come with the first page; a later one cannot change them.
+    if (!cursor)                 url += '&counts=true'
     if (search)           url += `&search=${encodeURIComponent(search)}`
     // Measured at fetch time, so a rolling window or today does not go stale under the poll.
     const { since, until } = timeWindow(timeWin)
@@ -1317,7 +1338,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       url += `&before_id=${encodeURIComponent(cursor.id)}`
     }
     return url
-  }, [entityTypeFilter, actionFilter, changedBy, search, timeWin, showPurged])
+  }, [entityTypeFilter, actionFilter, changedBy, classFilter, search, timeWin, showPurged])
 
   /** When the loaded events were asked for: where a rolling window, or today, is measured from. */
   const [askedAt, setAskedAt] = useState(() => Date.now())
@@ -1357,6 +1378,7 @@ export function AuditTrailTab({ userRole, showToast }) {
         // facts about everything the filters select, so a poll's answer is the current one whether
         // or not it replaced the list.
         setTotalMatching(typeof d?.totalMatching === 'number' ? d.totalMatching : null)
+        setCounts(d?.counts && typeof d.counts === 'object' ? d.counts : null)
         // Only when the list was replaced. After a merge the cursor still points past the oldest
         // row held.
         if (reset) {
@@ -1416,6 +1438,7 @@ export function AuditTrailTab({ userRole, showToast }) {
     (changedBy.length ? 1 : 0) + (showPurged ? 1 : 0)
 
   const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) + (rangeIsFiltering ? 1 : 0)
+    + (classFilter.length ? 1 : 0)
 
   const clearPopoverFilters = () => {
     setEntityTypeFilter([]); setActionFilter([]); setChangedBy([]); setShowPurged(false)
@@ -1424,9 +1447,9 @@ export function AuditTrailTab({ userRole, showToast }) {
   /**
    * Load every row one transaction wrote, by searching its id.
    *
-   * The entity and action filters are cleared because one act crosses both: an approval writes an
-   * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
-   * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
+   * The entity, action and class filters are cleared because one act crosses all three: an approval
+   * writes an UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and any of them would hide
+   * half of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
    * hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
    * no live table holds, and `transaction_rows` counts it. The time window is kept: the rows share
    * one `recorded_at`, so a window holding this event holds its siblings.
@@ -1435,14 +1458,19 @@ export function AuditTrailTab({ userRole, showToast }) {
     setNameFilter(String(causationId))
     setEntityTypeFilter([])
     setActionFilter([])
+    setClassFilter([])
     setChangedBy([])
     setShowPurged(true)
   }
 
   const resetFilters = () => {
-    setEntityTypeFilter([]); setNameFilter(''); setActionFilter([]); setChangedBy([])
+    setEntityTypeFilter([]); setNameFilter(''); setActionFilter([]); setChangedBy([]); setClassFilter([])
     setTimeWin(ALL_TIME); setShowPurged(false)
   }
+
+  /** A legend toggle: its class added to the chosen ones, or taken away. None chosen is every class. */
+  const toggleClass = (kind) => setClassFilter(
+    AUDIT_TRAIL_CLASSES.filter(c => (c === kind ? !classFilter.includes(c) : classFilter.includes(c))))
 
   useEffect(() => {
     load(true)
@@ -1473,12 +1501,12 @@ export function AuditTrailTab({ userRole, showToast }) {
     if (windowPaging && !loading && !loadingMore) loadMore()
   }, [windowPaging, loading, loadingMore, loadMore])
 
-  /** event_id -> { diff, kind }. Computed once per fetch; both the markers and the CSV read it. */
+  /** event_id -> { diff, kind }: the diff the drawer and the CSV read, and the class the server named. */
   const analysis = useMemo(() => {
     const m = new Map()
     for (const e of events) {
       const diff = diffFields(e.old_data, e.new_data)
-      m.set(e.event_id, { diff, kind: classifyEvent(e, diff) })
+      m.set(e.event_id, { diff, kind: markerOf(e) })
     }
     return m
   }, [events])
@@ -2030,14 +2058,17 @@ export function AuditTrailTab({ userRole, showToast }) {
               options={kindOptions}
               value={entityTypeFilter}
               onChange={setEntityTypeFilter}
+              counts={kindCounts}
+              tip="The kinds of entity the trail can hold with the other choices, each with its events in the current match."
             />
             <FilterList
               label="Action"
               plural="actions"
-              options={ACTION_OPTIONS}
+              options={actionOptions}
               value={actionFilter}
               onChange={setActionFilter}
-              tip="The database action on the audit row, as the drawer's badge shows it. The key's markers are a separate classification."
+              counts={actionCounts}
+              tip="The database action on the audit row, as the drawer's badge shows it, offered where the chosen kinds and classes can have it."
             />
             <FilterList
               label="Changed by"
@@ -2096,25 +2127,45 @@ export function AuditTrailTab({ userRole, showToast }) {
             card that gives way when the viewport is short; its own scroller is `trail-scroll`. No
             padding: the timeline runs to the card's edges, as a table does. */}
         <div className="card-fill-scroll trail-timeline">
-          {/* One row above the timeline, always drawn so the card keeps its shape: the key, and
-              the control that opens or closes every section. How much of the trail is loaded is
-              stated at the foot, beside Show more. */}
+          {/* One row above the timeline, always drawn so the card keeps its shape: the control that
+              opens or closes every section, over the section headings it acts on, and the key at
+              the row's right-hand end, over the tracks it explains. How much of the trail is loaded
+              is stated at the foot, beside Show more. */}
           <div className="trail-header">
-            {/* The legend for a derived classification: nothing else on the page says what a
-                triangle means. The same marker the track draws. Each entry takes focus, so its
-                tooltip is the keyboard's as well. */}
-            <div className="trail-legend">
-              {Object.entries(MARKERS).map(([kind, m]) => (
-                <Tooltip key={kind} text={m.hint}>
-                  <span className="trail-legend-item" tabIndex={0}>
-                    <TrailMarker kind={kind} />
-                    {m.label}
-                  </span>
-                </Tooltip>
-              ))}
+            <ExpandAllToggle
+              anyOpen={sections.some(s => s.open)}
+              onExpandAll={() => setSectionsOpen(sections.map(s => s.kind), true)}
+              onCollapseAll={() => setSectionsOpen(sections.map(s => s.kind), false)}
+              disabled={sections.length === 0}
+            />
 
-              {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
-                  reading `n` as a placeholder for each badge's count. */}
+            {/* The key is the class filter: each class's entry is a toggle drawing the marker the
+                track draws, with its events under every other filter. Several may be on; none on is
+                every class. Nothing else on the page says what a triangle means. */}
+            <div className="trail-legend" role="group" aria-label="Classes">
+              {Object.entries(MARKERS).map(([kind, m]) => {
+                const on = classFilter.includes(kind)
+                const n = counts?.class ? (counts.class[kind] ?? 0) : null
+                return (
+                  <Tooltip
+                    key={kind}
+                    text={`${m.hint}. ${on ? 'Shown. Select to leave it out.' : `Select to show it${classFilter.length ? ' as well' : ' alone'}.`}`}
+                  >
+                    <button
+                      type="button"
+                      className={`btn btn-sm trail-legend-toggle ${on ? 'btn-primary' : 'btn-ghost'}`}
+                      aria-pressed={on}
+                      onClick={() => toggleClass(kind)}
+                    >
+                      <TrailMarker kind={kind} />
+                      {n === null ? m.label : `${m.label} (${n})`}
+                    </button>
+                  </Tooltip>
+                )
+              })}
+
+              {/* A key entry, not a filter: shown only while a badge is on screen. The sample is a
+                  real `.trail-cluster`, reading `n` as a placeholder for each badge's count. */}
               {clusterCount > 0 && (
                 <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the time window.">
                   <span className="trail-legend-item" tabIndex={0}>
@@ -2124,13 +2175,6 @@ export function AuditTrailTab({ userRole, showToast }) {
                 </Tooltip>
               )}
             </div>
-
-            <ExpandAllToggle
-              anyOpen={sections.some(s => s.open)}
-              onExpandAll={() => setSectionsOpen(sections.map(s => s.kind), true)}
-              onCollapseAll={() => setSectionsOpen(sections.map(s => s.kind), false)}
-              disabled={sections.length === 0}
-            />
           </div>
 
           {loading ? (

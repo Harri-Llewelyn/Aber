@@ -157,7 +157,7 @@ describe('the hover summary', () => {
     /* MARKERS order, so the breakdown reads down the key printed above the timeline, in its labels. */
     const summary = clusterSummary([
       ev(1, 'operational', '2026-08-21T09:00:00Z'),
-      ev(2, 'creation',    '2026-08-21T09:00:00Z'),
+      ev(2, 'created',    '2026-08-21T09:00:00Z'),
       ev(3, 'operational', '2026-08-21T09:00:01Z')
     ], kindOf)
 
@@ -168,8 +168,8 @@ describe('the hover summary', () => {
     /* The fact a badge would otherwise lose: perfect overlap was the signature of one act, and
        collapsed to a count it has to be said in words. */
     const summary = clusterSummary([
-      ev(1, 'creation',   '2026-08-21T09:00:00Z', 'tx-1'),
-      ev(2, 'governance', '2026-08-21T09:00:00Z', 'tx-1')
+      ev(1, 'created',   '2026-08-21T09:00:00Z', 'tx-1'),
+      ev(2, 'configuration', '2026-08-21T09:00:00Z', 'tx-1')
     ], kindOf)
 
     expect(summary).toContain('One transaction')
@@ -179,7 +179,7 @@ describe('the hover summary', () => {
     /* Two different acts can commit in the same second, and legacy rows carry no causation, so a
        NULL must never match another NULL. */
     const summary = clusterSummary([
-      ev(1, 'creation',    '2026-08-21T09:00:00Z'),
+      ev(1, 'created',    '2026-08-21T09:00:00Z'),
       ev(2, 'operational', '2026-08-21T09:00:00Z')
     ], kindOf)
 
@@ -189,7 +189,7 @@ describe('the hover summary', () => {
 
   it('gives the window when the events are merely close', () => {
     const summary = clusterSummary([
-      ev(1, 'creation',    '2026-08-21T09:00:00Z'),
+      ev(1, 'created',    '2026-08-21T09:00:00Z'),
       ev(2, 'operational', '2026-08-21T09:00:20Z')
     ], kindOf)
 
@@ -200,7 +200,7 @@ describe('the hover summary', () => {
     // The badge is the only place the zoom relationship is discoverable: nothing else on the page
     // connects the time window to whether a group is drawn as one mark or several.
     const summary = clusterSummary([
-      ev(1, 'creation',    '2026-08-21T09:00:00Z'),
+      ev(1, 'created',    '2026-08-21T09:00:00Z'),
       ev(2, 'operational', '2026-08-21T09:00:01Z')
     ], kindOf)
 
@@ -228,14 +228,16 @@ describe('the component draws the badges', () => {
     {
       event_id: 1, entity_type: 'devices', entity_id: 'dev-1', event_type: 'INSERT',
       timestamp: '2026-08-21T09:00:00Z', description: 'created',
-      changed_by: null, actor_source: 'user', old_data: null, new_data: { name: 'Simulated_CNC_01' }
+      changed_by: null, actor_source: 'user', old_data: null, new_data: { name: 'Simulated_CNC_01' },
+      class: 'created'
     },
     {
       event_id: 2, entity_type: 'devices', entity_id: 'dev-1', event_type: 'UPDATE',
       timestamp: '2026-08-21T09:00:02Z', description: 'went online',
       changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
       old_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
-      new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' }
+      new_data: { name: 'Simulated_CNC_01', status: 'ONLINE' },
+      class: 'operational'
     }
   ]
   const LATER = {
@@ -243,7 +245,8 @@ describe('the component draws the badges', () => {
     timestamp: '2026-08-21T18:00:00Z', description: 'much later',
     changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
     old_data: { name: 'Simulated_CNC_01', status: 'ONLINE' },
-    new_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' }
+    new_data: { name: 'Simulated_CNC_01', status: 'OFFLINE' },
+    class: 'operational'
   }
   const EVENTS = [...BURST, LATER]
 

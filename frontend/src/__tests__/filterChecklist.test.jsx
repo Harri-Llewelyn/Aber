@@ -108,6 +108,19 @@ describe('FilterChecklist', () => {
     expect(screen.getByRole('checkbox', { name: 'Online' })).toBeTruthy()
   })
 
+  it('marks a value with its note, between its name and its count, and still lets it be cleared', () => {
+    /* A chosen value that can no longer occur with what else is chosen stays, saying why. */
+    const options = [...STATUSES.slice(0, 2), { ...STATUSES[2], note: 'not with Cells' }]
+    render(<Held label="Status" options={options} plural="statuses" initial={['stale']} counts={new Map([['online', 4]])} />)
+    const noted = screen.getByRole('checkbox', { name: 'Stale not with Cells 0' })
+    expect(noted.checked).toBe(true)
+    expect(noted.closest('label')).toHaveClass('filter-checklist-option-noted')
+    expect(noted.closest('label').querySelector('.filter-checklist-note').textContent).toBe('not with Cells')
+    expect(screen.getByRole('checkbox', { name: 'Online 4' }).closest('label')).not.toHaveClass('filter-checklist-option-noted')
+    fireEvent.click(noted)
+    expect(valueNow()).toBe('')
+  })
+
   it('moves between the checkboxes with ↑ and ↓, from the search box into them, and ticks with Space', () => {
     const options = Array.from({ length: SEARCH_AT + 2 }, (_, i) => ({ value: `v${i}`, label: `Value ${i}` }))
     render(<Held label="Gateway" options={options} plural="gateways" />)

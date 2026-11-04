@@ -25,6 +25,7 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 - **The columns cannot be sorted.** The list loads 30 runs at a time, newest first, and a sort would cover only the runs loaded. Use the filter to narrow it, or load older runs from the foot of the list.
 - The list shows the newest 30 runs that match the filter. The foot says how many are loaded, such as `30 of 57`, beside **Show 27 more**. That adds older runs, up to 30 at a time. At the end it says **All 57 shown.**
 - **A run** opens its panel when you select anywhere on its row, or press Enter or Space on it. The panel shows the whole of any failure, and when the run was queued, started and finished. For a backup, it shows where its files are, each file with its size, and its off-site copy. **Release** is there too, on a pinned backup.
+- **View Audit Trail**, in a run's panel, opens the Audit Trail on the run. It shows two lanes side by side: the request, and the backup it took. The backup's lane holds when it was taken, released and pruned, even once the backup is gone. A run that was cancelled or failed took no backup, so it shows the request alone. It is offered to whoever may open the Audit Trail.
 
 ## The cards above the list
 

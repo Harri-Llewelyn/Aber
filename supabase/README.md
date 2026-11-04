@@ -2887,6 +2887,172 @@ them, the one-element list against the single value, NULL and the empty list, a 
 holds, the cursor, the totals, the purged rule, the search and the caller's policies under lists,
 and one list form after `0001`, `0168`, `0222` and `0227` replay over the single-value form.
 
+### The Audit Trail sorts events into classes in the database (0228)
+
+The Audit Trail's legend names the class of each event: Created, Operational, Configuration,
+Lifecycle and, new here, Read. The dashboard used to work the class out in the browser, from rules
+of its own (`classifyEvent()`), while the server paged the trail. A filter on the class could then
+only hide rows from the page already loaded, and "200 of 242" would have been wrong. So the rules
+are the database's now.
+
+**`audit_event_class(action, entity_type, audit_domain, old_data, new_data)`** answers one of
+`created`, `operational`, `configuration`, `lifecycle` and `read`. The first rule that matches
+decides:
+
+1. **Read**: `SERVICE_LOGS_READ`, `CREDENTIAL_SHOWN`, `CAPTURE_DOWNLOAD_ISSUED` and `EXPORTED`. Each
+   records that someone looked at or took a copy of something, and changes nothing. Reads are
+   decided before the security lane's rule, which would otherwise call a log read a configuration
+   change.
+2. **Configuration**, for every row in the security lane, and for a schema rejection, a token minted
+   or revoked and a role granted or revoked.
+3. The capture lane: a recording, capture, upload or playback started is **created**; a capture
+   deleted is **lifecycle**; a recording or playback stopped is **operational**.
+4. **Configuration** for a schema attached to or detached from a device (`device_submodels`).
+5. **Lifecycle** for a `DELETE`, **created** for an `INSERT`.
+6. Otherwise the snapshots decide. **Lifecycle** when `is_archived`, `is_quarantined` or
+   `deprecated` is `true` now and was not before. **Configuration** when `schema_id`,
+   `asset_config`, `connection_method`, `grafana_url` or `access_url` changed. **Operational**
+   otherwise. A missing field and a JSON `null` are the same value. With one snapshot, a field it
+   holds that is neither `null` nor `''` counts as changed.
+
+These are the browser's rules, moved, with Read added. `test-harness/fixtures/audit-event-classes.json`
+holds an answer for each kind of row. The database suite asserts every case. While the browser's copy
+existed, a dashboard suite asserted the same cases against it, and the two differed only on the four
+reads, which the browser drew as a change.
+
+**Computed, not stored.** `audit_trail` is append-only, so a class column could not be filled in for
+the rows already recorded. `audit_event_class()` is `IMMUTABLE` and has no `SET` clause, so the
+planner inlines it into the query that calls it. It reads no table and calls only built-in
+operators, so an unpinned `search_path` changes nothing it resolves; the lint allowlist says so, as
+it does for `may_decide_proposal()`. `authenticated` and `service_role` may run it, and `anon` may
+not.
+
+#### What the page takes and answers
+
+- **`audit_trail_page()` takes `p_class text[]`**, after `p_changed_by`, a list like the other three:
+  any of its classes, combined with them by AND, and NULL or an empty list is no constraint. A class
+  no row has matches nothing. **Each event carries its `class`**, which the dashboard draws.
+- **`p_counts boolean`** (default false) adds `counts`: `{ class, entity_type, action }`, each a map
+  from a value to its events. **Each filter's own choice is left out of its own counts**, so choosing
+  an action does not empty the action counts, and a class's toggle can say how many events it would
+  add. Everything else applies to all three: the search, the window, the people, the ids and the
+  deleted toggle. A value with no events is absent. The dashboard asks for them with the first page
+  and the poll, not with Show more.
+- **A backup request's id finds the backup it took.** When the search is a whole UUID, it also
+  matches the rows of any backup whose Backup taken row records that id as its `job_id`, and with
+  them every row keyed by that backup's id: taken, released and pruned. It reads the trail, not
+  `backups`: a pruned backup's row is deleted, and on the dev stack 11 of 33 taken remain. So the
+  Backups page's View Audit Trail shows the request's lane and the backup's lane together. A
+  cancelled or failed request took no backup, and shows its own lane. Any other id finds what it
+  found before.
+- Nothing else changes: the keyset paging, `total_matching`, `purged_assets`, the purged rule, the
+  search, `transaction_rows`, `SECURITY INVOKER` and the pinned `search_path`. `audit_trail`'s
+  policies still decide the rows.
+
+#### Under a second on a million rows
+
+The target: one page, its `total_matching` and its counts in under a second on a trail of a million
+rows, with a class chosen. The function as it was took 2 to 2.6 seconds on such a trail with
+nothing chosen, before any class was computed. Three changes meet it.
+
+- **One partial index per class.** `idx_audit_trail_class_<class>` is on `(recorded_at DESC, id
+  DESC)` where `audit_event_class(...)` is that class, and includes `audit_domain`, `entity_type`,
+  `action`, `entity_id` and `changed_by`: what the filters, the policies, the purged rule and the
+  counts read. A query that names a class reads its rows from its index, with the class proven by
+  the index's predicate, never computed, and without touching the table. Postgres cannot read an
+  indexed expression back out of an index (an index-only scan needs the columns the expression
+  reads), so the five partial indexes are how a class is read without its row's snapshots.
+  The index keeps the class it was built with, which is why `audit_event_class()` is `IMMUTABLE` and
+  a change to its rules rebuilds them (`REINDEX INDEX`, each a statement of its own, since a
+  partitioned index cannot be rebuilt inside a transaction) in the same file. Check 199
+  (`scripts/check-docs-drift.mjs`) refuses a later file that redeclares it without rebuilding all
+  five.
+- **`audit_trail_matching(p_class, ...)`** returns one class's rows under every filter, each with
+  whether its entity is deleted. It is a SQL function with no `SET` clause, so it inlines into each
+  of the page's calls with its class a constant. The page calls it once per class for the counts and
+  once per class for the page, and the filter text is written once.
+- **The page is planned with its values.** `audit_trail_page()` is PL/pgSQL with
+  `plan_cache_mode = force_custom_plan`, so each call's arguments are constants to the planner: a
+  filter nobody chose folds away, a window prunes the months outside it, and a class not asked for
+  drops its branch. The counts come from one index-only scan per class, grouped into a few hundred
+  rows. The page is the newest few of each class after the cursor, merged, and a class with nothing
+  to show is not read. The purged rule reads the live ids of the five probed tables once, into an
+  array, rather than probing five tables per row.
+
+`test_a_million_row_trail_answers_in_under_a_second.py` holds the target. It attaches ten months of
+2001 to `audit_trail`, a hundred thousand rows each in a plant's mix, each month filled as a table
+of its own and then attached, so no row trigger runs a million times and the trail's indexes are
+built as a running stack has them. It inserts the devices, gateways and cells the rows name inside
+each test's transaction, leaving one device in ten out for the purged rule, and drops the ten months
+afterwards, as an owner retires whole months. Measured on a laptop, as an Administrator with the
+policies on, the median of three warm calls:
+
+| Call | Time |
+| --- | --- |
+| Seeding the million rows, their indexes and `VACUUM ANALYZE` | 25 to 50 s |
+| All time, Lifecycle, the page with its total and its counts | 0.55 s |
+| All time, Read and Lifecycle, the same | 0.6 s |
+| All time, Lifecycle, the next page, without the counts | 0.1 s |
+| All time, nothing chosen, the page with every count (printed, not asserted) | 0.7 to 0.85 s |
+
+The suite asserts the first three under a second, and the totals, the deleted count and the counts
+exact over the ten months. A search is still a scan of every row's snapshots, as before: about five
+seconds on a million rows.
+
+#### One redeclaration
+
+A new argument is a new signature, so the rule `0222` and `0227` followed applies. `0001` and
+`0168` declare the new form in place, with the same body, and `0001`'s sweep of stale overloads
+names it. On the first boot of an upgrade, `0001` creates the new form beside the list form and
+the sweep drops the list form at the end of the same file; `0228` drops it too if it is still
+there. **The new form calls `audit_trail_matching()` and `audit_event_class()`, which this file
+declares**, so on that one boot the Audit Trail answers with an error from the end of `0001` until
+`0228` has run. PL/pgSQL is checked when it runs, not when it is declared, so `0001` and `0168` can
+declare it first. No later boot has the window: the functions exist from the first. `0227` now
+grants its own form only while it is declared, and `0222`'s self-check asks only that `p_changed_by`
+follows `p_search`.
+
+The file's self-check asserts the classifier's and the helper's shapes (SQL, no `SET`; the classifier
+`IMMUTABLE`), one `audit_trail_page` with `p_class` and `p_counts` by name and type, `SECURITY
+INVOKER`, the pinned `search_path` and `force_custom_plan`, who may run all three, each class's index
+valid and on its class, and one answer per kind of rule.
+`test_the_audit_trail_sorts_events_into_classes_in_the_database.py` holds the fixture, the class
+filter and the class on each event, the counts, the backup search, the grants and the indexes, and
+one form after `0001`, `0168`, `0222`, `0227` and `0228` replay over the list form.
+
+### The Audit Trail knows which kinds each action is written for (0229)
+
+The Audit Trail's Entity and Action filters offered every kind and every action, whatever else was
+chosen, so Cells with Backup taken could be chosen and always showed nothing. Nothing said which
+actions go with which kind: each action is written by its own function, across some thirty
+migrations, and `audit_domain_for()` says which lane a pair is in, not whether it can occur.
+
+**`audit_trail_action_kinds()`** is the declared map: one row per action and kind a writer can
+produce, with the classes `audit_event_class()` can put such a row in. It is an `IMMUTABLE` SQL
+function over a `VALUES` list rather than a table, so a replay states the whole map again and no
+row can be left behind. `frontend/src/constants.js` mirrors it row for row as
+`AUDIT_TRAIL_ACTION_KINDS`, and mirror check 43 (`scripts/check-mirror-drift.mjs`) holds the two to
+the same (action, kind, class) triples. Nothing in the database reads it: the dashboard narrows by
+the mirror.
+
+- **The classes come from the rules.** A pair whose action or lane decides its class has that one
+  class. A pair the snapshots decide (an `UPDATE`, or a named act on an asset row) has
+  `operational`, `configuration` and `lifecycle`, whether or not its table has a column that would
+  make it the second or the third: the map says what the rules allow, so it can show an action that
+  never happens in a class, and never hides one that can.
+- **A writer that records a new action, or an action on a new kind, adds its rows** here and to the
+  mirror. The database suite reads the writers out of the catalog and fails until it does.
+
+`test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py` reads every writer: the audit
+trigger on each table it is attached to, for the operations it fires on, and each function whose
+body inserts into `audit_trail`, with its kind and action read from the `INSERT`. A kind written as
+`NEW.entity_type` or a record's field is read from that table's `CHECK`; an action written as a
+variable, from the literals it is assigned. Any other shape fails the suite. It asserts the map names
+every pair those writers produce and no other, and that each pair's classes are the ones
+`audit_event_class()` answers over snapshots that reach each of its rules. The file's self-check
+asserts who may run it and that no pair is listed twice or with a class the classifier does not
+answer.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

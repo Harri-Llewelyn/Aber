@@ -186,19 +186,20 @@ export const AUDIT_TRAIL_ENTITY_GROUPS = [
 
 /**
  * The groups the Audit Trail's action filter draws AUDIT_TRAIL_ACTIONS under, by what each act is
- * about. Every action is in exactly one (`auditTrailFilterGroups.test.js`). Not the legend's
- * categories, which classify an event rather than name its action.
+ * about, and the reads together: the acts that record access and change nothing, the legend's Read
+ * class (0228). Every action is in exactly one (`auditTrailFilterGroups.test.js`). Otherwise not the
+ * legend's classes, which classify an event rather than name its action.
  */
 export const AUDIT_TRAIL_ACTION_GROUPS = [
   { label: 'Row changes', actions: ['INSERT', 'UPDATE', 'DELETE'] },
   {
     label: 'The plant and the model',
-    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'EXPORTED', 'FLOW_DEPLOYED'],
+    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
   },
   {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
-      'CAPTURE_DOWNLOAD_ISSUED', 'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
+      'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
   },
   {
     label: 'People and access',
@@ -212,14 +213,89 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
   {
     label: 'Machine identities and credentials',
     actions: ['PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN'],
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED'],
   },
   {
     label: 'Backups',
     actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED'],
   },
-  { label: 'System', actions: ['SERVICE_LOGS_READ'] },
+  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'] },
+];
+
+/**
+ * The classes `audit_event_class()` (0228) sorts Audit Trail events into, in the legend's order.
+ * The words are the server's, and the address's (`?class=lifecycle,read`). Mirror check 44 holds
+ * them to the function and its indexes.
+ */
+export const AUDIT_TRAIL_CLASSES = ['created', 'operational', 'configuration', 'lifecycle', 'read'];
+
+/**
+ * Which kinds each action is written for, and the classes such a row can be in: the database's
+ * `audit_trail_action_kinds()` (0229), row for row, as `[action, tables, classes]`. Mirror check 43
+ * holds the two together. The Audit Trail's filters narrow by it: chosen kinds hide the actions
+ * none of them can have, chosen actions the kinds none of them apply to, and chosen classes the
+ * actions none of them can hold.
+ */
+export const AUDIT_TRAIL_ACTION_KINDS = [
+  // The audit trigger, on every table it is attached to.
+  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['created']],
+  ['INSERT', ['device_submodels', 'system_settings', 'service_principals', 'broker_accounts'], ['configuration']],
+  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'],
+    ['operational', 'configuration', 'lifecycle']],
+  ['UPDATE', ['device_submodels', 'system_settings'], ['configuration']],
+  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['lifecycle']],
+  ['DELETE', ['device_submodels', 'system_settings', 'broker_accounts'], ['configuration']],
+  // The plant and the model.
+  ['SCHEMA_REJECTION', ['devices'], ['configuration']],
+  ['PROPOSAL_APPLIED', ['areas', 'cells', 'devices', 'device_nameplate', 'gateways', 'schemas'],
+    ['operational', 'configuration', 'lifecycle']],
+  ['PROPOSAL_EXPIRED', ['change_proposals'], ['operational', 'configuration', 'lifecycle']],
+  ['EXPORTED', ['devices'], ['read']],
+  ['FLOW_DEPLOYED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
+  ['CREDENTIAL_ISSUED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
+  ['CREDENTIAL_SHOWN', ['gateways'], ['read']],
+  // Capture and playback.
+  ['CAPTURE_STARTED', ['capture_jobs'], ['created']],
+  ['CAPTURE_STOPPED', ['capture_jobs'], ['operational']],
+  ['CAPTURE_RECORDED', ['captures'], ['created']],
+  ['CAPTURE_UPLOADED', ['captures'], ['created']],
+  ['CAPTURE_DOWNLOAD_ISSUED', ['captures'], ['read']],
+  ['CAPTURE_DELETED', ['captures'], ['lifecycle']],
+  ['PLAYBACK_STARTED', ['playback_jobs'], ['created']],
+  ['PLAYBACK_STOPPED', ['playback_jobs'], ['operational']],
+  // People and access, in the person's lane.
+  ['PERSON_ADDED', ['user_roles'], ['configuration']],
+  ['ROLE_GRANTED', ['user_roles'], ['configuration']],
+  ['ROLE_REVOKED', ['user_roles'], ['configuration']],
+  ['ACCESS_REMOVED', ['user_roles'], ['configuration']],
+  ['ACCESS_RESTORED', ['user_roles'], ['configuration']],
+  ['PASSWORD_SET', ['user_roles'], ['configuration']],
+  ['DISPLAY_NAME_CHANGED', ['user_roles'], ['configuration']],
+  ['EMAIL_CHANGED', ['user_roles'], ['configuration']],
+  ['SESSIONS_ENDED', ['user_roles'], ['configuration']],
+  ['MFA_RESET', ['user_roles'], ['configuration']],
+  ['APP_APPROVED', ['user_roles'], ['configuration']],
+  ['APP_APPROVAL_REVOKED', ['user_roles'], ['configuration']],
+  // Apps, in the app's lane.
+  ['APP_REGISTERED', ['oauth_clients'], ['configuration']],
+  ['APP_REMOVED', ['oauth_clients'], ['configuration']],
+  ['APP_RESTORED', ['oauth_clients'], ['configuration']],
+  // Machine identities and credentials.
+  ['PRINCIPAL_REVOKED', ['service_principals'], ['configuration']],
+  ['PRINCIPAL_REINSTATED', ['service_principals'], ['configuration']],
+  ['PRINCIPAL_DESCRIBED', ['service_principals'], ['configuration']],
+  ['TOKEN_MINTED', ['service_principals'], ['configuration']],
+  ['TOKEN_REVOKED', ['service_principals'], ['configuration']],
+  // Backups: the request, then the backup it took.
+  ['BACKUP_REQUESTED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_CANCELLED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_FAILED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_TAKEN', ['backups'], ['configuration']],
+  ['BACKUP_RELEASED', ['backups'], ['configuration']],
+  ['BACKUP_PRUNED', ['backups'], ['configuration']],
+  // The System page.
+  ['SERVICE_LOGS_READ', ['service_logs'], ['read']],
 ];
 
 /**

@@ -569,6 +569,22 @@ describe('audit trail filtering', () => {
     expect(rpcArgs()).toBeUndefined();
   });
 
+  it('sends the classes as a list of the server words, and asks for the counts only when told (0228)', async () => {
+    await api.get('/api/v1/audit-trail?class=lifecycle,READ&counts=true');
+    expect(rpcArgs().p_class).toEqual(['lifecycle', 'read']);
+    expect(rpcArgs().p_counts).toBe(true);
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/audit-trail');
+    expect(rpcArgs().p_class).toBeNull();
+    expect(rpcArgs().p_counts).toBe(false);
+  });
+
+  it('refuses a class it does not know, rather than widening it', async () => {
+    const rows = await api.get('/api/v1/audit-trail?class=lifecycle,critical');
+    expect(rows).toEqual([]);
+    expect(rpcArgs()).toBeUndefined();
+  });
+
   it('honours the row limit', async () => {
     await api.get('/api/v1/audit-trail?limit=200');
     expect(rpcArgs().p_limit).toBe(200);

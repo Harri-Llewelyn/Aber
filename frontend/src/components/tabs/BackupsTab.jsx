@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
-import { backupUrl } from '../../routes'
+import { backupUrl, trailUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -16,7 +16,7 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconShieldAlert, IconX } from '../common/Icons'
 import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
@@ -24,6 +24,7 @@ import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
 import { Tooltip } from '../common/Tooltip'
 import { ColumnHeader } from '../common/SortHeader'
+import { PERMISSION_UUIDS } from '../../constants'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -104,7 +105,8 @@ const emptyFor = (chosen) => (chosen.length === 1
  * exists; the bytes never come here, and restore is a runbook. Administrator only, as the RLS and
  * every RPC are; App re-checks the role before rendering this.
  */
-export function BackupsTab({ showToast }) {
+export function BackupsTab({ showToast, hasPermission }) {
+  const canReadTrail = !!hasPermission?.(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const [runs, setRuns] = useState([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
@@ -374,6 +376,7 @@ export function BackupsTab({ showToast }) {
         onRelease={setReleaseFor}
         onClose={() => setSelectedId(null)}
         showToast={showToast}
+        canReadTrail={canReadTrail}
       />
 
       {PHYSICAL.filter(db => physical[db.key] !== undefined).map(db => (
@@ -875,7 +878,7 @@ function retentionText(backup, kept, retentionDays) {
  * One run's details: the whole of a failure, the queued, started and finished times, and the files
  * a backup holds. Release is its one action, on a pinned backup.
  */
-function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast }) {
+function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast, canReadTrail }) {
   const b = run?.backup
   const badge = run ? (STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }) : null
   const outcome = run ? runOutcome(run) : null
@@ -896,14 +899,24 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
     ] : [])
   ] : []
 
-  const actions = b?.pinned ? [{
-    label: 'Release',
-    primary: true,
-    pending: releasing,
-    pendingLabel: 'Releasing…',
-    onClick: () => onRelease(b),
-    title: 'Let the retention window apply to this backup'
-  }] : []
+  const actions = run ? [
+    b?.pinned && {
+      label: 'Release',
+      primary: true,
+      pending: releasing,
+      pendingLabel: 'Releasing…',
+      onClick: () => onRelease(b),
+      title: 'Let the retention window apply to this backup'
+    },
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    // Searched by the request's id, with no kind: the search finds the backup it took as well, so
+    // the request's lane and the backup's show together.
+    canReadTrail && {
+      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      to: trailUrl(run.id),
+      title: 'Open the Audit Trail on this run: its request, and the backup it took, released or pruned'
+    },
+  ].filter(Boolean) : []
 
   return (
     <ContextPanel

@@ -5,6 +5,7 @@ import { backupUrl } from '../routes'
 import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause, backupWarnings } from '../components/tabs/BackupsTab'
 import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
+import { PERMISSION_UUIDS } from '../constants'
 
 /**
  * The Backups page. What has to hold: the page never takes a backup itself, only queues one and
@@ -311,6 +312,31 @@ describe('a run\'s panel', () => {
     fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
     expect(panel()).toHaveTextContent('pg_dump timescaledb failed: connection refused')
     expect(panel().querySelector('.context-action')).toBeNull()
+  })
+
+  it('opens the Audit Trail on the run for a reader of the trail, searched by the request with no kind', async () => {
+    /* One search finds both histories: the request's, and the backup's it took, released or pruned
+       (audit_trail_page(), 0228). A kind would hide one of the two lanes. */
+    const hasPermission = vi.fn((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+    render(<BackupsTab showToast={vi.fn()} hasPermission={hasPermission} />)
+    fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
+    const link = within(panel()).getByRole('link', { name: /View Audit Trail/ })
+    const href = new URL(link.getAttribute('href'), 'http://x')
+    expect(href.pathname).toBe('/audit-trail')
+    expect(href.searchParams.get('search')).toBe('j-1')
+    expect(href.searchParams.has('type')).toBe(false)
+    expect([...panel().querySelectorAll('.context-action')].map(a => a.textContent.trim()))
+      .toEqual(['Release', 'View Audit Trail'])
+
+    // A failed run took no backup, and its own lane is still there to read.
+    fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
+    expect(within(panel()).getByRole('link', { name: /View Audit Trail/ })).toBeTruthy()
+  })
+
+  it('offers no View Audit Trail to a reader who may not open it', async () => {
+    render(<BackupsTab showToast={vi.fn()} hasPermission={() => false} />)
+    fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
+    expect(within(panel()).queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
   })
 })
 

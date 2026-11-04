@@ -1,8 +1,8 @@
 /**
  * Audit Trail: the action filter, and the two vocabularies this page speaks.
  * `audit_trail.action` is what the database did (INSERT / UPDATE / DELETE plus the
- * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, derived
- * client-side and colouring the timeline. The filter must use the first vocabulary. The allow-list
+ * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, the class the
+ * server names and the legend's toggles choose, colouring the timeline. The filter must use the first vocabulary. The allow-list
  * in api.js must refuse an unknown action rather than apply no predicate, because "returns
  * everything" is a failure a caller cannot see.
  */
@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, MARKERS } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS } from '../constants'
 import { api } from '../api'
-import { getAllByTooltip } from '../test/tooltips'
+import { tooltipOf } from '../test/tooltips'
 import { filterList, offered, toggleInList } from '../test/listFilters'
 
 vi.mock('../api', async () => {
@@ -63,17 +63,18 @@ describe('the action filter offers every action the database can record', () => 
     // group, then each group's order.
     expect(values).toEqual([
       'INSERT', 'UPDATE', 'DELETE',
-      'SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'EXPORTED', 'FLOW_DEPLOYED',
+      'SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED',
       'CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
-      'CAPTURE_DOWNLOAD_ISSUED', 'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED',
+      'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED',
       'PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
       'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET',
       'APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED',
       'PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN',
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED',
       'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED',
-      'SERVICE_LOGS_READ'
+      // The reads, the legend's Read class, together.
+      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'
     ])
     const headings = within(filter()).getAllByRole('group')
       .map(g => document.getElementById(g.getAttribute('aria-labelledby')).textContent)
@@ -126,11 +127,13 @@ describe('the two vocabularies are kept apart', () => {
     expect(screen.queryByRole('group', { name: /event/i })).toBeNull()
   })
 
-  it('the legend still describes the derived classification', async () => {
-    // Both vocabularies remain on screen; the fix is that they no longer share words.
+  it('the legend still describes the classes', async () => {
+    // Both vocabularies remain on screen; the fix is that they no longer share words. A toggle's
+    // tooltip opens with its class's hint and goes on to say what selecting it does.
     await show()
+    const tips = within(screen.getByRole('group', { name: 'Classes' })).getAllByRole('button').map(tooltipOf)
     for (const marker of Object.values(MARKERS)) {
-      expect(getAllByTooltip(marker.hint).length).toBeGreaterThan(0)
+      expect(tips.some(t => t?.startsWith(`${marker.hint}. `)), marker.label).toBe(true)
     }
   })
 })
