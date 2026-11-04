@@ -673,7 +673,10 @@ describe("the charts' groups", () => {
   })
   afterEach(() => { window.localStorage.removeItem(CLOSED_GROUPS_KEY) })
 
-  const heading = (name) => screen.getByRole('button', { name: new RegExp(`^${name}, \\d+ charts?$`) })
+  /** A group's heading, named "String, 1 chart": its label, then its count as a screen reader hears it. */
+  const heading = (label) => screen.getByRole('button', {
+    name: (name) => name.startsWith(`${label}, `) && /^\d+ charts?$/.test(name.slice(label.length + 2)),
+  })
   const groupNames = () => [...document.querySelectorAll('.history-group')].map(g => g.getAttribute('aria-label'))
   const chartsIn = (name) => [...document.querySelector(`.history-group[aria-label="${name}"]`).querySelectorAll('figure')]
     .map(f => f.getAttribute('aria-labelledby') && f.querySelector('.history-chart-title').textContent)
