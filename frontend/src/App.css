@@ -5250,11 +5250,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 /* ===== Time window control ===== */
-/* ‹ the window in words ›, Today and the span switch (common/TimeWindowControl.jsx), in a toolbar
-   after the search box. One flex item, so a toolbar that wraps moves it to a line of its own whole;
-   only on a line narrower than itself do Today and the switch go under the arrows, which never
-   part from the words. The words keep a minimum width, so › stays put under the pointer while a
-   week or a day is stepped. */
+/* ‹ the window in words ›, the span switch, and Zoom in and Zoom out where a page asks for them
+   (common/TimeWindowControl.jsx), in a toolbar after the search box. One flex item, so a toolbar
+   that wraps moves it to a line of its own whole; only on a line narrower than itself do the switch
+   and the zoom go under the arrows, which never part from the words. The words keep a minimum
+   width, so › stays put under the pointer while a week or a day is stepped. */
 .time-window {
   display: inline-flex;
   align-items: center;
@@ -5270,6 +5270,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 .time-window-step { padding-left: 7px; padding-right: 7px; }
+
+/* Zoom in and Zoom out, after the switch, a pair that wraps together. */
+.time-window-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .time-window-pick {
   min-width: 12.5rem;
