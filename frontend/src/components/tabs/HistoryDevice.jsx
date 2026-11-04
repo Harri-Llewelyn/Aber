@@ -19,8 +19,9 @@ import { RouteLink } from '../common/RouteLink'
 import { IconChartLine, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
+import { useBandDrag } from '../../hooks/useBandDrag'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
-import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
+import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS,
   TOO_MANY_BUCKETS, bucketOptions, bucketStarts, chartSeries, chartSummary, deviceMatches, deviceMetrics, inReads,
@@ -107,6 +108,12 @@ function BucketChoice({ value, options, onChange }) {
 /** A unit for each metric, from the catalog, by name. */
 const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
 
+/**
+ * The charts' band drag (hooks/useBandDrag.js): a press on a chart's plot area or a state's strip,
+ * each the window's width.
+ */
+const CHART_BAND = { track: '.u-over, .chart-box-states' }
+
 /** No metric chosen: every metric is charted. Hoisted: useUrlList's default is compared, not copied. */
 const ALL_METRICS = Object.freeze([])
 
@@ -126,6 +133,10 @@ function metaWords({ names, total, resolution, refused }) {
  * now; never on a re-render. `every` is the timer, in seconds, held by the page so it outlasts a
  * change of device. Export CSV downloads what the page shows: this device, the metrics chosen and
  * the window, resolved to its bounds as it opens, for a role with `telemetry:read`.
+ *
+ * The window zooms as the Audit Trail's does: Zoom in and Zoom out in the time control, and a drag
+ * across any chart, which shades the band on every chart and sets it as the window on release, as a
+ * new history entry, so Back undoes it.
  */
 export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, hasPermission, showToast }) {
   useClockTick(CLOCK_MS)
@@ -241,11 +252,25 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   const busy = Boolean(reading?.loading) || reading === null
 
+  // A drag across a chart: its fractions are of the window the charts draw, the read's.
+  const drawnSpan = reading?.byMetric ? { start: reading.start, ms: reading.end - reading.start } : null
+  const atFraction = (f) => drawnSpan.start + drawnSpan.ms * f
+  const { band, onPointerDown: startBand } = useBandDrag((a, b) => {
+    if (drawnSpan) setWin(bandWindow(atFraction(a), atFraction(b), drawnSpan.ms), { replace: false })
+  }, CHART_BAND)
+  /** The band as drawn: its ends as fractions, and the window a release sets, in words. */
+  const shownBand = band && drawnSpan ? (() => {
+    const lo = Math.min(band.a, band.b)
+    const hi = Math.max(band.a, band.b)
+    const { start, end } = windowBounds(bandWindow(atFraction(lo), atFraction(hi), drawnSpan.ms))
+    return { lo, hi, mid: (lo + hi) / 2, words: bandWords(start, end, now) }
+  })() : null
+
   return (
     <>
       <div className="filter-bar">
         <DeviceSwitcher device={device} devices={devices} win={win} chosen={chosen} bucket={bucket} />
-        <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} />
+        <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
         <FilterDropdown
           label="Metrics"
           noun="metric"
@@ -299,7 +324,8 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             {reading.reads > 1 && `, read in ${reading.reads} parts`}
             {reading.loading && ' · reading again…'}
           </p>
-          <div className="history-charts">
+          {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
+          <div className="history-charts" onPointerDown={startBand}>
             {charts.map(c => (
               <TimeSeriesChart
                 key={c.name}
@@ -314,6 +340,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                 validRange={c.validRange}
                 summary={c.summary}
                 syncKey={`history-${device.asset_id}`}
+                band={shownBand}
               />
             ))}
           </div>

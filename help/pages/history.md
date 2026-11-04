@@ -15,7 +15,7 @@ Everyone who can sign in can open History. Each chart shows only what your accou
 
 You can also start from a device. On the Devices page, open the device and select **View History**.
 
-The time window works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time). Choose **Day**, **Week**, **Month** or **Year** to see a whole span, and **‹** or **›** to step back or forward. Select the words between the arrows to jump to a day, or to pick a rolling or custom range. There is no **All time**, because a chart must fit a size you can read.
+The time window works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time). Choose **Day**, **Week**, **Month** or **Year** to see a whole span, and **‹** or **›** to step back or forward. Select the words between the arrows to jump to a day, or to pick a rolling or custom range. There is no **All time**, because a chart must fit a size you can read. To look closer, zoom in: see [Zooming in on a stretch](#zooming-in-on-a-stretch).
 
 ## Choosing metrics and buckets
 
@@ -28,6 +28,30 @@ The line above the charts says what you see, for example **3 of 10 metrics, in 1
 Choosing fewer metrics gives smaller buckets, and so finer detail. Under **Auto**, the page picks the bucket size for the metrics you chose, not for all of them. See [Which bucket size you see](#which-bucket-size-you-see).
 
 The address keeps the device, the window, the metrics and the bucket size, so a link you share opens the same charts. When you chart another device, it keeps the metrics it also has.
+
+## Zooming in on a stretch
+
+1. Press on a chart, or on a state's strip, and drag across the stretch you want. A shaded band follows the pointer, on every chart.
+2. Read the band's words, such as **10:05 – 10:40, 35 min**. They say what the charts will show.
+3. Let go. The charts show that stretch, in smaller buckets where the shorter window allows.
+4. To go back to the window before, select **Back** in your browser.
+
+Or use the buttons after **Day | Week | Month | Year**:
+
+- **Zoom in** shows the middle half of the window.
+- **Zoom out** shows a window twice as long, around the same middle. A window that would run past now ends at the current minute instead.
+
+**Zoom in** stops at a window of one minute, and is greyed out there. Point at a button to see why it is greyed out.
+
+A few things to know:
+
+- **A drag must move at least 4 pixels.** A shorter one is a click, and changes nothing.
+- **Press Escape during a drag** to cancel it.
+- **On a touch screen, dragging scrolls the page.** Use the buttons to zoom.
+- **A band shorter than one minute opens as one minute**, around its middle.
+- **A zoomed window is a custom range,** so the arrows are called **Earlier** and **Later**.
+- **Each zoom is a new step in your browser's history,** so **Back** undoes it. Stepping with **‹** or **›** adds no step.
+- **A zoom keeps the metrics and the bucket size you chose.**
 
 ## Refreshing
 

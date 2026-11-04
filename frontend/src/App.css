@@ -5804,7 +5804,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The band, drawn where the hatched parts are: on the axis, on each section heading and in the
    layer behind the rows. A translucent accent with an edge each side, so it reads on both themes
    and over a hatch. */
-.trail-band {
+.trail-band,
+.chart-band {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -5817,7 +5818,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* What a release sets, "10:05 – 10:40, 35 min", on the axis, which stays in view. Opaque over the
    ticks, centred on the band and held inside the track near either end, as the now marker is; an
    outline rather than the now marker's fill, so the two are not read as one. */
-.trail-band-words {
+.trail-band-words,
+.chart-band-words {
   position: absolute;
   top: 3px;
   z-index: 2;
@@ -5834,8 +5836,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   white-space: nowrap;
   pointer-events: none;
 }
-.trail-band-words-start { transform: none; }
-.trail-band-words-end   { transform: translateX(-100%); }
+.trail-band-words-start,
+.chart-band-words-start { transform: none; }
+.trail-band-words-end,
+.chart-band-words-end   { transform: translateX(-100%); }
 
 /* ===== History: the charts ===== */
 /* A chart's now marker and hatched future, as the Audit Trail's axis draws them (.trail-now,
@@ -5980,6 +5984,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
 }
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* A drag across a chart or a strip zooms to the band it shades (.chart-band, with the trail's look),
+   so a drag selects no text. */
+.history-charts .u-over,
+.chart-box-states { cursor: crosshair; user-select: none; }
 
 /* History's toolbar device and its list, in the time window's popover frame. */
 .history-device-pick { justify-content: flex-start; min-width: 0; }

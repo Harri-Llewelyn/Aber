@@ -1376,19 +1376,21 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
   an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
   off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
-  are. The Audit Trail passes `zoom`; System › Logs does not.
+  are. The Audit Trail and History pass `zoom`; System › Logs does not.
 - **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
   setter then adds a history entry (`navigate()` without `replace`). Everything else calls
   `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
   argument on.
 - **A drag across the Audit Trail zooms too.** A mouse or pen press on the axis or an empty part of a
-  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`). It is drawn on the
-  axis, on each section heading and in the gridlines layer, as the hatched parts are. The axis words
+  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`) through
+  `hooks/useBandDrag.js`. It is drawn on the axis, on each section heading and in the gridlines
+  layer, as the hatched parts are. The axis words
   it with `bandWords` ("10:05 – 10:40, 35 min"), and a release sets `bandWindow(start, end,
   axisMs)`: to the minute on an axis of an hour or more, to the second under one, and never under
   the floor. A press on a marker or a badge starts no band, so it still opens; nor does touch, so a
   finger scrolls the page. Escape drops a band, and keeps the key from the drawer. Both functions
-  take times, not pixels, so another timeline's drag can use them.
+  take times, not pixels, so another timeline's drag can use them: History's does, through the same
+  `useBandDrag`, which takes the track to press, what to skip and the track's end padding.
 - **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
   language setting can pass its own. No date library.
 - **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
@@ -1445,6 +1447,12 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   it, when the window starts before the one chosen. The file's first line names the resolution.
   An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
   History replaced.
+- **Zoom** is the time control's `zoom` and a drag across any chart (`useBandDrag` over each
+  `.u-over` and state strip, which are the window's width). The page holds the band and every chart
+  shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
+  `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
+  metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
+  the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.
 - **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
@@ -1476,13 +1484,14 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
 | `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
+| `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |
 
 - **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
 - **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
   `<html data-theme>` changes, so a theme switch redraws it.
 - **uPlot's own drag selection is off** (`cursor.drag` x and y false, `select` hidden): a chart
-  never rescales itself, and the page's window is the only zoom.
+  never rescales itself, and the page's window is the only zoom. A drag zooms that window (`band`).
 - **Under the Content-Security-Policy**, uPlot sets styles through the DOM (`element.style`), which
   `style-src` allows, and its stylesheet is imported through the bundle. The chart's first comment
   carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).

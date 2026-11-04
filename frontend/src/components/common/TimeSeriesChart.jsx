@@ -140,6 +140,21 @@ function NowMarker({ fraction, now }) {
   )
 }
 
+/**
+ * A band being dragged across the charts (`band`: its ends and middle as fractions of the window,
+ * and the window a release sets in words), drawn as the Audit Trail draws one on its axis.
+ */
+function BandMark({ band }) {
+  const edge = band.mid > 0.85 ? ' chart-band-words-end' : band.mid < 0.15 ? ' chart-band-words-start' : ''
+  const at = band.mid > 0.85 ? band.hi : band.mid < 0.15 ? band.lo : band.mid
+  return (
+    <>
+      <div className="chart-band" aria-hidden="true" style={{ left: `${band.lo * 100}%`, width: `${(band.hi - band.lo) * 100}%` }} />
+      <div className={`chart-band-words${edge}`} aria-hidden="true" style={{ left: `${at * 100}%` }}>{band.words}</div>
+    </>
+  )
+}
+
 /** The tone class of a state's runs: its place in the key, or the neutral tone of the others. */
 const toneOf = (tones, state) => `chart-tone-${tones.get(state) ?? 'other'}`
 
@@ -206,7 +221,8 @@ function StateKey({ stateKey: key, carried }) {
  * readings yet" mark the rest. A flag steps between false and true; a state is a strip of its runs,
  * a colour a value with its name kept, carried stretches hatched, and a key of each value's share
  * of the time under it. The head reads the bucket under the pointer, or the run under it on a
- * state strip, and otherwise the latest reading (latestWords()).
+ * state strip, and otherwise the latest reading (latestWords()). `band` is a drag's band, which the
+ * page shades on every chart; uPlot's own drag selection stays off.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -216,7 +232,7 @@ function StateKey({ stateKey: key, carried }) {
  *     start={startMs} end={endMs} now={Date.now()} minutes={5} summary={text} syncKey="device" />
  */
 export function TimeSeriesChart({
-  metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, height = 140,
+  metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -288,7 +304,12 @@ export function TimeSeriesChart({
         {isState && (
           <div className="chart-box chart-box-states" onPointerMove={pointAt} onPointerLeave={() => setRunHover(null)}>
             <StateStrip runs={runs} tones={key.tones} start={start} end={end} />
-            {fraction !== null && <div className="chart-overlay"><NowMarker fraction={fraction} now={now} /></div>}
+            {(fraction !== null || band) && (
+              <div className="chart-overlay">
+                {fraction !== null && <NowMarker fraction={fraction} now={now} />}
+                {band && <BandMark band={band} />}
+              </div>
+            )}
           </div>
         )}
         {(series.kind === 'none' || failed) && (
@@ -296,7 +317,13 @@ export function TimeSeriesChart({
             {failed ? 'This chart could not be drawn in this browser.' : 'No readings in this window, and none before it.'}
           </div>
         )}
-        {drawn && !failed && over && fraction !== null && createPortal(<NowMarker fraction={fraction} now={now} />, over)}
+        {drawn && !failed && over && (fraction !== null || band) && createPortal(
+          <>
+            {fraction !== null && <NowMarker fraction={fraction} now={now} />}
+            {band && <BandMark band={band} />}
+          </>,
+          over,
+        )}
       </div>
       {isState && key.shown.length > 0 && <StateKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} />}
       <p className="sr-only" id={`${id}-summary`}>{summary}</p>
