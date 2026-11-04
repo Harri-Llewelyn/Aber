@@ -54,6 +54,7 @@ DECLARE
     v_secs     numeric;
     v_source   text;
     v_width    interval;
+    v_step     interval;
     v_from     timestamp with time zone;
     v_back     timestamp with time zone;
     v_series   bigint;
@@ -85,7 +86,9 @@ BEGIN
     END IF;
 
     -- On the epoch grid, as the rollups' buckets are, so each source bucket falls in one bucket here.
-    v_from := date_bin(bucket, from_ts, timestamptz 'epoch');
+    -- In seconds, so a day is 24 hours in any session time zone, as date_bin() counts it.
+    v_step := make_interval(secs => v_secs);
+    v_from := date_bin(v_step, from_ts, timestamptz 'epoch');
     v_series := cardinality(asset_ids)::bigint * cardinality(metric_names);
     v_buckets := ceil(extract(epoch FROM to_ts - v_from) / v_secs)::bigint;
     IF v_series * v_buckets > c_max_rows THEN
@@ -207,7 +210,7 @@ BEGIN
        WHERE f.n > 0 OR f.cd IS NOT NULL OR f.cs IS NOT NULL OR f.cb IS NOT NULL
        ORDER BY f.aid, f.mname, f.b
     $q$, v_source)
-    USING from_ts, to_ts, bucket, asset_ids, metric_names, v_from, v_aid, v_mname, v_d, v_s, v_b;
+    USING from_ts, to_ts, v_step, asset_ids, metric_names, v_from, v_aid, v_mname, v_d, v_s, v_b;
 END;
 $fn$;
 

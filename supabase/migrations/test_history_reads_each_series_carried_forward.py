@@ -270,6 +270,18 @@ class Buckets(CarriedBase):
                 rows = self.read(T0, T0 + minutes(1), bucket=bucket)
                 self.assertEqual(rows[0]["avg_double"], expected)
 
+    def test_a_day_is_24_hours_in_any_session_time_zone(self):
+        # London's clocks went forward on 29 March 2026. A day bucket is still 86,400 s on the
+        # epoch grid, so it meets the hourly rollup's buckets rather than local midnights.
+        self.cur.execute("SET LOCAL TIME ZONE 'Europe/London';")
+        march = datetime(2026, 3, 28, tzinfo=timezone.utc)
+        for day in range(3):
+            self.bucket("telemetry_1h", march + timedelta(days=day, hours=12), 10 + day)
+        rows = self.read(march, march + timedelta(days=3), bucket="1 day")
+        self.assertEqual([r["bucket_ts"] for r in rows], [march + timedelta(days=d) for d in range(3)])
+        self.assertEqual([r["avg_double"] for r in rows], [10, 11, 12])
+        self.assertFalse(any(r["is_carried"] for r in rows))
+
     def test_a_window_opening_inside_a_bucket_starts_on_the_bucket(self):
         self.bucket("telemetry_5m", T0, 2)
         rows = self.read(T0 + minutes(3), T0 + minutes(12), bucket="5 minutes")

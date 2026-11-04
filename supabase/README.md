@@ -3075,6 +3075,7 @@ rather than carry values a second time, so its contract stays plain:
   last value alone; a chart of a bucket with readings needs its range.
 - **Buckets lie on the epoch grid**, as the rollups' do, so a window opening inside a bucket starts
   at that bucket's start. A bucket is a whole number of minutes, at least one, and has no months.
+  It is stepped in seconds, so a day is 24 hours in any session time zone, as `date_bin()` counts it.
 - **The source is the widest rollup whose width divides the bucket**: `telemetry_1h` for whole
   hours, `telemetry_5m` for whole five minutes, else `telemetry_1m`. A wider bucket, such as a day,
   is combined from it on the historian: the sums, counts, minima and maxima compose exactly, so the
