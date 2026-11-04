@@ -1,9 +1,10 @@
 /**
- * The History page's arithmetic: the window it opens on, the resolution the row cap picks, its
- * address, a chart's buckets and series, and the words a chart says for a screen reader. Pure, so
- * each rule is unit-tested; frontend/README.md, "History and its chart".
+ * The History page's arithmetic: the window it opens on, the resolution the row cap picks or the
+ * one chosen, its address, a chart's buckets and series, and the words a chart says. Pure, so each
+ * rule is unit-tested; frontend/README.md, "History and its chart".
  */
 import { HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
+import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers } from './sparkplugId'
@@ -57,6 +58,41 @@ export function pickResolution(startMs, endMs, series, {
   return { ...coarsest, perRead: Math.floor(maxRows / buckets) }
 }
 
+/** The Buckets control's choices: Auto, the finest that fits (pickResolution), then each resolution. */
+export const HISTORY_BUCKETS = ['auto', ...HISTORY_RESOLUTIONS.map(r => r.id)]
+
+/** Why a resolution finer than Auto's is off: its rows would pass the row cap. */
+export const TOO_MANY_BUCKETS = 'Too many buckets for this window: choose fewer metrics or a shorter window.'
+
+/**
+ * The resolution a read takes for `bucket`, one of HISTORY_BUCKETS: Auto's pick, or the one chosen
+ * when it is as coarse as Auto's or coarser, with every series in one read. A finer one would pass
+ * the row cap, so the read takes Auto's pick and `refused` names the one chosen. `resolution` is
+ * null when one series does not fit even at the coarsest.
+ */
+export function resolutionFor(startMs, endMs, series, bucket = 'auto', options = {}) {
+  const resolutions = options.resolutions ?? HISTORY_RESOLUTIONS
+  const auto = pickResolution(startMs, endMs, series, options)
+  const at = resolutions.findIndex(r => r.id === bucket)
+  if (!auto || at < 0) return { resolution: auto, refused: null }
+  const autoAt = resolutions.findIndex(r => r.id === auto.id)
+  if (at < autoAt) return { resolution: auto, refused: resolutions[at] }
+  if (at === autoAt) return { resolution: auto, refused: null }
+  return { resolution: { ...resolutions[at], perRead: Math.max(1, series) }, refused: null }
+}
+
+/**
+ * The Buckets control's options for Auto's pick `auto`: Auto, then each resolution, on when it is
+ * as coarse as Auto's pick or coarser. With no pick, only Auto is on.
+ */
+export function bucketOptions(auto) {
+  const autoAt = auto ? HISTORY_RESOLUTIONS.findIndex(r => r.id === auto.id) : HISTORY_RESOLUTIONS.length
+  return [
+    { value: 'auto', label: 'Auto buckets', on: true },
+    ...HISTORY_RESOLUTIONS.map((r, i) => ({ value: r.id, label: r.words, on: i >= autoAt })),
+  ]
+}
+
 /** `list` in groups of at most `size`, in order. */
 export function inReads(list, size) {
   const out = []
@@ -85,11 +121,18 @@ export function historyPath(segments) {
 export const deviceHistoryPath = (deviceId) =>
   (deviceId ? `/history/device/${encodeURIComponent(deviceId)}` : '/history')
 
-/** The address of a device's charts, or the picker's, keeping the window shown now. */
-export function pickedAddress(deviceId, win) {
+/**
+ * The address of a device's charts, or the picker's, keeping the window shown now, and the metrics
+ * chosen (`metric`) and the bucket choice (`bucket`) when they are not the defaults. The next
+ * device keeps the metrics it has.
+ */
+export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto' } = {}) {
   const query = new URLSearchParams()
   for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
-  const q = query.toString()
+  if (metrics.length) query.set('metric', encodeList(metrics))
+  if (bucket && bucket !== 'auto') query.set('bucket', bucket)
+  // A list reads with its commas, as useUrlList writes it.
+  const q = query.toString().replace(/%2C/gi, ',')
   return `${deviceHistoryPath(deviceId)}${q ? `?${q}` : ''}`
 }
 

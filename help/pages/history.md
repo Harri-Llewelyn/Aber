@@ -17,7 +17,17 @@ You can also start from a device. On the Devices page, open the device and selec
 
 The time window works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time). Choose **Day**, **Week**, **Month** or **Year** to see a whole span, and **‹** or **›** to step back or forward. Select the words between the arrows to jump to a day, or to pick a rolling or custom range. There is no **All time**, because a chart must fit a size you can read.
 
-The address keeps the device and the window, so a link you share opens the same charts.
+## Choosing metrics and buckets
+
+1. Select **Metrics** in the toolbar and tick the metrics you want to chart. It starts at **All metrics**. A long list has a search box.
+2. Select **Buckets** to choose the bucket size. It starts at **Auto**, the smallest size that fits.
+3. Select **Clear filters** to go back to **Last 24 hours**, every metric and **Auto**. The device stays.
+
+The line above the charts says what you see, for example **3 of 10 metrics, in 1-minute buckets**.
+
+Choosing fewer metrics gives smaller buckets, and so finer detail. Under **Auto**, the page picks the bucket size for the metrics you chose, not for all of them. See [Which bucket size you see](#which-bucket-size-you-see).
+
+The address keeps the device, the window, the metrics and the bucket size, so a link you share opens the same charts. When you chart another device, it keeps the metrics it also has.
 
 ## Refreshing
 
@@ -43,14 +53,16 @@ A chart with nothing to draw says **No readings in this window, and none before 
 
 ## Which bucket size you see
 
-The page picks the bucket size for you, and says which it chose above the charts, for example **15 metrics, in 5-minute buckets**. There are four sizes:
+Under **Auto**, the page picks the bucket size for you, and says which it chose above the charts, for example **15 metrics, in 5-minute buckets**. There are four sizes:
 
 - **1-minute buckets**
 - **5-minute buckets**
 - **1-hour buckets**
 - **1-day buckets**
 
-The page picks the smallest size that keeps one read to at most 5,000 points. A point is one bucket of one metric. So a longer window, or a device with more metrics, gets larger buckets. For example, one metric over 24 hours fits in 1-minute buckets, but 15 metrics over the same day get 5-minute buckets. To see finer detail, choose a shorter window.
+The page picks the smallest size that keeps one read to at most 5,000 points. A point is one bucket of one metric. So a longer window, or more metrics, gets larger buckets. For example, one metric over 24 hours fits in 1-minute buckets, but 15 metrics over the same day get 5-minute buckets. To see finer detail, choose fewer metrics or a shorter window.
+
+**Buckets** also offers each size. A larger size than **Auto** picks is always on. A smaller one would need more than 5,000 points, so it is listed but off; point at it to see why. A link that asks for one is charted at the size **Auto** picks, and the line above the charts says so.
 
 When even 1-day buckets would be too many for all the metrics at once, the page reads them in parts and says so. A window too long for one metric in 1-day buckets is not charted, and the page asks for a shorter one.
 

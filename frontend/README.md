@@ -1390,19 +1390,29 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   metric per bucket, a bucket with no reading carried forward and marked `is_carried`.
 - **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
   (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
-  metrics, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from the one
-  holding the window's start, on the epoch grid the rollups use. When no resolution fits every
-  metric, the coarsest reads them in parts. The page says which it shows ("in 5-minute buckets").
+  the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
+  the one holding the window's start, on the epoch grid the rollups use. When no resolution fits
+  every metric, the coarsest reads them in parts. The page says which it shows ("3 of 10 metrics,
+  in 1-minute buckets").
+- **Buckets** (`HISTORY_BUCKETS`, `?bucket=`) is Auto, `pickResolution()`'s pick, or one size, in
+  a `ToolbarPopover` as the time window is. `resolutionFor()` reads a coarser size with every
+  metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
+  with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
+  status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
 - **The metrics** are those the device's last birth declared and those its schemas model
   (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
-  (`validRanges()`), and its unit the catalog's.
+  (`validRanges()`), and its unit the catalog's. **Metrics** in the toolbar is a `FilterDropdown`
+  over them (`?metric=`, `useUrlList`); nothing chosen charts every one. A name the device does not
+  have is dropped from the address, so a device switched to keeps the names it shares.
+- **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
+  the buckets. The device is the page's subject, not a filter, and stays.
 - **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
   since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
   it outlasts a change of device. `usePolling` runs it only while the window reaches now
   (`holdsNow()`); for a window that has ended the interval half is off with the reason. A read in
   flight keeps the charts on screen, and only the newest read lands.
-- **The address** is `/history/device/<id>` with the window's keys; `/history` is the picker.
-  `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
+- **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
+  `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
 
 **`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.

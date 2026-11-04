@@ -5799,6 +5799,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-device-place { font-size: 11px; color: var(--text-muted); }
 .history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
 .history-picker-badge { margin-left: 8px; }
+/* Buckets: its size in the toolbar, its choices a column in the popover. */
+.history-bucket-pick { justify-content: flex-start; min-width: 0; }
+.history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
+.history-bucket-choices .btn { justify-content: flex-start; }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --

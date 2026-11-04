@@ -41,9 +41,11 @@ vi.mock('../api', async () => {
 
 const LATHE = '2b3e0c4a-1111-4000-8000-000000000001'
 const PRESS = '2b3e0c4a-2222-4000-8000-000000000002'
+const MILL = '2b3e0c4a-4444-4000-8000-000000000004'
 const devices = [
   { asset_id: LATHE, asset_name: 'Lathe 3', effective_cell_id: 'c1', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], submodel_schema_ids: ['s1'] },
   { asset_id: PRESS, asset_name: 'Press 1', effective_cell_id: 'c1', last_birth_metrics: [] },
+  { asset_id: MILL, asset_name: 'Mill 2', last_birth_metrics: ['Coolant/TEMP', 'Spindle/LOAD'] },
   { asset_id: '2b3e0c4a-3333-4000-8000-000000000003', asset_name: 'Stranger', is_quarantined: true },
 ]
 const schemas = [{ schema_uuid: 's1', schema_definition: { properties: { 'Spindle/LOAD': { type: 'number', minimum: 0, maximum: 120 } } } }]
@@ -95,7 +97,7 @@ describe('the device picker', () => {
     await visit('/history?range=7d')
     const table = screen.getByRole('table', { name: /choose a device/i })
     const links = within(table).getAllByRole('link')
-    expect(links.map(l => l.textContent)).toEqual(['Lathe 3', 'Press 1'])
+    expect(links.map(l => l.textContent)).toEqual(['Lathe 3', 'Mill 2', 'Press 1'])
     expect(links[0]).toHaveAttribute('href', `/history/device/${LATHE}?range=7d`)
     expect(within(table).getAllByText('Turning')).toHaveLength(2)
     expect(within(table).getAllByText('Hall B')).toHaveLength(2)
@@ -295,5 +297,116 @@ describe('refreshing', () => {
     expect(screen.getAllByRole('figure')).toHaveLength(2)
     await act(async () => { finish() })
     await waitFor(() => expect(screen.queryByText(/reading again…/)).not.toBeInTheDocument())
+  })
+})
+
+describe('the toolbar', () => {
+  // Three days: 4,320 one-minute buckets, so one metric fits them and two do not.
+  const THREE_DAYS = 'from=2026-10-01T00:00&to=2026-10-04T00:00'
+  const metricOf = (search) => new URLSearchParams(search).get('metric')
+  const lastRead = () => api.readCarriedTelemetry.mock.calls[api.readCarriedTelemetry.mock.calls.length - 1][0]
+  const bucketButton = () => screen.getByRole('button', { name: /^Buckets: / })
+  const bucketChoices = async () => {
+    fireEvent.click(bucketButton())
+    const panel = await screen.findByRole('dialog', { name: 'Choose the bucket size' })
+    return within(panel).getAllByRole('button')
+  }
+  const offered = (buttons) => buttons.map(b => [b.textContent, b.getAttribute('aria-disabled') === 'true'])
+  const choose = async (label) => {
+    fireEvent.click(screen.getByRole('button', { name: /^Metrics: / }))
+    const panel = await screen.findByRole('dialog', { name: 'Metrics' })
+    fireEvent.click(within(panel).getByRole('checkbox', { name: label }))
+  }
+
+  it('lays the toolbar out as Logs does: the filters, then Clear filters before the refresh control', async () => {
+    await visit(`/history/device/${LATHE}?range=7d`)
+    const bar = document.querySelector('.filter-bar')
+    const actions = bar.querySelector('.filter-bar-actions')
+    expect(within(actions).getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument()
+    expect(actions.lastElementChild).toBe(within(actions).getByRole('group', { name: 'Refresh' }))
+    expect(screen.getByRole('button', { name: 'Metrics: All metrics' })).toBeInTheDocument()
+    expect(bucketButton()).toHaveAccessibleName('Buckets: Auto buckets')
+  })
+
+  it("offers the device's metrics, and charts only those chosen, in the address", async () => {
+    await visit(`/history/device/${LATHE}`)
+    await screen.findAllByRole('figure')
+    await choose('Spindle/SPEED')
+    await waitFor(() => expect(lastRead()).toMatchObject({ metricNames: ['Spindle/SPEED'] }))
+    expect(metricOf(window.location.search)).toBe('Spindle/SPEED')
+    expect(await screen.findByText('1 of 2 metrics, in 1-minute buckets')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByRole('figure')).toHaveLength(1))
+    expect(screen.getByRole('figure', { name: 'Spindle/SPEED (rpm)' })).toBeInTheDocument()
+  })
+
+  it('gives fewer metrics finer buckets: the row cap counts the metrics chosen', async () => {
+    await visit(`/history/device/${LATHE}?${THREE_DAYS}`)
+    expect(await screen.findByText('2 metrics, in 5-minute buckets')).toBeInTheDocument()
+    await choose('Spindle/LOAD')
+    expect(await screen.findByText('1 of 2 metrics, in 1-minute buckets')).toBeInTheDocument()
+    expect(lastRead()).toMatchObject({ bucketMinutes: 1, metricNames: ['Spindle/LOAD'] })
+  })
+
+  it('opens on a link with the metrics it names, and leaves out a name the device does not have', async () => {
+    await visit(`/history/device/${LATHE}?metric=Spindle/LOAD,Nothing/HERE`)
+    await waitFor(() => expect(lastRead()).toMatchObject({ metricNames: ['Spindle/LOAD'] }))
+    await waitFor(() => expect(metricOf(window.location.search)).toBe('Spindle/LOAD'))
+    expect(screen.getByRole('button', { name: 'Metrics: Spindle/LOAD' })).toBeInTheDocument()
+  })
+
+  it('keeps the metrics and the buckets on switching device, where the next device has the metrics', async () => {
+    await visit(`/history/device/${LATHE}?range=1h&metric=Spindle/LOAD,Spindle/SPEED&bucket=5m`)
+    fireEvent.click(screen.getByRole('button', { name: 'Device: Lathe 3' }))
+    const panel = await screen.findByRole('dialog', { name: 'Choose a device' })
+    const link = within(panel).getByRole('link', { name: /Mill 2/ })
+    const query = new URL(link.getAttribute('href'), 'http://x').searchParams
+    expect(Object.fromEntries(query)).toEqual({ range: '1h', metric: 'Spindle/LOAD,Spindle/SPEED', bucket: '5m' })
+    act(() => { window.history.pushState({}, '', link.getAttribute('href')); window.dispatchEvent(new PopStateEvent('popstate')) })
+    await waitFor(() => expect(lastRead()).toMatchObject({ assetIds: [MILL], metricNames: ['Spindle/LOAD'], bucketMinutes: 5 }))
+    await waitFor(() => expect(metricOf(window.location.search)).toBe('Spindle/LOAD'))
+  })
+
+  it('offers Auto, then each bucket size, and reads at the one chosen, in the address', async () => {
+    await visit(`/history/device/${LATHE}?span=day&at=2026-11-02`)
+    await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 1 }))
+    const choices = await bucketChoices()
+    expect(offered(choices)).toEqual([
+      ['Auto buckets', false], ['1-minute buckets', false], ['5-minute buckets', false], ['1-hour buckets', false], ['1-day buckets', false],
+    ])
+    expect(choices[0]).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(choices[3])
+    await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 60 }))
+    expect(new URLSearchParams(window.location.search).get('bucket')).toBe('1h')
+    expect(await screen.findByText('2 metrics, in 1-hour buckets')).toBeInTheDocument()
+    expect(bucketButton()).toHaveAccessibleName('Buckets: 1-hour buckets')
+  })
+
+  it('offers a size finer than Auto takes, but off, and says why', async () => {
+    await visit(`/history/device/${LATHE}?${THREE_DAYS}`)
+    await screen.findByText('2 metrics, in 5-minute buckets')
+    const choices = await bucketChoices()
+    expect(offered(choices)).toEqual([
+      ['Auto buckets', false], ['1-minute buckets', true], ['5-minute buckets', false], ['1-hour buckets', false], ['1-day buckets', false],
+    ])
+    expect(choices[1]).toHaveAccessibleDescription('Too many buckets for this window: choose fewer metrics or a shorter window.')
+    const reads = api.readCarriedTelemetry.mock.calls.length
+    fireEvent.click(choices[1])
+    expect(new URLSearchParams(window.location.search).get('bucket')).toBeNull()
+    expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(reads)
+  })
+
+  it('reads a link that asks for too fine a size at Auto, and says so', async () => {
+    await visit(`/history/device/${LATHE}?${THREE_DAYS}&bucket=1m`)
+    expect(await screen.findByText('2 metrics, in 5-minute buckets: 1-minute buckets are too many for this window')).toBeInTheDocument()
+    expect(lastRead()).toMatchObject({ bucketMinutes: 5 })
+  })
+
+  it('counts and clears the window, the metrics and the buckets, and keeps the device', async () => {
+    await visit(`/history/device/${LATHE}?range=7d&metric=Spindle/LOAD&bucket=1h`)
+    const clear = await screen.findByRole('button', { name: /Clear filters \(3\)/ })
+    fireEvent.click(clear)
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe(`/history/device/${LATHE}`))
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 1, metricNames: ['Spindle/LOAD', 'Spindle/SPEED'] }))
   })
 })

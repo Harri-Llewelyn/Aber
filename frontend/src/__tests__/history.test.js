@@ -3,9 +3,10 @@ import { HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
 import { pathSegments } from '../hooks/useUrlState'
 import { windowFromQuery, windowToQuery } from '../utils/timeWindow'
 import {
-  DEFAULT_HISTORY_WINDOW, HISTORY_RANGES, HISTORY_SPANS, bucketCount, bucketStarts, chartPalette, chartSeries, chartSummary,
-  deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices, historyPath, inReads, nowFraction, pickResolution,
-  pickedAddress, splitCarried, validRangeWords, validRanges, withAlpha,
+  DEFAULT_HISTORY_WINDOW, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketCount, bucketOptions,
+  bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
+  historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
+  validRanges, withAlpha,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -56,6 +57,44 @@ describe('the resolution the row cap picks', () => {
   })
 })
 
+describe('the Buckets choice', () => {
+  it('offers Auto, then each resolution', () => {
+    expect(HISTORY_BUCKETS).toEqual(['auto', '1m', '5m', '1h', '1d'])
+  })
+
+  it("takes Auto's pick under Auto, and a coarser size with every series in one read", () => {
+    expect(resolutionFor(T0, T0 + DAY, 4, 'auto')).toMatchObject({ resolution: { id: '5m', perRead: 4 }, refused: null })
+    expect(resolutionFor(T0, T0 + DAY, 4, '1h')).toMatchObject({ resolution: { id: '1h', perRead: 4 }, refused: null })
+    expect(resolutionFor(T0, T0 + DAY, 4, '5m')).toMatchObject({ resolution: { id: '5m', perRead: 4 }, refused: null })
+  })
+
+  it("refuses a size finer than Auto's pick, which would pass the row cap, and reads at Auto's", () => {
+    // Four metrics over a day: 5,764 one-minute rows, over the cap of 5,000.
+    expect(resolutionFor(T0, T0 + DAY, 4, '1m')).toMatchObject({ resolution: { id: '5m' }, refused: { id: '1m' } })
+  })
+
+  it("keeps Auto's parts when the size chosen is Auto's own", () => {
+    expect(resolutionFor(T0, T0 + 365 * DAY, 15, '1d')).toMatchObject({ resolution: { id: '1d', perRead: 13 }, refused: null })
+    expect(resolutionFor(T0, T0 + 5001 * DAY, 1, '1d')).toEqual({ resolution: null, refused: null })
+  })
+
+  it("turns off each size finer than Auto's pick, and none coarser", () => {
+    const on = (auto) => bucketOptions(auto).map(o => [o.value, o.on])
+    expect(on(pickResolution(T0, T0 + DAY, 4))).toEqual([['auto', true], ['1m', false], ['5m', true], ['1h', true], ['1d', true]])
+    expect(on(pickResolution(T0, T0 + DAY, 1))).toEqual([['auto', true], ['1m', true], ['5m', true], ['1h', true], ['1d', true]])
+    expect(on(null)).toEqual([['auto', true], ['1m', false], ['5m', false], ['1h', false], ['1d', false]])
+    expect(bucketOptions(null).map(o => o.label)).toEqual(['Auto buckets', '1-minute buckets', '5-minute buckets', '1-hour buckets', '1-day buckets'])
+  })
+})
+
+describe('the refresh timer', () => {
+  it('offers Off, 30 s, 1 min and 5 min, and no 10 s, since each read reads every chart again', () => {
+    expect(HISTORY_REFRESH_EVERY).toEqual([
+      { value: 0, label: 'Off' }, { value: 30, label: '30 s' }, { value: 60, label: '1 min' }, { value: 300, label: '5 min' },
+    ])
+  })
+})
+
 describe("History's address", () => {
   it('names the device in the path and the window in the query, and reads both back', () => {
     const win = { kind: 'calendar', span: 'week', at: '2026-11-02' }
@@ -65,6 +104,13 @@ describe("History's address", () => {
     expect(historyPath(pathSegments(path))).toEqual({ tab: 'device', deviceId: '2b3e0c4a-0000-4000-8000-000000000001' })
     expect(windowFromQuery(new URLSearchParams(query), { ranges: HISTORY_RANGES, spans: HISTORY_SPANS, fallback: DEFAULT_HISTORY_WINDOW }))
       .toEqual(win)
+  })
+
+  it('carries the metrics chosen and the bucket choice, and writes neither at its default', () => {
+    const win = { kind: 'rolling', range: '7d', ms: 7 * DAY, label: 'Last 7 days' }
+    expect(pickedAddress('dev0123', win, { metrics: ['Spindle/LOAD', 'Axis,X'], bucket: '1h' }))
+      .toBe('/history/device/dev0123?range=7d&metric=Spindle%2FLOAD,Axis%252CX&bucket=1h')
+    expect(pickedAddress('dev0123', DEFAULT_HISTORY_WINDOW, { metrics: [], bucket: 'auto' })).toBe('/history/device/dev0123')
   })
 
   it('writes no window when it is the one History opens on, Last 24 hours', () => {
