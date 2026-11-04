@@ -3084,7 +3084,7 @@ sessions, scripts, machine identities, the i3X and MCP clients' tokens, and the 
 secret keys. Each is served and answered as before. Realtime still delivers to an app's token the
 changes to rows any signed-in account reads, because the token is inside the join message, where
 the gateway cannot see it. That gap is accepted, in
-[`docs/security-model.md`](../docs/security-model.md#a-removed-person-keeps-what-a-session-already-holds).
+[`docs/security-model.md`](../docs/security-model.md#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account).
 
 **Each body is declared where it is stated, as `0227` declared its form.** `0001` declares
 `has_role()` and `has_authority()` in place, and `0205`, whose body is the one the API runs,

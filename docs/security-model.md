@@ -20,7 +20,7 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`mosquitto/README.md`](../mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
-| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); a token GoTrue issued to an app reaches only `/auth/v1/` and its own app's functions ([below](#an-apps-token-reaches-only-its-own-routes)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
@@ -325,6 +325,46 @@ Realtime verify the signature for themselves and are not reached by a revocation
 The mechanism and its limits are in
 [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding).
 
+## An app's token reaches only its own routes
+
+GoTrue's OAuth server signs a person in to an app, and the app gets an access token that names the
+person. The token also names the app, in its `client_id` claim. A token with a `client_id` reaches
+GoTrue and its own app's functions, and nothing else. The person's role does not travel with it
+(`0235`). A token with no `client_id` is the dashboard's, a script's or a machine identity's, and
+is unchanged.
+
+| Surface | A token GoTrue issued to an app |
+| :--- | :--- |
+| GoTrue (`/auth/v1/`) | Reached: every app's functions check its session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` |
+| Its own app's functions | Reached, on the API listener: `grafana-userinfo` for Grafana, `nodered-userinfo` for Node-RED |
+| Every other function, gated or exempt | 403 at the gateway |
+| PostgREST, directly or relayed by i3X, `aas-api` or the Directory | 403 at the gateway. `auth_pre_request()` refuses it too, before every other check, since the gateway cannot tell a relayed request from a direct one |
+| Storage | 403 at the gateway. `has_role()` and `has_authority()` answer false for it, so a row a role gates is closed even to a request that reached Storage another way |
+| Realtime | 403 at the gateway when the token is in the handshake. Inside the join message the gateway cannot see it: a row a role gates is still closed, and a row any signed-in account reads is delivered, [an accepted risk](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account) |
+
+The refusal is decided on a token the gateway has verified. A token that does not verify, has
+expired or carries no `client_id` goes on as before, and its upstream answers it.
+
+**The four apps, and what each calls with its token.** Each was checked against the code. Every one
+reads the person's role from `user_roles` with the service key, never with the app's token, and
+exchanges and refreshes its token with its own client secret, not with the token.
+
+| App | Client id | Calls with its token | How |
+| :--- | :--- | :--- | :--- |
+| Grafana | `c0ffee00-0000-4000-8000-000000000001` | `grafana-userinfo` (its `api_url`), which asks GoTrue for `/auth/v1/user` | through the API listener |
+| Node-RED | `c0ffee00-0000-4000-8000-000000000002` | `nodered-userinfo`, at sign-in and once a minute, which asks GoTrue for `/auth/v1/user` | through the API listener |
+| Studio's door | `c0ffee00-0000-4000-8000-000000000003` | `studio-admission`, on every request, which asks GoTrue for `/auth/v1/user` | from its own listener, straight to the edge runtime; the function reaches GoTrue through the API listener |
+| The forge's door | `c0ffee00-0000-4000-8000-000000000004` | `forge-membership` on every request, which asks GoTrue for `/auth/v1/user`, and `forge-signout` at Gitea's Sign Out, which ends the session at `/auth/v1/logout` | from its own listener, straight to the edge runtime; the functions reach GoTrue through the API listener |
+
+So the doors reach `/auth/v1/` alone on the API listener. An app an Administrator registers that is
+not one of these four reaches `/auth/v1/` alone too, so it can ask who signed in and nothing more.
+The routes are fixed in the gateway's configuration (`supabase/envoy.yaml`, the API listener's
+`rbac` filter). `scripts/check-gateway-surface.mjs` holds them as `APP_ROUTES`, and mirror check 48
+holds their client ids to the apps the stack registers and their functions to the ones that exist.
+
+**Revisit when** an app that is not Aber's is given more than a sign-in. What such an app may reach
+is then a grant an Administrator chooses for that app, designed once with the MCP clients' sign-in.
+
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
 live below.
@@ -424,6 +464,8 @@ Three windows remain:
   refused. Grafana maps a role only at sign-in, so a role changed without a removal lasts until the
   next sign-in.
 - **Storage and Realtime, up to an hour.** Read-only, and only what any signed-in account reads.
+  An app's token reads the same over Realtime for as long as the app is allowed
+  ([below](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account)).
 - **Studio when its check fails.** A 5xx from `studio-admission` admits on the token's claim, so a
   removed Administrator could reach Studio while the edge runtime or the API is down, until the
   door's cookie expires (3600 s).
@@ -434,6 +476,23 @@ the token's expiry, which was the bound on every surface before `0170`.
 
 **Revisit if** `jwtExpiry` is raised, which lengthens the Grafana, Storage and Realtime windows with
 it, or if a role change in Grafana ever has to be immediate.
+
+### An app's token still receives what Realtime sends any signed-in account
+
+An [app's token reaches only its own routes](#an-apps-token-reaches-only-its-own-routes), with one
+gap. A Realtime client sends its token inside the WebSocket's join message, where the gateway
+cannot read it, and Realtime does not run `auth_pre_request()`. So an allowed app's token still
+receives, over Realtime, the changes to published rows any signed-in account may read: `areas`,
+`cells`, `devices` and `gateways`, and the platform alerts that are not about a service identity.
+A row a role gates is refused, because `has_role()` and `has_authority()` answer false for the
+token: capture and playback jobs, and a service identity's alerts.
+
+**Accepted because** it is read-only, and only what any signed-in account reads. The four apps that
+can be allowed are Aber's own, and none of them opens Realtime. An Administrator sees every app a
+person allowed, and taking the approval back ends the app's sessions.
+
+**Revisit when** an app that is not Aber's is given a grant of its own, or a published table
+carries something a person's role alone should read.
 
 ### An ended session keeps Storage, Realtime and Grafana until its token expires
 

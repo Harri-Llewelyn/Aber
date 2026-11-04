@@ -1587,6 +1587,15 @@ export const SUITES = {
       'and each time the refresh token is refused. Only GoTrue itself can show that its token ' +
       'endpoint honours the ended session.',
   },
+  'supabase/test_each_app_s_token_reaches_only_its_own_routes.py': {
+    lanes: ['stack'],
+    why:
+      "Each app's token reaches only its own routes (0235): a seeded account completes each of the " +
+      "four apps' authorization-code flows, and each app's token reaches GoTrue and its own " +
+      "userinfo function and is refused with the gateway's 403 on PostgREST, Storage and every " +
+      "other function, while the person's dashboard token reaches them all. Only GoTrue can issue " +
+      'a token that names an app, and only the gateway decides on it.',
+  },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],
     why:
