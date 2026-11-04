@@ -798,6 +798,44 @@ paths:
         '401':
           description: Granted to authenticated users only; `anon` is refused.
 
+  /rest/v1/rpc/telemetry_carried:
+    post:
+      tags: [Telemetry]
+      summary: Read series carried forward across quiet buckets
+      description: |
+        What the History page reads (`0233`). One row per series per bucket of the window, a series
+        being one asset and one metric, every pair of the two lists. A bucket with readings has
+        their weighted average, minimum, maximum and last values. **A bucket with none carries the
+        last value forward**, with `is_carried` true and `n_rows` 0: under report-by-exception a
+        quiet bucket means unchanged. Each series is seeded from the rollups before the window,
+        never from raw, so a series silent longer than raw retention still seeds.
+
+        Buckets lie on the epoch grid, as the rollups' do. The source is the widest rollup whose
+        width divides the bucket, and a wider bucket is combined from it on the historian. Nothing
+        is carried past now, and a series with no value yet has no row. `SECURITY INVOKER`, so it
+        reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '01:00:00', description: 'A PostgreSQL interval: a whole number of minutes, at least one, with no months, e.g. `5 minutes` or `1 day`.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id).' }
+                metric_names: { type: array, items: { type: string }, example: [Systems/TEMPERATURE] }
+      responses:
+        '200':
+          description: The buckets, ordered by asset, metric and bucket.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCarriedBucket' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, or more than 50,000 rows (buckets times series), refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   # --------------------------------------------------------------- Audit ----
   /rest/v1/audit_trail:
     get:
@@ -6286,6 +6324,25 @@ components:
         last_bool: { type: boolean, nullable: true }
         n_double: { type: integer, description: 'Number of numeric samples in the bucket.' }
         n_rows: { type: integer, description: 'Number of samples of any type in the bucket.' }
+
+    TelemetryCarriedBucket:
+      type: object
+      description: |
+        One bucket of one series from `/rest/v1/rpc/telemetry_carried`. A bucket with readings has
+        their summary; a quiet one carries the last value before it as its average, minimum,
+        maximum and last.
+      properties:
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket.' }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Systems/TEMPERATURE }
+        avg_double: { type: number, nullable: true, description: 'Weighted mean of the readings, or the carried value.' }
+        min_double: { type: number, nullable: true }
+        max_double: { type: number, nullable: true }
+        last_double: { type: number, nullable: true, description: 'The value at the end of the bucket, carried or read.' }
+        last_string: { type: string, nullable: true, description: 'A state metric''s value at the end of the bucket, carried or read.' }
+        last_bool: { type: boolean, nullable: true }
+        n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
+        is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
 
     AssetConfigRow:
       type: object
