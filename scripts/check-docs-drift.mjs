@@ -8846,6 +8846,116 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 218. History's help names its bucket sizes and its row cap as api.js holds them. The page says
+// which resolution it shows in HISTORY_RESOLUTIONS' words, and the row cap (TELEMETRY_MAX_ROWS)
+// decides which; a help page naming another size, or another cap, explains a page nobody sees.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const help = read('help/pages/history.md');
+  const block = api.match(/export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+  const words = [...block.matchAll(/words: '([^']+)'/g)].map((m) => m[1]);
+  const cap = Number(api.match(/^const TELEMETRY_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems218 = [];
+  if (!words.length) problems218.push('could not read the words of HISTORY_RESOLUTIONS out of frontend/src/api.js');
+  if (!/export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;/.test(api)) {
+    problems218.push('frontend/src/api.js no longer sets HISTORY_MAX_ROWS to TELEMETRY_MAX_ROWS');
+  }
+  if (!Number.isFinite(cap)) problems218.push('could not read TELEMETRY_MAX_ROWS out of frontend/src/api.js');
+  const listed = [...help.matchAll(/^- \*\*(\d+-(?:minute|hour|day) buckets)\*\*$/gm)].map((m) => m[1]);
+  if (words.length && listed.join(', ') !== words.join(', ')) {
+    problems218.push(`help/pages/history.md lists ${listed.join(', ') || 'no bucket sizes'}; api.js has ${words.join(', ')}`);
+  }
+  if (Number.isFinite(cap) && !help.includes(`at most ${cap.toLocaleString('en-GB')} points`)) {
+    problems218.push(`help/pages/history.md does not say "at most ${cap.toLocaleString('en-GB')} points"`);
+  }
+  if (problems218.length) {
+    fail('History\'s help states its bucket sizes or row cap otherwise than api.js holds them:\n' +
+      problems218.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names its ${words.length} bucket sizes and its ${cap.toLocaleString('en-GB')}-point cap as api.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 219. frontend/README.md's table of TimeSeriesChart's props is the props the component takes, every
+// one and no other. The chart is the one every History tab reuses, so the table is its contract.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/TimeSeriesChart.jsx';
+  const props = (read(COMPONENT).match(/export function TimeSeriesChart\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean).sort();
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('**`common/TimeSeriesChart.jsx` is the one time-series chart**');
+  const table = from < 0 ? '' : readme.slice(from, readme.indexOf('\n\n', readme.indexOf('| Prop |', from)));
+  const named = [...table.matchAll(/^\| ((?:`\w+`(?:, )?)+) \|/gm)]
+    .flatMap((m) => [...m[1].matchAll(/`(\w+)`/g)].map((n) => n[1])).sort();
+  const problems219 = [];
+  if (!props.length) problems219.push(`could not read TimeSeriesChart's props out of ${COMPONENT}`);
+  if (!named.length) problems219.push('frontend/README.md has no table of TimeSeriesChart\'s props under "History and its chart"');
+  for (const p of props.filter((p) => !named.includes(p))) problems219.push(`the README's table leaves out ${p}`);
+  for (const p of named.filter((p) => !props.includes(p))) problems219.push(`the README's table names ${p}, which TimeSeriesChart does not take`);
+  if (problems219.length) {
+    fail('frontend/README.md describes TimeSeriesChart otherwise than the code has it:\n' +
+      problems219.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's table names TimeSeriesChart's ${props.length} props, every one`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 220. The uPlot the dashboard pins is the one whose notice it carries. The build drops uPlot's own
+// header, so TimeSeriesChart.jsx's legal comment carries its MIT notice and names its version, and
+// NOTICE.md names the same. A version bump that leaves either behind says the bundle carries a
+// release it does not.
+// -------------------------------------------------------------------------------------------------
+{
+  const pinned = JSON.parse(read('frontend/package.json')).dependencies?.uplot;
+  const notice = read('frontend/src/components/common/TimeSeriesChart.jsx').match(/^\/\*![\s\S]*?\*\//)?.[0] ?? '';
+  const named = notice.match(/uPlot (\d+\.\d+\.\d+)/)?.[1];
+  const listed = read('NOTICE.md').match(/\[uPlot\]\([^)]*\) (\d+\.\d+\.\d+)/)?.[1];
+  const problems220 = [];
+  if (!/^\d+\.\d+\.\d+$/.test(pinned ?? '')) problems220.push(`frontend/package.json pins uplot as ${pinned ?? 'nothing'}, not an exact version`);
+  if (!notice.includes('Permission is hereby granted, free of charge')) {
+    problems220.push('TimeSeriesChart.jsx no longer opens with uPlot\'s MIT notice as a /*! comment');
+  }
+  if (named !== pinned) problems220.push(`TimeSeriesChart.jsx's notice names uPlot ${named ?? 'no version'}; package.json pins ${pinned}`);
+  if (listed !== pinned) problems220.push(`NOTICE.md names uPlot ${listed ?? 'no version'}; package.json pins ${pinned}`);
+  if (problems220.length) {
+    fail('uPlot\'s notice and the version the dashboard pins disagree:\n' + problems220.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the bundle carries the notice of uPlot ${pinned}, the version package.json pins, and NOTICE.md names it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 221. History's help says the window it opens on, and which spans it offers, as utils/history.js
+// has them. The page opens on DEFAULT_HISTORY_WINDOW and offers every span and no All time.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const presets = read('frontend/src/utils/timeWindow.js');
+  const help = read('help/pages/history.md');
+  const range = util.match(/export const DEFAULT_HISTORY_WINDOW = rollingWindow\('(\w+)', HISTORY_RANGES\)/)?.[1];
+  const label = range && presets.match(new RegExp(`value: '${range}', +label: '([^']+)'`))?.[1];
+  const problems221 = [];
+  if (!label) problems221.push('could not read DEFAULT_HISTORY_WINDOW\'s range and its label');
+  else if (!help.includes(`It opens on **${label}**.`)) problems221.push(`help/pages/history.md does not say "It opens on **${label}**."`);
+  if (!/export const HISTORY_SPANS = SPAN_IDS$/m.test(util)) {
+    problems221.push('utils/history.js no longer offers every span (HISTORY_SPANS = SPAN_IDS); the help names all four');
+  } else if (!help.includes('Choose **Day**, **Week**, **Month** or **Year**')) {
+    problems221.push('help/pages/history.md does not name the four spans');
+  }
+  if (!help.includes('There is no **All time**')) problems221.push('help/pages/history.md does not say there is no All time');
+  if (problems221.length) {
+    fail('History\'s help states its window otherwise than utils/history.js has it:\n' +
+      problems221.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help says it opens on ${label}, with every span and no All time`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
 // partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
 // OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also
