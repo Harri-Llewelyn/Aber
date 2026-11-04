@@ -1526,7 +1526,8 @@ arrive with no CI result.
 not something this repository can act on, and failing on it would train everyone to ignore the job.
 Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
-nothing wrong".
+nothing wrong". The optional workloads are rendered on, except Studio and postgres-meta, which stay
+off as in a default install: a site that runs them takes on two images the scan does not cover.
 
 **The workflow runs [`scripts/scan-images.mjs`](../scripts/scan-images.mjs), which is `npm run
 scan:images` on a laptop**: the same images, Trivy in the pinned container `scan:config` uses

@@ -40,7 +40,9 @@ function repositoryOf (ref) {
 
 /**
  * Every image a full render of `chart` names, with the optional workloads switched on so their
- * images are scanned too. The images this repository builds are left out unless `own`.
+ * images are scanned too. Studio and postgres-meta stay off, as in a default install: a site that
+ * turns them on runs two images this scan does not cover. The images this repository builds are
+ * left out unless `own`.
  */
 export function renderedImages ({ chart = join(REPO, 'deploy/helm/aber'), own = false } = {}) {
   const render = spawnSync('helm', ['template', 'aber', chart,

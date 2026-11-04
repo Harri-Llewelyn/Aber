@@ -25,7 +25,7 @@ unrecognised role produces `403`.
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
-| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
+| **Supabase Studio** | Off by default, with postgres-meta. Where a site runs it: behind the gateway's `studio` listener, an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`), and off the Ingress unless `ingress.routes.studio` |
 | **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway; the edge functions reach its API through the gateway's `forge-api` listener, which serves `/api/` alone and removes the identity headers |
 
 **An error tells the caller what to fix, never how the platform is built.** A refusal the caller
@@ -80,6 +80,9 @@ it is what a human debugging the FDW connects through.
 
 `timescaledb/test_historian_role_grants.py` asserts both halves for both roles — what they can do,
 and what they must not.
+
+**Supabase Studio is off in a default install,** with postgres-meta, which serves it alone: Aber's
+dashboard does the site's work. What follows holds where a site turns both on.
 
 **Supabase Studio is a database console with no login, roles or session of its own.** Whoever
 reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for

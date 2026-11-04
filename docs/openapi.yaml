@@ -1757,7 +1757,7 @@ paths:
         `deleted_at`, as GoTrue's admin `DELETE /auth/v1/admin/oauth/clients/{id}` does, and in the
         same transaction revokes every approval of it and deletes every session it holds, so no
         refresh token it was issued works. An `APP_REMOVED` row in the app's lane, and an
-        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own four apps are refused:
+        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own apps are refused:
         `0002` registers them again on every boot. Administrator only.
       requestBody:
         required: true

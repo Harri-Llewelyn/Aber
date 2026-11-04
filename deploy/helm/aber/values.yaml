@@ -197,7 +197,7 @@ secrets:
   grafanaAlertWebhookSecret: ""
 
   # Studio's door: the OAuth client the gateway uses (hashed by 0081) and its cookie-signing key.
-  # Empty by default, consistent with `routes.studio: false`. Fail-closed at both ends.
+  # Read only with supabaseStudio on; needed only with `routes.studio` on. Fail-closed at both ends.
   studioOAuthClientSecret: ""
   studioProxyHmacSecret: ""
 
@@ -802,8 +802,11 @@ supabaseStorage:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# postgres-meta serves Studio's database pages and nothing else: it runs any SQL it is sent as
+# supabase_admin, with no login of its own. On exactly when supabaseStudio is; the render fails
+# when the two differ.
 supabaseMeta:
-  enabled: true
+  enabled: false
   image:
     # The version the official stack pairs with the Studio tag below (Zod-coupled).
     repository: supabase/postgres-meta
@@ -814,8 +817,12 @@ supabaseMeta:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# Supabase Studio, the database administrator's console: tables, SQL, storage and accounts, as the
+# database owner. Aber's dashboard does the site's own work, so Studio is off. To turn it on, set
+# this and supabaseMeta.enabled; to reach it from a browser, also ingress.routes.studio with its two
+# secrets (help/site/running-the-server.md, *Reaching the stack*).
 supabaseStudio:
-  enabled: true
+  enabled: false
   image:
     repository: supabase/studio
     tag: 2026.10.12-sha-3699278
@@ -1434,10 +1441,11 @@ ingress:
   # Per-route overrides, keyed by the route names in aber.ingressRoutes: frontend,
   # supabase, nodered, grafana, studio, docs, gitea, mqtt.
   #
-  # Studio is off by default as an EXPOSURE decision: the route points at the gateway's studio
-  # listener (an Administrator login), but a database console on a public hostname is reachable
-  # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
-  # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
+  # Studio's route is off by default as an EXPOSURE decision, even where supabaseStudio is on: it
+  # points at the gateway's studio listener (an Administrator login), but a database console on a
+  # public hostname is reachable by anyone who can reach the ingress. Turning it on requires
+  # supabaseStudio.enabled, secrets.studioOAuthClientSecret and secrets.studioProxyHmacSecret (the
+  # render fails naming what is missing). Without the route:
   #   kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
   #
   # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin

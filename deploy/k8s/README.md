@@ -385,7 +385,8 @@ Run `npm run dev:test`. The port-forwards give `DB_HOST`, `SUPABASE_DB_HOST`, `M
 | `supabase-envoy`, `supabase-auth`, `supabase-rest` | deployed |
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
-| `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
+| `swagger-ui` | deployed |
+| `supabase-studio`, `supabase-meta` | off by default; `supabaseStudio.enabled` and `supabaseMeta.enabled` turn both on |
 | `db-roles-init`, `db-init`, `storage-policies`, `storage-init`, `timescaledb-maintenance` hooks | deployed |
 | `mosquitto` + `mosquitto-external`, `ingestion`, `playback` | deployed |
 | `node-red`, `frontend` | deployed |
