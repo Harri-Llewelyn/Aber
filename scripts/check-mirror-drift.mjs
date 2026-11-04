@@ -890,6 +890,59 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 43. Which kinds each Audit Trail action is written for, and the classes such a row can be in.
+// audit_trail_action_kinds() (0229) declares it and AUDIT_TRAIL_ACTION_KINDS mirrors it; the
+// Entity, Action and class filters narrow each other by the mirror. A pair the database has and
+// the dashboard lacks hides a value that can occur; one the dashboard has and the database lacks
+// offers one that cannot. Compared as (action, kind, class) triples, so the grouping may differ.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.audit_trail_action_kinds(', '$$;',
+    'audit_trail_action_kinds()');
+  const js = need(read('frontend/src/constants.js'), /export const AUDIT_TRAIL_ACTION_KINDS = \[([\s\S]*?)\n\];/,
+    'AUDIT_TRAIL_ACTION_KINDS in frontend/src/constants.js');
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const triples = (rows) => rows
+    .flatMap(([action, kinds, classes]) => kinds.flatMap((k) => classes.map((c) => `${action} ${k} ${c}`)))
+    .sort();
+  if (def && js) {
+    const sqlRows = [...def.body.matchAll(/\('([A-Z_]+)',\s*ARRAY\[([^\]]*)\],\s*ARRAY\[([^\]]*)\]\)/g)]
+      .map((m) => [m[1], words(m[2]), words(m[3])]);
+    const jsRows = [...js[1].matchAll(/\['([A-Z_]+)',\s*\[([^\]]*)\],\s*\[([^\]]*)\]\]/g)]
+      .map((m) => [m[1], words(m[2]), words(m[3])]);
+    if (sqlRows.length === 0 || jsRows.length === 0) {
+      problems.push(`auditTrailActionKinds: found no row in ${sqlRows.length ? 'AUDIT_TRAIL_ACTION_KINDS' : `audit_trail_action_kinds() (${def.file})`} -- its shape changed, so this check is no longer checking anything`);
+    } else {
+      compare('auditTrailActionKinds', `the ${triples(sqlRows).length} (action, kind, class) triples (${def.file})`,
+        triples(jsRows).join('; '), triples(sqlRows).join('; '));
+    }
+  }
+}
+
+// 44. The Audit Trail's classes, by name. audit_event_class() (0228) answers one of them, each has
+// its partial index, the dashboard lists them in AUDIT_TRAIL_CLASSES (the address's `?class=` words
+// and the legend's order) and draws one marker per class (MARKERS). A class the function answers
+// and the dashboard lacks draws no marker of its own; one with no index is read row by row.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.audit_event_class(', '$$;', 'audit_event_class()');
+  const constants = need(read('frontend/src/constants.js'), /export const AUDIT_TRAIL_CLASSES = \[([^\]]*)\]/,
+    'AUDIT_TRAIL_CLASSES in frontend/src/constants.js');
+  const tab = need(read('frontend/src/components/tabs/AuditTrailTab.jsx'), /export const MARKERS = \{([\s\S]*?)\n\}/,
+    'MARKERS in frontend/src/components/tabs/AuditTrailTab.jsx');
+  if (def && constants && tab) {
+    const answered = [...new Set([...def.body.matchAll(/THEN '([a-z]+)'|ELSE '([a-z]+)'/g)].map((m) => m[1] || m[2]))].sort();
+    const indexed = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_audit_trail_class_([a-z]+) ON public\.audit_trail[^;]*= '([a-z]+)';/g)]
+      .filter((m) => m[1] === m[2]).map((m) => m[1]).sort();
+    const listed = [...constants[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+    compare('auditTrailClasses', `the classes audit_event_class() answers (${def.file}) and AUDIT_TRAIL_CLASSES`,
+      [...listed].sort().join(', '), answered.join(', '));
+    compare('auditTrailClasses', 'the classes with an index of their own and AUDIT_TRAIL_CLASSES',
+      [...listed].sort().join(', '), indexed.join(', '));
+    const drawn = [...tab[1].matchAll(/^ {2}([a-z]+):/gm)].map((m) => m[1]);
+    compare('auditTrailClasses', "MARKERS' classes, in order, and AUDIT_TRAIL_CLASSES",
+      drawn.join(', '), listed.join(', '));
+  }
+}
+
 // -------------------------------------------------------------------------------------------------
 // 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect row of the example metrics carries (#457):

@@ -1157,6 +1157,32 @@ export const SUITES = {
       "search and the caller's own policies hold under lists; and that one list form is left, " +
       'with its grants, however 0001, 0168, 0222 and 0227 replay over the single-value form.',
   },
+  'supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py': {
+    lanes: ['db'],
+    why:
+      '0228 -- that audit_event_class() answers every case in test-harness/fixtures/' +
+      'audit-event-classes.json, the four reads included, and stays an IMMUTABLE SQL function ' +
+      "the planner inlines; that audit_trail_page(p_class) keeps those classes' rows and labels " +
+      "each event; that p_counts leaves each filter's own choice out of its own counts; that a " +
+      "backup request's id finds the backup it took; and that one form is left, with its grants " +
+      'and its five class indexes, however 0001, 0168, 0222, 0227 and 0228 replay over the form ' +
+      'from before.',
+  },
+  'supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py': {
+    lanes: ['db'],
+    why:
+      "0228's target -- that on a trail of a million rows audit_trail_page() answers a page, its " +
+      'total and its counts in under a second with a class chosen, as an Administrator with the ' +
+      "policies on, and that its totals are exact. It attaches ten months of 2001 and drops them, " +
+      'so it belongs on a throwaway database and nowhere else.',
+  },
+  'supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py': {
+    lanes: ['db'],
+    why:
+      "0229 -- that audit_trail_action_kinds() names every (action, kind) pair the trail's writers " +
+      'can produce, read from the catalog, and no other, and that each pair carries the classes ' +
+      'audit_event_class() answers for it. The Audit Trail narrows its filters by its mirror.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

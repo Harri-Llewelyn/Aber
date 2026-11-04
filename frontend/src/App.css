@@ -1380,6 +1380,10 @@ a.tab-strip-tab { text-decoration: none; }
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* A chosen value that cannot occur with what else is chosen: the name dimmed and the reason beside
+   it in the count's voice, so the row reads as kept for undoing, not as on offer. */
+.filter-checklist-note { flex-shrink: 0; font-size: 12px; font-style: italic; color: var(--text-muted); }
+.filter-checklist-option-noted .filter-checklist-label { color: var(--text-muted); }
 .filter-checklist-empty { padding: 4px 2px; font-size: 12px; color: var(--text-muted); }
 /* In a Filters panel: the list's label, as the time control's popover labels its groups. */
 .filter-list { display: flex; flex-direction: column; gap: 6px; }
@@ -5344,16 +5348,23 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   padding: 10px var(--inset);
 }
 
-/* The key. Each entry draws the track's own marker (TrailMarker), so the legend cannot drift away
-   from what it describes. */
+/* The key, at the row's right-hand end, and the class filter. Each entry draws the track's own
+   marker (TrailMarker), so the legend cannot drift away from what it describes. Kept to the right
+   when the row wraps on a narrow card. */
 .trail-legend {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 6px 14px;
+  margin-left: auto;
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* A class's toggle: the toolbar's counted toggle (btn-ghost, btn-primary while on) holding the
+   marker, so the key reads as it did and the filter as filters do elsewhere. */
+.trail-legend-toggle { gap: 6px; }
 
 .trail-legend-item {
   display: inline-flex;
@@ -5737,11 +5748,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
 }
 
-/* The class colours, carried by the marker's `color` into its fill. */
-.trail-node-creation    { color: var(--success); }
-.trail-node-operational { color: var(--accent); }
-.trail-node-governance  { color: var(--warning); }
-.trail-node-critical    { color: var(--danger); }
+/* The class colours, carried by the marker's `color` into its fill. Read is grey: it changed nothing,
+   and --text-muted holds 3:1 on the card in both themes (themeContrast.test.js). */
+.trail-node-created       { color: var(--success); }
+.trail-node-operational   { color: var(--accent); }
+.trail-node-configuration { color: var(--warning); }
+.trail-node-lifecycle     { color: var(--danger); }
+.trail-node-read          { color: var(--text-muted); }
 
 /* The cluster badge: several events too close together to draw separately, replaced by their count.
    Violet, because a badge is not a kind of event; see --cluster. Positioning is separate from the
@@ -5802,10 +5815,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */
-.trail-badge-creation    { background: var(--success-tint);     color: var(--success-text); }
-.trail-badge-operational { background: var(--accent-dim);       color: var(--accent-text); }
-.trail-badge-governance  { background: var(--warning-tint);     color: var(--warning-text); }
-.trail-badge-critical    { background: var(--danger-tint);      color: var(--danger-text); }
+.trail-badge-created       { background: var(--success-tint);     color: var(--success-text); }
+.trail-badge-operational   { background: var(--accent-dim);       color: var(--accent-text); }
+.trail-badge-configuration { background: var(--warning-tint);     color: var(--warning-text); }
+.trail-badge-lifecycle     { background: var(--danger-tint);      color: var(--danger-text); }
+.trail-badge-read          { background: var(--bg-glass);         color: var(--text-muted); }
 
 /* Stepping through one asset's history, in the drawer's nav slot at its full width: stacked,
    because the position line and the two rows of buttons are three things at three sizes. */
@@ -6258,36 +6272,11 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* The note that the row could not be reached, above the table it explains. */
 .profile-source { flex-shrink: 0; padding-bottom: 0; }
 
-/* A section of the Security tab: its heading, About tip and button on one row, a line under it,
-   then its table. The button wraps under the heading on a narrow window. */
-.profile-section-head { flex-shrink: 0; }
-.profile-section-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.profile-section-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.profile-section-actions { margin-left: auto; }
-.profile-section-note {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
 /* A session's place, then its badges on the same line. */
 .session-where { color: var(--text-primary); }
 .session-badge { margin-left: 8px; }
 
-/* The Security tab's Second factor section, under Sessions: a rule above its heading, and its
-   table keeps its height, so the sessions list is what scrolls. */
-.second-factor-head { border-top: 1px solid var(--border); }
+/* The MFA tab's table keeps its height. */
 .card-fill > .table-wrap.second-factor-table { flex-shrink: 0; overflow-y: visible; }
 
 /* Adding one: the QR code on its light ground, then the secret for typing in, in groups. */

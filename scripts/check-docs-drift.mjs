@@ -1168,7 +1168,7 @@ function edgeFunctionNames() {
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
-    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one. Both take p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195)',
+    'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
@@ -2734,19 +2734,22 @@ const OPERATOR_PAIRS = [
 // or the Audit Trail and drops it. db-init replays every file on every boot, so another migration
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
-// CellWrite, and no code reads it but the Audit Trail's list of governance fields, which past rows
-// carry.
+// CellWrite, and no code reads it. The Audit Trail's configuration fields, which past rows carry,
+// are audit_event_class()'s (0228), which reads it out of a snapshot as `-> 'grafana_url'` alone.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
   const MOVER = '0202_a_cell_s_dashboard_address_is_one_of_its_links.sql';
+  const CLASSIFIER = '0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
   const dir = 'supabase/migrations';
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
   const offences = [];
   for (const f of [MOVER, DROPPER]) if (!files.includes(f)) offences.push(`${dir}/${f} is missing`);
 
   for (const f of files.filter((name) => name !== DROPPER && name !== MOVER)) {
-    if (/\bgrafana_url\b/.test(read(`${dir}/${f}`))) offences.push(`${f} names grafana_url`);
+    const sql = read(`${dir}/${f}`);
+    const named = f === CLASSIFIER ? sql.replace(/-> 'grafana_url'/g, '') : sql;
+    if (/\bgrafana_url\b/.test(named)) offences.push(`${f} names grafana_url`);
   }
   if (files.includes(MOVER)) {
     const mover = read(`${dir}/${MOVER}`);
@@ -2771,8 +2774,7 @@ const OPERATOR_PAIRS = [
 
   const READERS = /^(?:frontend\/src|supabase\/functions|i3x|ingestion)\/.*\.(?:js|jsx|ts|mjs|py)$/;
   const TESTS = /(?:^|\/)(?:__tests__\/|test_[^/]*\.py$|[^/]*\.test\.[jt]sx?$|[^/]*_test\.ts$)/;
-  const GOVERNANCE = 'frontend/src/components/tabs/AuditTrailTab.jsx';
-  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p) && p !== GOVERNANCE)) {
+  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p))) {
     if (/\bgrafana_url\b/.test(read(f))) offences.push(`${f} names grafana_url`);
   }
 
@@ -3988,16 +3990,22 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 195. The Audit Trail's three list filters are arrays in every place that states them (0227).
 // 0001 and 0168 declare audit_trail_page() with p_entity_type text[], p_action text[] and
-// p_changed_by uuid[], each matched with = ANY; 0001's sweep of stale overloads names that form,
-// or it would drop it on every boot; 0227 drops the single-value form; the API reference documents
-// the three as arrays; and api.js sends each as an array from listParam() or null. A copy left on
-// one value either brings a second form back or sends a string the function refuses.
+// p_changed_by uuid[], and audit_trail_matching() (0228) matches each with = ANY; 0001's sweep of
+// stale overloads names that form, or it would drop it on every boot; 0227 drops the single-value
+// form; the API reference documents the three as arrays; and api.js sends each as an array from
+// listParam() or null. A copy left on one value either brings a second form back or sends a string
+// the function refuses.
 // -------------------------------------------------------------------------------------------------
 {
   const LISTS = { p_entity_type: 'text[]', p_action: 'text[]', p_changed_by: 'uuid[]' };
   const COLUMN = { p_entity_type: 't.entity_type', p_action: 't.action', p_changed_by: 't.changed_by' };
   const LIST_IDENT = 'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
-    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[])';
+    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean)';
+  // The rows the lists select are audit_trail_matching()'s, which the page calls once per class.
+  const m0228 = 'supabase/migrations/0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
+  const helperSql = allFiles.includes(m0228) ? read(m0228) : '';
+  const helperAt = helperSql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_matching(');
+  const helper = helperAt < 0 ? '' : helperSql.slice(helperAt, helperSql.indexOf('$$;', helperSql.indexOf('AS $$', helperAt)));
   const problems195 = [];
 
   const declaring = ['0001_baseline_schema.sql', '0168_every_schema_attached_to_a_device_counts.sql'];
@@ -4011,8 +4019,8 @@ const OPERATOR_PAIRS = [
       if (!args.includes(`${arg} ${type} DEFAULT NULL::${type}`)) {
         problems195.push(`${name} declares audit_trail_page without ${arg} ${type}`);
       }
-      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(body)) {
-        problems195.push(`${name}'s audit_trail_page does not match ${COLUMN[arg]} against any value of ${arg}`);
+      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(helper)) {
+        problems195.push(`audit_trail_matching() does not match ${COLUMN[arg]} against any value of ${arg}`);
       }
     }
   }
@@ -8834,6 +8842,43 @@ const OPERATOR_PAIRS = [
       problems197.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`frontend/README.md's GroupHeading example passes ${passed.length} of its props and names ${key}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
+// partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
+// OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also
+// rebuilds every class index (REINDEX, a statement of its own), or each query naming a class reads
+// the old answer. No file before 0228 declares it.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const CLASSES_FILE = '0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const problems199 = [];
+  const created = files.includes(CLASSES_FILE) ? read(`${dir}/${CLASSES_FILE}`) : '';
+  const classes = [...created.matchAll(/CREATE INDEX IF NOT EXISTS idx_audit_trail_class_([a-z]+) ON public\.audit_trail/g)]
+    .map((m) => m[1]);
+  if (!classes.length) problems199.push(`${CLASSES_FILE} creates no class index, so this check is checking nothing`);
+  for (const f of files.filter((name) => name !== CLASSES_FILE)) {
+    const sql = read(`${dir}/${f}`);
+    if (!/CREATE OR REPLACE FUNCTION public\.audit_event_class\(/.test(sql)) continue;
+    if (f < CLASSES_FILE) {
+      problems199.push(`${f} declares audit_event_class(), which 0228 declares first with its indexes`);
+      continue;
+    }
+    for (const c of classes) {
+      if (!sql.includes(`REINDEX INDEX public.idx_audit_trail_class_${c};`)) {
+        problems199.push(`${f} redeclares audit_event_class() without REINDEX INDEX public.idx_audit_trail_class_${c};`);
+      }
+    }
+  }
+  if (problems199.length) {
+    fail('a change to the Audit Trail\'s classes leaves an index built on the old ones:\n' +
+      problems199.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`audit_event_class() comes with its ${classes.length} class indexes in 0228, and no later file changes it without rebuilding them`);
   }
 }
 

@@ -189,10 +189,16 @@ class SurvivedTheConversionTestCase(unittest.TestCase):
             "SELECT c.relname FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid "
             "WHERE x.indrelid = %s::regclass ORDER BY c.relname", (PARENT,)
         )
+        # And 0228's five class indexes, one per class audit_event_class() answers.
         self.assertEqual(
             [
                 "audit_trail_pkey",
                 "idx_audit_trail_causation",
+                "idx_audit_trail_class_configuration",
+                "idx_audit_trail_class_created",
+                "idx_audit_trail_class_lifecycle",
+                "idx_audit_trail_class_operational",
+                "idx_audit_trail_class_read",
                 "idx_audit_trail_domain",
                 "idx_audit_trail_recorded_id",
             ],

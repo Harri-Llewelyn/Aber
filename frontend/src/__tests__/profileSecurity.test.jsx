@@ -74,12 +74,15 @@ describe('the Sessions tab', () => {
     expect(tabLink('Sessions')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('heads its Sessions section, with an About tip and a line on what it cannot show', async () => {
+  it('explains itself in its tooltip, and puts Sign Out of All Other Sessions filled in its toolbar', async () => {
     renderSessions()
-    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'About sessions' })).toBeInTheDocument()
-    expect(document.querySelector('.profile-section-note')).toHaveTextContent(/shows no device\. No address is recorded\./)
     await loaded()
+    // No heading, About tip or line under the bar, as no other tab has.
+    expect(screen.queryAllByRole('heading', { level: 4 })).toEqual([])
+    expect(screen.queryByRole('button', { name: /^About / })).toBeNull()
+    const signOut = screen.getByRole('button', { name: /Sign Out of All Other Sessions/ })
+    expect(signOut.closest('.filter-bar-actions')).toBeTruthy()
+    expect(signOut).toHaveClass('btn-primary')
   })
 
   it('has a header row', async () => {

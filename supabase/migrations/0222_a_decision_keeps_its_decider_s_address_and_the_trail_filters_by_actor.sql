@@ -92,9 +92,9 @@ BEGIN
     RAISE EXCEPTION '0222: audit_trail_page is declared % times, not once: %',
       coalesce(array_length(v_forms, 1), 0), coalesce(array_to_string(v_forms, ' | '), 'none');
   END IF;
-  -- Whatever its type: 0227 makes it a list, and checks that.
+  -- Whatever its type: 0227 makes it a list, and checks that. 0228's arguments follow it.
   IF v_forms[1] NOT LIKE '%, p_search text, p_changed_by uuid%' THEN
-    RAISE EXCEPTION '0222: audit_trail_page takes (%), not p_changed_by last', v_forms[1];
+    RAISE EXCEPTION '0222: audit_trail_page takes (%), not p_changed_by after p_search', v_forms[1];
   END IF;
   SELECT p.oid::regprocedure INTO v_page
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

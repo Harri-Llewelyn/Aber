@@ -1246,6 +1246,10 @@ yes-or-no choice stays a toggle button in the toolbar.
   values it shows. Each value's count is the rows that have it among those the page's other
   filters let through (`applyFacets`, `utils/listFilters.js`). ↑ and ↓ move between the
   checkboxes, Space ticks one, and Escape clears the search before it closes the panel.
+- **An option is `{ value, label, group?, note? }`.** `note` is why a value cannot occur with what
+  else is chosen ("not with Cells"). The row dims its name and shows the note before the count, and
+  the note is part of the checkbox's name. A page keeps such a value listed only while it is chosen,
+  so a choice that stops applying stays to be undone and is never cleared by itself.
 - **One meaning everywhere**: any value within a filter, every filter together, and nothing chosen
   is no constraint. Lifecycle (`LIFECYCLE_OPTIONS`) is Active and Archived and opens on Active;
   both chosen, like none, shows every row.
@@ -1256,7 +1260,22 @@ yes-or-no choice stays a toggle button in the toolbar.
 - **The Audit Trail's three lists are the server's** (`audit_trail_page()`'s arrays, `0227`), so
   they filter before the row limit. Its kinds are grouped by `group` in `AUDIT_TRAIL_ENTITY_TYPES`
   (the plant, the model, capture, security), its actions by `AUDIT_TRAIL_ACTION_GROUPS`, and
-  Changed by into People and Machine identities. They carry no counts yet.
+  Changed by into People and Machine identities.
+- **Its kinds and actions carry the server's counts** (`p_counts`, `0228`), each under every filter
+  but its own, asked for with the first page and the poll. **They narrow each other by
+  `AUDIT_TRAIL_ACTION_KINDS`**, the mirror of `audit_trail_action_kinds()` (`0229`, mirror check 43):
+  a list offers a value that can occur with the other lists' choices and the legend's classes, one
+  that did occur, and one that is chosen, noted where it cannot occur. With no kind chosen, an action
+  is one the role's own kinds can have.
+- **The Audit Trail's legend is its class filter.** The server names each event's class
+  (`audit_event_class()`, `0228`) and the page draws that marker; it has no rules of its own.
+  Each class's entry is a counted toggle, `btn-ghost` or `btn-primary` with `aria-pressed`, as a
+  toolbar's counted toggles are. Several may be on, none on is every class, and the address keeps
+  them as `?class=lifecycle,read`. `AUDIT_TRAIL_CLASSES` lists them in the legend's order and mirror
+  check 44 holds them, and `MARKERS`, to the function and its indexes. Read is a grey eye in
+  `--text-muted`, which holds 3:1 on the card (`themeContrast.test.js`). The legend sits at the
+  right-hand end of the row above the timeline, with Expand all and Collapse all at its start, over
+  the section headings they act on.
 - **Checks.** Check 193 (`scripts/check-docs-drift.mjs`) refuses a select in a toolbar, but System ›
   Logs' Service and Level, each one value `service-logs` takes. Check 194 holds the Audit Trail
   help's group names to `constants.js`. Mirror check 42 (`scripts/check-mirror-drift.mjs`) holds

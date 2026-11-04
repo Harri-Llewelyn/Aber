@@ -908,6 +908,30 @@ python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_t
 # form, and after 0227 alone does. Its self-check refuses two forms and a single-value argument.
 # Every test rolls back.
 python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
+# The Audit Trail sorts events into classes in the database (0228). audit_event_class() answers
+# every case in test-harness/fixtures/audit-event-classes.json, the four reads included, and stays
+# an IMMUTABLE SQL function the planner inlines. audit_trail_page(p_class) keeps the rows of any of
+# its classes, combined with the other lists by AND, and labels each event; the cursor, the totals
+# and the caller's policies hold. p_counts gives each class, kind and action its events under every
+# filter but its own, the search, the people and the purged rule included. A backup request's id
+# finds the backup it took, released and pruned; a cancelled request's, its own lane; another id,
+# what it did. One form is declared, with its grants and its five class indexes, after the chain
+# and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
+# before. Every test rolls back.
+python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
+# A million-row Audit Trail answers a class-filtered page in under a second (0228). Attaches ten
+# months of 2001, a hundred thousand rows each, filled as tables of their own and attached so their
+# indexes are built as a stack has them (25 to 50 s), and drops them afterwards. As an Administrator,
+# the first page with Lifecycle chosen and its counts, the same with two classes, and the next page
+# each answer in under a second, the median of three warm calls; the totals, the deleted count and
+# the counts are exact. Every time is printed. NEVER POINT IT AT A STACK ANYBODY USES.
+python supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py
+# The Audit Trail knows which kinds each action is written for (0229). audit_trail_action_kinds()
+# names every (action, kind) pair the trail's writers can produce, read from the catalog (the audit
+# trigger's tables and operations, and each function that inserts an audit row), and no other; a
+# writer whose kind or action cannot be read fails it. Each pair's classes are audit_event_class()'s.
+# Read-only.
+python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
