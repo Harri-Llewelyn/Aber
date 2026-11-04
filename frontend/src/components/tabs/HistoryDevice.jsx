@@ -214,7 +214,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       const validRange = ranges.get(name) ?? null
       return {
         name, unit, series, validRange,
-        summary: chartSummary({ metric: name, unit, windowText: reading.windowText, resolution: reading.resolution, series, validRange }),
+        summary: chartSummary({
+          metric: name, unit, windowText: reading.windowText, resolution: reading.resolution, series, validRange, starts,
+          span: { start: reading.start, end: reading.end, now: reading.at },
+        }),
       }
     })
   }, [reading, starts, units, ranges])

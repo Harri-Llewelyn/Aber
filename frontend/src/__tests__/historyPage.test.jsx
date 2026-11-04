@@ -8,6 +8,7 @@ import { render, screen, waitFor, within, fireEvent, act } from '@testing-librar
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
+import { momentWords } from '../utils/history'
 
 const { plots, polls } = vi.hoisted(() => ({ plots: [], polls: [] }))
 
@@ -42,10 +43,12 @@ vi.mock('../api', async () => {
 const LATHE = '2b3e0c4a-1111-4000-8000-000000000001'
 const PRESS = '2b3e0c4a-2222-4000-8000-000000000002'
 const MILL = '2b3e0c4a-4444-4000-8000-000000000004'
+const ROBOT = '2b3e0c4a-5555-4000-8000-000000000005'
 const devices = [
   { asset_id: LATHE, asset_name: 'Lathe 3', effective_cell_id: 'c1', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], submodel_schema_ids: ['s1'] },
   { asset_id: PRESS, asset_name: 'Press 1', effective_cell_id: 'c1', last_birth_metrics: [] },
   { asset_id: MILL, asset_name: 'Mill 2', last_birth_metrics: ['Coolant/TEMP', 'Spindle/LOAD'] },
+  { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Controller/EXECUTION'] },
   { asset_id: '2b3e0c4a-3333-4000-8000-000000000003', asset_name: 'Stranger', is_quarantined: true },
 ]
 const schemas = [{ schema_uuid: 's1', schema_definition: { properties: { 'Spindle/LOAD': { type: 'number', minimum: 0, maximum: 120 } } } }]
@@ -60,10 +63,22 @@ const routeGet = (path) => {
   return Promise.resolve([])
 }
 
+/**
+ * A state's runs over the first 60 buckets: RUNNING read at 0 and carried to 29, IDLE read at 30
+ * and carried to 44, RUNNING again read at 45 and carried on.
+ */
+const STATE_AT = (i) => (i < 30 || i >= 45 ? 'RUNNING' : 'IDLE')
+const stateRows = (first, width) => Array.from({ length: 60 }, (_, i) => ({
+  bucket_ts: new Date(first + i * width).toISOString(), asset_id: 'dev2b3e0c4a555540008000', metric_name: 'Controller/EXECUTION',
+  avg_double: null, min_double: null, max_double: null, last_double: null, last_string: STATE_AT(i), last_bool: null,
+  n_rows: [0, 30, 45].includes(i) ? 1 : 0, is_carried: ![0, 30, 45].includes(i),
+}))
+
 /** A reading in every bucket of the read, for each metric it names. */
 const readings = ({ from, bucketMinutes, metricNames }) => {
   const width = bucketMinutes * 60000
   const first = Math.floor(Date.parse(from) / width) * width
+  if (metricNames.includes('Controller/EXECUTION')) return Promise.resolve(stateRows(first, width))
   return Promise.resolve(metricNames.flatMap(name => [0, 1, 2].map(i => ({
     bucket_ts: new Date(first + i * width).toISOString(), asset_id: 'dev2b3e0c4a111140008000', metric_name: name,
     avg_double: 40 + i, min_double: 39, max_double: 45, last_double: 41, last_string: null, last_bool: null,
@@ -97,7 +112,7 @@ describe('the device picker', () => {
     await visit('/history?range=7d')
     const table = screen.getByRole('table', { name: /choose a device/i })
     const links = within(table).getAllByRole('link')
-    expect(links.map(l => l.textContent)).toEqual(['Lathe 3', 'Mill 2', 'Press 1'])
+    expect(links.map(l => l.textContent)).toEqual(['Lathe 3', 'Mill 2', 'Press 1', 'Robot 5'])
     expect(links[0]).toHaveAttribute('href', `/history/device/${LATHE}?range=7d`)
     expect(within(table).getAllByText('Turning')).toHaveLength(2)
     expect(within(table).getAllByText('Hall B')).toHaveLength(2)
@@ -137,9 +152,11 @@ describe("a device's charts", () => {
     expect(screen.getByRole('figure', { name: 'Spindle/LOAD (kW)' })).toBe(figures[0])
     expect(screen.getByRole('figure', { name: 'Spindle/SPEED (rpm)' })).toBe(figures[1])
     const load = screen.getByRole('img', { name: 'Spindle/LOAD (kW)' })
+    const width = 5 * 60000
+    const first = Math.floor(Date.parse(api.readCarriedTelemetry.mock.calls[0][0].from) / width) * width
     expect(load).toHaveAccessibleDescription(
-      'Spindle/LOAD (kW), Last 7 days, in 5-minute buckets. Latest 42 kW. Lowest 39 kW, highest 45 kW.'
-      + ' 1 of 2017 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+      `Spindle/LOAD (kW), Last 7 days, in 5-minute buckets. Latest 41 kW, in the bucket from ${momentWords(first + width, 5)}.`
+      + ' Lowest 39 kW, highest 45 kW. 1 of 2017 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
     expect(screen.getByText('Valid range 0 to 120 kW')).toBeInTheDocument()
     expect(plots).toHaveLength(2)
   })
@@ -408,5 +425,83 @@ describe('the toolbar', () => {
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe(`/history/device/${LATHE}`))
     expect(screen.queryByRole('button', { name: /Clear filters/ })).not.toBeInTheDocument()
     await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 1, metricNames: ['Spindle/LOAD', 'Spindle/SPEED'] }))
+  })
+})
+
+describe("a chart's head", () => {
+  it('shows the latest reading while the pointer is elsewhere, from the newest bucket that was not carried', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await screen.findAllByRole('figure')
+    const width = 60000
+    const first = Math.floor(Date.parse(api.readCarriedTelemetry.mock.calls[0][0].from) / width) * width
+    const head = within(screen.getByRole('figure', { name: 'Spindle/LOAD (kW)' })).getByText(/^Latest /)
+    // Bucket 2 carried the value; bucket 1 is the newest a reading arrived in, and its last value is 41.
+    expect(head).toHaveTextContent(`Latest 41 kW · ${momentWords(first + width, 1)}`)
+  })
+
+  it('reads the bucket under the pointer instead, and the latest again once it leaves', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await waitFor(() => expect(plots).toHaveLength(2))
+    const figure = screen.getByRole('figure', { name: 'Spindle/LOAD (kW)' })
+    const { opts, data } = plots[0]
+    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: 0 } }) })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(`${momentWords(data[0][0] * 1000, 1)} · 40 kW (39 to 45 kW)`)
+    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: null } }) })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/^Latest 41 kW · /)
+  })
+})
+
+describe('a state chart', () => {
+  const open = async () => {
+    await visit(`/history/device/${ROBOT}?range=1h`)
+    return screen.findByRole('figure', { name: 'Controller/EXECUTION' })
+  }
+
+  it('gives each value a colour of its own and keeps its name, the most time first', async () => {
+    const figure = await open()
+    const runs = [...figure.querySelectorAll('.chart-state')]
+    expect(runs.map(r => [r.textContent, r.className])).toEqual([
+      ['RUNNING', 'chart-state chart-tone-1'], ['IDLE', 'chart-state chart-tone-2'], ['RUNNING', 'chart-state chart-tone-1'],
+    ])
+  })
+
+  it('hatches each stretch that was carried forward', async () => {
+    const figure = await open()
+    const [first] = figure.querySelectorAll('.chart-state')
+    const held = first.querySelectorAll('.chart-state-carried')
+    expect(held).toHaveLength(1)
+    // Bucket 0 was read; buckets 1 to 29 carried it.
+    expect(parseFloat(held[0].style.left)).toBeGreaterThan(0)
+    expect(parseFloat(held[0].style.left) + parseFloat(held[0].style.width)).toBeCloseTo(100, 5)
+  })
+
+  it("keys each value with its share of the charted time, and the hatching", async () => {
+    const figure = await open()
+    const key = figure.querySelector('.chart-state-key')
+    const items = [...key.querySelectorAll('li')].map(li => li.textContent)
+    expect(items[0]).toMatch(/^RUNNING\d+%$/)
+    expect(items[1]).toMatch(/^IDLE\d+%$/)
+    expect(items[2]).toBe('carried forward')
+    const share = (text) => Number(text.match(/(\d+)%$/)[1])
+    expect(share(items[0]) + share(items[1])).toBeGreaterThanOrEqual(99)
+    expect(share(items[0])).toBeGreaterThan(share(items[1]))
+  })
+
+  it('reads the run under the pointer in the head, saying how much of it was carried', async () => {
+    const figure = await open()
+    const box = figure.querySelector('.chart-box-states')
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 34, right: 600, bottom: 34 })
+    const [, idle] = figure.querySelectorAll('.chart-state')
+    const x = (parseFloat(idle.style.left) + parseFloat(idle.style.width) / 2) * 6
+    fireEvent.pointerMove(box, { clientX: x })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · IDLE, 15 min, 14 min carried forward$/)
+    fireEvent.pointerLeave(box)
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/^Latest RUNNING · /)
+  })
+
+  it("gives a screen reader each value's share", async () => {
+    await open()
+    const img = screen.getByRole('img', { name: 'Controller/EXECUTION' })
+    expect(img).toHaveAccessibleDescription(/Time in each value: RUNNING \d+%, IDLE \d+%\./)
   })
 })

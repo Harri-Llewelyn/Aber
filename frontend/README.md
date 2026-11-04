@@ -1420,16 +1420,27 @@ It draws the bucket's average as the line and its minimum to maximum as a band. 
 is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
 flag steps between false and true, and a state is a strip of its runs in text.
 
+- **The head** reads the bucket under the pointer, and otherwise the latest reading
+  (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
+  value and the bucket's start, since a bucket is not a reading's timestamp.
+- **A state** is `stateRuns()`, clipped to the window and to now. Each value takes a tone,
+  `--chart-cat-1` to `--chart-cat-6` (App.css, both themes, a categorical order checked for
+  colour-blind separation), in the order of its share of the time (`stateShares()`), and keeps its
+  name, so colour is never the only cue. A carried stretch inside a run is hatched. Under the strip,
+  `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time and counts the rest as
+  others, in the neutral tone. The head reads the run under the pointer (`runWords()`). The data
+  read is the same as a number's: a state held only inside one bucket is not shown.
+
 | Prop | What it is |
 | :--- | :--- |
 | `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
 | `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
-| `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried` and `states`, one entry a bucket |
+| `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried`, `states` and `last`, one entry a bucket |
 | `start`, `end` | The window in milliseconds. The time axis is exactly the window |
 | `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
-| `minutes` | The bucket's width, for a state strip's last run |
+| `minutes` | The bucket's width: a state strip's runs, and the times the head says |
 | `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
-| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest, lowest and highest values, the carried buckets and the valid range, for a screen reader |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
 | `height` | The plot's height in pixels, 140 by default |
 

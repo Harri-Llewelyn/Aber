@@ -23,13 +23,16 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-import React, { useEffect, useId, useRef, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { OverflowText } from './OverflowText'
 import { clockWords } from '../../utils/timeWindow'
-import { chartPalette, chartTitle, nowFraction, readingWords, splitCarried, validRangeWords } from '../../utils/history'
+import {
+  chartPalette, chartTitle, latestWords, momentWords, nowFraction, readingWords, runWords, shareWords, splitCarried,
+  stateKey, stateRuns, stateShares, validRangeWords,
+} from '../../utils/history'
 
 const DAY_S = 24 * 60 * 60
 
@@ -137,30 +140,60 @@ function NowMarker({ fraction, now }) {
   )
 }
 
-/** A state metric as runs of its value across the window: text, which no line can draw. */
-function StateStrip({ starts, series, start, end, minutes, now }) {
-  const runs = []
-  series.states.forEach((state, i) => {
-    if (state === null) return
-    const last = runs[runs.length - 1]
-    if (last && last.state === state && last.to === i) last.to = i + 1
-    else runs.push({ state, from: i, to: i + 1 })
-  })
+/** The tone class of a state's runs: its place in the key, or the neutral tone of the others. */
+const toneOf = (tones, state) => `chart-tone-${tones.get(state) ?? 'other'}`
+
+/**
+ * A state metric as runs of its value across the window: text, which no line can draw. Each value
+ * has a colour from the theme's categorical tokens and keeps its name, and a carried stretch is
+ * hatched, as a number chart dashes one.
+ */
+function StateStrip({ runs, tones, start, end }) {
   const span = end - start
-  const at = (i) => Math.max(0, Math.min(1, ((starts[i] ?? (starts[starts.length - 1] + minutes * 60)) * 1000 - start) / span))
-  const stop = (i) => (i < starts.length ? at(i) : Math.min(1, (Math.min(now, end) - start) / span))
+  const part = (from, to, of) => ({ left: `${((from - of.from) / of.span) * 100}%`, width: `${((to - from) / of.span) * 100}%` })
+  const whole = { from: start, span }
   return (
     <div className="chart-states">
-      {runs.map(r => (
-        <span
-          key={r.from}
-          className="chart-state"
-          style={{ left: `${at(r.from) * 100}%`, width: `${Math.max(0, stop(r.to) - at(r.from)) * 100}%` }}
-        >
-          <OverflowText>{r.state}</OverflowText>
-        </span>
-      ))}
+      {runs.map(r => {
+        const own = { from: r.startMs, span: r.endMs - r.startMs }
+        return (
+          <span key={r.from} className={`chart-state ${toneOf(tones, r.state)}`} style={part(r.startMs, r.endMs, whole)}>
+            {r.carried.map(c => (
+              <span key={c.startMs} className="chart-state-carried" style={part(c.startMs, c.endMs, own)} />
+            ))}
+            <OverflowText>{r.state}</OverflowText>
+          </span>
+        )
+      })}
     </div>
+  )
+}
+
+/** Under a state chart: each value with its colour and its share of the charted time, then the others. */
+function StateKey({ stateKey: key, carried }) {
+  return (
+    <ul className="chart-state-key">
+      {key.shown.map(s => (
+        <li key={s.state} className={toneOf(key.tones, s.state)}>
+          <span className="chart-state-swatch" aria-hidden="true" />
+          <OverflowText className="chart-state-key-name">{s.state}</OverflowText>
+          <span className="chart-state-share">{shareWords(s.share)}</span>
+        </li>
+      ))}
+      {key.others && (
+        <li className="chart-tone-other">
+          <span className="chart-state-swatch" aria-hidden="true" />
+          <span className="chart-state-key-name">{`${key.others.count} other${key.others.count === 1 ? '' : 's'}`}</span>
+          <span className="chart-state-share">{shareWords(key.others.share)}</span>
+        </li>
+      )}
+      {carried && (
+        <li className="chart-tone-other">
+          <span className="chart-state-swatch chart-state-swatch-carried" aria-hidden="true" />
+          <span className="chart-state-key-name">carried forward</span>
+        </li>
+      )}
+    </ul>
   )
 }
 
@@ -170,7 +203,10 @@ function StateStrip({ starts, series, start, end, minutes, now }) {
  * band its minimum to maximum. A bucket with no reading carries the last value forward and is drawn
  * dashed, so a carried stretch never reads as a measured one. The schema's valid range is a dotted
  * line labelled "valid range". Where the window reaches past now, a Now line and a hatched "No
- * readings yet" mark the rest. A flag steps between false and true; a state is a strip of its runs.
+ * readings yet" mark the rest. A flag steps between false and true; a state is a strip of its runs,
+ * a colour a value with its name kept, carried stretches hatched, and a key of each value's share
+ * of the time under it. The head reads the bucket under the pointer, or the run under it on a
+ * state strip, and otherwise the latest reading (latestWords()).
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -187,8 +223,15 @@ export function TimeSeriesChart({
   const [over, setOver] = useState(null)
   const [failed, setFailed] = useState(false)
   const [hover, setHover] = useState(null)
+  const [runHover, setRunHover] = useState(null)
   const palette = useChartPalette()
   const drawn = series.kind === 'number' || series.kind === 'flag'
+  const isState = series.kind === 'state'
+  const runs = useMemo(
+    () => (isState ? stateRuns(series, starts, { start, end, now, minutes }) : []),
+    [isState, series, starts, start, end, now, minutes]
+  )
+  const key = useMemo(() => (isState ? stateKey(stateShares(runs)) : null), [isState, runs])
 
   useEffect(() => {
     const box = boxRef.current
@@ -220,20 +263,31 @@ export function TimeSeriesChart({
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
-  const hovered = hover !== null && starts[hover] !== undefined ? hoverWords(starts[hover], series, hover, unit) : null
+  const hovered = isState
+    ? (runHover ? runWords(runHover, minutes) : null)
+    : hover !== null && starts[hover] !== undefined ? hoverWords(starts[hover], series, hover, unit, minutes) : null
+  const headWords = hovered ?? latestWords(series, starts, minutes, unit)
+
+  /** The run under the pointer, from where it is across the strip, which is the window's width. */
+  const pointAt = (e) => {
+    const box = e.currentTarget.getBoundingClientRect()
+    if (!(box.width > 0)) return
+    const t = start + ((e.clientX - box.left) / box.width) * (end - start)
+    setRunHover(runs.find(r => t >= r.startMs && t < r.endMs) ?? null)
+  }
 
   return (
     <figure className="history-chart" aria-labelledby={`${id}-title`}>
       <figcaption className="history-chart-head">
         <span className="history-chart-title" id={`${id}-title`}>{chartTitle(metric, unit)}</span>
         {range && <span className="history-chart-range">{range}</span>}
-        <span className="history-chart-hover" aria-hidden="true">{hovered}</span>
+        <span className="history-chart-hover" aria-hidden="true">{headWords}</span>
       </figcaption>
       <div className="chart-frame" role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-summary`}>
         {drawn && <div ref={boxRef} className="chart-box" style={{ height }} hidden={failed} />}
-        {series.kind === 'state' && (
-          <div className="chart-box chart-box-states">
-            <StateStrip starts={starts} series={series} start={start} end={end} minutes={minutes} now={now} />
+        {isState && (
+          <div className="chart-box chart-box-states" onPointerMove={pointAt} onPointerLeave={() => setRunHover(null)}>
+            <StateStrip runs={runs} tones={key.tones} start={start} end={end} />
             {fraction !== null && <div className="chart-overlay"><NowMarker fraction={fraction} now={now} /></div>}
           </div>
         )}
@@ -244,15 +298,15 @@ export function TimeSeriesChart({
         )}
         {drawn && !failed && over && fraction !== null && createPortal(<NowMarker fraction={fraction} now={now} />, over)}
       </div>
+      {isState && key.shown.length > 0 && <StateKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} />}
       <p className="sr-only" id={`${id}-summary`}>{summary}</p>
     </figure>
   )
 }
 
 /** The bucket under the pointer, in words: its time, its average and range, or that it carried. */
-function hoverWords(x, series, i, unit) {
-  const d = new Date(x * 1000)
-  const when = `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${clockWords(d)}`
+function hoverWords(x, series, i, unit, minutes) {
+  const when = momentWords(x * 1000, minutes)
   const v = series.avg[i]
   if (v === null) return `${when} · no reading yet`
   if (series.kind === 'flag') return `${when} · ${v ? 'true' : 'false'}${series.carried[i] ? ', carried forward' : ''}`

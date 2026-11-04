@@ -6,7 +6,8 @@ import {
   DEFAULT_HISTORY_WINDOW, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketCount, bucketOptions,
   bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
-  validRanges, withAlpha,
+  validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
+  shareWords, stateKey, stateRuns, stateShares,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -230,18 +231,30 @@ describe("a chart's text for a screen reader", () => {
   const starts = bucketStarts(T0, T0 + 4 * 5 * MINUTE, 5)
   const at = (i, values) => ({ bucket_ts: new Date(T0 + i * 5 * MINUTE).toISOString(), ...values })
 
-  it('names the metric, the window, the resolution, the latest, lowest and highest, and what carried', () => {
+  const bucket = (i) => momentWords(T0 + i * 5 * MINUTE, 5)
+
+  it('names the metric, the window, the resolution, the latest reading and its bucket, lowest and highest, and what carried', () => {
     const series = chartSeries([
-      at(0, { avg_double: 41.25, min_double: 30.1, max_double: 52, n_rows: 10, is_carried: false }),
-      at(1, { avg_double: 44, min_double: 40, max_double: 49.5, n_rows: 8, is_carried: false }),
-      at(2, { avg_double: 45, min_double: 45, max_double: 45, n_rows: 0, is_carried: true }),
-      at(3, { avg_double: 45, min_double: 45, max_double: 45, n_rows: 0, is_carried: true }),
+      at(0, { avg_double: 41.25, min_double: 30.1, max_double: 52, last_double: 43, n_rows: 10, is_carried: false }),
+      at(1, { avg_double: 44, min_double: 40, max_double: 49.5, last_double: 45, n_rows: 8, is_carried: false }),
+      at(2, { avg_double: 45, min_double: 45, max_double: 45, last_double: 45, n_rows: 0, is_carried: true }),
+      at(3, { avg_double: 45, min_double: 45, max_double: 45, last_double: 45, n_rows: 0, is_carried: true }),
     ], starts)
     expect(chartSummary({
-      metric: 'Spindle/LOAD', unit: 'kW', windowText: 'Today, Mon 2 Nov', resolution, series,
+      metric: 'Spindle/LOAD', unit: 'kW', windowText: 'Today, Mon 2 Nov', resolution, series, starts,
       validRange: { minimum: 0, maximum: 120 },
-    })).toBe('Spindle/LOAD (kW), Today, Mon 2 Nov, in 5-minute buckets. Latest 45 kW. Lowest 30.1 kW, highest 52 kW.'
-      + ' 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+    })).toBe(`Spindle/LOAD (kW), Today, Mon 2 Nov, in 5-minute buckets. Latest 45 kW, in the bucket from ${bucket(1)}.`
+      + ' Lowest 30.1 kW, highest 52 kW. 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+  })
+
+  it('says when no reading arrived in the window, and the value carried into it', () => {
+    const series = chartSeries([
+      at(0, { avg_double: 7, min_double: 7, max_double: 7, last_double: 7, n_rows: 0, is_carried: true }),
+      at(1, { avg_double: 7, min_double: 7, max_double: 7, last_double: 7, n_rows: 0, is_carried: true }),
+    ], starts)
+    expect(chartSummary({ metric: 'Axis/X', unit: 'mm', windowText: 'Last 1 hour', resolution, series, starts }))
+      .toBe('Axis/X (mm), Last 1 hour, in 5-minute buckets. No reading in this window; 7 mm is carried forward from before it.'
+        + ' Lowest 7 mm, highest 7 mm. 2 of 4 buckets had no reading and carry the last one forward.')
   })
 
   it('says when a series has nothing to show', () => {
@@ -249,19 +262,119 @@ describe("a chart's text for a screen reader", () => {
       .toBe('Axis/X, Last 1 hour, in 5-minute buckets. No readings in this window, and none before it.')
   })
 
-  it('gives a state its latest value and a flag its word', () => {
-    const state = chartSeries([at(0, { last_string: 'ACTIVE' }), at(1, { last_string: 'READY', is_carried: true })], starts)
-    expect(chartSummary({ metric: 'Controller/EXECUTION', windowText: 'Last 1 hour', resolution, series: state }))
-      .toBe('Controller/EXECUTION, Last 1 hour, in 5-minute buckets. Latest READY. 1 of 4 buckets had no reading and carry the last one forward.')
+  it("gives a state its latest value and each value's share of the time, and a flag its word", () => {
+    const state = chartSeries([
+      at(0, { last_string: 'ACTIVE' }), at(1, { last_string: 'READY' }),
+      at(2, { last_string: 'READY', is_carried: true }), at(3, { last_string: 'READY', is_carried: true }),
+    ], starts)
+    const span = { start: T0, end: T0 + 20 * MINUTE, now: T0 + DAY }
+    expect(chartSummary({ metric: 'Controller/EXECUTION', windowText: 'Last 1 hour', resolution, series: state, starts, span }))
+      .toBe(`Controller/EXECUTION, Last 1 hour, in 5-minute buckets. Latest READY, in the bucket from ${bucket(1)}.`
+        + ' Time in each value: READY 75%, ACTIVE 25%. 2 of 4 buckets had no reading and carry the last one forward.')
     const flag = chartSeries([at(0, { last_bool: false }), at(3, { last_bool: true })], starts)
-    expect(chartSummary({ metric: 'Door/OPEN', windowText: 'Last 1 hour', resolution, series: flag }))
-      .toBe('Door/OPEN, Last 1 hour, in 5-minute buckets. Latest true.')
+    expect(chartSummary({ metric: 'Door/OPEN', windowText: 'Last 1 hour', resolution, series: flag, starts }))
+      .toBe(`Door/OPEN, Last 1 hour, in 5-minute buckets. Latest true, in the bucket from ${bucket(3)}.`)
   })
 
   it('words a valid range with either bound alone', () => {
     expect(validRangeWords({ minimum: 0, maximum: null }, '°C')).toBe('Valid range at least 0 °C')
     expect(validRangeWords({ minimum: null, maximum: 9.5 }, null)).toBe('Valid range at most 9.5')
     expect(validRangeWords(null, 'kW')).toBeNull()
+  })
+})
+
+describe('the latest reading', () => {
+  const starts = bucketStarts(T0, T0 + 4 * MINUTE, 1)
+  const at = (i, values) => ({ bucket_ts: new Date(T0 + i * MINUTE).toISOString(), ...values })
+
+  it("keeps each bucket's last value as it was read", () => {
+    expect(chartSeries([at(0, { avg_double: 2, last_double: 3 })], starts).last).toEqual([3, null, null, null])
+    expect(chartSeries([at(1, { last_bool: false })], starts).last).toEqual([null, false, null, null])
+    expect(chartSeries([at(2, { last_string: 'IDLE' })], starts).last).toEqual([null, null, 'IDLE', null])
+  })
+
+  it('is the newest bucket a reading arrived in, never a carried one', () => {
+    const series = chartSeries([
+      at(0, { avg_double: 20, last_double: 21.3, is_carried: false }),
+      at(1, { avg_double: 21.3, last_double: 21.3, is_carried: true }),
+      at(2, { avg_double: 21.3, last_double: 21.3, is_carried: true }),
+    ], starts)
+    expect(latestReading(series)).toEqual({ i: 0, value: 21.3 })
+    expect(latestWords(series, starts, 1, '°C')).toBe(`Latest 21.3 °C · ${momentWords(T0, 1)}`)
+  })
+
+  it('says a flag as true or false and a state as its text, and when only carried buckets hold a value', () => {
+    expect(latestWords(chartSeries([at(3, { last_bool: false })], starts), starts, 1)).toBe(`Latest false · ${momentWords(T0 + 3 * MINUTE, 1)}`)
+    expect(latestWords(chartSeries([at(1, { last_string: 'IDLE' })], starts), starts, 1)).toBe(`Latest IDLE · ${momentWords(T0 + MINUTE, 1)}`)
+    expect(latestWords(chartSeries([at(0, { last_double: 4, avg_double: 4, is_carried: true })], starts), starts, 1)).toBe('No reading in this window')
+    expect(latestWords(chartSeries([], starts), starts, 1)).toBeNull()
+  })
+
+  it("says a bucket's time as its date and clock, or its date alone for a day bucket", () => {
+    const d = new Date(2026, 10, 2, 12, 40)
+    expect(momentWords(d.getTime(), 5)).toMatch(/^2 Nov 12:40$/)
+    expect(momentWords(d.getTime(), 1440)).toMatch(/^2 Nov$/)
+  })
+})
+
+describe("a state chart's runs and key", () => {
+  const starts = bucketStarts(T0, T0 + 10 * MINUTE, 1)
+  const series = (values, carried = []) => ({
+    kind: 'state', states: values, carried: values.map((_, i) => carried.includes(i)),
+  })
+  const span = { start: T0, end: T0 + 10 * MINUTE, now: T0 + DAY, minutes: 1 }
+
+  it('joins buckets of one value into a run, with the stretches carried forward inside it', () => {
+    const runs = stateRuns(series(['A', 'A', 'A', 'B', 'B', null, 'A', 'A', 'A', 'A'], [1, 2, 8, 9]), starts, span)
+    expect(runs.map(r => [r.state, (r.startMs - T0) / MINUTE, (r.endMs - T0) / MINUTE])).toEqual([['A', 0, 3], ['B', 3, 5], ['A', 6, 10]])
+    expect(runs[0].carried.map(c => [(c.startMs - T0) / MINUTE, (c.endMs - T0) / MINUTE])).toEqual([[1, 3]])
+    expect(runs[2].carried.map(c => [(c.startMs - T0) / MINUTE, (c.endMs - T0) / MINUTE])).toEqual([[8, 10]])
+  })
+
+  it('clips a run to the window and to now, so the future is no share of the time', () => {
+    const runs = stateRuns(series(['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B', 'B', 'B']), starts,
+      { ...span, start: T0 + 30 * 1000, now: T0 + 6 * MINUTE })
+    expect(runs.map(r => [r.state, (r.startMs - T0) / 1000, (r.endMs - T0) / 1000])).toEqual([['A', 30, 240], ['B', 240, 360]])
+    const shares = stateShares(runs)
+    expect(shares.map(s => [s.state, s.share])).toEqual([['A', 210 / 330], ['B', 120 / 330]])
+  })
+
+  it("shares the time over the buckets that have a value, carried included, the most first", () => {
+    const shares = stateShares(stateRuns(series(['B', 'A', 'A', 'A', null, null, 'C', 'C', 'C', 'C'], [2, 3, 8, 9]), starts, span))
+    expect(shares.map(s => [s.state, s.share])).toEqual([['C', 0.5], ['A', 0.375], ['B', 0.125]])
+    expect(keyWords(stateKey(shares))).toBe('C 50%, A 38%, B 13%')
+  })
+
+  it('names at most six values in the key, each its tone in that order, and counts the rest as others', () => {
+    expect(STATE_KEY_MAX).toBe(6)
+    const values = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
+    const key = stateKey(stateShares(stateRuns(series(values), starts, span)))
+    expect(key.shown.map(s => [s.state, s.tone])).toEqual([['A', '1'], ['B', '2'], ['C', '3'], ['D', '4'], ['E', '5'], ['F', '6']])
+    expect(key.others).toMatchObject({ count: 4, tone: 'other' })
+    expect(key.others.share).toBeCloseTo(0.4)
+    expect(key.tones.get('G')).toBeUndefined()
+    expect(keyWords(key)).toBe('A 10%, B 10%, C 10%, D 10%, E 10%, F 10%, 4 others 40%')
+  })
+
+  it('says a sliver of a share as under one per cent', () => {
+    expect(shareWords(0.004)).toBe('<1%')
+    expect(shareWords(0)).toBe('0%')
+    expect(shareWords(0.625)).toBe('63%')
+  })
+
+  it('reads the run under the pointer with its stretch, its length and what of it was carried', () => {
+    const [a, b] = stateRuns(series(['A', 'A', 'A', 'B', 'B'], [1, 2, 3, 4]), starts, span)
+    const clock = (m) => momentWords(T0 + m * MINUTE, 1).split(' ').pop()
+    expect(runWords(a, 1)).toBe(`${momentWords(T0, 1)} – ${clock(3)} · A, 3 min, 2 min carried forward`)
+    expect(runWords(b, 1)).toBe(`${momentWords(T0 + 3 * MINUTE, 1)} – ${clock(5)} · B, 2 min, carried forward`)
+  })
+
+  it('says a stretch in minutes, hours and days', () => {
+    expect(durationWords(35 * MINUTE)).toBe('35 min')
+    expect(durationWords(125 * MINUTE)).toBe('2 h 5 min')
+    expect(durationWords(2 * HOUR)).toBe('2 h')
+    expect(durationWords(3 * DAY + 4 * HOUR)).toBe('3 d 4 h')
+    expect(durationWords(20 * 1000)).toBe('under 1 min')
   })
 })
 

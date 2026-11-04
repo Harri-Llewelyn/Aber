@@ -8,7 +8,7 @@ import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers } from './sparkplugId'
-import { SPAN_IDS, TIME_PRESETS, rollingWindow, windowToQuery } from './timeWindow'
+import { SPAN_IDS, TIME_PRESETS, clockWords, rollingWindow, windowToQuery } from './timeWindow'
 
 const MINUTE = 60 * 1000
 
@@ -203,7 +203,8 @@ export function bucketStarts(startMs, endMs, minutes) {
 /**
  * One series' rows laid on `starts`. `avg`, `min` and `max` are null where the read returned no
  * row; `carried` marks a bucket with no reading. A flag charts as 1 and 0, and a state, which no
- * line can draw, keeps its text in `states`. `kind` is what the series holds: number, flag, state,
+ * line can draw, keeps its text in `states`. `last` is each bucket's last value as it was read: a
+ * number, true or false, or a state's text. `kind` is what the series holds: number, flag, state,
  * or none for a series with no row at all.
  */
 export function chartSeries(rows, starts) {
@@ -219,7 +220,8 @@ export function chartSeries(rows, starts) {
     min: (r) => (kind === 'flag' ? flag(r) : r.min_double ?? null),
     max: (r) => (kind === 'flag' ? flag(r) : r.max_double ?? null),
   }
-  const series = { kind, avg: [], min: [], max: [], carried: [], states: [] }
+  const last = (r) => (kind === 'number' ? r.last_double : kind === 'flag' ? r.last_bool : r.last_string) ?? null
+  const series = { kind, avg: [], min: [], max: [], carried: [], states: [], last: [] }
   for (const x of starts) {
     const r = at.get(x)
     series.avg.push(r ? pick.avg(r) : null)
@@ -227,8 +229,119 @@ export function chartSeries(rows, starts) {
     series.max.push(r ? pick.max(r) : null)
     series.carried.push(r ? Boolean(r.is_carried) : false)
     series.states.push(r ? r.last_string ?? null : null)
+    series.last.push(r ? last(r) : null)
   }
   return series
+}
+
+/**
+ * The newest bucket a reading arrived in, never a carried one: its index and the last value read
+ * in it. Null when no reading arrived in the window.
+ */
+export function latestReading(series) {
+  for (let i = series.last.length - 1; i >= 0; i--) {
+    if (!series.carried[i] && series.last[i] !== null && series.last[i] !== undefined) return { i, value: series.last[i] }
+  }
+  return null
+}
+
+// ------------------------------------------------------------------------------------------------
+// A state's runs, and its key
+// ------------------------------------------------------------------------------------------------
+
+/** The most values a state chart's key names; the rest are counted as others. */
+export const STATE_KEY_MAX = 6
+
+/**
+ * A state series as runs of one value across the window, each with its stretch in milliseconds,
+ * clipped to the window and to now, and `carried`, the stretches inside it with no reading.
+ */
+export function stateRuns(series, starts, { start, end, now, minutes }) {
+  const width = minutes * MINUTE
+  const stop = Math.min(end, now)
+  const runs = []
+  series.states.forEach((state, i) => {
+    const from = Math.max(start, starts[i] * 1000)
+    const to = Math.min(stop, starts[i] * 1000 + width)
+    if (state === null || !(to > from)) return
+    let run = runs[runs.length - 1]
+    if (!run || run.state !== state || run.to !== i) {
+      run = { state, from: i, to: i, startMs: from, endMs: from, carried: [] }
+      runs.push(run)
+    }
+    run.to = i + 1
+    run.endMs = to
+    if (series.carried[i]) {
+      const held = run.carried[run.carried.length - 1]
+      if (held && held.endMs === from) held.endMs = to
+      else run.carried.push({ startMs: from, endMs: to })
+    }
+  })
+  return runs
+}
+
+/** Each value's time across `runs` and its share of the time that has a value, most first. */
+export function stateShares(runs) {
+  const time = new Map()
+  for (const r of runs) time.set(r.state, (time.get(r.state) || 0) + r.endMs - r.startMs)
+  const total = [...time.values()].reduce((a, b) => a + b, 0)
+  return [...time]
+    .map(([state, ms]) => ({ state, ms, share: total > 0 ? ms / total : 0 }))
+    .sort((a, b) => b.ms - a.ms || String(a.state).localeCompare(String(b.state)))
+}
+
+/**
+ * The key under a state chart: the `max` values with the most time, each with its tone, 1 first,
+ * and the rest as one `others` entry (null when there is none), whose runs take the neutral tone.
+ */
+export function stateKey(shares, max = STATE_KEY_MAX) {
+  const shown = shares.slice(0, max).map((s, i) => ({ ...s, tone: String(i + 1) }))
+  const rest = shares.slice(max)
+  const others = rest.length
+    ? { count: rest.length, ms: rest.reduce((a, s) => a + s.ms, 0), share: rest.reduce((a, s) => a + s.share, 0), tone: 'other' }
+    : null
+  return { shown, others, tones: new Map(shown.map(s => [s.state, s.tone])) }
+}
+
+/** A share in words: a whole percentage, or "<1%" for a sliver that is there. */
+export const shareWords = (share) => (share > 0 && share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`)
+
+/** The key's words: "RUNNING 62%, IDLE 30%, 3 others 8%". */
+export function keyWords({ shown, others }) {
+  const parts = shown.map(s => `${s.state} ${shareWords(s.share)}`)
+  if (others) parts.push(`${others.count} other${others.count === 1 ? '' : 's'} ${shareWords(others.share)}`)
+  return parts.join(', ')
+}
+
+/** A stretch of time in words: "35 min", "2 h 5 min", "3 d 4 h". */
+export function durationWords(ms) {
+  const minutes = Math.round(ms / MINUTE)
+  if (minutes < 1) return 'under 1 min'
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`
+  const days = Math.floor(hours / 24)
+  return hours % 24 ? `${days} d ${hours % 24} h` : `${days} d`
+}
+
+/** A moment in words at `minutes` buckets: its date and clock time, or its date alone for a day bucket. */
+export function momentWords(ms, minutes) {
+  const d = new Date(ms)
+  const day = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return minutes >= 1440 ? day : `${day} ${clockWords(d)}`
+}
+
+/**
+ * A run under the pointer in words: "2 Nov 10:05 – 10:40 · RUNNING, 35 min", and how much of it was
+ * carried forward: all of it, or "20 min carried forward".
+ */
+export function runWords(run, minutes) {
+  const sameDay = new Date(run.startMs).toDateString() === new Date(run.endMs).toDateString()
+  const to = minutes < 1440 && sameDay ? clockWords(new Date(run.endMs)) : momentWords(run.endMs, minutes)
+  const length = run.endMs - run.startMs
+  const held = run.carried.reduce((a, c) => a + c.endMs - c.startMs, 0)
+  const carried = held <= 0 ? '' : held >= length ? ', carried forward' : `, ${durationWords(held)} carried forward`
+  return `${momentWords(run.startMs, minutes)} – ${to} · ${run.state}, ${durationWords(length)}${carried}`
 }
 
 /**
@@ -262,32 +375,58 @@ export function readingWords(value, unit) {
   return unit ? `${text} ${unit}` : text
 }
 
+/** A value as its chart says it: a reading with its unit, true or false, or a state's text. */
+export function valueWords(kind, value, unit) {
+  if (kind === 'flag') return value ? 'true' : 'false'
+  if (kind === 'state') return String(value)
+  return readingWords(value, unit)
+}
+
+/**
+ * The chart head's latest reading, while the pointer is elsewhere: "Latest 21.3 °C · 2 Nov 12:40",
+ * the time being the bucket's, since a bucket is not a reading's timestamp. "No reading in this
+ * window" when only carried buckets hold a value, and null when nothing does.
+ */
+export function latestWords(series, starts, minutes, unit) {
+  if (series.kind === 'none') return null
+  const latest = latestReading(series)
+  if (!latest) return 'No reading in this window'
+  return `Latest ${valueWords(series.kind, latest.value, unit)} · ${momentWords(starts[latest.i] * 1000, minutes)}`
+}
+
 /** The chart's title: the metric's name, then its unit in brackets when it has one. */
 export const chartTitle = (metric, unit) => (unit ? `${metric} (${unit})` : metric)
 
 /**
  * The text a screen reader is given for a chart: the metric, the window, the resolution, the
- * latest value and the lowest and highest, how many buckets carried a value forward, and the valid
- * range where the schema declares one.
+ * latest reading and its bucket (as the chart head says it), the lowest and highest, a state's
+ * share of the time in each value, how many buckets carried a value forward, and the valid range
+ * where the schema declares one. `span` (`{ start, end, now }`, in milliseconds) places a state's
+ * runs.
  */
-export function chartSummary({ metric, unit, windowText, resolution, series, validRange }) {
+export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span }) {
   const head = `${chartTitle(metric, unit)}, ${windowText}, in ${resolution.words}.`
   const shown = series.avg.map((v, i) => i).filter(i => series.avg[i] !== null)
   if (series.kind === 'none' || (series.kind !== 'state' && shown.length === 0)) {
     return `${head} No readings in this window, and none before it.`
   }
   const parts = [head]
-  if (series.kind === 'state') {
-    const latest = [...series.states].reverse().find(s => s !== null)
-    parts.push(`Latest ${latest}.`)
+  const word = (v) => valueWords(series.kind, v, unit)
+  const latest = latestReading(series)
+  if (latest) {
+    parts.push(`Latest ${word(latest.value)}, in the bucket from ${momentWords(starts[latest.i] * 1000, resolution.minutes)}.`)
   } else {
-    const word = (v) => (series.kind === 'flag' ? (v ? 'true' : 'false') : readingWords(v, unit))
-    parts.push(`Latest ${word(series.avg[shown[shown.length - 1]])}.`)
-    if (series.kind === 'number') {
-      const lows = series.min.filter(v => v !== null)
-      const highs = series.max.filter(v => v !== null)
-      parts.push(`Lowest ${word(Math.min(...lows))}, highest ${word(Math.max(...highs))}.`)
-    }
+    const held = [...series.last].reverse().find(v => v !== null)
+    parts.push(held === undefined ? 'No reading in this window.' : `No reading in this window; ${word(held)} is carried forward from before it.`)
+  }
+  if (series.kind === 'number') {
+    const lows = series.min.filter(v => v !== null)
+    const highs = series.max.filter(v => v !== null)
+    parts.push(`Lowest ${word(Math.min(...lows))}, highest ${word(Math.max(...highs))}.`)
+  }
+  if (series.kind === 'state' && span) {
+    const key = stateKey(stateShares(stateRuns(series, starts, { ...span, minutes: resolution.minutes })))
+    if (key.shown.length) parts.push(`Time in each value: ${keyWords(key)}.`)
   }
   const total = series.carried.length
   const held = series.carried.filter(Boolean).length
