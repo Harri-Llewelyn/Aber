@@ -1403,9 +1403,9 @@ GoTrue runs an OAuth 2.1 server for the stack's own clients: Grafana, Node-RED, 
 forge doors. `0002` seeds all four, with `registration_type` `manual`. Up to 1.5.0 the chart also
 left GoTrue's dynamic client registration on, so anyone holding the publishable key could register a
 client of their own at `/auth/v1/oauth/clients/register`. That key is public by design: every browser
-is served it. A token issued to any client carries its person's whole role, because `has_role()`
-reads `auth.uid()` and not the client the token was issued to. So a registered client was one
-approval on the consent page away from a token as capable as the person who approved it.
+is served it. Until `0235`, a token issued to any client carried its person's whole role, because
+`has_role()` read `auth.uid()` and not the client the token was issued to. So a registered client was
+one approval on the consent page away from a token as capable as the person who approved it.
 
 The chart now sets `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION` to `"false"`. It is not a chart
 value: nothing the stack uses registers itself.

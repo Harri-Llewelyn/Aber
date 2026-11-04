@@ -535,9 +535,9 @@ if (RUNTIME) {
       console.log("  --   an app's own token: issued by GoTrue alone, so the stack lane holds its routes");
     }
 
-    // Every OAuth client the stack uses is seeded, and a token issued to any client carries its
-    // person's whole role. An empty registration is refused whether or not registration is on, so
-    // this creates nothing; only the refusal's reason tells the two apart.
+    // Every OAuth client the stack uses is seeded, and a client nobody reviewed should not exist to be
+    // approved. An empty registration is refused whether or not registration is on, so this creates
+    // nothing; only the refusal's reason tells the two apart.
     {
       const label = 'dynamic OAuth client registration (/auth/v1/oauth/clients/register)';
       const res = await probeOnce(
