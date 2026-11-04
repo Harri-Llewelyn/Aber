@@ -1,7 +1,7 @@
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { approvalsForUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
+import { approvalsForUrl, areaUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -84,7 +84,8 @@ import {
   IconDownload,
   IconRadio,
   IconLayoutDashboard,
-  IconTrash
+  IconTrash,
+  IconChartLine
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
@@ -1758,6 +1759,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'View Telemetry', icon: <IconActivity size={13} />,
             onClick: () => setTelemetryFor(selectedDevice),
             title: "Open this device's metrics with their latest values"
+          },
+          {
+            // The device's readings over time, a chart a metric; the modal above keeps the latest.
+            label: 'View History', icon: <IconChartLine size={13} />,
+            to: deviceHistoryUrl(selectedDevice.asset_id),
+            title: "Chart this device's readings over time on the History page"
           },
           {
             // A read of what the device declared at birth: not gated on device:manage and not

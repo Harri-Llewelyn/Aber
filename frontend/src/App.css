@@ -5679,6 +5679,124 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border-right: 1px dashed var(--text-dim);
 }
 
+/* ===== History: the charts ===== */
+/* A chart's now marker and hatched future, as the Audit Trail's axis draws them (.trail-now,
+   .trail-shade-future): placed over uPlot's plot area (.u-over), which is the window's width, and
+   leaving the pointer to the chart beneath. */
+.chart-now {
+  position: absolute;
+  top: 2px;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-now-start { transform: none; }
+.chart-now-end   { transform: translateX(-100%); }
+.chart-future {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 8px;
+  border-left: 1px solid var(--accent);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg,
+    color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
+}
+
+.history-meta {
+  margin: 0;
+  padding: 8px var(--inset) 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The charts stack down the card, which scrolls; each fits the card's width, never wider. */
+.history-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+  padding: 12px var(--inset) var(--inset);
+  min-width: 0;
+}
+.history-chart { margin: 0; min-width: 0; }
+.history-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.history-chart-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.history-chart-range { font-size: 12px; color: var(--warning-text); }
+.history-chart-hover { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.chart-frame { position: relative; min-width: 0; }
+.chart-box { position: relative; width: 100%; min-width: 0; overflow: hidden; }
+.chart-box .uplot { width: 100%; font-family: var(--font-mono); }
+.chart-box-empty {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A state metric: each run of one value is a box across its stretch of the window, named in text. */
+.chart-box-states { height: 34px; }
+.chart-states { position: absolute; inset: 4px 0; }
+.chart-state {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--accent-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.chart-overlay { position: absolute; inset: 0; pointer-events: none; }
+
+/* History's toolbar device and its list, in the time window's popover frame. */
+.history-device-pick { justify-content: flex-start; min-width: 0; }
+.history-device-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.history-device-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--accent-text);
+  text-decoration: none;
+}
+.history-device-option:hover,
+.history-device-option:focus-visible { background: var(--bg-glass); text-decoration: underline; }
+.history-device-option.is-current { color: var(--text-primary); font-weight: 600; }
+.history-device-place { font-size: 11px; color: var(--text-muted); }
+.history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
+.history-picker-badge { margin-left: 8px; }
+
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
    see offsetFor(). */

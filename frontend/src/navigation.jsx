@@ -20,7 +20,8 @@ import {
   IconSettings,
   IconInbox,
   IconTag,
-  IconUser
+  IconUser,
+  IconChartLine
 } from './components/common/Icons'
 
 /*
@@ -125,6 +126,11 @@ export const SETTINGS_TABS = [
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
 ]
 
+/** History's views. Device is the only one, so it is the bare page: /history picks a device. */
+export const HISTORY_TABS = [
+  { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+]
+
 /** The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
@@ -146,8 +152,9 @@ export const PROFILE_TABS = [
  *                     timer over something and offers a way to restore from it.
  *   Administration -- who may do what, what runs, how is it configured?
  *
- * The Site Map is the landing page, alone in `home`. Audit Trail leads History rather than
- * sitting beside Devices because it is the audit trace of every entity.
+ * The Site Map is the landing page, and leads `home`. The History page sits under it: the plant over
+ * time, beside the plant now. Audit Trail leads the History group rather than sitting beside
+ * Devices because it is the audit trace of every entity.
  *
  * The groups are not captioned in the rail: the separator is the whole of the grouping, and a
  * caption had to hold its box in the collapsed state to stop items jumping on hover.
@@ -172,6 +179,8 @@ export const NAV_GROUPS = [
  */
 export const TABS = [
   { id: 'site-map',       label: 'Site Map',       group: 'home',    icon: <IconMap size={16} /> },
+  // Ungated, as the Site Map is: what it charts is what the telemetry views let the viewer read.
+  { id: 'history',        label: 'History',        group: 'home',    icon: <IconChartLine size={16} />, pageTabs: HISTORY_TABS },
   // Gated on `proposal:create`: an Auditor holds neither it nor a decision gate, and RLS would
   // return them their own proposals, of which they can have none.
   { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconInbox size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE, pageTabs: APPROVALS_TABS, signalTab: 'open' },

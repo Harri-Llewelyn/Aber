@@ -1115,6 +1115,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
+| History | `device`, then the device's id (`/history/device/<id>`; `/history` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
@@ -1175,6 +1176,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis. `TelemetryModal` keeps the latest values |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1375,6 +1377,56 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   Show more goes on from there a page at a time. A page that fails, or adds nothing, stops the loop,
   and a page asked for under an older filter is dropped when it lands. All time loads one page and
   keeps Show more.
+
+### History and its chart
+
+**History charts a device's readings over a window** (`tabs/HistoryTab.jsx`, `tabs/HistoryDevice.jsx`).
+Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each rule.
+
+- **The window** is the shared `TimeWindowControl` with every rolling range (`TIME_PRESETS`) and
+  every span, and no All time. It falls back to Last 24 hours (`DEFAULT_HISTORY_WINDOW`).
+- **The read** is `api.readCarriedTelemetry()`, the RPC `telemetry_carried()` (`0233`): one row per
+  metric per bucket, a bucket with no reading carried forward and marked `is_carried`.
+- **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
+  (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
+  metrics, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from the one
+  holding the window's start, on the epoch grid the rollups use. When no resolution fits every
+  metric, the coarsest reads them in parts. The page says which it shows ("in 5-minute buckets").
+- **The metrics** are those the device's last birth declared and those its schemas model
+  (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
+  (`validRanges()`), and its unit the catalog's.
+- **The address** is `/history/device/<id>` with the window's keys; `/history` is the picker.
+  `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
+  (`routes.js`). Choosing a device adds a history entry.
+
+**`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
+It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
+is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
+flag steps between false and true, and a state is a strip of its runs in text.
+
+| Prop | What it is |
+| :--- | :--- |
+| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
+| `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
+| `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried` and `states`, one entry a bucket |
+| `start`, `end` | The window in milliseconds. The time axis is exactly the window |
+| `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
+| `minutes` | The bucket's width, for a state strip's last run |
+| `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest, lowest and highest values, the carried buckets and the valid range, for a screen reader |
+| `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
+| `height` | The plot's height in pixels, 140 by default |
+
+- **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
+- **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
+  `<html data-theme>` changes, so a theme switch redraws it.
+- **uPlot's own drag selection is off** (`cursor.drag` x and y false, `select` hidden): a chart
+  never rescales itself, and the page's window is the only zoom.
+- **Under the Content-Security-Policy**, uPlot sets styles through the DOM (`element.style`), which
+  `style-src` allows, and its stylesheet is imported through the bundle. The chart's first comment
+  carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).
+- A browser that cannot draw on a canvas gets the summary and a line saying the chart could not be
+  drawn.
 
 ---
 

@@ -10,6 +10,8 @@ import viteConfig from '../../vite.config.js'
  */
 
 const ICONS = fs.readFileSync(path.resolve(__dirname, '../components/common/Icons.jsx'), 'utf8')
+const CHART = fs.readFileSync(path.resolve(__dirname, '../components/common/TimeSeriesChart.jsx'), 'utf8')
+const UPLOT_LICENSE = fs.readFileSync(path.resolve(__dirname, '../../node_modules/uplot/LICENSE'), 'utf8')
 
 describe('legal comments in the built dashboard', () => {
   it('the build keeps legal comments', async () => {
@@ -25,5 +27,14 @@ describe('legal comments in the built dashboard', () => {
     expect(first).toContain('Copyright (c) 2013-2023 Cole Bemis')
     expect(first).toContain('provided that the above\n * copyright notice and this permission notice appear in all copies.')
     expect(first).toContain('The above copyright notice and this permission notice shall be included in all')
+  })
+
+  // uPlot's own header is a plain `/**` comment, which the build drops; its MIT notice travels in
+  // the chart's legal comment instead (NOTICE.md, "The dashboard's charts").
+  it("TimeSeriesChart.jsx opens with uPlot's licence notice, as the installed package states it", () => {
+    const first = /^\/\*![\s\S]*?\*\//.exec(CHART)?.[0] || ''
+    const asComment = (text) => text.trim().split('\n').map(line => ` * ${line}`.trimEnd()).join('\n')
+    expect(first).toContain('uPlot 1.6.32')
+    expect(first).toContain(asComment(UPLOT_LICENSE))
   })
 })

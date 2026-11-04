@@ -92,6 +92,7 @@ import { ChangePasswordModal } from './components/modals/ChangePasswordModal'
 
 // Lazy-load Tab components
 const SiteMapTab       = lazy(() => import('./components/tabs/SiteMapTab').then(m => ({ default: m.SiteMapTab })))
+const HistoryTab       = lazy(() => import('./components/tabs/HistoryTab').then(m => ({ default: m.HistoryTab })))
 const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m => ({ default: m.AreasTab })))
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
@@ -752,6 +753,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
+            {tab === 'history'        && <HistoryTab />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}

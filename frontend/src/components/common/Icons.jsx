@@ -723,3 +723,11 @@ export const IconScan = ({ size = 14, className = "", style = {}, ...rest }) => 
     <path d="M21 17v2a2 2 0 0 1-2 2h-2" /><path d="M7 21H5a2 2 0 0 1-2-2v-2" />
   </svg>
 )
+
+// Lucide's chart-line: the History page, readings over time. Not IconActivity, which means live
+// telemetry, and not IconHistory, the Audit Trail's.
+export const IconChartLine = ({ size = 16, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="m19 9-5 5-4-4-3 3" />
+  </svg>
+)
