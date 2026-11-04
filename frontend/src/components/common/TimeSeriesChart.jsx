@@ -86,6 +86,13 @@ const drawValidRange = (validRange, palette) => (u) => {
   }
 }
 
+/**
+ * The plot area's gutters, in pixels: the value axis on the left, and room on the right for the
+ * last time label. A text strip takes the same, so one time is at one place across every chart.
+ */
+export const PLOT_LEFT_PX = 56
+export const PLOT_RIGHT_PX = 28
+
 /** uPlot's options for one chart. Its own drag selection is off: the page's window is the only zoom. */
 function plotOptions({ width, height, series, start, end, validRange, palette, syncKey, onHover }) {
   const flag = series.kind === 'flag'
@@ -95,6 +102,8 @@ function plotOptions({ width, height, series, start, end, validRange, palette, s
     width,
     height,
     legend: { show: false },
+    // Top, right, bottom, left; null is uPlot's own. The right is fixed so a strip can match it.
+    padding: [null, PLOT_RIGHT_PX, null, null],
     cursor: { drag: { x: false, y: false, setScale: false }, ...(syncKey ? { sync: { key: syncKey } } : {}) },
     select: { show: false },
     scales: {
@@ -105,7 +114,7 @@ function plotOptions({ width, height, series, start, end, validRange, palette, s
       { ...axis, values: timeLabels((end - start) / 1000) },
       {
         ...axis,
-        size: 56,
+        size: PLOT_LEFT_PX,
         ...(flag ? { splits: () => [0, 1] } : {}),
         values: (u, splits) => splits.map(v => (flag ? (v === 1 ? 'true' : v === 0 ? 'false' : '') : readingWords(v))),
       },
@@ -302,7 +311,12 @@ export function TimeSeriesChart({
       <div className="chart-frame" role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-summary`}>
         {drawn && <div ref={boxRef} className="chart-box" style={{ height }} hidden={failed} />}
         {isState && (
-          <div className="chart-box chart-box-states" onPointerMove={pointAt} onPointerLeave={() => setRunHover(null)}>
+          <div
+            className="chart-box chart-box-states"
+            style={{ marginLeft: PLOT_LEFT_PX, marginRight: PLOT_RIGHT_PX }}
+            onPointerMove={pointAt}
+            onPointerLeave={() => setRunHover(null)}
+          >
             <StateStrip runs={runs} start={start} end={end} />
             {(fraction !== null || band) && (
               <div className="chart-overlay">

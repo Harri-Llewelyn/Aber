@@ -8,7 +8,10 @@ import { render, screen, waitFor, within, fireEvent, act, cleanup } from '@testi
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { CLOSED_GROUPS_KEY } from '../components/tabs/HistoryDevice'
+import { PLOT_LEFT_PX, PLOT_RIGHT_PX } from '../components/common/TimeSeriesChart'
 import { api } from '../api'
+import fs from 'node:fs'
+import path from 'node:path'
 import { momentWords, stateHue } from '../utils/history'
 import { PERMISSION_UUIDS } from '../constants'
 
@@ -463,6 +466,20 @@ describe('a state chart', () => {
     return screen.findByRole('figure', { name: 'Controller/EXECUTION' })
   }
 
+  it("draws on the number charts' time scale: the same gutters as their plot area", async () => {
+    const figure = await open()
+    await waitFor(() => expect(plots.length).toBeGreaterThan(0))
+    // Every chart's plot area starts after the value axis and stops short of the last time label.
+    for (const { opts } of plots) {
+      expect(opts.axes[1].size).toBe(PLOT_LEFT_PX)
+      expect(opts.padding[1]).toBe(PLOT_RIGHT_PX)
+    }
+    // The strip has no axis of its own, so it takes the same margins, and one time is at one place.
+    const box = figure.querySelector('.chart-box-states')
+    expect(box.style.marginLeft).toBe(`${PLOT_LEFT_PX}px`)
+    expect(box.style.marginRight).toBe(`${PLOT_RIGHT_PX}px`)
+  })
+
   it('colours each value by the hue its text hashes to, the same wherever it appears, and keeps its name', async () => {
     const figure = await open()
     const runs = [...figure.querySelectorAll('.chart-state')]
@@ -713,6 +730,18 @@ describe("the charts' groups", () => {
     fireEvent.click(heading('String'))
     expect(chartsIn('String')).toEqual(['Controller/EXECUTION'])
     expect(window.localStorage.getItem(CLOSED_GROUPS_KEY)).toBeNull()
+  })
+
+  it("leaves no space under a closed group: its charts' box is hidden, and the stylesheet lets it be", async () => {
+    await visit(`/history/device/${CELL}`)
+    await screen.findAllByRole('figure')
+    fireEvent.click(screen.getByRole('button', { name: /^String/ }))
+    const body = document.getElementById(screen.getByRole('button', { name: /^String/ }).getAttribute('aria-controls'))
+    expect(body).toHaveAttribute('hidden')
+    // jsdom applies no stylesheet: `.history-charts` is display: flex, which outranks [hidden] unless
+    // App.css says otherwise.
+    const css = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+    expect(css).toMatch(/\.history-charts\[hidden\] \{ display: none; \}/)
   })
 
   it('opens and closes every group from Collapse all and Expand all', async () => {

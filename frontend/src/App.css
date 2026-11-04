@@ -5903,6 +5903,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   padding: 12px var(--inset) var(--inset);
   min-width: 0;
 }
+/* A closed group's charts take no space: display: flex above would otherwise outrank [hidden]. */
+.history-charts[hidden] { display: none; }
 .history-chart { margin: 0; min-width: 0; }
 .history-chart-head {
   display: flex;
