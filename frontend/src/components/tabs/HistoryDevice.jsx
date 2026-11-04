@@ -374,7 +374,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           value={chosen}
           onChange={setChosen}
           words={v => (v.length === 0 ? 'All metrics' : null)}
-          width="md"
+          width="sm"
           tip="Chart only the metrics you choose. Fewer metrics fit finer buckets."
         />
         <BucketChoice value={bucket} options={bucketOptions(auto)} onChange={setBucket} />
