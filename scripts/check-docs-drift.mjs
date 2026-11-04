@@ -8937,7 +8937,8 @@ const OPERATOR_PAIRS = [
   const presets = read('frontend/src/utils/timeWindow.js');
   const help = read('help/pages/history.md');
   const range = util.match(/export const DEFAULT_HISTORY_WINDOW = rollingWindow\('(\w+)', HISTORY_RANGES\)/)?.[1];
-  const label = range && presets.match(new RegExp(`value: '${range}', +label: '([^']+)'`))?.[1];
+  const labels = Object.fromEntries([...presets.matchAll(/value: '(\w+)', +label: '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const label = range && labels[range];
   const problems221 = [];
   if (!label) problems221.push('could not read DEFAULT_HISTORY_WINDOW\'s range and its label');
   else if (!help.includes(`It opens on **${label}**.`)) problems221.push(`help/pages/history.md does not say "It opens on **${label}**."`);

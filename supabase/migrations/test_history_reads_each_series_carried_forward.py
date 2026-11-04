@@ -320,9 +320,9 @@ class Refusals(CarriedBase):
             "no metrics": (T0, T0 + minutes(5), "1 minute", [DEVICE], None),
             "over 50,000 rows": (T0, T0 + timedelta(days=35), "1 minute", [DEVICE], ["m"]),
         }
-        # Every foreign relation is gone, so a refusal that came after a read would raise otherwise.
-        for rollup in ("telemetry_1m", "telemetry_5m", "telemetry_1h"):
-            self.cur.execute(f"REVOKE SELECT ON timescale.{rollup} FROM authenticated;")
+        # The caller may read no rollup, so a refusal that came after a read would raise otherwise.
+        self.cur.execute("REVOKE SELECT ON timescale.telemetry_1m, timescale.telemetry_5m, timescale.telemetry_1h"
+                         " FROM authenticated;")
         for name, args in cases.items():
             with self.subTest(case=name):
                 with self.assertRaises(psycopg2.errors.InvalidParameterValue):
