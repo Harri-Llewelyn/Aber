@@ -3981,7 +3981,7 @@ a.chip { text-decoration: none; }
 
 .alert-pill-item {
   display: flex;
-  gap: 9px;
+  flex-direction: column;
   padding: 0;
   border-bottom: 1px solid var(--border);
 }
@@ -4015,8 +4015,11 @@ a.chip { text-decoration: none; }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
    alert's sparkplug_id happens not to resolve to a device. */
-.alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }
-.alert-pill-item > .alert-pill-item-body { padding: 10px 12px 10px 0; }
+.alert-pill-item-static {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+}
 
 .alert-pill-dot {
   width: 7px;
@@ -4029,6 +4032,31 @@ a.chip { text-decoration: none; }
 .alert-pill-dot-critical { background: var(--danger); }
 .alert-pill-dot-warning  { background: var(--warning); }
 .alert-pill-dot-info     { background: var(--accent); }
+/* Acknowledged: the same hue as a ring, so the row reads apart from an unacknowledged one by shape. */
+.alert-pill-dot.alert-pill-dot-acknowledged {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.alert-pill-dot-warning.alert-pill-dot-acknowledged { box-shadow: inset 0 0 0 1.5px var(--warning); }
+.alert-pill-dot-info.alert-pill-dot-acknowledged    { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* Under an alert's name: Acknowledge, or who acknowledged it, when and why, with Withdraw. Indented
+   to the name, past the dot: 12px of row padding, the 7px dot and its 9px gap. */
+.alert-pill-ack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 12px 10px 28px;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.alert-pill-ack-words { display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
+.alert-pill-ack-tick { flex-shrink: 0; margin-top: 1px; color: var(--success-text); }
+.alert-pill-ack-note { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
+.alert-pill-ack .btn-sm { padding: 2px 8px; font-size: 11px; }
 
 .alert-pill-item-body { min-width: 0; }
 .alert-pill-item-name { font-size: 12px; font-weight: 600; }
