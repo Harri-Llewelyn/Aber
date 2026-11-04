@@ -571,7 +571,8 @@ so a commissioning burst of five or six rows lands on one pixel. Two fixes were 
 
 Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
 count. Grouping is by **pixel** distance, not by time, so the time window acts as a zoom and a
-cluster dissolves into its members as the same events move apart on screen. The badge sits at the
+cluster dissolves into its members as the same events move apart on screen. A drag across the trail
+or Zoom in narrows the window ([One time control](#one-time-control-for-every-period)). The badge sits at the
 mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
@@ -1337,7 +1338,8 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
 - **A span a page does not offer is passed over** in the address, which then falls back, and Jump
   to lands on Day, or on the first span offered where Day is not.
 - **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
-  `SegmentedControl`. Today is in the popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
+  `SegmentedControl`, then Zoom in and Zoom out where the page asks for them. Today is in the
+  popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
   not wrap inside itself, so a toolbar that wraps moves it whole.
 - **The words open a `ToolbarPopover`**, the frame `FiltersPopover` is drawn in: the same place,
   arrow, Escape and click-outside rules, and the chevron every popover's button ends in. Focus moves to the panel's first control as it opens,
@@ -1359,8 +1361,30 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   today). A rolling one is `range`. A custom one is `from` and `to`, local `YYYY-MM-DDTHH:mm`, and
   `to` is the first minute outside the window. The Audit Trail's older `since` and `until` are read
   as `from` and `to`, and the address is rewritten that way. The old `until` included its whole
-  minute, so its `to` is a minute later and the same rows come back. A change replaces the history
-  entry.
+  minute, so its `to` is a minute later and the same rows come back. A step, a span or a choice in
+  the popover replaces the history entry; a zoom adds one.
+- **Zoom is opt-in: `zoom`.** It adds Zoom in and Zoom out after the switch, in the expanded plan's
+  order and with its glyphs (`IconZoomIn`, `IconZoomOut`). Zoom in shows the middle half of the
+  window and Zoom out twice it about the same middle, each as a custom window to the second
+  (`zoomIn`, `zoomOut`). Zoom in stops at `ZOOM_FLOOR_MS` (one minute), since under an hour the axis
+  prints seconds. Zoom out has no limit, but a window that would end past the current minute is
+  moved back to end with it, so it holds now. A rolling window is measured from the current minute,
+  as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
+  an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
+  off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
+  are. The Audit Trail passes `zoom`; System › Logs does not.
+- **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
+  setter then adds a history entry (`navigate()` without `replace`). Everything else calls
+  `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
+  argument on.
+- **A drag across the Audit Trail zooms too.** A mouse or pen press on the axis or an empty part of a
+  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`). It is drawn on the
+  axis, on each section heading and in the gridlines layer, as the hatched parts are. The axis words
+  it with `bandWords` ("10:05 – 10:40, 35 min"), and a release sets `bandWindow(start, end,
+  axisMs)`: to the minute on an axis of an hour or more, to the second under one, and never under
+  the floor. A press on a marker or a badge starts no band, so it still opens; nor does touch, so a
+  finger scrolls the page. Escape drops a band, and keeps the key from the drawer. Both functions
+  take times, not pixels, so another timeline's drag can use them.
 - **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
   language setting can pass its own. No date library.
 - **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
