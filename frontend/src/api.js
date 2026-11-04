@@ -2617,20 +2617,6 @@ const apiMethods = {
     }
 
     /**
-     * Latest value per metric for one device, for the Devices page's telemetry drawer.
-     *
-     * Checked before the /config route and the collection route, which would otherwise match
-     * first. Scoped to a single asset so the bounded page is spent on this device; the default
-     * window is 24h because a machine that reports hourly should not appear to have no data.
-     */
-    if (path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/)) {
-      const match = path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/);
-      const url = new URL(path, window.location.origin);
-      const minutes = Number.parseInt(url.searchParams.get('minutes') || '1440', 10);
-      return queryLatestTelemetry({ assetId: match[1], minutes });
-    }
-
-    /**
      * Everything the nameplate editor needs, in one round trip: the template's element list, the
      * stored row, and what the device publishes for itself. The AAS exporter prefers a
      * device-published value over a stored one, so the form shows which fields the device already

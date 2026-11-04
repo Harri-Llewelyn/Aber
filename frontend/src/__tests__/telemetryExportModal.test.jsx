@@ -1,14 +1,12 @@
 /**
- * The per-device telemetry inspector and its CSV export. The behaviour worth pinning is the metric
- * list: declared union observed. Observed-only would drop a metric the moment it stopped reporting,
- * which is the fault an operator is looking for.
+ * The readings CSV export, as History's Export CSV opens it: one device, the metrics the page
+ * charts and the page's window as absolute bounds. The dialog has no range of its own. Raw is the
+ * default, and a bucket average is never substituted silently.
  */
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { TelemetryModal } from '../components/modals/TelemetryModal'
-import { TelemetryExportModal } from '../components/modals/TelemetryExportModal'
-import { PERMISSION_UUIDS, } from '../constants'
+import { TelemetryExportModal, exportWords } from '../components/modals/TelemetryExportModal'
 import { api, TELEMETRY_EXPORT_MAX_ROWS } from '../api'
 import { downloadCSV } from '../utils/downloadCSV'
 
@@ -20,6 +18,7 @@ vi.mock('../api', async () => {
 vi.mock('../utils/downloadCSV', () => ({ downloadCSV: vi.fn() }))
 
 const NOW = Date.parse('2026-08-02T12:00:00Z')
+const HOUR = 60 * 60 * 1000
 
 const device = (overrides = {}) => ({
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000001',
@@ -28,193 +27,13 @@ const device = (overrides = {}) => ({
   ...overrides
 })
 
-const observed = [
-  { time: new Date(NOW - 60_000).toISOString(), asset_id: 'dev1', metric_name: 'Systems/TEMPERATURE', val_double: 42.5, val_string: null, val_bool: null },
-  { time: new Date(NOW - 30_000).toISOString(), asset_id: 'dev1', metric_name: 'Controller/EXECUTION', val_double: null, val_string: 'ACTIVE', val_bool: null }
-]
-
-// The modal reads once on open, with no expand step.
-const showDrawer = async (props = {}) => {
-  render(<TelemetryModal device={device()} hasPermission={() => true} onExport={vi.fn()} onClose={vi.fn()} {...props} />)
-  await waitFor(() => expect(api.get).toHaveBeenCalled())
-}
+/** The dialog over the window [NOW - span, NOW), as History hands it over. */
+const windowProps = (span = HOUR, words = 'Last 1 hour') => ({
+  from: new Date(NOW - span).toISOString(), to: new Date(NOW).toISOString(), windowWords: words,
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.get.mockResolvedValue(observed)
-})
-
-describe('device telemetry modal', () => {
-  it('names the device it is showing, and reads on open', async () => {
-    render(<TelemetryModal device={device()} hasPermission={() => true} onClose={vi.fn()} />)
-
-    expect(screen.getByText(/Telemetry — Simulated_CNC_01/)).toBeInTheDocument()
-    await waitFor(() => expect(api.get).toHaveBeenCalled())
-  })
-
-  it('closes on Escape and on the X, so it is never a trap', async () => {
-    const onClose = vi.fn()
-    render(<TelemetryModal device={device()} hasPermission={() => true} onClose={onClose} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /^close$/i }))
-    expect(onClose).toHaveBeenCalledTimes(1)
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(onClose).toHaveBeenCalledTimes(2)
-  })
-
-  it('queries only this device, not the whole fleet', async () => {
-    await showDrawer()
-
-    const path = api.get.mock.calls[0][0]
-    expect(path).toContain(`/api/v1/devices/${device().asset_id}/telemetry/latest`)
-  })
-
-  it('lists a declared metric that has never reported, as "no data" rather than omitting it', async () => {
-    await showDrawer()
-
-    // Declared and observed.
-    await waitFor(() => expect(screen.getByText('Systems/TEMPERATURE')).toBeInTheDocument())
-    expect(screen.getByText('42.5')).toBeInTheDocument()
-    expect(screen.getByText('ACTIVE')).toBeInTheDocument()
-
-    // Declared, never published -- the case that matters.
-    expect(screen.getByText('OEE/AVAILABILITY')).toBeInTheDocument()
-    expect(screen.getByText('— no data —')).toBeInTheDocument()
-  })
-
-  it('includes an observed metric the device never declared', async () => {
-    api.get.mockResolvedValue([
-      ...observed,
-      { time: new Date(NOW).toISOString(), asset_id: 'dev1', metric_name: 'Undeclared/DRIFT', val_double: 7, val_string: null, val_bool: null }
-    ])
-    await showDrawer()
-
-    await waitFor(() => expect(screen.getByText('Undeclared/DRIFT')).toBeInTheDocument())
-  })
-
-  it('renders a false boolean as a value, not as missing', async () => {
-    // val_bool false is falsy; a truthiness test would report a real reading as "no data".
-    api.get.mockResolvedValue([
-      { time: new Date(NOW).toISOString(), asset_id: 'dev1', metric_name: 'Controller/ESTOP', val_double: null, val_string: null, val_bool: false }
-    ])
-    render(<TelemetryModal device={device({ last_birth_metrics: [] })} hasPermission={() => true} onClose={vi.fn()} />)
-
-    await waitFor(() => expect(screen.getByText('false')).toBeInTheDocument())
-  })
-
-  it('surfaces a failed query instead of an empty table', async () => {
-    api.get.mockRejectedValue(new Error('relation "telemetry" does not exist'))
-    await showDrawer()
-
-    await waitFor(() => expect(screen.getByText(/Telemetry query failed/)).toBeInTheDocument())
-    expect(screen.getByText(/relation "telemetry" does not exist/)).toBeInTheDocument()
-  })
-
-  it('gates on telemetry:read, and says so rather than showing an empty list', async () => {
-    render(
-      <TelemetryModal
-        device={device()}
-        hasPermission={(p) => p !== PERMISSION_UUIDS.TELEMETRY_READ}
-      />
-    )
-
-    await waitFor(() =>
-      expect(screen.getByText(/role does not include telemetry access/i)).toBeInTheDocument()
-    )
-    // An empty table would read as "this device has never reported anything".
-    expect(screen.queryByText('Systems/TEMPERATURE')).not.toBeInTheDocument()
-  })
-})
-
-describe('device telemetry modal: sorting by a column (#801)', () => {
-  const reading = (metric_name, msAgo) => ({
-    time: new Date(NOW - msAgo).toISOString(), asset_id: 'dev1', metric_name, val_double: 1, val_string: null, val_bool: null
-  })
-  const sortable = device({ last_birth_metrics: ['Spindle/Axis 10', 'Spindle/Axis 9', 'Coolant/LEVEL', 'Never/REPORTED'] })
-
-  const open = async () => {
-    api.get.mockResolvedValue([
-      reading('Spindle/Axis 10', 60_000),
-      reading('Spindle/Axis 9', 600_000),
-      reading('Coolant/LEVEL', 5_000),
-    ])
-    render(<TelemetryModal device={sortable} hasPermission={() => true} onClose={vi.fn()} />)
-    await screen.findByText('Never/REPORTED')
-  }
-  /** The metric name on each row, in the order shown; the first cell is the checkbox. */
-  const metrics = () => screen.getAllByRole('row').slice(1).map(r => r.cells[1].textContent)
-  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
-
-  it('sorts metric names in natural order, so Axis 9 comes before Axis 10', async () => {
-    await open()
-    // By default, reported first and then the one that never has.
-    expect(metrics()).toEqual(['Coolant/LEVEL', 'Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED'])
-
-    sortBy('Metric')
-    expect(metrics()).toEqual(['Coolant/LEVEL', 'Never/REPORTED', 'Spindle/Axis 9', 'Spindle/Axis 10'])
-    expect(screen.getByRole('columnheader', { name: 'Metric' })).toHaveAttribute('aria-sort', 'ascending')
-    sortBy('Metric')
-    expect(metrics()).toEqual(['Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED', 'Coolant/LEVEL'])
-    expect(screen.getByRole('columnheader', { name: 'Metric' })).toHaveAttribute('aria-sort', 'descending')
-  })
-
-  it('sorts by when each metric last reported, with one that never has last either way', async () => {
-    await open()
-
-    sortBy('Last Updated')
-    expect(metrics()).toEqual(['Spindle/Axis 9', 'Spindle/Axis 10', 'Coolant/LEVEL', 'Never/REPORTED'])
-    sortBy('Last Updated')
-    expect(metrics()).toEqual(['Coolant/LEVEL', 'Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED'])
-  })
-
-  /** Each row's value is a different metric in its own unit, so they have no order between them. */
-  it('does not offer Latest Value as a sort, and leaves the page address alone', async () => {
-    window.history.replaceState(null, '', '/devices?sort=-name')
-    await open()
-
-    expect(screen.getByRole('columnheader', { name: 'Latest Value' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Latest Value' })).toBeNull()
-    sortBy('Metric')
-    expect(window.location.pathname + window.location.search).toBe('/devices?sort=-name')
-  })
-})
-
-describe('metric selection and export hand-off', () => {
-  it('offers Export CSV only once something is ticked', async () => {
-    await showDrawer()
-    await waitFor(() => expect(screen.getByText('Systems/TEMPERATURE')).toBeInTheDocument())
-
-    expect(screen.queryByRole('button', { name: /Export CSV/i })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByLabelText('Select Systems/TEMPERATURE'))
-    expect(screen.getByRole('button', { name: /Export CSV \(1\)/i })).toBeInTheDocument()
-  })
-
-  it('selects and clears every metric from the header checkbox', async () => {
-    await showDrawer()
-    await waitFor(() => expect(screen.getByText('Systems/TEMPERATURE')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByLabelText('Select all metrics'))
-    expect(screen.getByRole('button', { name: /Export CSV \(3\)/i })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByLabelText('Select all metrics'))
-    expect(screen.queryByRole('button', { name: /Export CSV/i })).not.toBeInTheDocument()
-  })
-
-  it('hands the chosen metric names to the export dialog', async () => {
-    const onExport = vi.fn()
-    await showDrawer({ onExport })
-    await waitFor(() => expect(screen.getByText('Systems/TEMPERATURE')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByLabelText('Select Systems/TEMPERATURE'))
-    fireEvent.click(screen.getByLabelText('Select OEE/AVAILABILITY'))
-    fireEvent.click(screen.getByRole('button', { name: /Export CSV \(2\)/i }))
-
-    expect(onExport).toHaveBeenCalledTimes(1)
-    const [, names] = onExport.mock.calls[0]
-    expect(names.sort()).toEqual(['OEE/AVAILABILITY', 'Systems/TEMPERATURE'])
-  })
 })
 
 describe('telemetry CSV export dialog', () => {
@@ -248,11 +67,11 @@ describe('telemetry CSV export dialog', () => {
   const telemetryCalls = () =>
     api.get.mock.calls.map(c => c[0]).filter(p => !p.startsWith('/api/v1/telemetry/horizons'))
 
-  const openExport = (metricNames = ['Systems/TEMPERATURE']) => {
+  const openExport = (metricNames = ['Systems/TEMPERATURE'], span = HOUR) => {
     const showToast = vi.fn()
     const onClose = vi.fn()
     render(
-      <TelemetryExportModal device={device()} metricNames={metricNames}
+      <TelemetryExportModal device={device()} metricNames={metricNames} {...windowProps(span)}
                             onClose={onClose} showToast={showToast} />
     )
     return { showToast, onClose }
@@ -262,41 +81,42 @@ describe('telemetry CSV export dialog', () => {
 
   beforeEach(() => { mockApi() })
 
-  it('offers the five presets plus a custom range', () => {
-    openExport()
-    for (const label of ['1 minute', '1 hour', '1 day', '7 days', '30 days', 'Custom range']) {
-      expect(screen.getAllByRole('button', { name: label }).length).toBeGreaterThan(0)
-    }
+  it('says what it exports in its first line: the device, the metrics and the window with its bounds', () => {
+    openExport(['Systems/TEMPERATURE', 'OEE/AVAILABILITY'])
+    const words = exportWords({
+      deviceName: 'Simulated_CNC_01', metricNames: ['a', 'b'], windowWords: 'Last 1 hour', ...windowProps(),
+    })
+    expect(words).toMatch(/^Simulated_CNC_01 · 2 metrics · Last 1 hour \(\d{1,2} \w{3,4} \d\d:\d\d – \d{1,2} \w{3,4} \d\d:\d\d\)$/)
+    expect(screen.getByText(words)).toBeInTheDocument()
+    // The page's window is the range: the dialog offers none of its own.
+    expect(screen.queryByRole('button', { name: 'Custom range' })).toBeNull()
+    expect(screen.queryByLabelText('Range start')).toBeNull()
   })
 
-  it('sends absolute bounds derived from the chosen preset', async () => {
+  it('reads exactly the window it is handed, each metric in turn', async () => {
     const { showToast } = openExport()
-
-    fireEvent.click(screen.getAllByRole('button', { name: '1 hour' })[0])
     runExport()
 
     await waitFor(() => expect(telemetryCalls()).not.toHaveLength(0))
     const url = new URL(telemetryCalls()[0], 'http://x')
     expect(url.searchParams.get('metric_name')).toBe('Systems/TEMPERATURE')
-    expect(url.searchParams.get('from')).toBeTruthy()
-    expect(url.searchParams.get('to')).toBeTruthy()
+    expect(url.searchParams.get('from')).toBe(new Date(NOW - HOUR).toISOString())
+    expect(url.searchParams.get('to')).toBe(new Date(NOW).toISOString())
     // Nothing to write, so it reports rather than downloading an empty file. The last hour IS
     // within every horizon, so the plain sentence is the true one here.
-    await waitFor(() => expect(screen.getByText(/No telemetry in that range/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/No telemetry in that window/)).toBeInTheDocument())
     expect(downloadCSV).not.toHaveBeenCalled()
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('refuses a custom range whose start is after its end', async () => {
-    openExport()
-    fireEvent.click(screen.getByRole('button', { name: 'Custom range' }))
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-02T12:00' } })
-    fireEvent.change(screen.getByLabelText('Range end'),   { target: { value: '2026-08-01T12:00' } })
-    runExport()
-
-    await waitFor(() =>
-      expect(screen.getByText(/start time must be before the end time/i)).toBeInTheDocument()
+  it('refuses a window that does not start before it ends, and reads nothing', async () => {
+    render(
+      <TelemetryExportModal device={device()} metricNames={['Systems/TEMPERATURE']}
+        from={new Date(NOW).toISOString()} to={new Date(NOW - HOUR).toISOString()} windowWords="Custom range"
+        onClose={vi.fn()} showToast={vi.fn()} />
     )
+    runExport()
+    await waitFor(() => expect(screen.getByText(/must start before it ends/i)).toBeInTheDocument())
     expect(telemetryCalls()).toHaveLength(0)
   })
 
@@ -352,7 +172,7 @@ describe('telemetry CSV export dialog', () => {
     expect(rows[0].time).toContain('RESOLUTION')
     expect(rows[1].time).toContain('TRUNCATED')
     // Carried in the FILE, not only in a dialog that is gone once dismissed.
-    expect(rows[1].asset_id).toContain('narrow the range')
+    expect(rows[1].asset_id).toContain('narrow the window')
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('truncated'), 'error')
   }, 20000)
 })
@@ -384,11 +204,12 @@ describe('telemetry export resolution', () => {
   const telemetryCalls = () =>
     api.get.mock.calls.map(c => c[0]).filter(p => !p.startsWith('/api/v1/telemetry/horizons'))
 
-  const open = async (metricNames = ['Systems/TEMPERATURE']) => {
+  /** The dialog over a window starting `days` ago, which is how an old-range export is asked for. */
+  const open = async ({ metricNames = ['Systems/TEMPERATURE'], days = null } = {}) => {
     const showToast = vi.fn()
     const onClose = vi.fn()
     render(
-      <TelemetryExportModal device={device()} metricNames={metricNames}
+      <TelemetryExportModal device={device()} metricNames={metricNames} {...windowProps(days === null ? HOUR : days * DAY)}
                             onClose={onClose} showToast={showToast} />
     )
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/v1/telemetry/horizons'))
@@ -396,14 +217,6 @@ describe('telemetry export resolution', () => {
   }
 
   const runExport = () => fireEvent.click(screen.getByRole('button', { name: /^Export CSV$/i }))
-
-  /** A custom range starting `days` ago, which is how an old-range export is asked for. */
-  const setCustomRangeStarting = (days) => {
-    const iso = (t) => new Date(t).toISOString().slice(0, 16)
-    fireEvent.click(screen.getByRole('button', { name: 'Custom range' }))
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: iso(NOW - days * DAY) } })
-    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: iso(NOW) } })
-  }
 
   const picker = () => screen.getByRole('group', { name: /export resolution/i })
 
@@ -433,8 +246,7 @@ describe('telemetry export resolution', () => {
   })
 
   it('warns when the range starts before the chosen resolution reaches, and names the finest that covers it', async () => {
-    await open()
-    setCustomRangeStarting(120)   // raw stops at 90 days; the 1-minute rollup runs to 180
+    await open({ days: 120 })
 
     await waitFor(() =>
       expect(screen.getByText(/starts before raw telemetry begins/i)).toBeInTheDocument()
@@ -445,8 +257,7 @@ describe('telemetry export resolution', () => {
   })
 
   it('does not warn when the range is inside the raw horizon', async () => {
-    await open()
-    setCustomRangeStarting(30)
+    await open({ days: 30 })
     await waitFor(() =>
       expect(screen.queryByText(/starts before raw telemetry/i)).not.toBeInTheDocument()
     )
@@ -454,15 +265,13 @@ describe('telemetry export resolution', () => {
 
   it('never warns when the horizons lookup did not answer, rather than refusing on its own ignorance', async () => {
     mockApi({ horizons: {} })
-    await open()
-    setCustomRangeStarting(5000)
+    await open({ days: 5000 })
     await waitFor(() => expect(within(picker()).getAllByText(/reach unknown/).length).toBe(4))
     expect(screen.queryByText(/starts before/i)).not.toBeInTheDocument()
   })
 
   it('the switch button selects that resolution and sends it on the wire', async () => {
-    await open()
-    setCustomRangeStarting(120)
+    await open({ days: 120 })
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /switch to 1 minute/i })).toBeInTheDocument()
     )
@@ -477,8 +286,7 @@ describe('telemetry export resolution', () => {
   it('an empty result past the horizon blames the retention policy, not the device', async () => {
     // THE SENTENCE THIS ISSUE IS ABOUT. "No telemetry in that range" sends the reader to look for
     // a fault in a device that was reporting perfectly well.
-    await open()
-    setCustomRangeStarting(120)
+    await open({ days: 120 })
     runExport()
 
     await waitFor(() =>
@@ -489,8 +297,7 @@ describe('telemetry export resolution', () => {
   })
 
   it('says so plainly when no resolution reaches back that far', async () => {
-    await open()
-    setCustomRangeStarting(5000)
+    await open({ days: 5000 })
     runExport()
     await waitFor(() =>
       expect(screen.getByText(/before any resolution still holds data/i)).toBeInTheDocument()

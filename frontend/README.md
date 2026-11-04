@@ -886,8 +886,8 @@ Value, Actions), header row and all, so the two read alike.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
-  error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
-  inspector (`modals/TelemetryModal.jsx`) by subscribing it.**
+  error — it silently emits nothing, which is the worse failure. **Do not "fix" History's charts
+  (`tabs/HistoryDevice.jsx`) by subscribing them**: they read again on Refresh and on its timer.
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in the
   gap and the client is not told. The 60 s poll is also the only path carrying the exponential
   backoff, and the only one that reports a refresh's outcome (see **When the dashboard stops
@@ -1176,7 +1176,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis. `TelemetryModal` keeps the latest values |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1411,6 +1411,15 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   it outlasts a change of device. `usePolling` runs it only while the window reaches now
   (`holdsNow()`); for a window that has ended the interval half is off with the reason. A read in
   flight keeps the charts on screen, and only the newest read lands.
+- **Export CSV** (`filter-bar-actions`, after Clear filters and before Refresh, as the Audit
+  Trail places its own) opens `TelemetryExportModal` with what the page shows: the device, the
+  metrics chosen and the window, resolved to ISO bounds as it opens and named in its first line
+  (`exportWords()`). The dialog has no range of its own. It pages `/api/v1/telemetry` per metric
+  up to `TELEMETRY_EXPORT_MAX_ROWS` (50,000) across them, raw by default and never a rollup in
+  its place: it labels each resolution with its horizon and warns, with the finest that covers
+  it, when the window starts before the one chosen. The file's first line names the resolution.
+  An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
+  History replaced.
 - **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.

@@ -40,8 +40,6 @@ import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
-import { TelemetryExportModal } from '../modals/TelemetryExportModal'
-import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
   DEVICE_STATUS,
@@ -74,7 +72,6 @@ import {
   IconPencil,
   IconArchive,
   IconRefreshCw,
-  IconActivity,
   IconHistory,
   IconClipboardList,
   IconBookOpen,
@@ -160,9 +157,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // row beside it kept updating. Resolved against `assets` every render. In the address as
   // `?device=`, so a link can open one device.
   const [selectedId, setSelectedId] = useUrlState('device', '', { allowed: loading ? null : assets.map(a => a.asset_id) })
-  // The device whose telemetry inspector is open, or null. A modal, because the inspector is a
-  // four-column table and the drawer is too narrow for one.
-  const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
   // Bumped when EntityLinksModal closes; the telemetry and catalog read below keys on it, since a
   // document edit is a reasonable moment to re-read.
@@ -171,8 +165,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // issued id, as telemetry.asset_id is, never on the id a device publishes under.
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
   const [catalog, setCatalog] = useState([])
-  // { device, metricNames } while the telemetry CSV export dialog is open.
-  const [exportTelemetry, setExportTelemetry] = useState(null)
   // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
   // `cell_id` starts empty, meaning inherit from the gateway.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
@@ -1498,22 +1490,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {docsForDevice && (
         <EntityLinksModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
       )}
-      {telemetryFor && (
-        <TelemetryModal
-          device={telemetryFor}
-          hasPermission={hasPermission}
-          onExport={(dev, names) => setExportTelemetry({ device: dev, metricNames: names })}
-          onClose={() => setTelemetryFor(null)}
-        />
-      )}
-      {exportTelemetry && (
-        <TelemetryExportModal
-          device={exportTelemetry.device}
-          metricNames={exportTelemetry.metricNames}
-          onClose={() => setExportTelemetry(null)}
-          showToast={showToast}
-        />
-      )}
       {/* The bundle is withheld from a replay lane, which is a recording of an asset rather than
           one, and from a reader without `audit_trail:read`: the bundle carries the trail, and
           aas-export refuses it on the same permission. */}
@@ -1755,16 +1731,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: 'Open the approvals queue, filtered to this device'
           },
           {
-            // A modal, not a section of this panel: the inspector is a four-column table.
-            label: 'View Telemetry', icon: <IconActivity size={13} />,
-            onClick: () => setTelemetryFor(selectedDevice),
-            title: "Open this device's metrics with their latest values"
-          },
-          {
-            // The device's readings over time, a chart a metric; the modal above keeps the latest.
+            // The device's readings over time, a chart a metric with its latest reading, and their
+            // CSV export.
             label: 'View History', icon: <IconChartLine size={13} />,
             to: deviceHistoryUrl(selectedDevice.asset_id),
-            title: "Chart this device's readings over time on the History page"
+            title: "Chart this device's readings over time on the History page, and export them"
           },
           {
             // A read of what the device declared at birth: not gated on device:manage and not

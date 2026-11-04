@@ -71,6 +71,25 @@ The page picks the smallest size that keeps one read to at most 5,000 points. A 
 
 When even 1-day buckets would be too many for all the metrics at once, the page reads them in parts and says so. A window too long for one metric in 1-day buckets is not charted, and the page asks for a shorter one.
 
+## Exporting readings
+
+1. Choose the device, the window and the metrics, as above. The export saves what the charts show.
+2. Select **Export CSV** in the toolbar. The dialog's first line says what it will save, for example **Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)**. The times are fixed when the dialog opens.
+3. Choose the **Resolution**, then select **Export CSV** in the dialog. The file downloads.
+
+The resolutions:
+
+- **Raw samples**, the one the dialog starts on, is every reading as the machine sent it.
+- **1 minute**, **5 minutes** and **1 hour** are summaries: each period's average, lowest, highest and last reading. The file's first line names the resolution, because the file is what gets passed on.
+
+Each resolution says how far back it has data, because raw readings are kept for much less time than the summaries. If the window starts before the resolution you chose begins, the dialog says so, names the finest resolution that covers the whole window, and offers to switch. It never swaps in a summary by itself.
+
+**Buckets** changes only the charts. The export has its own **Resolution**.
+
+An export holds at most 50,000 rows, shared across the metrics. Once it reaches that, the later metrics are left out, and the dialog and the file's first lines say so.
+
+Exporting needs permission to read telemetry. Without it, **Export CSV** is off and names the roles that have it.
+
 ## What the states mean
 
 - **Loading readings…** means the page is reading the device's metrics. A long window takes longer.
@@ -78,4 +97,4 @@ When even 1-day buckets would be too many for all the metrics at once, the page 
 - **No device answers to this address** means the link names a device that no longer exists. Select **Choose another device**.
 - **This device has declared no metrics** means it has not started up since it was registered, and no schema attached to it lists any metric.
 
-Nothing on this page changes anything. To see each metric's newest reading, use **View Telemetry** on the device's panel on the Devices page.
+Nothing on this page changes anything.

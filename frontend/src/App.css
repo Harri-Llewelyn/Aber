@@ -5859,6 +5859,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-device-place { font-size: 11px; color: var(--text-muted); }
 .history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
 .history-picker-badge { margin-left: 8px; }
+/* The export dialog's first line: the device, the metrics and the window it exports. */
+.telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
 /* Buckets: its size in the toolbar, its choices a column in the popover. */
 .history-bucket-pick { justify-content: flex-start; min-width: 0; }
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }

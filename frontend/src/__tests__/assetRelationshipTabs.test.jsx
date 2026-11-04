@@ -224,8 +224,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
   })
 })
 
-// Paging a fleet-wide stream has no equivalent in the per-device telemetry modal, which shows the
-// latest value per metric and defers history to the CSV export. See telemetryModal.test.jsx.
+// A device's readings over time, their latest values and their CSV export are History's; see
+// historyPage.test.jsx and telemetryExportModal.test.jsx.
 
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.

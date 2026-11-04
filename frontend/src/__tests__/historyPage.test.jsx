@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
 import { momentWords } from '../utils/history'
+import { PERMISSION_UUIDS } from '../constants'
 
 const { plots, polls } = vi.hoisted(() => ({ plots: [], polls: [] }))
 
@@ -86,9 +87,10 @@ const readings = ({ from, bucketMinutes, metricNames }) => {
   }))))
 }
 
-const visit = async (address) => {
+/** Every permission unless a test says otherwise: Export CSV needs telemetry:read. */
+const visit = async (address, { hasPermission = () => true } = {}) => {
   window.history.pushState({}, '', address)
-  render(<HistoryTab />)
+  render(<HistoryTab hasPermission={hasPermission} showToast={vi.fn()} />)
   await waitFor(() => expect(screen.queryByText(/Loading devices/)).not.toBeInTheDocument())
 }
 
@@ -503,5 +505,81 @@ describe('a state chart', () => {
     await open()
     const img = screen.getByRole('img', { name: 'Controller/EXECUTION' })
     expect(img).toHaveAccessibleDescription(/Time in each value: RUNNING \d+%, IDLE \d+%\./)
+  })
+})
+
+describe('exporting the readings shown', () => {
+  const exportButton = () => screen.getByRole('button', { name: /Export CSV/ })
+  const csvReads = () => api.get.mock.calls.map(c => c[0]).filter(p => p.startsWith('/api/v1/telemetry?'))
+
+  it('sits after Clear filters and before the refresh control, as the Audit Trail places its Export CSV', async () => {
+    await visit(`/history/device/${LATHE}?range=7d`)
+    const actions = document.querySelector('.filter-bar-actions')
+    const order = [...actions.querySelectorAll('button, [role="group"]')]
+      .filter(el => !el.closest('[role="group"]') || el.getAttribute('role') === 'group')
+      .map(el => el.getAttribute('aria-label') || el.textContent.trim())
+    expect(order).toEqual(['✕ Clear filters (1)', 'Export CSV', 'Refresh'])
+    expect(exportButton()).toHaveClass('btn-primary')
+  })
+
+  it('exports this device, the metrics chosen and the window, at the bounds it has as it opens', async () => {
+    await visit(`/history/device/${LATHE}?metric=Spindle/SPEED`)
+    await screen.findAllByRole('figure')
+    const before = Date.now()
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings/ })
+    expect(within(dialog).getByText(/^Lathe 3 · 1 metric · Last 24 hours \(.+ – .+\)$/)).toBeInTheDocument()
+    expect(within(dialog).getByText('Spindle/SPEED')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Spindle/LOAD')).toBeNull()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(csvReads()).toHaveLength(1))
+    const query = new URL(csvReads()[0], 'http://x').searchParams
+    expect(query.get('asset_id')).toBe(LATHE)
+    expect(query.get('metric_name')).toBe('Spindle/SPEED')
+    const from = Date.parse(query.get('from'))
+    const to = Date.parse(query.get('to'))
+    expect(to - from).toBe(24 * 60 * 60 * 1000)
+    expect(to).toBeGreaterThanOrEqual(before)
+    expect(to).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('exports raw readings by default, never a bucket average in their place', async () => {
+    await visit(`/history/device/${LATHE}?bucket=1h`)
+    await screen.findAllByRole('figure')
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings/ })
+    expect(within(dialog).getByRole('button', { name: /Raw samples/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(csvReads()).toHaveLength(2))
+    expect(csvReads().every(p => !new URL(p, 'http://x').searchParams.has('resolution'))).toBe(true)
+  })
+
+  it('exports a past window to its own bounds', async () => {
+    await visit(`/history/device/${LATHE}?span=day&at=2026-11-02&metric=Spindle/LOAD`)
+    await screen.findAllByRole('figure')
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings/ })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(csvReads()).toHaveLength(1))
+    const query = new URL(csvReads()[0], 'http://x').searchParams
+    expect(query.get('from')).toBe(new Date(2026, 10, 2).toISOString())
+    expect(query.get('to')).toBe(new Date(2026, 10, 3).toISOString())
+  })
+
+  it('is offered but off without telemetry:read, saying who may', async () => {
+    await visit(`/history/device/${LATHE}`, { hasPermission: (p) => p !== PERMISSION_UUIDS.TELEMETRY_READ })
+    await screen.findAllByRole('figure')
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription(/^Exporting readings needs telemetry access\. Requires /)
+    fireEvent.click(exportButton())
+    expect(screen.queryByRole('dialog', { name: /Export readings/ })).toBeNull()
+  })
+
+  it('is off for a device with no metric', async () => {
+    await visit(`/history/device/${PRESS}`)
+    await screen.findByText(/declared no metrics/)
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription('This device has no metric to export.')
   })
 })

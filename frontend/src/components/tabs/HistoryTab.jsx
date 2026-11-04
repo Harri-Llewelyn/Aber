@@ -75,10 +75,10 @@ function DevicePicker({ devices, search, win }) {
 /**
  * The History page: a site's readings over time. Its one tab is Device, each metric of one device
  * charted over the window the time control sets. Ungated, as the Site Map is: what it charts is
- * what the telemetry views let the viewer read. The address names the device and the window
- * (`/history/device/<id>?range=24h`); `/history` picks a device.
+ * what the telemetry views let the viewer read; its Export CSV needs `telemetry:read`. The address
+ * names the device and the window (`/history/device/<id>?range=24h`); `/history` picks a device.
  */
-export function HistoryTab() {
+export function HistoryTab({ hasPermission, showToast }) {
   const url = useUrl()
   const { deviceId } = historyPath(pathSegments(url))
   const [win, setWin] = useTimeWindow({ ranges: HISTORY_RANGES, fallback: DEFAULT_HISTORY_WINDOW, spans: HISTORY_SPANS })
@@ -137,6 +137,8 @@ export function HistoryTab() {
                 setWin={setWin}
                 every={every}
                 setEvery={setEvery}
+                hasPermission={hasPermission}
+                showToast={showToast}
               />
             ) : (
               <EmptyState icon={<IconCpu size={36} />} message="No device answers to this address. It may have been deleted.">

@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
+import { PERMISSION_UUIDS } from '../../constants'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { TimeSeriesChart } from '../common/TimeSeriesChart'
 import { RefreshButton } from '../common/RefreshButton'
 import { ClearFilters } from '../common/ClearFilters'
+import { ActionButton } from '../common/ActionButton'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { FilterDropdown } from '../common/FilterChecklist'
 import { Tooltip } from '../common/Tooltip'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
-import { IconChartLine, IconCpu } from '../common/Icons'
+import { IconChartLine, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
@@ -120,9 +124,10 @@ function metaWords({ names, total, resolution, refused }) {
  * The page says which resolution it shows. A read is made again when the device, the window, the
  * metrics or the buckets change, on Refresh, and on the refresh timer while the window reaches
  * now; never on a re-render. `every` is the timer, in seconds, held by the page so it outlasts a
- * change of device.
+ * change of device. Export CSV downloads what the page shows: this device, the metrics chosen and
+ * the window, resolved to its bounds as it opens, for a role with `telemetry:read`.
  */
-export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery }) {
+export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, hasPermission, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const metrics = useMemo(() => deviceMetrics(device, schemas), [device, schemas])
@@ -132,6 +137,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   const [bucket, setBucket] = useUrlState('bucket', 'auto', { allowed: HISTORY_BUCKETS })
   const names = useMemo(() => (chosen.length ? metrics.filter(m => chosen.includes(m)) : metrics), [metrics, chosen])
   const [reading, setReading] = useState(null)
+  const [exporting, setExporting] = useState(null)
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
 
@@ -199,6 +205,17 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     ? pickResolution(shownStart.getTime(), shownEnd.getTime(), names.length)
     : null
 
+  const canExport = hasPermission?.(PERMISSION_UUIDS.TELEMETRY_READ) ?? false
+  const exportBlocked = names.length === 0
+    ? 'This device has no metric to export.'
+    : !(shownStart && shownEnd && shownEnd > shownStart) ? 'Set both ends of the custom range to export it.' : null
+  /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
+  const openExport = () => {
+    const at = Date.now()
+    const { start, end } = windowBounds(win, at)
+    setExporting({ names, from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at) })
+  }
+
   const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), chosen.length > 0, bucket !== 'auto'].filter(Boolean).length
   const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(ALL_METRICS); setBucket('auto') }
 
@@ -243,6 +260,16 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         <BucketChoice value={bucket} options={bucketOptions(auto)} onChange={setBucket} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canExport}
+            deniedTitle={`Exporting readings needs telemetry access. ${requiresRolesTitle(PERMISSION_UUIDS.TELEMETRY_READ)}.`}
+            disabled={Boolean(exportBlocked)}
+            title={exportBlocked ?? 'Download the readings of the metrics shown, over this window, as CSV'}
+            onClick={openExport}
+          >
+            <IconDownload size={13} aria-hidden="true" /> Export CSV
+          </ActionButton>
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -291,6 +318,18 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             ))}
           </div>
         </>
+      )}
+
+      {exporting && (
+        <TelemetryExportModal
+          device={device}
+          metricNames={exporting.names}
+          from={exporting.from}
+          to={exporting.to}
+          windowWords={exporting.windowWords}
+          onClose={() => setExporting(null)}
+          showToast={showToast}
+        />
       )}
     </>
   )
