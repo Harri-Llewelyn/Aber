@@ -251,12 +251,18 @@ class TheColumns(AcknowledgementBase):
 
 class TheChecks(AcknowledgementBase):
     def write(self, **columns):
+        """Write the five columns as the owner, past the functions; a column not named is NULL."""
         alert = self.upsert()
-        sets = ", ".join(f"{c} = %({c})s" for c in columns)
         self.cur.execute("SAVEPOINT direct;")
         try:
-            self.cur.execute(f"UPDATE public.platform_alerts SET {sets} WHERE id = %(id)s;",
-                             {**columns, "id": alert})
+            self.cur.execute(
+                "UPDATE public.platform_alerts"
+                "   SET acknowledged_at = %(acknowledged_at)s, acknowledged_by = %(acknowledged_by)s,"
+                "       acknowledged_by_email = %(acknowledged_by_email)s,"
+                "       acknowledgement_reason = %(acknowledgement_reason)s,"
+                "       acknowledgement_note = %(acknowledgement_note)s"
+                " WHERE id = %(id)s;",
+                {**{c: None for c in ACK_COLUMNS}, **columns, "id": alert})
         except psycopg2.Error:
             self.cur.execute("ROLLBACK TO SAVEPOINT direct;")
             raise

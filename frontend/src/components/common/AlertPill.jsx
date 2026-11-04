@@ -109,7 +109,7 @@ export function AlertPill({
   return (
     <div className="alert-pill-wrap" ref={wrapRef}>
       <Tooltip text={healthy
-        ? `${stillFiring || 'No alerts are firing.'}`
+        ? (stillFiring.trim() || 'No alerts are firing.')
         : `${critical ? `${critical} critical. ` : ''}${stillFiring}Open the list for detail.`}>
         <button
           className={`alert-pill ${tone}`}
@@ -290,7 +290,7 @@ function AcknowledgementLine({ alert, canAcknowledge, canWithdraw, onAcknowledge
   }
   const who = alert.acknowledged_by_email || 'someone'
   return (
-    <div className="alert-pill-ack alert-pill-ack-done">
+    <div className="alert-pill-ack">
       <div className="alert-pill-ack-words">
         <IconCheck size={12} className="alert-pill-ack-tick" aria-hidden="true" />
         <span>

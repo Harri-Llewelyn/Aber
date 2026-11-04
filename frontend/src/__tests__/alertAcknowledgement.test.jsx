@@ -71,7 +71,7 @@ describe('the counter counts only what nobody has acknowledged', () => {
     expect(pill()).toHaveClass('alert-pill-healthy')
     expect(pill()).toHaveTextContent('')
     expect(pill()).toHaveAccessibleName('No unacknowledged firing alerts')
-    expect(tooltipOf(pill())).toBe('1 acknowledged alert is still firing. ')
+    expect(tooltipOf(pill())).toBe('1 acknowledged alert is still firing.')
   })
 
   it('is what App hands the title and the favicon', () => {

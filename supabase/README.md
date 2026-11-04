@@ -3074,6 +3074,9 @@ write here is, so it goes through a function and the Audit Trail records it.
   `platform_alerts_acknowledgement_is_whole` keeps the time, the person and the reason together.
 - **The email is stamped from the token**, as `0222` stamps a decider's. Every reader of the alert
   sees who acknowledged it, and `display_names_for()` names nobody for this.
+- **An Operator's second write.** Filing a proposal was the first ([The approvals queue](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)),
+  and this is not a write to an asset table either: it marks an alert, through one function, and
+  every asset table's write policies are unchanged.
 - **`acknowledge_alert(p_alert_id, p_reason, p_note)`** is `SECURITY DEFINER`. An Operator, a
   Shopfloor Manager or an Administrator may call it; every other caller is `42501`, a machine
   identity included, since `user_roles` gives one no role. It checks the select policy's own
