@@ -6007,6 +6007,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-device-place { font-size: 11px; color: var(--text-muted); }
 .history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
 .history-picker-badge { margin-left: 8px; }
+/* What the device page shows under its toolbar; its width sets the text charts' buckets. */
+.history-body { min-width: 0; }
 /* The export dialog's first line: the device, the metrics and the window it exports. */
 .telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
 /* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a

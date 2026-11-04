@@ -23,9 +23,9 @@ import { useBandDrag } from '../../hooks/useBandDrag'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
-  DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS,
-  TOO_MANY_BUCKETS, bucketOptions, bucketStarts, chartSeries, chartSummary, deviceMatches, deviceMetrics, inReads,
-  pickResolution, pickedAddress, resolutionFor, validRanges,
+  DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
+  HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, chartSeries, chartSummary, datatypeKind, deviceMatches,
+  deviceMetrics, inReads, pickResolution, pickedAddress, readPlan, readableResolution, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -117,12 +117,21 @@ const CHART_BAND = { track: '.u-over, .chart-box-states' }
 /** No metric chosen: every metric is charted. Hoisted: useUrlList's default is compared, not copied. */
 const ALL_METRICS = Object.freeze([])
 
-/** The status line: how many metrics are charted, of how many, and in which buckets. */
-function metaWords({ names, total, resolution, refused }) {
+/**
+ * The status line: how many metrics are charted, of how many, in which buckets, and the text
+ * charts' when they read apart in others.
+ */
+function metaWords({ names, total, groups, refused, reads }) {
   const count = names.length < total ? `${names.length} of ${total} metrics` : `${total} metric${total === 1 ? '' : 's'}`
+  const main = groups.find(g => !g.text) ?? groups[0]
+  const text = groups.find(g => g.text && g !== main && g.resolution.id !== main.resolution.id)
   const why = refused ? `: ${refused.words} are too many for this window` : ''
-  return `${count}, in ${resolution.words}${why}`
+  const parts = reads > groups.length ? `, read in ${reads} parts` : ''
+  return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}`
 }
+
+/** How long a change of width settles before the text charts' buckets are picked again. */
+const WIDTH_SETTLE_MS = 300
 
 /**
  * The Device tab with a device chosen: one chart per metric over the window, stacked on one time
@@ -144,15 +153,29 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   const metrics = useMemo(() => deviceMetrics(device, schemas), [device, schemas])
   const ranges = useMemo(() => validRanges(device, schemas), [device, schemas])
   const units = useMemo(() => unitsOf(catalog), [catalog])
+  const kinds = useMemo(() => new Map((catalog || []).map(m => [m.name, datatypeKind(m.datatype)])), [catalog])
   const [chosen, setChosen] = useUrlList('metric', ALL_METRICS, { allowed: metrics })
   const [bucket, setBucket] = useUrlState('bucket', 'auto', { allowed: HISTORY_BUCKETS })
   const names = useMemo(() => (chosen.length ? metrics.filter(m => chosen.includes(m)) : metrics), [metrics, chosen])
   const [reading, setReading] = useState(null)
   const [exporting, setExporting] = useState(null)
+  const bodyRef = useRef(null)
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
 
+  const textNames = useMemo(() => new Set(names.filter(n => kinds.get(n) === 'text')), [names, kinds])
+
+  /** The width a strip is drawn at: a chart's, else the page's less its insets, else a default. */
+  const chartPx = () => {
+    const body = bodyRef.current
+    const box = body?.querySelector('.chart-box')
+    const inset = body ? parseFloat(getComputedStyle(body).getPropertyValue('--inset')) || 16 : 0
+    const width = box?.clientWidth || (body ? body.clientWidth - 2 * inset : 0)
+    return width > 0 ? width : DEFAULT_CHART_PX
+  }
+
   const namesKey = names.join('\n')
+  const textKey = [...textNames].join('\n')
   const windowKey = JSON.stringify(win)
   const read = useCallback(async (signal) => {
     const id = ++latestRead.current
@@ -162,25 +185,27 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       setReading({ problem: 'Set both ends of the custom range to chart it.' })
       return
     }
-    const { resolution, refused } = resolutionFor(start.getTime(), end.getTime(), names.length, bucket)
-    if (!resolution) {
+    const plan = readPlan(start.getTime(), end.getTime(), { names, textNames, bucket, widthPx: chartPx() })
+    if (plan.problem) {
       setReading({ problem: 'This window is too long to chart. At 1-day buckets, one metric would need more buckets than one read may carry. Choose a shorter window.' })
       return
     }
-    const span = { start: start.getTime(), end: end.getTime(), resolution, refused, at, names, windowText: windowWords(win, at) }
+    const { groups, refused } = plan
+    const resolutionOf = new Map(groups.flatMap(g => g.names.map(n => [n, g.resolution])))
+    const span = { start: start.getTime(), end: end.getTime(), groups, resolutionOf, refused, at, names, windowText: windowWords(win, at) }
     if (names.length === 0) {
       setReading({ ...span, byMetric: new Map(), reads: 0 })
       return
     }
     setReading(r => ({ ...(r?.byMetric ? r : {}), loading: true }))
-    const reads = inReads(names, resolution.perRead)
+    const reads = groups.flatMap(g => inReads(g.names, g.resolution.perRead).map(part => ({ part, resolution: g.resolution })))
     try {
-      const parts = await Promise.all(reads.map(group => api.readCarriedTelemetry({
+      const parts = await Promise.all(reads.map(({ part, resolution }) => api.readCarriedTelemetry({
         from: start.toISOString(),
         to: end.toISOString(),
         bucketMinutes: resolution.minutes,
         assetIds: [device.asset_id],
-        metricNames: group,
+        metricNames: part,
       }, { signal })))
       if (id !== latestRead.current) return
       const byMetric = new Map()
@@ -198,13 +223,36 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     }
     // The window and the metrics by value: a new object of the same window is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.asset_id, namesKey, windowKey, bucket])
+  }, [device.asset_id, namesKey, textKey, windowKey, bucket])
 
   useEffect(() => {
     const controller = new AbortController()
     read(controller.signal).catch(() => {})
     return () => controller.abort()
   }, [read])
+
+  // The page's width, once a change of it settles, for the text charts' buckets under Auto.
+  const [settledPx, setSettledPx] = useState(null)
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || typeof ResizeObserver !== 'function') return undefined
+    let timer = null
+    const watcher = new ResizeObserver(() => {
+      clearTimeout(timer)
+      timer = setTimeout(() => setSettledPx(chartPx()), WIDTH_SETTLE_MS)
+    })
+    watcher.observe(body)
+    return () => { watcher.disconnect(); clearTimeout(timer) }
+  }, [])
+  // A width that changes the text charts' buckets reads them again; any other width reads nothing.
+  useEffect(() => {
+    const text = reading?.groups?.find(g => g.text)
+    if (settledPx === null || !text) return
+    const pick = readableResolution(reading.start, reading.end, text.names.length, settledPx)
+    if (pick && pick.id !== text.resolution.id) read().catch(() => {})
+    // On a settled width only: a new read settles `reading` and must not re-pick by itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settledPx])
 
   // The timer runs only while the window reaches now: an ended window cannot gain a reading.
   const live = holdsNow(win, now)
@@ -230,25 +278,25 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), chosen.length > 0, bucket !== 'auto'].filter(Boolean).length
   const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(ALL_METRICS); setBucket('auto') }
 
-  const starts = useMemo(
-    () => (reading?.byMetric ? bucketStarts(reading.start, reading.end, reading.resolution.minutes) : []),
-    [reading]
-  )
   const charts = useMemo(() => {
     if (!reading?.byMetric) return []
+    // Each resolution's bucket starts, once: the text charts may read at their own.
+    const startsOf = new Map(reading.groups.map(g => [g.resolution.id, bucketStarts(reading.start, reading.end, g.resolution.minutes)]))
     return reading.names.map(name => {
+      const resolution = reading.resolutionOf.get(name)
+      const starts = startsOf.get(resolution.id)
       const series = chartSeries(reading.byMetric.get(name) || [], starts)
       const unit = units.get(name) ?? null
       const validRange = ranges.get(name) ?? null
       return {
-        name, unit, series, validRange,
+        name, unit, series, validRange, resolution, starts,
         summary: chartSummary({
-          metric: name, unit, windowText: reading.windowText, resolution: reading.resolution, series, validRange, starts,
+          metric: name, unit, windowText: reading.windowText, resolution, series, validRange, starts,
           span: { start: reading.start, end: reading.end, now: reading.at },
         }),
       }
     })
-  }, [reading, starts, units, ranges])
+  }, [reading, units, ranges])
 
   const busy = Boolean(reading?.loading) || reading === null
 
@@ -306,6 +354,8 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         </div>
       </div>
 
+      {/* Measured for the text charts' bucket width (chartPx). */}
+      <div className="history-body" ref={bodyRef}>
       {reading?.problem ? (
         <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
       ) : reading?.error ? (
@@ -320,8 +370,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       ) : (
         <>
           <p className="history-meta" role="status">
-            {metaWords({ names: reading.names, total: metrics.length, resolution: reading.resolution, refused: reading.refused })}
-            {reading.reads > 1 && `, read in ${reading.reads} parts`}
+            {metaWords({ names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads })}
             {reading.loading && ' · reading again…'}
           </p>
           {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
@@ -331,12 +380,12 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                 key={c.name}
                 metric={c.name}
                 unit={c.unit}
-                starts={starts}
+                starts={c.starts}
                 series={c.series}
                 start={reading.start}
                 end={reading.end}
                 now={now}
-                minutes={reading.resolution.minutes}
+                minutes={c.resolution.minutes}
                 validRange={c.validRange}
                 summary={c.summary}
                 syncKey={`history-${device.asset_id}`}
@@ -346,6 +395,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           </div>
         </>
       )}
+      </div>
 
       {exporting && (
         <TelemetryExportModal

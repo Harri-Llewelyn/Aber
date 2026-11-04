@@ -49,11 +49,14 @@ const devices = [
   { asset_id: LATHE, asset_name: 'Lathe 3', effective_cell_id: 'c1', last_birth_metrics: ['Spindle/LOAD', 'Spindle/SPEED'], submodel_schema_ids: ['s1'] },
   { asset_id: PRESS, asset_name: 'Press 1', effective_cell_id: 'c1', last_birth_metrics: [] },
   { asset_id: MILL, asset_name: 'Mill 2', last_birth_metrics: ['Coolant/TEMP', 'Spindle/LOAD'] },
-  { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Controller/EXECUTION'] },
+  { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Arm/TORQUE', 'Controller/EXECUTION'] },
   { asset_id: '2b3e0c4a-3333-4000-8000-000000000003', asset_name: 'Stranger', is_quarantined: true },
 ]
 const schemas = [{ schema_uuid: 's1', schema_definition: { properties: { 'Spindle/LOAD': { type: 'number', minimum: 0, maximum: 120 } } } }]
-const catalog = [{ name: 'Spindle/LOAD', units: 'kW' }, { name: 'Spindle/SPEED', units: 'rpm' }]
+const catalog = [
+  { name: 'Spindle/LOAD', units: 'kW' }, { name: 'Spindle/SPEED', units: 'rpm' },
+  { name: 'Arm/TORQUE', units: 'N·m', datatype: 10 }, { name: 'Controller/EXECUTION', datatype: 12 },
+]
 
 const routeGet = (path) => {
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
@@ -584,5 +587,68 @@ describe('exporting the readings shown', () => {
     await screen.findByText(/declared no metrics/)
     expect(exportButton()).toBeDisabled()
     expect(exportButton()).toHaveAccessibleDescription('This device has no metric to export.')
+  })
+})
+
+describe("a text chart's buckets under Auto", () => {
+  const readsOf = () => api.readCarriedTelemetry.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])
+  let originalWidth
+  beforeEach(() => { originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth') })
+  afterEach(() => {
+    if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
+    delete window.ResizeObserver
+  })
+  /** Every chart box `px` wide, and the page 32 px wider, as its insets make it. */
+  const widthIs = (px) => Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get() { return this.classList?.contains('chart-box') ? px : this.classList?.contains('history-body') ? px + 32 : 0 },
+  })
+
+  it('reads text apart, in buckets each at least 5 px wide, and says so', async () => {
+    await visit(`/history/device/${ROBOT}`)
+    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 1-hour buckets')).toBeInTheDocument()
+    // 960 px across a day: 24 hourly buckets are 40 px; 288 five-minute ones would be 3.3.
+    expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 60]])
+    expect(screen.getByRole('img', { name: 'Controller/EXECUTION' })).toHaveAccessibleDescription(/, in 1-hour buckets\./)
+    expect(screen.getByRole('img', { name: 'Arm/TORQUE (N·m)' })).toHaveAccessibleDescription(/, in 1-minute buckets\./)
+  })
+
+  it('measures the page: a narrower one gives text wider buckets', async () => {
+    widthIs(200)
+    await visit(`/history/device/${ROBOT}?range=1h`)
+    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument()
+    expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
+  })
+
+  it('reads text again once a change of width settles, and not on each resize, nor on one that changes nothing', async () => {
+    const watchers = []
+    window.ResizeObserver = class { constructor(cb) { this.cb = cb; watchers.push(this) } observe() {} disconnect() {} }
+    widthIs(960)
+    await visit(`/history/device/${ROBOT}?range=1h`)
+    await screen.findByText('2 metrics, in 1-minute buckets')
+    const before = api.readCarriedTelemetry.mock.calls.length
+    const page = watchers.find(w => w.cb)
+    // The same width settles: the buckets stay, so nothing is read.
+    act(() => { watchers.forEach(w => w.cb([])) })
+    await new Promise(r => setTimeout(r, 400))
+    expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
+    // Narrower, in three steps: one read, of the text, at 5 minutes, once the steps settle.
+    widthIs(200)
+    act(() => { page.cb([]); page.cb([]); watchers.forEach(w => w.cb([])) })
+    expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
+    await waitFor(() => expect(screen.getByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument())
+    expect(readsOf().slice(before)).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
+  })
+
+  it('reads every chart at a Buckets choice, text included', async () => {
+    await visit(`/history/device/${ROBOT}?bucket=5m`)
+    expect(await screen.findByText('2 metrics, in 5-minute buckets')).toBeInTheDocument()
+    expect(readsOf()).toEqual([[['Arm/TORQUE', 'Controller/EXECUTION'], 5]])
+  })
+
+  it('reads a metric the catalog does not know as before, with the numbers', async () => {
+    await visit(`/history/device/${LATHE}`)
+    await screen.findByText('2 metrics, in 1-minute buckets')
+    expect(readsOf()).toEqual([[['Spindle/LOAD', 'Spindle/SPEED'], 1]])
   })
 })

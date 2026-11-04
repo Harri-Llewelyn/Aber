@@ -1426,6 +1426,16 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
   with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
   status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
+- **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
+  its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
+  numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
+  `TEXT_BUCKET_MIN_PX` (5px) across the chart and whose rows fit the cap, since one-minute buckets
+  over a day run a strip's words together. The width is a chart box's, measured at each read; a
+  change of width settles for 300 ms and reads the text again only when it changes their pick.
+  Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
+  count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
+  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included. A
+  coarser bucket keeps only its last value, so a state held inside one is not drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
 - **The metrics** are those the device's last birth declared and those its schemas model
   (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
   (`validRanges()`), and its unit the catalog's. **Metrics** in the toolbar is a `FilterDropdown`

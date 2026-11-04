@@ -93,6 +93,54 @@ export function bucketOptions(auto) {
   ]
 }
 
+/**
+ * A metric's kind before it is read, from its catalog datatype: text (String, Text, UUID), flag
+ * (Boolean), or number (the numeric types, DateTime and the rest); null when the catalog does not
+ * know the metric.
+ */
+export function datatypeKind(code) {
+  if (code === null || code === undefined) return null
+  if (code === 11) return 'flag'
+  if (code === 12 || code === 14 || code === 15) return 'text'
+  return 'number'
+}
+
+/** The narrowest a text chart's bucket is drawn under Auto, in pixels, so its words stay readable. */
+export const TEXT_BUCKET_MIN_PX = 5
+
+/** The chart width assumed when there is none to measure yet. */
+export const DEFAULT_CHART_PX = 960
+
+/**
+ * Auto's pick for text charts `widthPx` wide: the finest resolution whose buckets are each at least
+ * TEXT_BUCKET_MIN_PX across and whose rows fit the row cap, or the coarsest when none is that wide.
+ */
+export function readableResolution(startMs, endMs, series, widthPx, {
+  resolutions = HISTORY_RESOLUTIONS, maxRows = HISTORY_MAX_ROWS, minPx = TEXT_BUCKET_MIN_PX,
+} = {}) {
+  const wide = resolutions.filter(r => bucketCount(startMs, endMs, r.minutes) * minPx <= widthPx)
+  return pickResolution(startMs, endMs, series, { resolutions: wide.length ? wide : resolutions.slice(-1), maxRows })
+}
+
+/**
+ * The reads a window takes: groups of metrics, each at one resolution. A Buckets choice reads every
+ * metric at it. Under Auto, or when the choice is too fine (`refused`), text metrics (`textNames`)
+ * read apart at readableResolution() for charts `widthPx` wide, flagged `text`, and the rest at
+ * pickResolution() for their own number. `problem` when one series does not fit even at 1 day.
+ */
+export function readPlan(startMs, endMs, { names, textNames = new Set(), bucket = 'auto', widthPx = DEFAULT_CHART_PX }) {
+  const { resolution: chosen, refused } = resolutionFor(startMs, endMs, names.length, bucket)
+  if (!chosen) return { problem: true, groups: [], refused: null }
+  if (bucket !== 'auto' && !refused) return { groups: names.length ? [{ names, resolution: chosen }] : [], refused: null, chosen }
+  const text = names.filter(n => textNames.has(n))
+  const rest = names.filter(n => !textNames.has(n))
+  const groups = []
+  if (rest.length) groups.push({ names: rest, resolution: pickResolution(startMs, endMs, rest.length) })
+  if (text.length) groups.push({ names: text, resolution: readableResolution(startMs, endMs, text.length, widthPx), text: true })
+  if (groups.some(g => !g.resolution)) return { problem: true, groups: [], refused: null }
+  return { groups, refused, chosen }
+}
+
 /** `list` in groups of at most `size`, in order. */
 export function inReads(list, size) {
   const out = []
