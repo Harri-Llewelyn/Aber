@@ -10,10 +10,11 @@ import {
   DEVICE_STATUS,
   deviceChipClass,
   deviceDotColor,
+  deviceDotStyle,
   deviceStatusChipClass,
   deviceStatusDotColor
 } from '../utils/deviceStatus'
-import { alertIndex, alertForDevice } from '../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../utils/deviceAlerts'
 
 const device = (over = {}) => ({
   asset_id: '22000000-0000-4000-8000-000000000001',
@@ -174,5 +175,54 @@ describe('the rule against red device STATES is intact', () => {
       expect(deviceChipClass(d, null)).not.toBe('chip-danger')
       expect(deviceDotColor(d, null)).not.toBe('var(--danger)')
     }
+  })
+})
+
+
+describe('an acknowledged alert, and what wins', () => {
+  /* Acknowledging an alert (0231) does not resolve it, so the device still carries it, drawn as
+     Alert acknowledged: the hollow chip and the ring. An alert nobody has acknowledged wins over
+     any acknowledged one, whatever their severities. */
+  const acked = (over = {}) => alert({ acknowledged_at: '2026-11-04T09:05:00Z', acknowledged_by: 'u1',
+    acknowledgement_reason: 'investigating', ...over })
+
+  it('lets an unacknowledged alert win over an acknowledged critical', () => {
+    const index = alertIndex([
+      acked({ fingerprint: 'f1', severity: 'critical', alert_name: 'Thermal Excursion' }),
+      alert({ fingerprint: 'f2', severity: 'info', alert_name: 'Low OEE' })
+    ])
+    expect(alertForDevice(index, device())?.alert_name).toBe('Low OEE')
+    expect(alertState(alertForDevice(index, device()))).toBe('alert')
+  })
+
+  it('keeps the worst severity among the acknowledged when nothing else fires', () => {
+    const index = alertIndex([
+      acked({ fingerprint: 'f1', severity: 'warning', alert_name: 'Low OEE' }),
+      acked({ fingerprint: 'f2', severity: 'critical', alert_name: 'Thermal Excursion' })
+    ])
+    expect(alertForDevice(index, device())?.alert_name).toBe('Thermal Excursion')
+    expect(alertState(alertForDevice(index, device()))).toBe('acknowledged')
+  })
+
+  it('finds the unacknowledged one whichever identifier indexed it', () => {
+    // The acknowledged alert carries the wire id; the other only the row UUID.
+    const index = alertIndex([
+      acked({ fingerprint: 'f1', entity_id: null }),
+      alert({ fingerprint: 'f2', sparkplug_id: null, alert_name: 'Low OEE', severity: 'warning' })
+    ])
+    expect(alertForDevice(index, device())?.alert_name).toBe('Low OEE')
+  })
+
+  it('is no state at all with no alert', () => {
+    expect(alertState(null)).toBeNull()
+  })
+
+  it('draws the hollow chip and the ring, never the filled red', () => {
+    expect(deviceChipClass(device(), acked())).toBe('chip-acknowledged')
+    expect(deviceDotStyle(device(), acked())).toEqual({ background: 'transparent', boxShadow: 'inset 0 0 0 1.5px var(--danger)' })
+    expect(deviceDotStyle(device(), alert())).toEqual({ background: 'var(--danger)' })
+    // Archived still wins.
+    expect(deviceChipClass(device({ is_archived: true }), acked())).toBe('chip-offline')
+    expect(deviceDotStyle(device({ is_archived: true }), acked())).toEqual({ background: 'var(--text-muted)' })
   })
 })
