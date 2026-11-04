@@ -4275,7 +4275,8 @@ CREATE OR REPLACE FUNCTION public.has_authority(allowed_permissions text[]) RETU
     AS $$
     -- One arm or the other, never both: the trigger on user_roles guarantees an identity cannot be
     -- in both sets. An anonymous caller takes the person arm, matches nothing, and returns false.
-    SELECT CASE
+    -- A token GoTrue issued to an app carries its client_id and holds no permission (0235).
+    SELECT coalesce(auth.jwt() ->> 'client_id', '') = '' AND CASE
         WHEN public.is_machine_principal(auth.uid()) THEN EXISTS (
             SELECT 1
               FROM public.principal_permissions pp
@@ -4300,7 +4301,7 @@ ALTER FUNCTION public.has_authority(allowed_permissions text[]) OWNER TO postgre
 --
 
 -- FUNCTION has_authority(allowed_permissions text[]) :: COMMENT
-COMMENT ON FUNCTION public.has_authority(allowed_permissions text[]) IS 'True when the caller holds any of these PERMISSIONS. A machine principal resolves through principal_permissions, a person through user_roles -> role_permissions, and nothing resolves through both. Use it where a policy would otherwise name a role that machine principals happen to share; has_role() remains the predicate for the 58 sites that name Administrator or Shopfloor_Manager, which no machine has ever satisfied.';
+COMMENT ON FUNCTION public.has_authority(allowed_permissions text[]) IS 'True when the caller holds any of these PERMISSIONS. A machine principal resolves through principal_permissions, a person through user_roles -> role_permissions, and nothing resolves through both. A token GoTrue issued to an app, which carries a client_id, holds none (0235). Use it where a policy would otherwise name a role that machine principals happen to share; has_role() remains the predicate for the 58 sites that name Administrator or Shopfloor_Manager, which no machine has ever satisfied.';
 
 --
 
@@ -4309,7 +4310,8 @@ CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-  SELECT EXISTS (
+  -- A token GoTrue issued to an app carries its client_id and holds no role (0235).
+  SELECT coalesce(auth.jwt() ->> 'client_id', '') = '' AND EXISTS (
     SELECT 1
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id

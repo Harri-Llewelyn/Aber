@@ -530,7 +530,8 @@ export const SUITES = {
     lanes: ['db'],
     why:
       'Prints what has_role() and has_authority() cost per call, and the plan of a read their ' +
-      'policy guards, so a change to either is measured before and after on the same database. ' +
+      "policy guards, so a change to either is measured before and after on the same database; " +
+      "and what they cost for an app's token, which holds nothing (0235). " +
       'Fails only on a wrong answer, never on a number.',
   },
   'supabase/migrations/test_first_administrator.py': {
@@ -1024,6 +1025,14 @@ export const SUITES = {
       '0205 -- that a token whose session has ended is refused with the 401 the dashboard signs ' +
       'in again on, and that every token naming a live session, or none, is still served: a ' +
       'false refusal here is the whole API down.',
+  },
+  'supabase/migrations/test_an_app_s_token_reaches_only_its_own_routes.py': {
+    lanes: ['db'],
+    why:
+      "0235 -- that a token GoTrue issued to an app, which carries a client_id, is refused by " +
+      'auth_pre_request() before any other arm and holds no role or permission in has_role() and ' +
+      "has_authority(), so a row a role gates is closed to it; and that a token with no client_id " +
+      'is served and answered as before: a false refusal here is the whole API down.',
   },
   'supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py': {
     lanes: ['db'],
