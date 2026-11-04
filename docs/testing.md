@@ -1439,7 +1439,8 @@ layer on.
 
 **No CI job installs with the layer off**, though that is the chart's default and what most sites
 run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
-is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+is the only one a default install renders. With Studio on, Studio's and postgres-meta's join it,
+each admitting its one caller, and still admit only that caller with the layer on. Every developer's `npm run dev:up` installs without the layer. A second,
 smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
 configuration that differs from the one CI runs only in its NetworkPolicy objects.
 
@@ -1550,7 +1551,8 @@ arrive with no CI result.
 not something this repository can act on, and failing on it would train everyone to ignore the job.
 Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
-nothing wrong".
+nothing wrong". The optional workloads are rendered on, except Studio and postgres-meta, which stay
+off as in a default install: a site that runs them takes on two images the scan does not cover.
 
 **The workflow runs [`scripts/scan-images.mjs`](../scripts/scan-images.mjs), which is `npm run
 scan:images` on a laptop**: the same images, Trivy in the pinned container `scan:config` uses

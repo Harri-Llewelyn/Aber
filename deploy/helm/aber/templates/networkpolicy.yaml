@@ -718,7 +718,8 @@ spec:
 ---
 {{/*
 =================================================================================================
-THE ONE POLICY THIS CHART RENDERS WITH `networkPolicy.enabled` OFF (#172).
+THE ONE POLICY A DEFAULT INSTALL RENDERS WITH `networkPolicy.enabled` OFF (#172). Studio's and
+postgres-meta's, below, join it only where a site runs them.
 
 Everything above is the M4 layer, opt-in because default-deny egress is a posture an operator
 chooses. This is one object closing one hole that is open by DEFAULT, and the hole is
@@ -774,4 +775,82 @@ spec:
     # <- anywhere on 22 — git over SSH, how every appliance converges. NOT a widening: without this
     # line selecting the pod at all would close it. See the note above.
     {{- include "aber.giteaSshIngressRule" . | nindent 4 }}
+{{- end }}
+{{- if .Values.supabaseMeta.enabled }}
+{{- $fullname := include "aber.fullname" . }}
+---
+{{/*
+=================================================================================================
+RENDERED WHENEVER POSTGRES-META RUNS, WHATEVER `networkPolicy.enabled` SAYS, as the forge's is.
+
+postgres-meta asks for no login and runs any SQL a request carries as supabase_admin. It exists for
+Studio's database pages alone, so Studio's pods on 8080 are its only callers; without this, any pod
+in the namespace could use it as the database's admin, Node-RED's function nodes included.
+
+Ingress-only, like the forge's. With `networkPolicy.enabled` on, the generated pair admits the same
+one peer on the same port, so the union is unchanged: nothing is widened. Only as good as the CNI,
+as every policy here is.
+=================================================================================================
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-meta-studio-only" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-meta") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-meta") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # <- Studio on 8080, and NOTHING ELSE: its server-side calls for the Database pages.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-studio") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- if .Values.supabaseStudio.enabled }}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $gw := "supabase-envoy" }}
+---
+{{/*
+=================================================================================================
+RENDERED WHENEVER STUDIO RUNS, WHATEVER `networkPolicy.enabled` SAYS, as the forge's is.
+
+Studio is a database console with no login of its own, running as the owner. The gateway's studio
+listener on 8001 is its door: an OAuth sign-in and an Administrator check. A request that skips the
+gateway skips both, so the gateway's pods on 3000 are Studio's only callers. A kubectl port-forward
+enters the pod itself, past any policy, and still reaches it.
+
+Ingress-only, like the forge's: Studio still calls postgres-meta, the database and the gateway. With
+`networkPolicy.enabled` on, the generated pair admits the same one peer on the same port, so the
+union is unchanged: nothing is widened.
+=================================================================================================
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-studio-gateway-only" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-studio") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-studio") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # <- the gateway on 3000, and NOTHING ELSE: its studio listener, the only path to the console.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "aber.selectorLabels" (dict "ctx" . "component" $gw) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3000
 {{- end }}

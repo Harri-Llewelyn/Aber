@@ -157,6 +157,10 @@ spec:
               value: stub
             - name: ENABLE_IMAGE_TRANSFORMATION
               value: "false"
+            # Nothing here speaks storage-api's S3 protocol, and the chart gives it no access keys. Its
+            # routes parse a multipart form before any credential (check-gateway-surface.mjs, 6).
+            - name: S3_PROTOCOL_ENABLED
+              value: "false"
           # 127.0.0.1, NEVER localhost. The image's musl resolver answers `localhost` with ::1
           # first and storage-api binds 0.0.0.0 (IPv4 only), so a localhost probe gets
           # ECONNREFUSED against a healthy server and the pod never leaves `starting`.

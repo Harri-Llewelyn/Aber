@@ -784,6 +784,16 @@ an empty ingestion or i3X password stops its init container. Skipped under exist
 {{- end -}}
 
 {{/*
+postgres-meta serves Studio's database pages and nothing else. Studio without it opens to pages
+that fail, and postgres-meta without Studio is SQL as supabase_admin, with no login, for nobody.
+*/}}
+{{- define "aber.validateStudioMeta" -}}
+{{- if ne (.Values.supabaseStudio.enabled | toString) (.Values.supabaseMeta.enabled | toString) -}}
+{{- fail (printf "\n\naber: supabaseStudio.enabled is %v but supabaseMeta.enabled is %v.\n\npostgres-meta serves Studio's database pages and nothing else, so the two are on or off together.\nWithout it Studio's Table and SQL editors fail; without Studio it runs SQL as supabase_admin, with no\nlogin, for no one. Set both to true or both to false.\n" .Values.supabaseStudio.enabled .Values.supabaseMeta.enabled) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Publishing Studio requires the credentials that make it a door rather than a hole. With the secrets
 unset the gateway substitutes credentials that cannot authenticate and no client is registered, so
 the route publishes a hostname whose every request ends at a login nobody can complete, which
@@ -791,6 +801,9 @@ reads as a broken proxy rather than two empty values. Skipped under existingSecr
 holds both keys out of the chart's sight.
 */}}
 {{- define "aber.validateStudioRoute" -}}
+{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) (not .Values.supabaseStudio.enabled) -}}
+{{- fail "\n\naber: ingress.routes.studio is true but supabaseStudio.enabled is false.\n\nThe route publishes Supabase Studio, which this install does not run. Turn Studio on with it:\n\n  supabaseStudio.enabled: true\n  supabaseMeta.enabled: true\n\nor leave ingress.routes.studio at its default of false.\n" -}}
+{{- end -}}
 {{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) (not .Values.secrets.existingSecret) -}}
 {{- if or (not .Values.secrets.studioOAuthClientSecret) (not .Values.secrets.studioProxyHmacSecret) -}}
 {{- fail "\n\naber: ingress.routes.studio is true but Studio's door has no credentials.\n\nThe route publishes the gateway's studio listener, which runs an OAuth flow against this stack's own\nGoTrue and admits `Administrator` only. Without both values below the flow has no registered client\nand no cookie key, so every request to studio.<publicBaseDomain> ends at a login that cannot\ncomplete -- which looks like a broken proxy rather than like an unset value.\n\nSet both:\n  secrets.studioOAuthClientSecret   (also hashed into auth.oauth_clients by migration 0081)\n  secrets.studioProxyHmacSecret     (signs the session cookie; nothing else reads it)\n\nOr leave ingress.routes.studio at its default of false and reach the console with a port-forward.\n" -}}
@@ -843,6 +856,7 @@ existingSecret the password is not the chart's to see, and 0163 refuses an empty
 {{- include "aber.validateSecrets" . -}}
 {{- include "aber.validateSigningKeys" . -}}
 {{- include "aber.validateFirstAdministrator" . -}}
+{{- include "aber.validateStudioMeta" . -}}
 {{- include "aber.validateStudioRoute" . -}}
 {{- include "aber.validateMqttPrincipals" . -}}
 {{- include "aber.validateRealtime" . -}}

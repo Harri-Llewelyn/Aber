@@ -684,7 +684,7 @@ people allow it. A click or Enter opens its drawer, `?app=<id>` (`appUrl()`), in
 as a person's. The drawer reads `app_approvals()` when it opens and draws the people in
 `components/common/AppApprovalsTable.jsx`, the table Profile's list of approvals shares; Revoke calls
 `revoke_app_approval()` and Remove App `remove_app()`, each after a dialog that says what ends.
-Remove App is disabled for Aber's own four, which db-init registers again on every boot.
+Remove App is disabled for Aber's own apps, which db-init registers again on every boot.
 
 **Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
 `utils/passwords.js` sends the current password with the new one in one

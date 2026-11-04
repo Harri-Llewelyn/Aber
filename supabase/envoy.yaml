@@ -3,7 +3,8 @@
 # asserts that the substituter knows every one and that they are still placeholders. Four listeners:
 # the API on 8000, which admits the opaque sb_publishable_* / sb_secret_* keys and hands each upstream
 # the JWT it requires; Studio's login on 8001; the forge's login on 8002; the forge's API for the edge
-# runtime on 8003, which no browser reaches. Route order is first-match.
+# runtime on 8003, which no browser reaches. Route order is first-match. Studio's listener and cluster sit
+# between `# studio:begin` and `# studio:end` lines, which the chart removes when Studio is off.
 # i3X, Node-RED and Grafana have no cluster here; they are published on their own ports.
 # Required by SDS (the listeners' client secrets and cookie keys); labels only.
 node:
@@ -14,6 +15,14 @@ node:
 admin:
   address:
     socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+# RE2 refuses a regex over 100 program instructions by default. The API listener's two multipart
+# refusals compile to about 460 and 410 (Envoy 1.39), since each counts 71 or 191 characters.
+layered_runtime:
+  layers:
+    - name: static
+      static_layer:
+        re2.max_program_size.error_level: 1000
 
 static_resources:
   listeners:
@@ -164,6 +173,31 @@ static_resources:
                             envoy.filters.http.lua:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: translate_bearer
+
+                        # Multipart that storage-api's parser (busboy) must not see, refused above every route to it. A
+                        # boundary is 1 to 70 characters (RFC 2046 5.1.1), so no conforming client meets either rule. The
+                        # first refuses a longer one as clients write it. The second refuses a Content-Type over 200
+                        # characters or outside printable ASCII, which bounds every other spelling busboy reads (spaces,
+                        # quotes, boundary*=charset'') below the 252-byte boundary that stalls it. The key check runs first.
+                        - name: storage-v1-long-boundary
+                          match:
+                            prefix: "/storage/v1/"
+                            headers:
+                              - name: "content-type"
+                                string_match: { safe_regex: { regex: '[ \t]*(?i:multipart)/.*(?i:boundary)[^=;]*=[ \t]*(?:"[\t\x20\x21\x23-\x7e]{71}|[\x21\x23-\x3a\x3c-\x7e]{71}).*' } }
+                          direct_response:
+                            status: 400
+                            body: { inline_string: "The multipart boundary is longer than 70 characters (RFC 2046, section 5.1.1).\n" }
+
+                        - name: storage-v1-unreadable-multipart
+                          match:
+                            prefix: "/storage/v1/"
+                            headers:
+                              - name: "content-type"
+                                string_match: { safe_regex: { regex: '[ \t]*(?i:multipart)/(?:[\t\x20-\x7e]{191}|.*[^\t\x20-\x7e]).*' } }
+                          direct_response:
+                            status: 400
+                            body: { inline_string: "A multipart Content-Type must be printable ASCII and at most 200 characters.\n" }
 
                         # Exemption 2 of 5: an AAS File URL must resolve with no session. Before /storage/v1/; the
                         # upstream path keeps /object/public/.
@@ -501,6 +535,7 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+    # studio:begin -- the chart drops this listener when supabaseStudio.enabled is false.
     # STUDIO'S LOGIN (supabase/README.md, "The second listener"). Studio has no authentication of its
     # own and runs as the database owner, so: an OAuth 2.1 code flow against this stack's GoTrue, a
     # session cookie, and an Administrator check. Its own listener because machine principals on 8000
@@ -669,6 +704,7 @@ static_resources:
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+    # studio:end
 
     # THE FORGE'S LOGIN (supabase/README.md, "The forge's door"). Gitea cannot be an OIDC client of
     # GoTrue, so the oauth2, jwt_authn and rbac filters Studio's listener also runs do the code flow,
@@ -1057,6 +1093,7 @@ static_resources:
                   address:
                     socket_address: { address: supabase-functions, port_value: 9000 }
 
+    # studio:begin -- the chart drops this cluster when supabaseStudio.enabled is false.
     # For the studio listener only. Target-specific address, as realtime-v1's is.
     - name: studio
       type: STRICT_DNS
@@ -1068,6 +1105,7 @@ static_resources:
               - endpoint:
                   address:
                     socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }
+    # studio:end
 
     # For the forge and forge-api listeners; HTTP only (git over SSH never passes through this gateway).
     - name: gitea
