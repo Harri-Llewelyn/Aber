@@ -1279,12 +1279,14 @@ jobs:
 
       # TLS to the databases: with postgresTls on, each database gets a Certificate, its pg_hba
       # admits the network on TLS only, every client that opens a connection carries the CA one
-      # way or another, and no `sslmode=disable` survives the render.
+      # way or another, and no `sslmode=disable` survives the render. Studio is on so postgres-meta
+      # renders and its CA is checked too.
       - name: Verify TLS To The Databases Renders Closed
         run: |
           helm template aber deploy/helm/aber \
             -f deploy/helm/aber/values-dev.yaml \
             --set postgresTls.enabled=true \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
             --set e2e.enabled=true --set coldArchive.enabled=true \
             --set backup.enabled=true --set backupService.enabled=true \
             > /tmp/db-tls.yaml
