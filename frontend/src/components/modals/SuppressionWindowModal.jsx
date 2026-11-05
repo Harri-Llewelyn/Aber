@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
-import { IconBellOff } from '../common/Icons'
+import { IconAlertTriangle, IconBellOff } from '../common/Icons'
 import { localMinute, parseLocal } from '../../utils/timeWindow'
 import { formatDateTime } from '../../utils/format'
 import { SUPPRESSION_REASON_MAX, windowState } from '../../utils/alertSuppression'
@@ -31,6 +31,8 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
   const [end, setEnd] = useState(() => (window ? localMinute(new Date(window.ends_at)) : ''))
   const [reason, setReason] = useState(window?.reason ?? '')
   const [error, setError] = useState(null)
+  // Set by the first edit, so a dialog that has just opened is not already scolding.
+  const [touched, setTouched] = useState(false)
   const [pending, run] = usePendingAction()
   const reasonRef = useRef(null)
 
@@ -82,7 +84,7 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
         <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
           <ActionButton
-            className="btn btn-primary"
+            className={`btn btn-primary${problem ? ' btn-disabled' : ''}`}
             pending={pending}
             pendingLabel={changing ? 'Changing…' : 'Scheduling…'}
             disabled={problem !== null}
@@ -101,7 +103,7 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
           className="form-control"
           rows={2}
           value={reason}
-          onChange={e => setReason(e.target.value)}
+          onChange={e => { setReason(e.target.value); setTouched(true) }}
           disabled={pending}
           maxLength={SUPPRESSION_REASON_MAX}
           placeholder="Belt change on the feeder"
@@ -117,7 +119,7 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
             type="datetime-local"
             className="form-control"
             value={start}
-            onChange={e => setStart(e.target.value)}
+            onChange={e => { setStart(e.target.value); setTouched(true) }}
             disabled={pending || started}
           />
         </div>
@@ -128,7 +130,7 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
             type="datetime-local"
             className="form-control"
             value={end}
-            onChange={e => setEnd(e.target.value)}
+            onChange={e => { setEnd(e.target.value); setTouched(true) }}
             disabled={pending}
           />
         </div>
@@ -137,6 +139,12 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
         {started
           ? `In local time. It started at ${formatDateTime(window.starts_at)}, so its start stays.`
           : 'In local time. A start already past is now.'}
+      </p>
+      {/* Why the confirm is off, said where the person is looking, not only in its hover tip. */}
+      <p className="form-hint hint-danger" aria-live="polite">
+        {touched && problem && problem !== 'Nothing has changed' && (
+          <><IconAlertTriangle size={12} /> {problem}</>
+        )}
       </p>
     </Modal>
   )

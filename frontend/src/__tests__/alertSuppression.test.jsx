@@ -318,6 +318,26 @@ describe('a drawer\'s Suppression windows section', () => {
     expect(within(item('Line shutdown')).queryAllByRole('button')).toEqual([])
   })
 
+  it('says in the dialog why it cannot schedule, once the person has changed a field', async () => {
+    await show('Shopfloor_Manager')
+    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    const confirm = within(dialog).getByRole('button', { name: 'Schedule window' })
+    // Just opened: off, greyed, and not yet scolding.
+    expect(confirm).toBeDisabled()
+    expect(confirm).toHaveClass('btn-disabled')
+    expect(within(dialog).queryByText(/must be in the future/)).toBeNull()
+
+    const past = new Date(now - HOUR)
+    const pad = (n) => String(n).padStart(2, '0')
+    const local = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())}T${pad(past.getHours())}:${pad(past.getMinutes())}`
+    fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: local } })
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Belt change' } })
+    expect(within(dialog).getByText(/The end must be in the future/)).toBeTruthy()
+    expect(confirm).toBeDisabled()
+    expect(confirm).toHaveClass('btn-disabled')
+  })
+
   it('schedules from a dialog whose confirm says Schedule window, and toasts a link to the subject', async () => {
     const refreshed = vi.fn()
     window.addEventListener(ALERTS_REFRESH_EVENT, refreshed)
