@@ -113,6 +113,30 @@ runtime. An app the stack does not register is in no policy, so it reaches `/aut
 `APP_ROUTES` in `check-gateway-surface.mjs` holds the policies, and mirror check 48 holds their
 client ids to `stack_app_ids()`.
 
+## The consent step
+
+While Settings requires MFA, a manager or an Administrator approves an app's sign-in only from a
+session that gave its code ([`docs/security-model.md`](security-model.md#mfa-required-to-change-the-platform)).
+An `ext_authz` filter after `rbac` decides it, and is off on every route but one:
+
+- **`auth-v1-consent-routes`** matches the prefix `/auth/v1/oauth/authorizations/`, where GoTrue
+  serves the consent page's two calls, and turns the filter on with its per-route settings. The
+  filter asks `consent-gate` with the original method and path under `/consent-gate`, and the
+  bearer alone. A 200 lets the request on to GoTrue. Any other answer is passed to the browser,
+  with its `Content-Type`, so the consent page reads the refusal's `msg`.
+- **It fails closed** (`failure_mode_allow: false`). A 5xx or no answer within 3 seconds is the
+  gateway's own `503 {"code":503,"error_code":"consent_check_unavailable",…}`, mapped in
+  `local_reply_config` on the `UAEX` flag. No app's sign-in is approved meanwhile, Grafana's too;
+  the dashboard and open app sessions are untouched.
+- **`auth-v1-consent-spellings`**, just after it, answers `404` itself to any other spelling of the
+  prefix: a doubled slash, another case, an encoded slash. GoTrue's router matches the path as
+  sent, so none of them would reach its consent handler either way.
+
+Every other `/auth/v1/` route is untouched. The static check holds the filter's settings, the one
+route that turns it on and the spellings route's place and regex. `--runtime` asks `consent-gate`
+on the prefix and sends the spellings. `--consent` drives the decisions with two throwaway people
+it makes with the secret key, and turns the switch on and back.
+
 ## The client's address
 
 The API listener works out each caller's address, and the sign-in limit below and GoTrue's own

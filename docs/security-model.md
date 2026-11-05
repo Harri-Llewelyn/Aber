@@ -236,22 +236,22 @@ people's accounts in GoTrue, and it is narrow by construction.
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off. GoTrue keeps the session that made
   the change and ends the person's others. No Audit Trail row is written: GoTrue records
   `user_updated_password` in its own audit log (`auth.audit_log_entries`).
-- **A second factor can be enrolled; nothing requires one yet** (1.7.0). Any person, every role,
-  may add a TOTP factor on Profile › Security through GoTrue's factor API (auth-js
+- **A second factor can be enrolled by anyone, and Settings can require one** (1.7.0, 1.8.0). Any
+  person, every role, may add a TOTP factor on Profile › MFA through GoTrue's factor API (auth-js
   `supabase.auth.mfa`). The chart sets the `GOTRUE_MFA_*` variables in
   `templates/supabase/auth.yaml`: TOTP enrol and verify on, as GoTrue defaults; phone off (it needs
   an SMS provider); WebAuthn off (it needs a hostname relying-party id and a secure context);
   recovery codes off (auth-js has no client for them). A password sign-in with a factor enrolled is
   `aal1`. The dashboard then asks for the code before it opens, before the OAuth consent page
   approves a service, and before a password reset, which GoTrue refuses from `aal1` for an account
-  with a factor. It does not ask when `amr` names a federated method (`oauth`, `sso/saml`). **That
-  question is the dashboard's, not enforcement:** no policy, edge function or gateway rule reads
-  `aal`, so a session that skips it keeps every right its role has, as a password-only session
-  does. GoTrue's own rules do apply. Removing a verified factor, and adding another, need an `aal2`
-  session. Verifying a code deletes every other `aal1` session the person holds, and GoTrue issues
-  the OAuth clients' sessions (Grafana, Node-RED, Studio, the forge) at `aal1`, so each code ends
-  those. A person adding or removing their own factor writes no Audit Trail row; GoTrue records it
-  in `auth.audit_log_entries`.
+  with a factor. It does not ask when `amr` names a federated method (`oauth`, `sso/saml`). That
+  question is the dashboard's. **Enforcement is the Settings row** described in
+  [MFA required to change the platform](#mfa-required-to-change-the-platform): off by default, and
+  while it is off nothing reads `aal`. GoTrue's own rules always apply. Removing a verified factor,
+  and adding another, need an `aal2` session. Verifying a code deletes every other `aal1` session
+  the person holds, and GoTrue issues the OAuth clients' sessions (Grafana, Node-RED, Studio, the
+  forge) at `aal1`, so each code ends those. A person adding or removing their own factor writes no
+  Audit Trail row; GoTrue records it in `auth.audit_log_entries`.
 - **Reset MFA, by an Administrator** (`0216`). For someone who has lost their authenticator.
   `manage-people`'s `reset-mfa` asks `record_person_mfa_reset()` first with `p_check_only`, which
   refuses your own account and a machine identity (a removed person's factors may be reset). Then
@@ -274,6 +274,53 @@ people's accounts in GoTrue, and it is narrow by construction.
 What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
 and so is what an ended session still reaches ([below it](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires)).
 
+### MFA required to change the platform
+
+A Settings row, **Require MFA to change the platform** (`security.require_mfa_for_managers`, Settings
+› Security), turns enforcement on (`0251`). It is off on every install, so a new stack's first
+sign-in is not an enrolment. Only an Administrator may change it, and each change is an Audit Trail
+row, as every setting's is. While it is on, an **Administrator or a Shopfloor Manager** changes the
+platform only from a session that gave its code (`aal2`), or one another identity provider signed
+in (`amr`). Operators and Auditors are never asked. A refused act answers 403 with one sentence,
+which says to add an authenticator on Profile › MFA; the dashboard links it there.
+
+| Surface | With the switch on, at `aal1` |
+| :--- | :--- |
+| Every write policy that admits either role (the areas, devices, gateways, cells, schemas, settings and their kin; the storage writes to 3D models, plans, captures and exports) | Refused: `require_mfa()` beside `has_role()`, which raises rather than answering false, so an UPDATE is never a silent zero rows |
+| Every function that changes the platform for them: proposals' decisions, relocation, schemas, credentials and enrolment tokens, machine identities and tokens, backups, apps, every People act, captures and playback | Refused, after the role check |
+| `aas-export`, `approve-quarantine`, `broker-inventory`, `broker-subscriber`, `gateway-bundle`, `gateway-credential`, `manage-people`, `mint-service-token` | Refused before they act, by `_shared/secondFactor.ts` |
+| Signing in to Node-RED, Studio, the forge or any app an Administrator adds | Refused at the consent step (below) |
+| Grafana's sign-in, and `grafana-userinfo` | Not covered: Grafana changes dashboards, not the plant |
+| Every read, and a person's own account (sessions, picture, name, factors), and an alert's acknowledgement | Not covered |
+| Machine identities | Never covered: they hold no role, so the predicate admits them wherever they write |
+
+`supabase/mfa-exemptions.json` names each role-checked site that does not ask, with its reason.
+Mirror check 59 fails on a new write policy or function that neither asks nor is named there.
+
+**The consent step.** GoTrue issues every token an app holds at `aal1`, whatever the person's
+dashboard session is, so no door can read the assurance from its own token. Every app's token is
+won through the dashboard's consent page, whose two calls (`GET /auth/v1/oauth/authorizations/{id}`
+and `POST …/{id}/consent`) carry the person's own session. The gateway's `ext_authz` filter asks
+`consent-gate` on that prefix alone. The function reads the switch, the person's role, the token's
+`aal` and `amr`, and the sign-in's app, live, and admits Grafana's sign-in at `aal1`. It fails
+closed: when `consent-gate` gives no answer within 3 seconds, or a 5xx, no app's sign-in is
+approved, Grafana's included, while the dashboard and open app sessions carry on. Every other
+spelling of the prefix is answered by the gateway itself.
+
+**App sessions won at `aal1` end.** No app session records the assurance of the consent that won
+it, and every one is `aal1`. So when the switch turns on, every covered person's app sessions end,
+Grafana's excepted, and when a person gains a covered role while it is on, theirs do. Each is one
+`SESSIONS_ENDED` row per person, naming the apps.
+
+**Why `aal2` means something here.** 1.8 signs every token with GoTrue's ES256 key alone, and no
+service accepts one signed with the shared secret (#1007). So whoever holds that secret cannot mint
+an `aal2` claim. Whoever holds the ES256 private key (`JWT_KEYS`, held by GoTrue and
+`mint-service-token`) still can, as they can mint any role.
+
+**Recovery.** An Administrator resets another person's factor from a session that gave its own code.
+A site whose only Administrator has lost their authenticator uses the secret key, below, then adds a
+new authenticator on Profile › MFA. Adding one brings that session to `aal2`, so nothing locks out.
+
 ### Resetting the only Administrator's second factor
 
 Reset MFA needs another Administrator. A site whose only Administrator has lost their
@@ -289,7 +336,9 @@ curl -s -X DELETE "https://api.<domain>/auth/v1/admin/users/<user id>/factors/<f
 
 The first answer lists the account under `users`, with its `factors`. A deletion this way writes no
 Audit Trail row; GoTrue's own audit log records it. Keep two Administrators, so that each can reset
-the other's from People.
+the other's from People. With MFA required, each resets the other's from a session that gave its own
+code; the secret key's way works whatever the switch says, and afterwards the Administrator adds a
+new authenticator on Profile › MFA.
 
 ## Machine identities
 
@@ -661,7 +710,7 @@ keeps one. Only a Playback gateway's password is delivered to the playback worke
 or Simulated gateway's never reaches it. Showing a password is Administrator only, each showing is
 a `CREDENTIAL_SHOWN` row in the Audit Trail, and the copy is deleted when the gateway is archived
 or deleted. An Administrator could already issue a new password for any gateway, which gives the
-same access.
+same access. Showing one is a read, so it is not refused when Settings requires MFA (`0251`).
 
 **Revisit if** Host gateways come to publish for machines whose data matters more than the
 platform's own, or if a role other than `Administrator` needs to see a password. At that point,

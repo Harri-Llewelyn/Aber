@@ -111,7 +111,11 @@ What ending a session does:
 
 MFA (multi-factor authentication) asks for a code from an authenticator app on your phone. With an authenticator added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
 
-Every role can set up MFA. Nothing on this site requires it yet.
+Every role can set up MFA. An Administrator can make it required on the **Settings** page, under **Security**.
+
+While it is required, Administrators and Shopfloor Managers need it to change the platform. That covers saving a change, deciding an approval, issuing a credential and every change on People. It covers signing in to Node-RED, Studio and the forge too. Without an authenticator you can still read everything, and Grafana still signs you in. A change you try is refused, with a link to this tab. Add an authenticator, and try again.
+
+Operators and Auditors are never asked for it.
 
 To add one:
 
@@ -134,7 +138,7 @@ What happens when you sign in:
 - **A password reset link** asks for your code before you choose the new password.
 - **If you remove the app you signed in with** and have another, the dashboard asks for a code from the other one.
 
-**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new authenticator here.
+**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new authenticator here. While MFA is required, add one before you change anything.
 
 ## Apps you have allowed
 
