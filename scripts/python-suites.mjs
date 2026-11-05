@@ -1219,6 +1219,16 @@ export const SUITES = {
       'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
       'audit rows, their lane, their class and who reads them.',
   },
+  'supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py': {
+    lanes: ['db'],
+    why:
+      '0240 and 0241 -- that a Shopfloor Manager and an Administrator schedule, change and end a ' +
+      'suppression window and every other role is refused; the CHECKs; that a window covers its ' +
+      "device, its gateway's own alerts, or each device in its cell when the alert is read, and never " +
+      'a platform or machine identity alert; that platform_alerts_active says suppressed before, ' +
+      'during and after it and keeps its columns; that an occurrence records the window that first ' +
+      "covered it and nothing clears it; and the audit rows in the subject's lane.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',

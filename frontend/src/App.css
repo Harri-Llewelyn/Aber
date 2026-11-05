@@ -62,6 +62,10 @@
   --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
   --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
   --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
+  /* An acknowledged alert: the danger colour paled. The edge at 70% over the card still clears 3:1
+     against it in both themes; the fill is half the firing tint's. */
+  --danger-soft-border: color-mix(in srgb, var(--danger) 70%, var(--bg-card));
+  --danger-soft-tint:   color-mix(in srgb, var(--danger) 7%, transparent);
   --text-primary: #e8eaf0;
   /* Three distinguishable secondary tiers, every one clearing WCAG AA against --bg-card. */
   --text-muted:   #858ea3;  /* 5.14:1 on --bg-card */
@@ -170,6 +174,10 @@
   --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
   --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
   --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
+  /* An acknowledged alert: the danger colour paled. The edge at 70% over the card still clears 3:1
+     against it in both themes; the fill is half the firing tint's. */
+  --danger-soft-border: color-mix(in srgb, var(--danger) 70%, var(--bg-card));
+  --danger-soft-tint:   color-mix(in srgb, var(--danger) 7%, transparent);
   --text-primary: #0f172a;
   --text-muted:   #475569;  /* 7.58:1 on --bg-card */
   /* Clears AA on both a white card (5.25:1) and --bg-base (4.80:1), and stays dimmer than
@@ -2286,11 +2294,11 @@ td.row-actions, th.row-actions {
   gap: 4px;
 }
 
-/* An alert somebody has acknowledged: the danger badge hollow, bordered, with a tick in front, so
-   it reads apart from an unacknowledged ALARM or WARNING by shape as well as words. */
+/* An alert somebody has acknowledged: the danger badge paled, with a softer edge and a tick in
+   front, so it reads as still an issue but in hand, apart from a firing ALARM by shape and words. */
 .badge-acknowledged {
-  background: transparent;
-  border: 1px solid var(--danger);
+  background: var(--danger-soft-tint);
+  border: 1px solid var(--danger-soft-border);
   gap: 4px;
 }
 
@@ -3556,7 +3564,7 @@ span.area-plan-pin { cursor: inherit; }
 .area-plan-pin-attention { --pin-colour: var(--warning); }
 .area-plan-pin-idle      { --pin-colour: var(--text-dim); }
 .area-plan-pin-alert     { --pin-colour: var(--danger); }
-.area-plan-pin-acknowledged { --pin-colour: var(--danger); }
+.area-plan-pin-acknowledged { --pin-colour: var(--danger-soft-border); }
 .area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
 /* The Site Map's grid sets --pin-size by its column count; 40px elsewhere, and the largest drawn. */
@@ -3803,8 +3811,8 @@ span.area-plan-pin { cursor: inherit; }
 /* An area with an alert firing against a device in it: the one red dot, and only on an area card,
    where a pin inside is red for the same reason. The legend keeps the chip swatch. */
 .tile-dot-alert     { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
-/* Every alert there acknowledged: the same red as a ring, with no glow. */
-.tile-dot-acknowledged { background: transparent; box-shadow: inset 0 0 0 2px var(--danger); }
+/* Every alert there acknowledged: a paled red ring, with no glow. */
+.tile-dot-acknowledged { background: var(--danger-soft-tint); box-shadow: inset 0 0 0 2px var(--danger-soft-border); }
 
 /* Legend chip swatch: the alert entry describes a chip, not a dot, since an alert fires against one
    device while the dots roll up a whole lane or area. Sized to sit on the same 8px optical line as
@@ -3819,13 +3827,13 @@ span.area-plan-pin { cursor: inherit; }
 /* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: var(--danger-tint); }
-/* An acknowledged alert's chip, hollow, with the tick its flag carries. */
+/* An acknowledged alert's chip, paled, with the tick its flag carries. */
 .legend-chip-acknowledged {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-color: var(--danger);
-  background: transparent;
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-tint);
   color: var(--danger-text);
 }
 
@@ -3898,9 +3906,9 @@ a.chip { text-decoration: none; }
   margin-top: 5px;
 }
 
-/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
-   and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
-   band, and a clipped link is worse than a two-line footer. */
+/* The state on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
+   and "Alert acknowledged · since 5 Nov 2026, 14:22" plus the link is close enough to that to wrap on
+   a narrow band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
   display: flex;
   align-items: center;
@@ -3928,6 +3936,37 @@ a.chip { text-decoration: none; }
 
 .context-alert-link:hover { color: var(--text-primary); }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Acknowledged, the banner pales: its severity's colour, softer at the edge and in the fill, as
+   the badges and pins pale. Suppressed, it colours nothing: a dashed neutral outline, and the
+   crossed bell. */
+.context-alert.context-alert-acknowledged {
+  border-color: color-mix(in srgb, var(--warning) 70%, var(--bg-card));
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+.context-alert-critical.context-alert-acknowledged {
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-tint);
+}
+.context-alert.context-alert-suppressed {
+  border-color: var(--border);
+  border-style: dashed;
+  background: transparent;
+}
+.context-alert-suppressed .context-alert-head { color: var(--text-primary); }
+
+/* Who acknowledged it, or until when a window keeps it quiet, with the reason under it. */
+.context-alert-state {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+.context-alert-state svg { flex-shrink: 0; margin-top: 1px; }
+.context-alert-note { font-size: 11px; line-height: 1.35; color: var(--text-primary); margin-top: 3px; overflow-wrap: anywhere; }
 
 /* The top bar's alert counter and the list behind it. Permanent in all three states; see
    AlertPill.jsx. `position: relative` on the wrapper anchors the panel to the pill rather than the
@@ -4117,6 +4156,12 @@ a.chip { text-decoration: none; }
 }
 .alert-pill-dot-warning.alert-pill-dot-acknowledged { box-shadow: inset 0 0 0 1.5px var(--warning); }
 .alert-pill-dot-info.alert-pill-dot-acknowledged    { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* Suppressed: a muted ring with a stroke through it, whatever its severity, since it colours
+   nothing. After the acknowledged rules, so it wins on a row that is both. */
+.alert-pill-dot.alert-pill-dot-suppressed {
+  background: linear-gradient(135deg, transparent 43%, var(--text-muted) 43% 57%, transparent 57%);
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
 
 /* Under an alert's name: Acknowledge, or who acknowledged it, when and why, with Withdraw. Indented
    to the name, past the dot: 12px of row padding, the 7px dot and its 9px gap. */
@@ -4133,6 +4178,7 @@ a.chip { text-decoration: none; }
 
 .alert-pill-ack-words { display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
 .alert-pill-ack-tick { flex-shrink: 0; margin-top: 1px; color: var(--success-text); }
+.alert-pill-suppression-mark { flex-shrink: 0; margin-top: 1px; }
 .alert-pill-ack-note { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
 .alert-pill-ack .btn-sm { padding: 2px 8px; font-size: 11px; }
 
@@ -4687,8 +4733,8 @@ a.chip { text-decoration: none; }
 /* --danger-text and --chip-offline-text, not --danger and --text-muted: both measure under AA on the
    fill their chip paints. */
 .chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
-/* An acknowledged alert: the danger chip hollow, its ACKNOWLEDGED flag carrying the tick. */
-.chip-acknowledged { border-color: var(--danger); background: var(--bg-card); color: var(--text-primary); font-weight: 600; }
+/* An acknowledged alert: the danger chip paled, its ACKNOWLEDGED flag carrying the tick. */
+.chip-acknowledged { border-color: var(--danger-soft-border); background: var(--danger-soft-tint); color: var(--text-primary); font-weight: 600; }
 .chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--chip-offline-text); font-weight: 500; }
 
 /* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
@@ -4867,7 +4913,8 @@ a.chip { text-decoration: none; }
 
 /* Tighter than the 6px a form label gives it: these labels are 11px and uppercase, and the
    standard gap reads as a gap rather than as part of the label. */
-.context-field-label .help-tip {
+.context-field-label .help-tip,
+.context-panel-section-label .help-tip {
   margin-left: 3px;
   width: 15px;
   height: 15px;
@@ -4978,6 +5025,31 @@ a.chip { text-decoration: none; }
   flex-direction: column;
   gap: 10px;
 }
+
+/* A drawer's Suppression windows section (common/SuppressionWindows.jsx): each window a ruled row,
+   its state as a word beside the reason, the times and who under it, the acts at its foot. The
+   reason wraps rather than cuts: it is what the reader came for, and it is at most 200 characters. */
+.suppression-windows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* Flex so its HelpTip sits on the label's line, as a field label's does. */
+.suppression-windows > .context-panel-section-label { margin-bottom: 0; display: flex; align-items: center; }
+.suppression-windows .context-field-empty { font-size: 11px; }
+.suppression-window-list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.suppression-window {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.suppression-window:first-child { border-top: none; padding-top: 2px; }
+.suppression-window-head { display: flex; align-items: flex-start; gap: 6px; }
+.suppression-window-head .badge { flex-shrink: 0; }
+.suppression-window-reason { font-size: 12px; color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
+.suppression-window-meta { color: var(--text-muted); line-height: 1.35; }
+.suppression-window-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+/* The dialog's start and end side by side, one above the other in a narrow dialog. */
+.suppression-window-times { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 
 /* A copyable identifier inside the panel is a block, not an inline chip. It wraps to as many
    lines as the value needs (see `.copyable-id-wrap`), so the negative margin `.copyable-id`

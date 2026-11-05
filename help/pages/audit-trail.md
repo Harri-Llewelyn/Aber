@@ -95,6 +95,8 @@ A few things to know:
 
 **An alert's acknowledgements have a lane of their own**, under **Alerts** in the plant's section. The lane is named after the alert and the device or gateway it is about. Each row says who acknowledged it or withdrew it, the reason and the note. An alert about a machine identity is the exception: its acknowledgements are in that identity's lane, which only an Administrator or an Auditor can read.
 
+**A suppression window's acts are in the lane of the device, gateway or cell it covers.** Each row says who scheduled, changed, ended or cancelled the window, when it starts and ends, and why. The action filter lists them under **Alerts**. Each is **Operational**, by the last rule below.
+
 **Aber decides each event's class, not the page.** The first rule that fits decides:
 
 1. **Read**: a service's logs read on the System page, a gateway's credential shown again, a capture's download link issued, and a device exported.

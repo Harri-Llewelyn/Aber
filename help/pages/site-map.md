@@ -24,7 +24,9 @@ Open it to see whether the plant is up. When something is wrong, every lane, pin
 - **Needs attention** (amber): a device here is quarantined, waiting to be approved. It outranks Online.
 - **Nothing live** (grey): no device here is online, and none is waiting to be approved.
 - **Alert firing** (a red pin with a pulsing ring; an amber or red badge in the panel): an alert is firing against a device here, and nobody has acknowledged it. The badge is red when the alert is critical and amber otherwise. The map shows the alert and judges nothing itself.
-- **Alert acknowledged** (a red pin with a tick and no pulse; a hollow red badge with a tick in the panel): an alert against a device here has been acknowledged, and is still firing. A device chip says **ACKNOWLEDGED**. If another alert here is not acknowledged, the place shows **Alert firing** instead.
+- **Alert acknowledged** (a pale red pin with a tick and no pulse; a pale red badge with a tick in the panel): an alert against a device here has been acknowledged, and is still firing. A device chip says **ACKNOWLEDGED**. If another alert here is not acknowledged, the place shows **Alert firing** instead.
+
+A suppressed alert colours nothing. A suppression window keeps a device's alerts quiet during planned work, so the place shows the state it would have without them. Windows are set in the panel of a device, gateway or cell: see [Suppression windows](devices.md#suppression-windows).
 
 Every state is what Aber last read. If the dashboard cannot reach the server for about 10 seconds, a strip under the top bar says **Not updating since** and a time. While it shows, treat what you see as out of date. It goes away when the next refresh works. If your session has ended, the strip says so instead and offers **Sign In Again**.
 
@@ -34,7 +36,7 @@ Nothing on this page changes anything. Equipment is filed on the Devices, Gatewa
 
 ## The alert counter
 
-The alert counter is the shield or warning sign in the top bar, on every page. Its number is how many alerts are firing that nobody has acknowledged. The browser tab's title and its icon count the same. Select the counter to list every firing alert.
+The alert counter is the shield or warning sign in the top bar, on every page. Its number is how many alerts are firing that nobody has acknowledged. A suppressed alert is not counted either. The browser tab's title and its icon count the same. Select the counter to list every firing alert.
 
 To acknowledge an alert:
 
@@ -46,3 +48,5 @@ To acknowledge an alert:
 The alert stays in the list, after the others, with a tick. It says who acknowledged it, when, and why. It leaves the number until it resolves. If it fires again before it resolves, it stays acknowledged. Once it resolves, the next time it fires it counts again.
 
 Operators, Shopfloor Managers and Administrators can acknowledge an alert. If someone else acknowledged it first, the dialog says who and when. **Withdraw**, under an acknowledged alert, puts it back in the number. The person who acknowledged it can withdraw it, and so can a Shopfloor Manager or an Administrator. Each acknowledgement and withdrawal is recorded in the Audit Trail.
+
+A suppressed alert is listed last, with a crossed-out bell. It says until when, and the window's reason. It is not counted, it colours nothing, and nothing is sent about it. When its window ends, it counts again if it is still firing, and it shows as if it had just fired. See [Suppression windows](devices.md#suppression-windows).

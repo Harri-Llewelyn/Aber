@@ -2065,6 +2065,105 @@ paths:
         '403': { description: 'Not the acknowledger, a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No alert with that id that you may read.' }
 
+  /rest/v1/rpc/schedule_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Schedule a suppression window on a device, a gateway or a cell
+      description: |
+        Keeps a subject's alerts quiet for a period, such as planned maintenance (`0240`). An alert
+        that fires inside the window is still recorded, marked suppressed: the dashboard does not
+        count it or colour anything for it, and it is not sent. It ends by itself at `p_ends_at`.
+
+        A device window covers the device's own alerts. A gateway window covers the gateway's own
+        alerts, not its devices'. A cell window covers every device in the cell at the moment an
+        alert is read, so a device moved out of the cell is no longer covered. Platform and
+        machine identity alerts are never covered.
+
+        A Shopfloor Manager or an Administrator may call it. A start in the past, or none, is now.
+        Writes one `SUPPRESSION_WINDOW_SCHEDULED` row in the Audit Trail, in the subject's own lane.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_subject_kind, p_subject_id, p_ends_at, p_reason]
+              properties:
+                p_subject_kind: { type: string, enum: [device, gateway, cell] }
+                p_subject_id: { type: string, format: uuid, description: 'The device''s, gateway''s or cell''s `id`.' }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Null, or a time already past, is now.' }
+                p_ends_at: { type: string, format: date-time, description: 'After the start, and after now.' }
+                p_reason: { type: string, minLength: 1, maxLength: 200, description: 'Trimmed. Every signed-in reader sees it beside the alert.' }
+      responses:
+        '200':
+          description: The window.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'A subject kind outside the three, no end, an end not after the start and now, or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such device, gateway or cell.' }
+
+  /rest/v1/rpc/change_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Change a suppression window's start, end or reason
+      description: |
+        A null argument keeps what the window has (`0240`). A window that has started keeps its
+        start, and one that has ended is kept as it was. Writes one `SUPPRESSION_WINDOW_CHANGED`
+        row in the Audit Trail, with the window before and after, or nothing when nothing changed.
+        A Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Only for a window that has not started. A time already past is now.' }
+                p_ends_at: { type: string, format: date-time, nullable: true, description: 'After the start, and after now.' }
+                p_reason: { type: string, nullable: true, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: The window, changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'An ended window, or a new start for a started one (`23514`); an end not after now and the start, or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
+  /rest/v1/rpc/end_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: End a suppression window now
+      description: |
+        A window that has started ends now, with who ended it, and its subject's alerts count again
+        (`0240`): one still firing is then sent, as if it had just fired. A window that has not
+        started is cancelled: it covered nothing, so it is deleted. Writes one
+        `SUPPRESSION_WINDOW_ENDED` or `SUPPRESSION_WINDOW_CANCELLED` row in the Audit Trail. A
+        Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The window as it ended, or as it was before it was cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'The window has already ended (`23514`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:
@@ -3267,6 +3366,11 @@ paths:
         links each alert to its rule by `rule_uid`. An acknowledged alert is still firing, so it is
         still returned, with its acknowledgement (0231); the dashboard counts only the rows whose
         `acknowledged_at` is null.
+
+        A suppressed alert is still firing too, so it is returned with `suppressed` true and the
+        window that covers it now: its id, its reason and when it ends (0240). Whether a row is
+        suppressed is decided as it is read, so a window's start and end take effect with no write.
+        The dashboard counts and colours only the rows that are neither acknowledged nor suppressed.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -3276,6 +3380,30 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/alert_suppression_windows:
+    get:
+      tags: [Registry]
+      summary: Read the suppression windows
+      description: |
+        One row per window on a device, a gateway or a cell (0240): its start, its end, its reason,
+        who scheduled it and, if it was ended early, who ended it. Every signed-in role reads every
+        window, as the drawers list them. Nobody writes the table here: use
+        `/rest/v1/rpc/schedule_alert_suppression_window`, `/rest/v1/rpc/change_alert_suppression_window`
+        and `/rest/v1/rpc/end_alert_suppression_window`.
+      parameters:
+        - { name: device_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: gateway_id, in: query, schema: { type: string } }
+        - { name: cell_id, in: query, schema: { type: string } }
+        - { name: ends_at, in: query, schema: { type: string, format: date-time }, description: 'e.g. `gt.2026-11-05T09:00:00Z` for the current and upcoming windows.' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching windows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AlertSuppressionWindow' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/device_nameplate:
@@ -6459,7 +6587,9 @@ components:
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
-                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN]
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
+                 SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
+                 SUPPRESSION_WINDOW_CANCELLED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6486,7 +6616,10 @@ components:
             from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
             written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
             `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
-            alert about its token.
+            alert about its token. The `SUPPRESSION_WINDOW_` actions (0240) are written by
+            `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and
+            `end_alert_suppression_window()`, in the lane of the device, gateway or cell the window
+            covers.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -7275,6 +7408,42 @@ components:
           nullable: true
           enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other]
         acknowledgement_note: { type: string, nullable: true, maxLength: 200, description: 'Their own words, trimmed. Required with the reason `other`.' }
+        suppression_window_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            The suppression window that first covered this occurrence, for history (0240): stamped as
+            it starts in one, or when one opens while it fires, and never cleared. On
+            `platform_alerts` only; whether an alert is suppressed now is `suppressed`, below.
+        suppressed:
+          type: boolean
+          description: |
+            On `platform_alerts_active` only (0240): whether a suppression window covers the alert
+            now, decided as the row is read. A suppressed alert is not counted, colours nothing and
+            is not sent.
+        suppressing_window_id: { type: string, format: uuid, nullable: true, description: 'On `platform_alerts_active` only: the window that covers it now. Of several, the one that ends last.' }
+        suppression_reason: { type: string, nullable: true, description: 'On `platform_alerts_active` only: that window''s reason.' }
+        suppressed_until: { type: string, format: date-time, nullable: true, description: 'On `platform_alerts_active` only: when that window ends. The alert counts again then if it is still firing.' }
+
+    AlertSuppressionWindow:
+      type: object
+      description: |
+        A scheduled period on one device, gateway or cell during which its alerts are recorded but
+        marked suppressed (0240). Exactly one of `device_id`, `gateway_id` and `cell_id` is set.
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid, nullable: true }
+        gateway_id: { type: string, format: uuid, nullable: true, description: 'The gateway''s own alerts, not its devices''.' }
+        cell_id: { type: string, format: uuid, nullable: true, description: 'Every device in the cell when an alert is read.' }
+        starts_at: { type: string, format: date-time, description: 'Never before it was scheduled.' }
+        ends_at: { type: string, format: date-time, description: 'The first moment it no longer covers. Now, when it was ended early.' }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+        created_by: { type: string, format: uuid, description: 'The `auth.users` id of the person who scheduled it.' }
+        created_by_email: { type: string, nullable: true, description: 'Their email address as their token carried it.' }
+        created_at: { type: string, format: date-time }
+        ended_by: { type: string, format: uuid, nullable: true, description: 'Who ended it early, or null.' }
+        ended_by_email: { type: string, nullable: true }
 
     DeviceNameplate:
       type: object

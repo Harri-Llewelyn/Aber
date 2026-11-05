@@ -13,6 +13,7 @@ import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
@@ -59,7 +60,7 @@ import {
 import { useSortableRows } from '../../hooks/useTableSort'
 import { Tooltip } from '../common/Tooltip'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, activeAlerts = [] }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, userRole = null, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [cells, setCells]       = useState([])
@@ -808,7 +809,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 : 'Archive Cell'
           },
         ].filter(Boolean) : []}
-      />
+      >
+        {/* A tool of unknown height, so after the actions: every device in the cell when an alert is read. */}
+        {selectedCell && (
+          <SuppressionWindows
+            kind="cell"
+            subjectId={selectedCell.cell_id}
+            subjectName={selectedCell.cell_name}
+            userRole={userRole}
+            showToast={showToast}
+            open={!!selectedCell}
+          />
+        )}
+      </ContextPanel>
 
     </div>
   )

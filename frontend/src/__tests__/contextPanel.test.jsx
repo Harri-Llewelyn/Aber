@@ -1085,11 +1085,13 @@ describe('Context panel layout invariants', () => {
     expect(within(section).getByText('3D Model')).toBeInTheDocument()
     expect(within(section).getByTestId('model-3d-input')).toBeInTheDocument()
 
-    // After the fields, before the actions, and nothing after the actions.
+    // After the fields, before the actions. After the actions is one tool, the Suppression windows,
+    // whose height is not known.
     const actions = panel().querySelector('.context-panel-actions')
     expect(fields[0].compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(section.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(panel().querySelector('.context-panel-extras')).toBeNull()
+    const tools = panel().querySelector('.context-panel-extras')
+    expect([...tools.children].map(c => c.className)).toEqual(['suppression-windows'])
   })
 
   it('rules the 3D model off as the actions are, as far below the fields', () => {

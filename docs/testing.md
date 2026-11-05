@@ -974,6 +974,16 @@ python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is
 # fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
 # machine identity's own in the security lane. Every test rolls back.
 python supabase/migrations/test_a_person_acknowledges_an_alert.py
+# An alert stays quiet during planned work (0240, 0241). A Shopfloor Manager and an Administrator
+# schedule, change and end a suppression window on a device, a gateway or a cell; an Operator, an
+# Auditor and a machine identity are refused, and nobody writes the table directly. A device window
+# covers the device, a gateway window the gateway's own alerts, and a cell window each device in the
+# cell when the alert is read, so a device moved out is no longer covered. Platform and machine
+# identity alerts are never covered. platform_alerts_active says suppressed before, during and after
+# a window, with every column it returned before. An occurrence records the window that first
+# covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
+# one audit row in the subject's lane. Every test rolls back.
+python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

@@ -133,6 +133,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger-text on card',           '--danger-text',  card,                                         AA_TEXT],
     ['--danger-text on base',           '--danger-text',  base,                                         AA_TEXT],
     ['--danger-text on --danger-tint',  '--danger-text',  on(paint('.badge-critical'), card),           AA_TEXT],
+    // An acknowledged alert pales: its text still reads, and its edge still marks it out as a shape.
+    ['--danger-text on an acknowledged badge', '--danger-text', on(paint('.badge-acknowledged'), card), AA_TEXT],
+    ['--danger-text on an acknowledged banner', '--danger-text', on(paint('.context-alert-critical.context-alert-acknowledged'), surface), AA_TEXT],
+    ['acknowledged edge on card',       '--danger-soft-border', card,                                   AA_LARGE],
     ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
