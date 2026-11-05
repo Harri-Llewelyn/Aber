@@ -190,6 +190,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // The studio listener's ext_authz step: whether the caller is an Administrator in user_roles now.
   // The service key is for that lookup, after GoTrue has verified the caller's session.
   "studio-admission": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // The API listener's ext_authz step on GoTrue's consent endpoints: whether the MFA switch lets
+  // this person approve this app's sign-in. The service key reads their role, the switch and the
+  // authorization's app, after GoTrue has verified the session.
+  "consent-gate": ["SUPABASE_SERVICE_ROLE_KEY"],
   // Gitea's own sign-out link, routed here by the forge listener: ends the door's GoTrue session,
   // then sends the browser to the dashboard's /sign-out. The service key is for the sign-out; the
   // dashboard's address is where the browser goes next.
