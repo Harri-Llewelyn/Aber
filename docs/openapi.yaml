@@ -836,6 +836,45 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/telemetry_coverage:
+    post:
+      tags: [Telemetry]
+      summary: Count where readings arrived, a device at a time, block by block
+      description: |
+        What History's Overview reads (`0245`). One row per device asked for: how many readings it
+        sent in each block of the window, over every metric, as `counts`, oldest block first and 0
+        for a block with none. Block i starts at `first_block` plus i times `block_width`. Read from
+        the historian's rollups per device, never raw telemetry.
+
+        **More than 40 devices take 5-minute or 1-hour blocks only**, the rollups' own widths, so
+        nothing is summed on the historian. Forty or fewer may take any whole number of 5 minutes.
+        The source follows each block's age: an hourly block comes from the hourly device rollup up
+        to its watermark and from the 5-minute one after it, and a block under an hour over a window
+        older than the 5-minute rollup reaches is read hourly, as `block_width` says.
+        `computed_from` to `computed_to` is what the rollup has counted: a block outside it is not
+        counted yet, which is not a block with no readings. `SECURITY INVOKER`, so it reads what the
+        caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, block, asset_ids]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                block: { type: string, example: '00:05:00', description: 'A PostgreSQL interval: a whole number of 5 minutes, at least one, with no months. More than 40 devices take `5 minutes` or `1 hour` only.' }
+                asset_ids: { type: array, items: { type: string }, maxItems: 1000, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id), at most 1,000.' }
+      responses:
+        '200':
+          description: One row per device, ordered by device.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCoverageRow' } }
+        '400': { description: 'Bounds out of order, a bad block, no devices, more than 1,000 devices, a summed block for more than 40, or more than 360,000 device-buckets to read, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   # --------------------------------------------------------------- Audit ----
   /rest/v1/audit_trail:
     get:
@@ -6736,6 +6775,20 @@ components:
         last_bool: { type: boolean, nullable: true }
         n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
         is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
+
+    TelemetryCoverageRow:
+      type: object
+      description: |
+        One device's readings in each block from `/rest/v1/rpc/telemetry_coverage`, and what the
+        historian's device rollup has counted.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        first_block: { type: string, format: date-time, description: 'Start of the first block, on the epoch grid.' }
+        block_width: { type: string, example: '00:05:00', description: 'The block, a PostgreSQL interval: the one asked for, or an hour for a window older than the 5-minute rollup reaches.' }
+        counts: { type: array, items: { type: integer }, description: 'Readings in each block, oldest first; 0 for none.' }
+        computed_from: { type: string, description: 'The oldest moment the rollup has counted, or `-infinity`.' }
+        computed_to: { type: string, description: 'The newest moment the rollup has counted, or `infinity`.' }
+        complete: { type: boolean, description: 'The rollup has counted all the history it will.' }
 
     AssetConfigRow:
       type: object

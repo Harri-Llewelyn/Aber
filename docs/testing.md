@@ -567,6 +567,14 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
 # reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_each_series_carried_forward.py
+# History counts where readings arrived (0245). Local tables stand in for the historian's device
+# rollups and the coverage view. One row per device asked for, its counts an array,
+# oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
+# one summed from the widest rollup that divides it for 40 devices or fewer; nothing finer than 5
+# minutes; more than 40 take 5 minutes or 1 hour only. Each row carries what
+# the rollup has counted. Bad bounds, more than 1,000 devices and reads over 360,000 buckets are
+# refused before any read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_counts_where_readings_arrived.py
 # Reading a service's logs is recorded (0225). record_service_logs_read() writes one
 # SERVICE_LOGS_READ row in the service's lane of the security domain, naming the Administrator and
 # the read's service, level, filter and range. The database decides a row is due: one on the first
@@ -1047,6 +1055,11 @@ python timescaledb/test_physical_backup.py
 python timescaledb/test_rollup_compression.py
 # A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
 python timescaledb/test_rollup_refresh.py
+# History's Overview counts from two device rollups: telemetry_device_5m from telemetry_1m and
+# telemetry_device_1h from telemetry_1h, materialised only, one of each policy, kept as long as the
+# series rollup of their width. One backfill job, a row a rollup; its window walks back a chunk at a
+# time and stops at the hour holding its source's oldest bucket. Changes nothing.
+python timescaledb/test_device_rollups.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

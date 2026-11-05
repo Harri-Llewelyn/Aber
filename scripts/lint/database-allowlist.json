@@ -150,7 +150,8 @@
     "ensure_audit_trail_partitions(integer) | warning extra | auto variable \"v_i\" shadows a previously defined variable": "The FOR loop declares its own v_i, so the DECLAREd one is unused. Cosmetic; drop it when the function is next touched."
   },
   "historian_splinter": {
-    "function_search_path_mutable_public_refresh_requested_rollups_f842ac7c9bbe4adabcdd561075962ef1": "A job procedure that commits between refreshes: a SET clause would make it atomic, and refresh_continuous_aggregate() refuses to run there (timescaledb/README.md). Every name in the body is schema-qualified, and it runs as the superuser who owns it.",
+    "function_search_path_mutable_public_refresh_requested_rollups_8c9bced2aa9132bdd52ace23a827eb56": "A job procedure that commits between refreshes: a SET clause would make it atomic, and refresh_continuous_aggregate() refuses to run there (timescaledb/README.md). Every name in the body is schema-qualified, and it runs as the superuser who owns it.",
+    "function_search_path_mutable_public_backfill_device_rollups_41fccdd7664fe51d98bc626e9db49e2b": "The device rollups' backfill job, for the same reason as refresh_requested_rollups(): it commits after each chunk's refreshes, so a SET clause would make it atomic and refresh_continuous_aggregate() would refuse. Every name in the body is schema-qualified, and it runs as the superuser who owns it.",
     "extension_in_public_timescaledb": "TimescaleDB installs itself in public, and the historian is not exposed through PostgREST, which is what this lint guards."
   },
   "historian_plpgsql_check": {}

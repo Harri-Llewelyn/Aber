@@ -6,10 +6,11 @@ export const BAND_DRAG_PX = 4
 /**
  * A band dragged across a timeline, by mouse or pen: the Audit Trail's tracks and History's charts.
  * A press inside an element matching `track` starts one, unless it is inside one matching `skip`;
- * touch starts none, so a finger still scrolls the page. `band` is `{ a, b }`, fractions of the
- * pressed track from the press to the pointer, while one is drawn. A release at least BAND_DRAG_PX
- * from the press calls `onBand(a, b)`; Escape drops the band, and keeps the key from a drawer under
- * it. Fractions are measured inside `inset` pixels of padding at each end of the track.
+ * touch starts none, so a finger still scrolls the page. `band` is `{ a, b, y0, y }`: fractions of
+ * the pressed track from the press to the pointer, and the press's and the pointer's clientY, for a
+ * box across several tracks, while one is drawn. A release at least BAND_DRAG_PX from the press
+ * calls `onBand(a, b, { y0, y })`; Escape drops the band, and keeps the key from a drawer under it.
+ * Fractions are measured inside `inset` pixels of padding at each end of the track.
  *
  *   const { band, onPointerDown } = useBandDrag(onBand, { track: '.trail-track', skip: '.trail-node', inset: 14 })
  *   <div onPointerDown={onPointerDown}>…</div>
@@ -31,7 +32,7 @@ export function useBandDrag(onBand, { track: trackSelector, skip = null, inset =
       const inner = r.width - 2 * inset
       return inner > 0 ? Math.min(1, Math.max(0, (x - r.left - inset) / inner)) : 0
     }
-    const { pointerId, clientX: x0 } = e
+    const { pointerId, clientX: x0, clientY: y0 } = e
     const a = fractionAt(x0)
     const far = (x) => Math.abs(x - x0) >= BAND_DRAG_PX
     let drawn = false
@@ -42,13 +43,13 @@ export function useBandDrag(onBand, { track: trackSelector, skip = null, inset =
       if (ev.buttons === 0) { stop(); return }
       if (!drawn && !far(ev.clientX)) return
       drawn = true
-      setBand({ a, b: fractionAt(ev.clientX) })
+      setBand({ a, b: fractionAt(ev.clientX), y0, y: ev.clientY })
     }
     const up = (ev) => {
       if (ev.pointerId !== pointerId) return
       const set = drawn && far(ev.clientX)
       stop()
-      if (set) latest.current(a, fractionAt(ev.clientX))
+      if (set) latest.current(a, fractionAt(ev.clientX), { y0, y: ev.clientY })
     }
     const key = (ev) => {
       if (ev.key !== 'Escape') return

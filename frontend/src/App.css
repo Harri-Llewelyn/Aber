@@ -101,6 +101,14 @@
   --chart-state-c:      0.065;
   --chart-state-edge-l: 0.70;
   --chart-state-edge-c: 0.115;
+  /* History's Overview: a block's shade, fewer readings to more, a sequential blue ramp checked with
+     the dataviz validator against this card. Sparse blocks recede toward the card and dense ones are
+     a calm light blue. The step nearest the card clears 2:1 (2.08:1), the floor for an ordered ramp;
+     a block's count is also in its readout, never in its colour alone. */
+  --coverage-1: #184f95;
+  --coverage-2: #256abf;
+  --coverage-3: #3987e5;
+  --coverage-4: #86b6ef;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
@@ -208,6 +216,12 @@
   --chart-state-c:      0.045;
   --chart-state-edge-l: 0.60;
   --chart-state-edge-c: 0.10;
+  /* Overview's shades on the white card, the same ramp darkening with the count; the step nearest
+     the card clears 2:1 (2.11:1). */
+  --coverage-1: #86b6ef;
+  --coverage-2: #5598e7;
+  --coverage-3: #2a78d6;
+  --coverage-4: #1c5cab;
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
@@ -4403,16 +4417,18 @@ a.chip { text-decoration: none; }
 }
 
 /* ===== Popover arrows =====
-   The four panels that open from a button point at it: a square turned 45 degrees, centred on the
-   panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
-   of the panel, because the alert, notification and account panels clip or scroll their overflow;
-   the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
+   The four panels that open from a button point at it, and History Overview's selection popover at
+   its box: a square turned 45 degrees, centred on the panel's border on the side facing what it
+   points at. It is a pseudo-element of the panel's wrapper, not of the panel, because the alert,
+   notification and account panels clip or scroll their overflow; the Filters panel and the
+   selection popover clip nothing and carry their own. --bg-card is opaque in both themes, so the
    half inside the panel hides the panel's border there and the two bordered sides carry the
    outline on into the point. The rules below say where the centre goes and which way it turns. */
 .alert-pill-wrap:has(> .alert-pill-panel)::after,
 .notif-wrap:has(> .notif-panel)::after,
 .user-menu:has(> .user-popover)::after,
-.filters-popover::before {
+.filters-popover::before,
+.overview-popover::before {
   --arrow-size: 10px;
   content: '';
   position: absolute;
@@ -4457,6 +4473,20 @@ a.chip { text-decoration: none; }
   top: -0.5px;
   left: calc(var(--arrow-x, 50%) - 1px);
 }
+
+/* Up from History Overview's selection popover to its box, or down where it opens above the box;
+   none where a box taller than the window has it over its foot. --arrow-x is set as the Filters
+   panel's is. */
+.overview-popover::before {
+  top: -0.5px;
+  left: calc(var(--arrow-x, 50%) - 1px);
+}
+.overview-popover-above::before {
+  --arrow-turn: 225deg;
+  top: auto;
+  bottom: -0.5px;
+}
+.overview-popover-over::before { display: none; }
 
 /* The 3D model preview in the device drawer's model section: the drawer's width, and 16:9 so it
    grows with the drawer (about 290px tall at 1080p). One class on all three states (the
@@ -5969,14 +5999,15 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
 }
 
-/* The row above the charts: Expand all or Collapse all at its start, as .trail-header has it, then
-   the line saying what is shown. */
+/* The row above the charts and Overview's lanes: Expand all or Collapse all at its start, as
+   .trail-header has it, then the line saying what is shown. The same room above and below as
+   .trail-header, so the three pages' rows read alike; what follows it adds none of its own. */
 .history-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 16px;
-  padding: 8px var(--inset) 0;
+  padding: 10px var(--inset);
 }
 .history-meta {
   margin: 0;
@@ -6109,7 +6140,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
    Vocabulary page's sections are drawn. */
-.history-groups { display: flex; flex-direction: column; min-width: 0; padding-top: 12px; }
+.history-groups { display: flex; flex-direction: column; min-width: 0; }
 .history-group { min-width: 0; }
 .history-group-head {
   background: var(--bg-base);
@@ -6124,6 +6155,131 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-bucket-pick { justify-content: space-between; min-width: 0; }
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
 .history-bucket-choices .btn { justify-content: flex-start; }
+
+/* ===== History: Overview ===== */
+/* Overview is the Audit Trail's lane grid (.trail-swimlanes, .trail-lane, .trail-section,
+   .trail-axis): a label column, then a track a row, under the same axis, at the same widths and
+   row height. What follows is only what Overview adds to it. */
+.overview-swimlanes {
+  position: relative;
+  min-width: 0;
+  /* Overview's headings carry no icon, so a lane's label starts past the chevron alone: under its
+     heading's text, as the Audit Trail's does. */
+  --trail-name-indent: calc(var(--inset) + 18px);
+}
+/* A cell's heading under its area's, a step in, and pinned one row below it. */
+.overview-subsection { top: calc(var(--trail-axis-height) + 1px + 29px); }
+.overview-subsection .group-heading { padding-left: calc(var(--inset) + 18px); }
+.overview-lane-deep .trail-lane-label { padding-left: calc(var(--trail-name-indent) + 18px); }
+/* A lane's label: tick box, status dot, name, then the metric count as the qualifier. */
+.overview-pick { flex-shrink: 0; margin: 0; }
+.overview-status { display: inline-flex; flex-shrink: 0; }
+.overview-lane-name { min-width: 0; text-decoration: none; }
+.overview-lane-name .trail-lane-name { display: block; color: var(--accent-text); }
+.overview-lane-name:hover .trail-lane-name,
+.overview-lane-name:focus-visible .trail-lane-name { text-decoration: underline; }
+.overview-lane-offline { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+/* A track's blocks: a run of one shade a box, between the row's rules, on the track's own colour. */
+.overview-track { cursor: crosshair; user-select: none; }
+.overview-run { position: absolute; top: 7px; bottom: 7px; }
+.overview-step-1 { background: var(--coverage-1); }
+.overview-step-2 { background: var(--coverage-2); }
+.overview-step-3 { background: var(--coverage-3); }
+.overview-step-4 { background: var(--coverage-4); }
+/* Where a lane's readings stop, at the track's right-hand end, on the card so it reads over a block. */
+.overview-stop {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The block under the pointer in words: the tooltip's bubble and arrow (.tooltip-bubble), on one
+   line, below the block or above it on the last lane. */
+.overview-readout { white-space: nowrap; }
+/* The selection box, over the tracks and under the labels, with the band's look on every edge. */
+.overview-box-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--trail-label-width) + var(--trail-lane-gap));
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.overview-box {
+  position: absolute;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+/* The selection's words and actions, in a popover beside the box: the Filters panel's frame,
+   portalled and fixed so the card cannot clip it, with its arrow (Popover arrows). */
+/* Focused as it opens, after a drag, so a press is not lost; no ring, as only a pointer opens it. */
+.overview-popover:focus { outline: none; }
+.overview-popover {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 10px var(--inset-tight);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-popover);
+}
+.overview-popover-words { margin: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.overview-popover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The key, at the end of the row above the lanes, as the Audit Trail's legend is. */
+.overview-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.overview-key-item { display: inline-flex; align-items: center; gap: 6px; }
+.overview-key-shades { display: inline-flex; gap: 2px; }
+/* A swatch takes its shade from .overview-step-N; the one for no readings is the track's own
+   colour, the card, with an edge. */
+.overview-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+.overview-swatch-none {
+  background: var(--bg-card);
+  box-shadow: inset 0 0 0 1px var(--border-hover);
+}
+/* A stretch the device rollups have not counted yet: dotted crosswise, so it is told from the
+   future's single hatch (.trail-shade-future) and from a block with no readings. */
+.overview-uncounted {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px);
+}
+.overview-swatch-uncounted {
+  background:
+    repeating-linear-gradient(45deg, var(--text-dim) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, var(--text-dim) 0 1px, transparent 1px 4px), var(--bg-card);
+}
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --

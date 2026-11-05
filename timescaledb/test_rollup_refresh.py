@@ -112,13 +112,16 @@ class RollupRefreshTestCase(unittest.TestCase):
         for view in ROLLUPS:
             self.refresh(view, self.anchor)
         # The watermark is read through TimescaleDB's internal functions: no public view reports it.
+        # Only these rollups': one never refreshed (a device rollup, before its backfill) reports the
+        # earliest timestamp, 4714 BC, which psycopg2 cannot turn into a datetime.
         marks = dict(self.query(
             "SELECT c.view_name::text, _timescaledb_functions.to_timestamp("
             "         _timescaledb_functions.cagg_watermark(h.id)) "
             "  FROM timescaledb_information.continuous_aggregates c "
             "  JOIN _timescaledb_catalog.hypertable h "
             "    ON h.schema_name = c.materialization_hypertable_schema "
-            "   AND h.table_name = c.materialization_hypertable_name"))
+            "   AND h.table_name = c.materialization_hypertable_name "
+            " WHERE c.view_name::text = ANY(%s)", list(ROLLUPS)))
         for view in ROLLUPS:
             self.assertGreater(marks[view], self.end,
                                f"{view}'s watermark did not pass the replayed hour")
