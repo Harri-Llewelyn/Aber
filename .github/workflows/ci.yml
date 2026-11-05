@@ -1182,6 +1182,53 @@ jobs:
           print("  ok  postgres-meta admits Studio alone on 8080, and Studio the gateway alone on 3000, with the layer off or on")
           PY
 
+      # With Studio off the dashboard is told so: VITE_STUDIO_ENABLED "false", no address, and no
+      # Studio door in the CSP's connect-src, so sign-out beacons nothing nobody serves. With Studio
+      # on, both name the door as before. The forge's door is in both.
+      - name: Verify The Dashboard Names No Studio Door With Studio Off
+        run: |
+          set -euo pipefail
+          DEV=deploy/helm/aber/values-dev.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --show-only templates/apps/frontend.yaml > /tmp/door-studio-off.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
+            --show-only templates/apps/frontend.yaml > /tmp/door-studio-on.yaml
+          python3 - /tmp/door-studio-off.yaml /tmp/door-studio-on.yaml <<'PY'
+          import re, sys, yaml
+          from urllib.parse import urlsplit
+
+          def read(path):
+              """The frontend ConfigMap's VITE_STUDIO_ENABLED, VITE_STUDIO_URL and VITE_GITEA_URL, and the CSP's connect-src."""
+              data = next(d['data'] for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                          if d and d['kind'] == 'ConfigMap' and 'config.js' in (d.get('data') or {}))
+              setting = lambda name: (re.search(rf'^\s*{name}: "(.*)",$', data['config.js'], re.M) or [None, None])[1]
+              connect = re.search(r'connect-src ([^;"]*)', data['content-security-policy.conf'])
+              return {n: setting(n) for n in ('VITE_STUDIO_ENABLED', 'VITE_STUDIO_URL', 'VITE_GITEA_URL')}, \
+                  (connect.group(1).split() if connect else None)
+
+          errors = []
+          off, off_connect = read(sys.argv[1])
+          on, on_connect = read(sys.argv[2])
+          door = on['VITE_STUDIO_URL'] or ''
+          host = urlsplit(door).hostname
+          forge = '{0.scheme}://{0.netloc}'.format(urlsplit(on['VITE_GITEA_URL'] or ''))
+          if on['VITE_STUDIO_ENABLED'] != 'true' or not host:
+              errors.append(f"with Studio on, config.js says VITE_STUDIO_ENABLED {on['VITE_STUDIO_ENABLED']!r} and VITE_STUDIO_URL {door!r}")
+          elif not on_connect or not any(urlsplit(s).hostname == host for s in on_connect):
+              errors.append(f"with Studio on, the CSP's connect-src {on_connect} leaves out Studio's door {door}")
+          if off['VITE_STUDIO_ENABLED'] != 'false' or off['VITE_STUDIO_URL'] != '':
+              errors.append(f"with Studio off, config.js says VITE_STUDIO_ENABLED {off['VITE_STUDIO_ENABLED']!r} and VITE_STUDIO_URL {off['VITE_STUDIO_URL']!r}")
+          if off_connect is None or (host and any(urlsplit(s).hostname == host for s in off_connect)):
+              errors.append(f"with Studio off, the CSP's connect-src {off_connect} still names Studio's door {host}")
+          for name, connect in (('off', off_connect), ('on', on_connect)):
+              if forge not in (connect or []):
+                  errors.append(f"with Studio {name}, the CSP's connect-src {connect} leaves out the forge's door {forge}")
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+          print(f"  ok  with Studio off the dashboard names no Studio door and the CSP leaves {host} out; with it on, both name {door}")
+          PY
+
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice. e2e is on because e2e-validate is one of the clients asserted, and its

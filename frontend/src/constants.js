@@ -1,4 +1,4 @@
-import { readFlag, readSetting } from './config';
+import { readFlag, readSetting, studioDoorUrl } from './config';
 
 export const SPARKPLUG_TYPES = {
   1: 'Int8', 2: 'Int16', 3: 'Int32', 4: 'Int64',
@@ -373,13 +373,12 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
   .replace(/\/+$/, '');
 
 /**
- * Supabase Studio's door, as the browser reaches it. Not a link (Studio is reached from the
- * System page); this exists for sign-out alone (`utils/studioSignOut.js`). The fallback matches
- * STUDIO_PUBLIC_URL's, `127.0.0.1` and not `localhost`: cookies key on host, so a session opened
- * on one cannot be ended on the other.
+ * Supabase Studio's door, as the browser reaches it, or null where the chart runs no Studio. Not a
+ * link (Studio is reached from the System page); this exists for sign-out alone
+ * (`utils/studioSignOut.js`). The fallback matches STUDIO_PUBLIC_URL's, `127.0.0.1` and not
+ * `localhost`: cookies key on host, so a session opened on one cannot be ended on the other.
  */
-export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323')
-  .replace(/\/+$/, '');
+export const STUDIO_URL = studioDoorUrl('http://127.0.0.1:54323')?.replace(/\/+$/, '') ?? null;
 
 /**
  * The forge's door, as the browser reaches it (GITEA_ROOT_URL on the server side). A link as
