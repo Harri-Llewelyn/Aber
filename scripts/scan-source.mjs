@@ -77,6 +77,13 @@ export function parseFailures (errors, tracked, excused = UNPARSED) {
   }
 }
 
+// Whether one name matches one segment of a pattern: `*` is any run of characters, `?` any one.
+const nameMatches = (glob, name) => {
+  if (!glob) return !name
+  if (glob[0] === '*') return nameMatches(glob.slice(1), name) || (!!name && nameMatches(glob, name.slice(1)))
+  return !!name && (glob[0] === '?' || glob[0] === name[0]) && nameMatches(glob.slice(1), name.slice(1))
+}
+
 /**
  * An ignore file's patterns as a test of a path: true when the file leaves the path out. Only the
  * part of gitignore's syntax that Semgrep and this test read the same way is accepted: `*` and `?`
@@ -85,17 +92,19 @@ export function parseFailures (errors, tracked, excused = UNPARSED) {
  */
 export function ignoreRules (text) {
   const rules = text.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => {
-    if (/[\s!\\[\]]|\*\*|^:/.test(line)) throw new Error(`${IGNORE_FILE}: "${line}" uses syntax this check does not read`)
+    if (/[\s!\\[\]]|\*\*|^:|\/\//.test(line)) throw new Error(`${IGNORE_FILE}: "${line}" uses syntax this check does not read`)
     const dirOnly = line.endsWith('/')
     const body = dirOnly ? line.slice(0, -1) : line
-    const glob = [...body.replace(/^\//, '')]
-      .map((c) => (c === '*' ? '[^/]*' : c === '?' ? '[^/]' : c.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&'))).join('')
-    return { re: new RegExp(`^${glob}$`), anchored: body.includes('/'), dirOnly }
+    return { segments: body.replace(/^\//, '').split('/'), anchored: body.includes('/'), dirOnly }
   })
+  // A pattern names the file itself, or a directory above it; a trailing / names only a directory.
+  const names = (parts, end, dirOnly) => !(dirOnly && end === parts.length)
   return (path) => {
     const parts = path.split('/')
-    return rules.some(({ re, anchored, dirOnly }) => parts.some((name, i) =>
-      !(dirOnly && i === parts.length - 1) && re.test(anchored ? parts.slice(0, i + 1).join('/') : name)))
+    return rules.some(({ segments, anchored, dirOnly }) => (anchored
+      ? segments.length <= parts.length && names(parts, segments.length, dirOnly)
+        && segments.every((glob, i) => nameMatches(glob, parts[i]))
+      : parts.some((name, i) => names(parts, i + 1, dirOnly) && nameMatches(segments[0], name))))
   }
 }
 

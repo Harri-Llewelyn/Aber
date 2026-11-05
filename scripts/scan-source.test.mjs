@@ -127,7 +127,7 @@ test('* and ? stay within a name', () => {
 });
 
 test('syntax Semgrep might read differently from the check is refused', () => {
-  for (const line of ['!keep.js', '**/dist', 'a\\ b', '[ab].js', ':include .gitignore', 'trailing ']) {
+  for (const line of ['!keep.js', '**/dist', 'a\\ b', '[ab].js', ':include .gitignore', 'trailing ', 'a//b']) {
     assert.throws(() => ignoreRules(`${line}\n`), /uses syntax this check does not read/, line);
   }
 });
