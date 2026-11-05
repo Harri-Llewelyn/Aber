@@ -36,6 +36,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **User ID** names the person who made the change, and **Machine identity** names the machine. An Administrator can select the name to open that person or machine on the **Access Control** page. Select the ID beside the name to copy it.
 - **View in Devices**, at the foot of the drawer, opens the entity on its own page. It reads **View in Gateways**, **View in Cells**, **View in Areas** or **View in Schemas** for those kinds. A deleted entity has no page, so it has no such button.
 - **Raw audit payload** opens the entry exactly as it was recorded, for when the summary is not enough.
+- **A read of a service's logs** over a fixed window shows the window as one row, in your local time, such as "3 Nov 09:00 – 4 Nov 09:00". The raw payload keeps its two ends in UTC, as they were recorded.
 - **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded. Under **All time** the page loads 200 events at first. Any other window loads every event in it by itself, up to 2,000, as [Moving through time](#moving-through-time) says.
 - The page **refreshes itself** every 60 seconds, unless an Administrator changed that on the Settings page. A refresh adds new events at the top, and keeps the pages you already loaded.
 
