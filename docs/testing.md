@@ -996,7 +996,9 @@ python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # Aber sends each alert to a webhook (0247-0249). The trigger queues a firing message as an
 # occurrence starts firing and a resolve as it resolves, and nothing on a repeat upsert or a
 # last_confirmed_at stamp, below the route, before the webhook has an address and a key, or for a
-# machine identity's alert. Every arm of platform_alert_send_decision(); reminders past the
+# machine identity's alert. Every arm of platform_alert_send_decision(), with 0250's suppression
+# hold: held inside a window, sent once it ends, and nothing for an occurrence that resolved inside
+# it. Reminders past the
 # interval, and none unconfirmed, acknowledged, resolved or replaced; the three Notifications
 # settings, each one's rule and who reads and writes them; the address, the signing key (shown once,
 # rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each

@@ -3378,10 +3378,11 @@ the audit row belongs in the subject's lane, which the generic audit trigger can
   and name, the times, the reason and who scheduled and ended it. `0241` files them.
 
 **Sending holds, it does not drop.** The dispatcher
-([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function. Its
-suppression arm calls `platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the
-occurrence `a` it would send, and **holds** the send while that answers a window: nothing is sent,
-and the occurrence is not marked sent. When the window ends, or is ended early, and the alert is
+([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function,
+`platform_alert_send_decision()`. Its suppression arm, in place since `0250`, calls
+`platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the occurrence `a` it
+would send, and **holds** the send while that answers a window: nothing is sent, and the occurrence
+is not marked sent. When the window ends, or is ended early, and the alert is
 still firing, the next pass finds the function answering NULL and sends it, as if it had just fired.
 Otherwise a machine that comes back from maintenance broken never alerts. An occurrence that
 resolves inside the window is never sent: there is nothing left to say. The dispatcher reads the
@@ -3470,15 +3471,16 @@ sent**, so whatever changed since the row was queued counts. It answers `send`, 
 | `firing`, `reminder` | The occurrence resolved, or a newer occurrence of its fingerprint replaced it | drop |
 | `firing`, `reminder` | It is acknowledged | drop |
 | `reminder` | Its writer has not confirmed it within its window | drop |
+| `firing`, `reminder` | A suppression window covers the alert now (`0250`) | hold |
 | `firing`, `reminder` | Otherwise | send |
 
 So a firing message whose alert resolved before it went out is dropped, and its resolve with it. An
 acknowledgement drops the firing message and every reminder, and a resolve still goes if its firing
 message went. **A held row stays `pending`** with its next attempt pushed a minute out, and is not an
 attempt. It is decided again when it comes due, and sent once the hold lifts. Suppression windows
-(#326) are the second reason to hold: the function has a marked place for the arm (`SUPPRESSION ARM`,
-after acknowledgement and before `send`), so a firing message or a reminder held while a window
-covers its alert is sent when the window ends, as if the alert had just fired.
+(#326) are the second reason to hold. `0247` leaves the arm a marked place (`SUPPRESSION ARM`, after
+acknowledgement and before `send`), and `0250` fills it: a firing message or a reminder held while a
+window covers its alert is sent when the window ends, as if the alert had just fired.
 
 **A reminder every `notifications.reminder_hours`** (default 12, the repeat interval Grafana uses)
 while an alert fires unacknowledged. `queue_platform_alert_reminders()` queues one when the newest
@@ -3647,6 +3649,33 @@ backs. It needs one line in the map of kinds and nothing else:
 
 The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
 rows are still there.
+
+### A suppressed alert is held until its window ends (0250)
+
+`0240`'s suppression windows keep an alert quiet on the dashboard, and `0247`'s dispatcher sends each
+alert to the webhook. Each was built to stand alone, so `0247`'s send decision left suppression a
+marked place (`SUPPRESSION ARM`). This file fills it, and nothing else changes.
+
+- **A firing message or a reminder is held** while `platform_alert_suppressing_window()` answers a
+  window for the alert, asked with `now()` as the dashboard asks it. The row stays `pending`, is not
+  an attempt, and is decided again a minute later.
+- **When the window ends, or is ended early**, the predicate answers NULL, and the next decision
+  sends an alert that is still firing, as if it had just fired.
+- **The drops come first.** An alert that resolved, was replaced or was acknowledged inside its
+  window is dropped, not held, so it is never sent.
+- **A resolve is decided as before**: sent only if its firing message went. So an occurrence that
+  resolved inside its window sends neither message. One whose firing message went before the
+  window opened still sends its resolve, so the receiver is not left holding an alert that never
+  ends.
+- **The occurrence's stamp is not read.** `suppression_window_id` says which window first covered
+  an occurrence, for history; the predicate says whether one covers it now.
+
+`platform_alert_send_decision()` is redeclared whole from `0247`, unchanged but for the arm and its
+comment. The file's self-check asserts that the function asks the predicate after the
+acknowledgement's drop, keeps its volatility, `SECURITY DEFINER`, pin and grants, and drops a message
+about an occurrence that is gone. `test_aber_sends_each_alert_to_a_webhook.py` holds a firing
+message held inside a window and sent once it is ended early, a reminder held, and an occurrence that
+resolved inside its window sending nothing.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

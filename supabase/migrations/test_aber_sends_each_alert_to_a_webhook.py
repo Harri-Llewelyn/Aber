@@ -1,6 +1,6 @@
 """
 Aber queues each alert for the channels that carry it, decides each message as it is sent, and
-reminds while an alert fires unacknowledged (0247, 0248, 0249).
+reminds while an alert fires unacknowledged (0247, 0248, 0249, 0250).
 
     python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
 
@@ -12,7 +12,9 @@ What is held here:
     resolve when it resolves, and nothing on a repeat upsert or a last_confirmed_at stamp. Nothing
     is queued before the webhook has an address and a key, below its route, or about a machine
     identity. Queueing asks for one pass a transaction.
-  * platform_alert_send_decision(), every arm of its table.
+  * platform_alert_send_decision(), every arm of its table, the suppression hold (0250) among them:
+    a firing message or a reminder waits while a window covers its alert and is sent once it ends,
+    and an occurrence that resolved inside its window sends nothing.
   * The reminders: due after notifications.reminder_hours, only while confirmed by the writer,
     firing, unacknowledged and the newest occurrence, and never twice at once.
   * The three Notifications settings: their seeds, each one's rule, who reads them and who writes.
@@ -329,12 +331,93 @@ class TheSendDecision(DispatchBase):
         alert_id = self.upsert()
         self.assertRefused("22023", self.decide, alert_id, "test")
 
-    def test_the_suppression_arm_has_its_place(self):
-        self.cur.execute("SELECT prosrc FROM pg_proc WHERE oid = 'public.platform_alert_send_decision(uuid, text, text)'::regprocedure;")
-        src = self.cur.fetchone()[0]
-        self.assertIn("SUPPRESSION ARM", src)
-        self.assertLess(src.index("acknowledged_at IS NOT NULL"), src.index("SUPPRESSION ARM"),
-                        "an acknowledged alert is dropped before suppression could hold it")
+
+class ASuppressedAlertIsHeld(DispatchBase):
+    """0250: a firing message or a reminder waits while a suppression window (0240) covers its alert,
+    and a resolve goes only if its firing message went."""
+
+    def setUp(self):
+        super().setUp()
+        self.configure()
+        self.device = "a0d17250-0000-4000-8000-0000000250d1"
+        self.cur.execute("INSERT INTO public.devices (id, name) VALUES (%s, 'Test_0250_Press');", (self.device,))
+        self.cur.execute("SELECT public.claim_notification_dispatch(60);")
+        self.holder = self.cur.fetchone()[0]
+
+    def window(self, starts="-1 hour", ends="+1 hour"):
+        """A window on the device, written as the owner, its start and end relative to now."""
+        self.cur.execute(
+            "INSERT INTO public.alert_suppression_windows (device_id, starts_at, ends_at, reason, created_by)"
+            " VALUES (%s, now() + %s::interval, now() + %s::interval, 'Belt change', %s) RETURNING id;",
+            (self.device, starts, ends, MANAGER_ID))
+        return self.cur.fetchone()[0]
+
+    def fire(self, fingerprint="fp-0250"):
+        return self.upsert(fingerprint=fingerprint, entity_id=self.device)
+
+    def row_id(self, alert_id, event):
+        self.cur.execute("SELECT id FROM public.notification_deliveries WHERE alert_id = %s AND event = %s;",
+                         (alert_id, event))
+        return self.cur.fetchone()[0]
+
+    def dispatch(self, alert_id, event):
+        """What notification-dispatch does with one due row: decide it, and record what it decided."""
+        decision = self.decide(alert_id, event)
+        outcome = {"send": "sent", "hold": "held", "drop": "dropped"}[decision]
+        self.cur.execute("SELECT public.record_notification_delivery(%s, %s, %s, %s, NULL, NULL);",
+                         (self.holder, self.row_id(alert_id, event), outcome, 60 if outcome == "held" else None))
+        return decision
+
+    def test_a_firing_alert_inside_a_window_is_held_not_sent_and_not_dropped(self):
+        self.window()
+        alert_id = self.fire()
+        self.assertEqual(self.dispatch(alert_id, "firing"), "hold")
+        self.cur.execute("SELECT state, attempts, next_attempt_at > now() FROM public.notification_deliveries"
+                         " WHERE id = %s;", (self.row_id(alert_id, "firing"),))
+        self.assertEqual(self.cur.fetchone(), ("pending", 0, True), "held: still queued, no attempt, due again later")
+
+    def test_a_window_ended_early_lets_the_next_decision_send(self):
+        window_id = self.window()
+        alert_id = self.fire()
+        self.assertEqual(self.dispatch(alert_id, "firing"), "hold")
+        self.as_person(MANAGER_ID, "SELECT id FROM public.end_alert_suppression_window(%s);", (window_id,))
+        self.assertEqual(self.decide(alert_id, "firing"), "send", "still firing once the window ends, so it is sent")
+
+    def test_an_occurrence_that_resolved_inside_its_window_sends_neither_message(self):
+        self.window()
+        alert_id = self.fire()
+        self.assertEqual(self.dispatch(alert_id, "firing"), "hold")
+        self.resolve(fingerprint="fp-0250", entity_id=self.device)
+        self.assertEqual(self.decide(alert_id, "resolved"), "hold", "its firing message is still pending")
+        self.assertEqual(self.dispatch(alert_id, "firing"), "drop")
+        self.assertEqual(self.dispatch(alert_id, "resolved"), "drop")
+        self.assertEqual([s for _, _, s in self.queued(alert_id)], ["dropped", "dropped"])
+
+    def test_a_reminder_is_held_inside_a_window(self):
+        alert_id = self.fire()
+        self.set_state(alert_id, "firing", "sent", finished_ago="13 hours")
+        self.assertEqual(self.decide(alert_id, "reminder"), "send")
+        self.window()
+        self.assertEqual(self.decide(alert_id, "reminder"), "hold")
+
+    def test_a_resolve_whose_firing_message_went_is_sent_inside_a_window(self):
+        alert_id = self.fire()
+        self.assertEqual(self.dispatch(alert_id, "firing"), "send")
+        self.window()
+        self.resolve(fingerprint="fp-0250", entity_id=self.device)
+        self.assertEqual(self.decide(alert_id, "resolved"), "send", "the receiver was told it fired")
+
+    def test_an_acknowledged_alert_inside_a_window_is_dropped_not_held(self):
+        self.window()
+        alert_id = self.fire()
+        self.as_person(OPERATOR_ID, "SELECT id FROM public.acknowledge_alert(%s, 'planned_work', NULL);", (alert_id,))
+        self.assertEqual([self.decide(alert_id, "firing"), self.decide(alert_id, "reminder")], ["drop", "drop"])
+
+    def test_a_window_that_has_not_started_or_has_ended_holds_nothing(self):
+        self.window(starts="+1 hour", ends="+2 hours")
+        self.window(starts="-2 hours", ends="-1 hour")
+        alert_id = self.fire()
+        self.assertEqual(self.decide(alert_id, "firing"), "send")
 
 
 class TheReminders(DispatchBase):

@@ -41,6 +41,9 @@ address on your network, or a chat service's, that receives a message for each a
   severity the webhook sends, or above, is sent.
 - **A reminder** every **Remind every (hours)**, 12 by default, while the alert fires and nobody has
   acknowledged it. Acknowledging an alert stops its reminders. Its resolve is still sent.
+- **A suppressed alert waits.** While a [suppression window](devices.md#suppression-windows) covers
+  it, its message stays **Waiting** in the log. If it still fires when the window ends, the message
+  is sent then. If it fires and resolves inside the window, nothing is sent.
 - **No alert about a machine identity's token is sent.** Only an Administrator can see those, and
   the webhook's readers are not known.
 - **Each message is signed** with the signing key, so the receiver can check it came from this site.
