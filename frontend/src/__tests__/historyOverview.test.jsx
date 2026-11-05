@@ -503,9 +503,10 @@ describe("History's Overview", () => {
     ])
     expect(within(header).getAllByRole('button').map(b => b.textContent)).toEqual(['Collapse all'])
     // One rule for Overview and the Device tab, with .trail-header's padding: the same above and below.
-    const padding = (selector) => APP_CSS.match(new RegExp(`\\n\\${selector} \\{[^}]*?padding: ([^;]+);`))?.[1]
-    expect(padding('.history-header')).toBe('10px var(--inset)')
-    expect(padding('.history-header')).toBe(padding('.trail-header'))
+    const historyPadding = APP_CSS.match(/\n\.history-header \{[^}]*?padding: ([^;]+);/)?.[1]
+    const trailPadding = APP_CSS.match(/\n\.trail-header \{[^}]*?padding: ([^;]+);/)?.[1]
+    expect(historyPadding).toBe('10px var(--inset)')
+    expect(historyPadding).toBe(trailPadding)
   })
 
   it("re-reads on the refresh timer, and the control's Zoom works here", async () => {
