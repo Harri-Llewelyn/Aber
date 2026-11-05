@@ -3927,14 +3927,17 @@ a.chip { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent);
+  /* A link reads as blue text with no resting underline, as every link does. */
+  color: var(--accent-text);
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
   flex-shrink: 0;
 }
 
-.context-alert-link:hover { color: var(--text-primary); }
+/* The banner's two links, kept together at the foot's right. */
+.context-alert-links { display: inline-flex; align-items: center; gap: 12px; }
+
+.context-alert-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Acknowledged, the banner pales: its severity's colour, softer at the edge and in the fill, as

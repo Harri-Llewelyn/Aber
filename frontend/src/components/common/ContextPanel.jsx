@@ -9,6 +9,8 @@ import { grafanaAlertUrl } from '../../constants'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { isAcknowledged, reasonLabel } from '../../utils/alertAcknowledgement'
 import { isSuppressed } from '../../utils/alertSuppression'
+import { ALERTS_PATH, alertsAddress } from '../../utils/alertHistory'
+import { DEFAULT_HISTORY_WINDOW } from '../../utils/history'
 
 /**
  * Below this width only one drawer shows: an open help drawer hides a page's (the media query in
@@ -275,20 +277,30 @@ function AlertBanner({ alert, open }) {
         <span>
           {state}{alert.starts_at ? ` · since ${formatDateTime(alert.starts_at)}` : ''}
         </span>
-        {/* The one place this panel links on its own initiative. A real anchor with
-            target=_blank, so middle-click and copy link address work. To the rule by its
-            uid, or by its name for an older row. See grafanaAlertUrl. */}
-        <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
-          <a
+        <span className="context-alert-links">
+          {/* The occurrences of this subject's alerts, on History's Alerts tab, as the Device tab's
+              key line links them: every device and gateway alert carries the Sparkplug id. */}
+          <RouteLink
+            to={alert.sparkplug_id ? alertsAddress(DEFAULT_HISTORY_WINDOW, { assets: [alert.sparkplug_id] }) : ALERTS_PATH}
             className="context-alert-link"
-            href={grafanaAlertUrl(alert)}
-            target="_blank"
-            rel="noopener noreferrer"
             tabIndex={open ? 0 : -1}
           >
-            View in Grafana <IconExternalLink size={11} />
-          </a>
-        </Tooltip>
+            Alert history
+          </RouteLink>
+          {/* A real anchor with target=_blank, so middle-click and copy link address work. To the rule by its
+              uid, or by its name for an older row. See grafanaAlertUrl. */}
+          <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
+            <a
+              className="context-alert-link"
+              href={grafanaAlertUrl(alert)}
+              target="_blank"
+              rel="noopener noreferrer"
+              tabIndex={open ? 0 : -1}
+            >
+              View in Grafana <IconExternalLink size={11} />
+            </a>
+          </Tooltip>
+        </span>
       </div>
     </div>
   )
