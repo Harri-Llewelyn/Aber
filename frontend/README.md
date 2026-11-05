@@ -330,7 +330,10 @@ slides back when they leave.
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
   control's tooltip must carry the whole text.
 - It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
-  drawer opening needs no listener.
+  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
+- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
+  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
+  heading's sr-only words already give a screen reader the whole value.
 - The whole text is always in the DOM, so a screen reader hears all of it.
 
 The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
