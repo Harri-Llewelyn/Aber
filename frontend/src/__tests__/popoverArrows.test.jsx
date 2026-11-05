@@ -7,7 +7,8 @@ import { FiltersPopover } from '../components/common/FiltersPopover'
 import { blankComments } from '../test/themeColours'
 
 /**
- * The four panels that open from a button point at it with an arrow, and share one shape. jsdom
+ * The four panels that open from a button point at it with an arrow, as History Overview's
+ * selection popover points at its box, and the five share one shape. jsdom
  * lays nothing out, so the CSS half is asserted against the stylesheet: each panel has an arrow,
  * the arrow is drawn where the panel cannot clip it, and the numbers that place it agree with the
  * panel's own. The screenshots in both themes and every rail mode are the check that it lines up.
@@ -35,7 +36,8 @@ const PANELS = [
   { panel: '.alert-pill-panel', arrow: '.alert-pill-wrap:has(> .alert-pill-panel)::after' },
   { panel: '.notif-panel', arrow: '.notif-wrap:has(> .notif-panel)::after' },
   { panel: '.user-popover', arrow: '.user-menu:has(> .user-popover)::after' },
-  { panel: '.filters-popover', arrow: '.filters-popover::before' }
+  { panel: '.filters-popover', arrow: '.filters-popover::before' },
+  { panel: '.overview-popover', arrow: '.overview-popover::before' },
 ]
 
 describe('the popover arrows', () => {
@@ -58,9 +60,11 @@ describe('the popover arrows', () => {
     expect(declared('.user-popover', 'overflow')).toBe('hidden')
     expect(declared('.notif-panel', 'overflow-y')).toBe('auto')
     expect(declared('.alert-pill-panel', 'overflow-y')).toBe('auto')
-    // The Filters panel clips nothing itself; its list scrolls inside it.
-    expect(declared('.filters-popover', 'overflow')).toBeUndefined()
-    expect(declared('.filters-popover', 'overflow-y')).toBeUndefined()
+    // The Filters panel clips nothing itself; its list scrolls inside it. Nor does the selection's.
+    for (const panel of ['.filters-popover', '.overview-popover']) {
+      expect(declared(panel, 'overflow')).toBeUndefined()
+      expect(declared(panel, 'overflow-y')).toBeUndefined()
+    }
   })
 
   it('points the top-bar arrows up, at the button, on the panel border and above the panel', () => {
@@ -90,6 +94,12 @@ describe('the popover arrows', () => {
 
   it('places the Filters arrow from the --arrow-x its component sets', () => {
     expect(declared('.filters-popover::before', 'left')).toBe('calc(var(--arrow-x, 50%) - 1px)')
+  })
+
+  it("places the selection popover's arrow the same way, and turns it down when the popover is above its box", () => {
+    expect(declared('.overview-popover::before', 'left')).toBe('calc(var(--arrow-x, 50%) - 1px)')
+    expect(declared('.overview-popover-above::before', '--arrow-turn')).toBe('225deg')
+    expect(declared('.overview-popover-above::before', 'bottom')).toBe('-0.5px')
   })
 })
 

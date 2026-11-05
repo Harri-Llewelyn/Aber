@@ -656,6 +656,15 @@ export const SUITES = {
       'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
       'carried past now, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_counts_where_readings_arrived.py': {
+    lanes: ['db'],
+    why:
+      "0245's telemetry_coverage(), over local tables standing in for the historian's device rollups: " +
+      'one row per device, its counts an array with a 0 for a block with none, read unsummed at the ' +
+      "rollups' own widths and summed from the widest that divides a wider block for 40 devices or " +
+      'fewer, what the rollup has counted on every row, bad bounds refused before any read, and it ' +
+      'reads as the caller.',
+  },
   'supabase/migrations/test_reading_a_service_s_logs_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1679,6 +1688,14 @@ export const SUITES = {
       'A replay written days late reaches the rollups: the window ingestion records is refreshed by ' +
       'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
       '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
+  },
+  'timescaledb/test_device_rollups.py': {
+    lanes: ['stack'],
+    why:
+      "History's Overview counts from two device rollups, 5 minutes from telemetry_1m and an hour " +
+      "from telemetry_1h, each materialised only, reconciled once, kept as long as its width's series " +
+      "rollup, and filled back a chunk a run to its own source's oldest bucket; fdw_reader reads what " +
+      'they hold.',
   },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],
