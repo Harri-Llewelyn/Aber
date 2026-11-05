@@ -274,7 +274,7 @@ describe("History's Overview", () => {
   it('is the first tab and the default, and reads every device in service', async () => {
     await visit('/history?span=day&at=2026-11-02')
     const tabs = screen.getByRole('navigation', { name: 'History' })
-    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device'])
+    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device', 'Alerts'])
     expect(within(tabs).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
     expect(within(tabs).getByRole('link', { name: 'Device' })).toHaveAttribute('href', '/history/device')
     const asked = api.readCoverage.mock.calls[0][0]
