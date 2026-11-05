@@ -504,6 +504,21 @@ Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gate
 actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
 height is not known, and above the actions it could push Edit Details off the drawer.
 
+- **Suppression windows are a tool, after the actions.** The device, gateway and cell drawers pass
+  `common/SuppressionWindows.jsx` as `children`, since its list has no fixed height. It lists the
+  current and upcoming windows with `context-panel-section-label`, as a gateway's Devices are, each
+  with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
+  it. A device's drawer passes its current cell, whose windows are listed marked From cell and
+  changed from the cell's drawer. A Shopfloor Manager or an Administrator (`maySuppress()`) gets
+  Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
+  (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
+  custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
+  The section reads again at its next window's start or end.
+- **The alert names no evaluator.** The banner above the fields (`ContextPanel`'s `alert`) says
+  Alert firing, Alert acknowledged or Alert suppressed, since when, with the counter's lines under
+  it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one
+  takes a dashed neutral outline and a crossed bell, since it colours nothing. The Devices page
+  hands the banner the device's alert from `alertIndex(..., { suppressed: true })`.
 - **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
   under its header and above the fields. It continues the header's band, takes the header's rule,
   and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
@@ -1953,6 +1968,19 @@ passes `{ record: false }`, as a Grafana alert does.
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
   acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
   outranks any acknowledged one.
+- **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
+  whether a suppression window covers each alert as it is read, with the window's reason and end.
+  `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
+  the pill's number, the tab title and the favicon, and `alertIndex()` leaves a suppressed one out,
+  so no pin, chip or row colours it. The list keeps it, after the acknowledged ones, with a muted
+  ring struck through, a crossed bell, "Suppressed until" its end, and the reason under it. **A
+  window's start and end write nothing**, so `usePlatformAlerts` reads again a second after the
+  nearest end of a window that covers an alert, or start of one still to come (`nextSuppressionChange()`),
+  and at least two seconds after a read, so a clock ahead of the server's asks again until the
+  answer changes. An alert whose window ends while it fires toasts as if it had just fired; a
+  suppressed alert toasts neither firing nor resolved. A drawer that schedules, changes or ends a
+  window calls `requestAlertsRefresh()`, so this tab reads at once; another tab learns of an early
+  end at its next reconcile. The windows table is not in the realtime publication.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
