@@ -11,9 +11,10 @@ import { GITEA_URL, STUDIO_URL } from '../constants';
  * (end_my_door_sessions(), in utils/signOut.js): a door then sends its next request through its own
  * sign-out.
  *
- * Best-effort, deliberately: Studio may be off, the gateway down or the address unset, and the
- * local sign-out must still happen, so this resolves rather than rejects. The timeout exists
- * because `fetch` has none, and an unreachable Studio would otherwise hang the sign-out button.
+ * A door with no address sends nothing: STUDIO_URL is null where the chart runs no Studio.
+ * Otherwise best-effort, deliberately: the gateway may be down or the host unrouted, and the local
+ * sign-out must still happen, so this resolves rather than rejects. The timeout exists because
+ * `fetch` has none, and an unreachable door would otherwise hang the sign-out button.
  */
 const SIGNOUT_TIMEOUT_MS = 2000;
 
