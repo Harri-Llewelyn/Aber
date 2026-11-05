@@ -433,7 +433,9 @@ AS $fn$
                              FROM _timescaledb_config.bgw_job j
                             WHERE j.hypertable_id = c.mat_hypertable_id AND j.proc_name = 'policy_retention'
                             LIMIT 1)),
-         _timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(c.mat_hypertable_id)),
+         -- A rollup never refreshed has the earliest timestamp as its watermark: nothing counted.
+         (SELECT CASE WHEN w <= 'epoch'::timestamptz THEN '-infinity'::timestamptz ELSE w END
+            FROM _timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(c.mat_hypertable_id)) AS w),
          coalesce(b.done, false)
     FROM _timescaledb_catalog.continuous_agg c
     LEFT JOIN public.device_rollup_backfill b ON b.id
