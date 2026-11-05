@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
 import { Badge } from './Badge'
+import { HelpTip } from './HelpTip'
 import { IconPlus } from './Icons'
 import { formatDateTime } from '../../utils/format'
 import { maySuppress, subjectUrl, windowState } from '../../utils/alertSuppression'
 import { requestAlertsRefresh } from '../../hooks/usePlatformAlerts'
 import { SuppressionWindowModal, EndSuppressionWindowModal } from '../modals/SuppressionWindowModal'
+
+// The section label's tip, in the help page's words. Under the ~35-word tooltip rule.
+const WINDOWS_HELP = 'A planned period, such as maintenance, when alerts here are recorded but not counted, ' +
+  'coloured or sent. A window ends by itself, and a cell’s window covers every device in it.'
 
 /**
  * A drawer's Suppression windows section: the current and upcoming windows on a device, a gateway
@@ -86,7 +91,10 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
 
   return (
     <section className="suppression-windows" aria-label="Suppression windows">
-      <div className="context-panel-section-label">Suppression windows ({listed.length})</div>
+      <div className="context-panel-section-label">
+        Suppression windows ({listed.length})
+        <HelpTip text={WINDOWS_HELP} label="What suppression windows are" size={11} />
+      </div>
       {error && <div className="context-field-empty">Could not read the windows: {error}</div>}
       {!error && listed.length === 0 && <div className="context-field-empty">No windows scheduled</div>}
       {listed.length > 0 && (

@@ -296,7 +296,15 @@ describe('a drawer\'s Suppression windows section', () => {
 
   it.each(['Operator', 'Auditor', null])('offers no act to %s', async (role) => {
     const section = await show(role)
-    expect(within(section).queryAllByRole('button')).toEqual([])
+    // The label's HelpTip is the one button every role gets: it explains, it does not act.
+    const acts = within(section).queryAllByRole('button').filter(b => b.getAttribute('aria-label') !== 'What suppression windows are')
+    expect(acts).toEqual([])
+  })
+
+  it('explains the section with a HelpTip on its label', async () => {
+    const section = await show('Operator')
+    const label = section.querySelector('.context-panel-section-label')
+    expect(within(label).getByRole('button', { name: 'What suppression windows are' })).toBeTruthy()
   })
 
   it.each(SUPPRESSION_WINDOW_ROLES)('offers %s Schedule window…, and Change… and End now on each own window', async (role) => {
