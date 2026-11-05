@@ -345,21 +345,21 @@ describe("History's Overview", () => {
     expect(document.querySelector('.overview-readout')).toBeNull()
     const chart = within(popover).getByRole('button', { name: /Chart/ })
     expect(chart).toHaveAttribute('aria-disabled', 'true')
-    // Focus goes to the first action that is not off: Zoom, Chart being off for three.
-    await waitFor(() => expect(within(popover).getByRole('button', { name: /Zoom/ })).toHaveFocus())
+    // The popover itself takes the focus, so no action's tooltip opens over the box.
+    await waitFor(() => expect(popover).toHaveFocus())
     // Escape closes it and clears the box, and focus goes back to the box's first lane.
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
     expect(document.querySelector('.overview-box')).toBeNull()
     expect(screen.getByRole('checkbox', { name: 'Pick Mill 2' })).toHaveFocus()
 
-    // One lane: Chart is on and takes the focus; Zoom sets the window as a new history entry.
+    // One lane: Chart is on; Zoom sets the window as a new history entry.
     fireEvent.pointerDown(strips[0], mouse(x(10), rowY('Lathe 3')))
     fireEvent.pointerMove(strips[0], mouse(x(12), rowY('Lathe 3')))
     fireEvent.pointerUp(strips[0], mouse(x(12), rowY('Lathe 3')))
     const one = screen.getByRole('dialog', { name: 'Selection' })
     expect(within(one).getByRole('status')).toHaveTextContent('1 device · 10:00 – 12:00, 2 h')
-    await waitFor(() => expect(within(one).getByRole('button', { name: /Chart/ })).toHaveFocus())
+    await waitFor(() => expect(one).toHaveFocus())
     const push = vi.spyOn(window.history, 'pushState')
     fireEvent.click(within(one).getByRole('button', { name: /Zoom/ }))
     expect(search()).toBe('?from=2026-11-02T10%3A00&to=2026-11-02T12%3A00')
@@ -385,7 +385,10 @@ describe("History's Overview", () => {
     }
     let popover = draw()
     const [chart, , clear] = within(popover).getAllByRole('button')
-    await waitFor(() => expect(chart).toHaveFocus())
+    await waitFor(() => expect(popover).toHaveFocus())
+    // Shift+Tab from the popover itself goes to its last action, not out of it.
+    fireEvent.keyDown(popover, { key: 'Tab', shiftKey: true })
+    expect(clear).toHaveFocus()
     // Tab from the last action comes round to the first, and Shift+Tab from the first to the last.
     clear.focus()
     fireEvent.keyDown(clear, { key: 'Tab' })

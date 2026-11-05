@@ -1537,8 +1537,8 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
   `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
   part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
-  (*Popover arrows*, `.overview-popover::before`). Focus moves to its first action that is on, and
-  Tab stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
+  (*Popover arrows*, `.overview-popover::before`). The popover itself takes focus as it opens, not
+  its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
   the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
   Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and

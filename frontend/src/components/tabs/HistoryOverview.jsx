@@ -264,8 +264,6 @@ function ChartButton({ keys, win, names }) {
   )
 }
 
-/** What in the popover takes the focus as it opens: its first action that is not off. */
-const FIRST_ACTION = 'button:not([disabled]):not([aria-disabled="true"])'
 
 /**
  * The selection's words and actions in a popover beside the box, as on the Datasets page of AMRC's
@@ -291,10 +289,11 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onCl
     setPos(placeSelection(shown, { width: el.offsetWidth, height: el.offsetHeight }, window.innerWidth, window.innerHeight))
   }, [box, words, ref, layerRef])
 
-  // Once placed. Not scrolled to, which would close it.
+  // Once placed, the popover itself takes focus, not its first action: a focused button opens its
+  // tooltip, which would cover the box. Tab then reaches the actions. Not scrolled to, which would close it.
   const placed = pos !== null
   useEffect(() => {
-    if (placed) ref.current?.querySelector(FIRST_ACTION)?.focus({ preventScroll: true })
+    if (placed) ref.current?.focus({ preventScroll: true })
   }, [placed, ref])
 
   const closer = useRef(onClose)
@@ -321,7 +320,8 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onCl
     const actions = [...ref.current.querySelectorAll('button:not([disabled])')]
     if (actions.length === 0) return
     const [first, last] = [actions[0], actions[actions.length - 1]]
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    const at = document.activeElement
+    if (e.shiftKey && (at === first || at === ref.current)) { e.preventDefault(); last.focus() } else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus() }
   }
 
   return createPortal(
@@ -329,6 +329,7 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onCl
       ref={ref}
       role="dialog"
       aria-label="Selection"
+      tabIndex={-1}
       className={`overview-popover${pos?.above ? ' overview-popover-above' : ''}${pos?.over ? ' overview-popover-over' : ''}`}
       onKeyDown={onKeyDown}
       // Unplaced, transparent rather than hidden, as ToolbarPopover is, so the focus above lands.

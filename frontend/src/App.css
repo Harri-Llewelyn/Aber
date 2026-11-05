@@ -6134,6 +6134,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 /* The selection's words and actions, in a popover beside the box: the Filters panel's frame,
    portalled and fixed so the card cannot clip it, with its arrow (Popover arrows). */
+/* Focused as it opens, after a drag, so a press is not lost; no ring, as only a pointer opens it. */
+.overview-popover:focus { outline: none; }
 .overview-popover {
   position: fixed;
   z-index: 200;
