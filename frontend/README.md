@@ -1483,7 +1483,9 @@ arrived over the window, a lane per device, before anything is charted. Its arit
 - **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
   its readings in each block as an array, and the stretch the historian's device rollups have
   counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
-  its timer, and when a settled width changes the blocks.
+  its timer, and when a settled width changes the blocks. A window older than the 5-minute device
+  rollup reaches comes back in hours (`block_width`); the strips are laid on the width that came back
+  (`readWidth()`), and the status line names it.
 - **The blocks** (`coverageBlock()`): `COVERAGE_SMALL_SELECTION` (40) devices or fewer take the
   finest of `COVERAGE_BLOCKS` at about one block per `COVERAGE_BLOCK_PX` (4px) of the strip. More
   take the device rollups' own widths only, 5 minutes up to 26 hours and 1 hour up to

@@ -1017,6 +1017,11 @@ python timescaledb/test_physical_backup.py
 python timescaledb/test_rollup_compression.py
 # A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
 python timescaledb/test_rollup_refresh.py
+# History's Overview counts from two device rollups: telemetry_device_5m from telemetry_1m and
+# telemetry_device_1h from telemetry_1h, materialised only, one of each policy, kept as long as the
+# series rollup of their width. One backfill job, a row a rollup; its window walks back a chunk at a
+# time and stops at the hour holding its source's oldest bucket. Changes nothing.
+python timescaledb/test_device_rollups.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

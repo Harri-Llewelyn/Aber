@@ -848,6 +848,9 @@ paths:
 
         **More than 40 devices take 5-minute or 1-hour blocks only**, the rollups' own widths, so
         nothing is summed on the historian. Forty or fewer may take any whole number of 5 minutes.
+        The source follows each block's age: an hourly block comes from the hourly device rollup up
+        to its watermark and from the 5-minute one after it, and a block under an hour over a window
+        older than the 5-minute rollup reaches is read hourly, as `block_width` says.
         `computed_from` to `computed_to` is what the rollup has counted: a block outside it is not
         counted yet, which is not a block with no readings. `SECURITY INVOKER`, so it reads what the
         caller may read through the telemetry views.
@@ -6463,7 +6466,7 @@ components:
       properties:
         asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         first_block: { type: string, format: date-time, description: 'Start of the first block, on the epoch grid.' }
-        block_width: { type: string, example: '00:05:00', description: 'The block, a PostgreSQL interval.' }
+        block_width: { type: string, example: '00:05:00', description: 'The block, a PostgreSQL interval: the one asked for, or an hour for a window older than the 5-minute rollup reaches.' }
         counts: { type: array, items: { type: integer }, description: 'Readings in each block, oldest first; 0 for none.' }
         computed_from: { type: string, description: 'The oldest moment the rollup has counted, or `-infinity`.' }
         computed_to: { type: string, description: 'The newest moment the rollup has counted, or `infinity`.' }

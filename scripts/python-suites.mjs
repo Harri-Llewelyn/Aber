@@ -1670,6 +1670,14 @@ export const SUITES = {
       'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
       '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
   },
+  'timescaledb/test_device_rollups.py': {
+    lanes: ['stack'],
+    why:
+      "History's Overview counts from two device rollups, 5 minutes from telemetry_1m and an hour " +
+      "from telemetry_1h, each materialised only, reconciled once, kept as long as its width's series " +
+      "rollup, and filled back a chunk a run to its own source's oldest bucket; fdw_reader reads what " +
+      'they hold.',
+  },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],
     why:

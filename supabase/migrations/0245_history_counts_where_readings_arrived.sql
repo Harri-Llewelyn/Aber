@@ -8,6 +8,9 @@
 --
 --   * It reads the historian's rollups per device (telemetry_device_5m and _1h, timescaledb/
 --     aggregates.sql) over postgres_fdw: one row a device a bucket, never raw telemetry.
+--   * The source follows each block's age. An hourly block comes from the hourly rollup up to its
+--     watermark and from the 5-minute one after it, each bucket once. A block under an hour over a
+--     window older than the 5-minute rollup reaches is read hourly, and block_width says so.
 --   * More than 40 devices read only those rollups' own widths, 5 minutes and 1 hour, unsummed:
 --     nothing is grouped on the historian but each device's arrays. Up to 40 may take any whole
 --     number of 5 minutes, summed from the widest rollup that divides it. Nothing finer: under 5

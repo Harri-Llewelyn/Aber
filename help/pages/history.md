@@ -42,6 +42,16 @@ The block size depends on how many devices Overview shows:
 - **40 devices or fewer** get about one block for every 4 pixels of the strip, at any window up to a year. A block is never shorter than 5 minutes, so a short window has few blocks.
 - **More than 40** get 5-minute blocks up to a day and 1-hour blocks up to 7 days. A longer window is not shown, and the page says why. To see one, type a cell's name in the search box, or narrow the list to 40 devices or fewer.
 
+### How far back Overview reaches
+
+Overview reaches as far back as the historian keeps its readings counted. You don't choose where it reads from: it picks by the age of each block.
+
+- **5-minute blocks** reach back as far as the 1-minute summaries, 180 days by default.
+- **1-hour blocks** reach back as far as the hourly summaries, 5 years by default.
+- **An older day is shown in 1-hour blocks**, even where it would otherwise get 5-minute ones. The line above the lanes says so, for example **20 devices, in 1-hour blocks**. The 5-minute counts for that day are no longer kept.
+
+The newest few minutes are counted a little after they arrive, so the right-hand end of a lane is hatched as not counted yet for a moment.
+
 ## Choosing a device and a window
 
 1. Open **History** in the sidebar, directly below the Site Map, and select the **Device** tab. It lists every device.

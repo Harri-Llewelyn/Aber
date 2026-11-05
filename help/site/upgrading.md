@@ -1706,9 +1706,13 @@ historian, which count each device's readings every 5 minutes and every hour. Th
 them empty, and the historian fills them in the background. Nothing waits for it.
 
 - **The last 25 hours** are counted within a few minutes of the upgrade.
-- **Older history is counted six hours at a time,** every 2 minutes, back to the oldest 1-minute
-  rollup (180 days by default). At the storage basis, 1,000 devices of 10 metrics, that takes
-  about a day. A smaller site takes less.
+- **Older history is counted in the background, every 2 minutes.** Each run counts six more hours
+  of the 5-minute rollup and a week more of the hourly one.
+  - **The hourly one reaches back as far as your hourly rollup** (5 years by default). At the storage
+    basis, 1,000 devices of 10 metrics, it fills in about 9 hours.
+  - **The 5-minute one reaches back as far as your 1-minute rollup** (180 days by default). At the
+    storage basis it fills in about a day.
+  - A smaller site takes less. A window older than the 5-minute one reaches is shown in hours.
 - **Until then, Overview hatches the older part of a window** and says so, for example
   "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
   and are complete at once.

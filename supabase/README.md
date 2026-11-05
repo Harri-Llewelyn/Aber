@@ -3305,16 +3305,27 @@ rows of `telemetry_5m` for one day, and the historian took 5 to 16 s to group th
 measurement). So the historian keeps a rollup per device, and the function reads that.
 
 - **The device rollups** (`timescaledb/aggregates.sql`): `telemetry_device_5m`, `sum(n_rows)` by
-  device and 5-minute bucket from `telemetry_1m`, and `telemetry_device_1h` from it. Ten times fewer
-  rows than a series rollup at ten metrics. Materialised only: a real-time read walks the raw tail's
+  device and 5-minute bucket from `telemetry_1m`, which reaches back 180 days by default, and
+  `telemetry_device_1h`, the same by the hour from `telemetry_1h`, which reaches back 5 years. Ten
+  times fewer rows than a series rollup at ten metrics. Materialised only: a real-time read walks the raw tail's
   `(asset_id, metric_name, time)` index for every device it names, since it names no metric.
   `timescaledb/README.md` has their policies and the backfill.
 - **One row per device asked for**, in `asset_id` order: `counts integer[]`, oldest block first,
   `0` for a block with none; `first_block` and `block_width`, so block i starts at
   `first_block + i * block_width`; and `computed_from`, `computed_to` and `complete`, what the
-  rollup has counted (the historian's `telemetry_device_coverage`, from its catalogue). A block
-  outside that stretch is not counted yet, which is not a block with no readings. A device with no
-  readings has a row of zeros.
+  read covers. A block outside that stretch is not counted yet, which is not a block with no
+  readings. A device with no readings has a row of zeros.
+- **The source follows each block's age, with no setting.** The historian's
+  `telemetry_device_coverage` reports each rollup's reach and watermark, from its catalogue.
+  - **A block under an hour** comes from `telemetry_device_5m`. A window older than that rollup
+    reaches is read in hours instead, and `block_width` says so, so an old day draws 24 blocks.
+  - **An hour and longer** comes from `telemetry_device_1h` up to its watermark, then from
+    `telemetry_device_5m` summed to the block on the historian, from where the hourly one stops. A
+    block the watermark falls inside takes each part once; no bucket is read from both. The
+    stitched stretch is the hourly rollup's refresh lag, about an hour, so the right-hand edge lags
+    only by the 5-minute rollup's. It is 6 hours at most: an hourly rollup further behind leaves
+    the gap not counted, and `computed_from` starts after it. At 1,000 devices the stretch costs
+    the historian 7 ms for two hours and 41 ms for six.
 - **Blocks lie on the epoch grid**, as the rollups' buckets do, from the one holding `from_ts`, and
   are stepped in seconds.
 - **More than 40 devices read only the device rollups' own widths**, 5 minutes and 1 hour, and
@@ -3327,7 +3338,8 @@ measurement). So the historian keeps a rollup per device, and the function reads
   about half a second.
 - **At most 1,000 devices and 360,000 device-buckets read**, refused before anything is read, as are
   bounds out of order and a bad block (`22023`). 360,000 is 1,000 devices over 26 hours of 5-minute
-  buckets, or 40 over a year of hourly ones. The dashboard reads 1,000 devices a call, and shows a
+  buckets, or 40 over a year of hourly ones, each with the stitched stretch. It is counted at the
+  block asked for, before anything is read; reading an old window hourly takes fewer. The dashboard reads 1,000 devices a call, and shows a
   larger selection 7 days at most (`COVERAGE_*` in `frontend/src/api.js`).
 - **The foreign tables fetch 10,000 rows at a time** (`fetch_size`, declared in `0001`). At the
   default 100, the round trips were half the read's time once the historian's share was small.
@@ -3341,16 +3353,17 @@ devices of 10 metrics at the storage basis's density), warm, as `authenticated`:
 
 | Read | Blocks | Warm median |
 | :--- | ---: | ---: |
-| 1,000 devices, Last 24 hours | 289 × 5 minutes | 1.1 s |
-| 1,000 devices, a week | 169 × 1 hour | 0.3 s |
-| 20 devices, Last 24 hours | 289 × 5 minutes | 26 ms |
-| 20 devices, a week | 169 × 1 hour | 18 ms |
-| 20 devices, a week, summed | 337 × 30 minutes | 39 ms |
-| 40 devices, a year, summed (synthetic) | 367 × 1 day | 320 ms |
-| 1,000 devices, 30 days (synthetic) | 721 × 1 hour | 3.9 s, so the page stops at 7 days |
+| 1,000 devices, Last 24 hours | 289 × 5 minutes | 650 ms |
+| 1,000 devices, a week, stitched at the hourly watermark | 169 × 1 hour | 400 ms |
+| 20 devices, Last 24 hours | 289 × 5 minutes | 18 ms |
+| 20 devices, a week, stitched | 169 × 1 hour | 14 ms |
+| 20 devices, a year, summed (synthetic year) | 367 × 1 day | 100 ms |
+| 20 devices, a day 200 days back (synthetic), read in hours | 25 × 1 hour | 3 ms |
+| 40 devices, a year, summed (synthetic) | 367 × 1 day | 370 ms |
+| 1,000 devices, 30 days (synthetic) | 721 × 1 hour | 1.5 to 3.9 s, so the page stops at 7 days |
 
 `test_history_counts_where_readings_arrived.py` holds every rule above with local tables standing in
-for the foreign ones. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the
+for the foreign ones, the stitch at the watermark among them. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the
 pinned `search_path`, the grants, the foreign tables' `fetch_size`, and that the refusals come before
 any read, so it holds on a stack with no historian.
 
