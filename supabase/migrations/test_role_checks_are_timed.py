@@ -81,7 +81,7 @@ APP_CASES = [
 
 # A write policy's two calls (0251), against has_role() alone in the same run, so both see one load.
 MFA_SETTING = "security.require_mfa_for_managers"
-MFA_CASES = [
+GUARDED_CASES = [
     ("has_role() alone", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), True),
     ("has_role() + mfa_satisfied()", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND public.mfa_satisfied()"), True),
 ]
@@ -170,7 +170,7 @@ class TheRoleChecksAreTimed(unittest.TestCase):
                 (json.dumps({"sub": ADMIN_ID, "role": "authenticated", "aal": aal}),),
             )
             print(f"\n  {CALLS} calls x {RUNS} runs, as {ADMIN_ID} at {aal}, MFA {'on' if on else 'off'}, median us per call:")
-            for label, statement, expected in MFA_CASES:
+            for label, statement, expected in GUARDED_CASES:
                 per_call, answer = self.timed(statement)
                 self.assertEqual(answer, expected, label)
                 runs = ", ".join(f"{t:.2f}" for t in per_call)
