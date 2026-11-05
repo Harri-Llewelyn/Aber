@@ -64,6 +64,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to %', p_act
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   -- Serialises every act on people, so two Administrators changing each other at once cannot both
   -- pass the last-Administrator rule. Reads are not blocked. The role is checked again under the

@@ -597,6 +597,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_proposal FROM public.change_proposals
      WHERE id = p_proposal_id FOR UPDATE;
@@ -1415,6 +1416,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to mint a gateway broker credential'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -2026,6 +2028,7 @@ BEGIN
         RAISE EXCEPTION 'cancel_backup_job: only an Administrator may cancel a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     -- PENDING only. A RUNNING job is the service's: pg_dump is under way, and a row flipped under
     -- it would leave the job finishing into a state that says it did not.
@@ -2159,6 +2162,7 @@ BEGIN
         RAISE EXCEPTION 'only an Administrator may remove the off-site backup destination'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
     PERFORM public.set_backup_offsite_destination('', '', '', '', '', '', false);
     DELETE FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key';
 END;
@@ -2427,6 +2431,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to create a machine principal'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF v_name IS NULL OR length(v_name) = 0 THEN
         RAISE EXCEPTION
@@ -2629,6 +2634,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to describe a machine principal'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     v_actor := auth.uid();
     IF v_actor IS NULL THEN
@@ -2774,6 +2780,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to discard a schema draft'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_draft FROM public.schemas WHERE id = p_schema_id FOR UPDATE;
     IF NOT FOUND THEN
@@ -3454,6 +3461,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to version a schema'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_parent_id IS NULL THEN
     RAISE EXCEPTION 'parent_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -5290,6 +5298,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to issue a gateway enrolment token'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   -- BOUNDED, because the TTL arrives from a client. A 30-minute default matches the time it takes
   -- to carry a bundle to an appliance and boot it; the ceiling is a day, past which a "short-lived
@@ -5759,11 +5768,45 @@ CREATE OR REPLACE FUNCTION public.may_manage_captures() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $$
-    SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']);
+    -- Every capture and playback act a person makes asks this first; require_mfa() refuses a
+    -- session the MFA switch does not admit (0251).
+    SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND public.require_mfa();
 $$;
 
 
 ALTER FUNCTION public.may_manage_captures() OWNER TO postgres;
+
+--
+
+-- mfa_satisfied() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.mfa_satisfied() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  -- Whether the MFA switch admits the caller: it is off, the caller holds no covered role (a
+  -- machine identity holds none), the session gave its code (aal2), or another identity provider
+  -- signed it in. The switch is read first, so a site that never turns it on pays one lookup.
+  -- Mirror check 59 holds this to _shared/secondFactor.ts, the edge functions' copy.
+  SELECT NOT coalesce((SELECT s.value = 'true'::jsonb
+                         FROM public.system_settings s
+                        WHERE s.key = 'security.require_mfa_for_managers'), false)
+      OR NOT EXISTS (SELECT 1
+                       FROM public.user_roles ur
+                       JOIN public.roles r ON r.id = ur.role_id
+                      WHERE ur.user_id = auth.uid()
+                        AND r.name = ANY (ARRAY['Administrator', 'Shopfloor_Manager']))
+      OR coalesce(auth.jwt() ->> 'aal', '') = 'aal2'
+      OR coalesce(auth.jwt() -> 'amr' @> '[{"method": "oauth"}]'::jsonb
+                  OR auth.jwt() -> 'amr' @> '[{"method": "sso/saml"}]'::jsonb, false);
+$$;
+
+
+ALTER FUNCTION public.mfa_satisfied() OWNER TO postgres;
+
+--
+
+-- FUNCTION mfa_satisfied() :: COMMENT
+COMMENT ON FUNCTION public.mfa_satisfied() IS 'Whether the Settings row security.require_mfa_for_managers admits the caller to change the platform: true while it is off, for a caller holding neither Administrator nor Shopfloor_Manager (every machine identity included), for an aal2 session, and for one whose amr names another identity provider (oauth, sso/saml). Read live on every call. require_mfa() is the form the policies and functions call (0251).';
 
 --
 
@@ -6552,6 +6595,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to publish a schema version'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_draft_id IS NULL THEN
     RAISE EXCEPTION 'draft_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -6704,6 +6748,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to record a gateway credential issue'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -7461,6 +7506,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to reinstate a service principal'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -7606,6 +7652,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF COALESCE(TRIM(p_reason), '') = '' THEN
         -- A REASON IS THE WHOLE POINT OF A REJECTION. Without one the proposer learns only that
@@ -7662,6 +7709,7 @@ BEGIN
         RAISE EXCEPTION 'release_backup: only an Administrator may release a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     UPDATE public.backups
        SET pinned = false, released_at = now(), released_by = auth.uid()
@@ -7802,6 +7850,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to relocate devices'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF p_moves IS NULL OR jsonb_typeof(p_moves) <> 'array' THEN
     RAISE EXCEPTION 'p_moves must be a JSON array of moves, got %',
@@ -8019,6 +8068,7 @@ BEGIN
         RAISE EXCEPTION 'request_backup: only an Administrator may take a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     -- Reported rather than left to the index, so the refusal says what is in the way. A PENDING
     -- row nobody has claimed is the sign the service is not running, and the message says so.
@@ -8258,6 +8308,36 @@ ALTER FUNCTION public.require_ingestion_caller(p_fn text) OWNER TO postgres;
 
 --
 
+-- require_mfa() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.require_mfa() RETURNS boolean
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- True, or a refusal: a policy that answered false would hide an UPDATE or DELETE as zero rows,
+    -- which reads as success. A policy calls it once per statement, as (SELECT public.require_mfa()).
+    IF public.mfa_satisfied() THEN
+        RETURN true;
+    END IF;
+    -- The sentence the dashboard links to Profile › MFA (utils/secondFactor.js); mirror check 59.
+    RAISE EXCEPTION 'MFA is required for this. Add an authenticator on Profile › MFA, then try again.'
+        USING ERRCODE = 'insufficient_privilege',
+              DETAIL = 'mfa_required',
+              HINT = 'Settings requires MFA of Administrators and Shopfloor Managers who change the '
+                     'platform, and this session has not given a code from an authenticator app.';
+END;
+$$;
+
+
+ALTER FUNCTION public.require_mfa() OWNER TO postgres;
+
+--
+
+-- FUNCTION require_mfa() :: COMMENT
+COMMENT ON FUNCTION public.require_mfa() IS 'mfa_satisfied() as a guard: true, or 42501 (PostgREST answers 403) with the sentence that points to Profile › MFA and the detail mfa_required. Beside has_role() in every write policy that admits Administrator or Shopfloor_Manager, and after the role check in every function that changes the platform for them (0251).';
+
+--
+
 -- require_playback_caller(text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.require_playback_caller(p_fn text) RETURNS void
     LANGUAGE plpgsql STABLE
@@ -8460,6 +8540,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to revoke a service principal'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -8589,6 +8670,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to revoke a service token'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -8870,6 +8952,7 @@ BEGIN
         RAISE EXCEPTION 'only an Administrator may set the off-site backup destination'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     UPDATE public.system_settings s
        SET value = v.value
@@ -16860,14 +16943,14 @@ ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
 -- areas areas_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.areas', 'areas_delete_privileged', $ddl$
-CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- areas areas_insert_privileged :: POLICY
 SELECT public.replay_policy('public.areas', 'areas_insert_privileged', $ddl$
-CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16881,7 +16964,7 @@ $ddl$);
 
 -- areas areas_update_privileged :: POLICY
 SELECT public.replay_policy('public.areas', 'areas_update_privileged', $ddl$
-CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -16909,14 +16992,14 @@ ALTER TABLE public.asset_config ENABLE ROW LEVEL SECURITY;
 -- asset_config asset_config_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.asset_config', 'asset_config_delete_privileged', $ddl$
-CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- asset_config asset_config_insert_privileged :: POLICY
 SELECT public.replay_policy('public.asset_config', 'asset_config_insert_privileged', $ddl$
-CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16930,7 +17013,7 @@ $ddl$);
 
 -- asset_config asset_config_update_privileged :: POLICY
 SELECT public.replay_policy('public.asset_config', 'asset_config_update_privileged', $ddl$
-CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17021,7 +17104,7 @@ ALTER TABLE public.captures ENABLE ROW LEVEL SECURITY;
 -- captures captures_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.captures', 'captures_delete_privileged', $ddl$
-CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17042,14 +17125,14 @@ ALTER TABLE public.cells ENABLE ROW LEVEL SECURITY;
 -- cells cells_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.cells', 'cells_delete_privileged', $ddl$
-CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- cells cells_insert_privileged :: POLICY
 SELECT public.replay_policy('public.cells', 'cells_insert_privileged', $ddl$
-CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17063,7 +17146,7 @@ $ddl$);
 
 -- cells cells_update_privileged :: POLICY
 SELECT public.replay_policy('public.cells', 'cells_update_privileged', $ddl$
-CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17105,14 +17188,14 @@ ALTER TABLE public.device_nameplate ENABLE ROW LEVEL SECURITY;
 -- device_nameplate device_nameplate_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_delete_privileged', $ddl$
-CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- device_nameplate device_nameplate_insert_privileged :: POLICY
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_insert_privileged', $ddl$
-CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17126,7 +17209,7 @@ $ddl$);
 
 -- device_nameplate device_nameplate_update_privileged :: POLICY
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_update_privileged', $ddl$
-CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17140,14 +17223,14 @@ ALTER TABLE public.device_submodels ENABLE ROW LEVEL SECURITY;
 -- device_submodels device_submodels_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_delete_privileged', $ddl$
-CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- device_submodels device_submodels_insert_privileged :: POLICY
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_insert_privileged', $ddl$
-CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17161,7 +17244,7 @@ $ddl$);
 
 -- device_submodels device_submodels_update_privileged :: POLICY
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_update_privileged', $ddl$
-CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17175,14 +17258,14 @@ ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 -- devices devices_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.devices', 'devices_delete_privileged', $ddl$
-CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- devices devices_insert_privileged :: POLICY
 SELECT public.replay_policy('public.devices', 'devices_insert_privileged', $ddl$
-CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17196,7 +17279,7 @@ $ddl$);
 
 -- devices devices_update_privileged :: POLICY
 SELECT public.replay_policy('public.devices', 'devices_update_privileged', $ddl$
-CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17215,14 +17298,14 @@ ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 -- directory_services directory_services_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.directory_services', 'directory_services_delete_privileged', $ddl$
-CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- directory_services directory_services_insert_privileged :: POLICY
 SELECT public.replay_policy('public.directory_services', 'directory_services_insert_privileged', $ddl$
-CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17236,7 +17319,7 @@ $ddl$);
 
 -- directory_services directory_services_update_privileged :: POLICY
 SELECT public.replay_policy('public.directory_services', 'directory_services_update_privileged', $ddl$
-CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17265,14 +17348,14 @@ ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
 -- gateways gateways_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.gateways', 'gateways_delete_privileged', $ddl$
-CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- gateways gateways_insert_privileged :: POLICY
 SELECT public.replay_policy('public.gateways', 'gateways_insert_privileged', $ddl$
-CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17286,7 +17369,7 @@ $ddl$);
 
 -- gateways gateways_update_privileged :: POLICY
 SELECT public.replay_policy('public.gateways', 'gateways_update_privileged', $ddl$
-CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17328,14 +17411,14 @@ ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 -- links links_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.links', 'links_delete_privileged', $ddl$
-CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- links links_insert_privileged :: POLICY
 SELECT public.replay_policy('public.links', 'links_insert_privileged', $ddl$
-CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17349,7 +17432,7 @@ $ddl$);
 
 -- links links_update_privileged :: POLICY
 SELECT public.replay_policy('public.links', 'links_update_privileged', $ddl$
-CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17377,7 +17460,7 @@ ALTER TABLE public.metric_catalog ENABLE ROW LEVEL SECURITY;
 -- metric_catalog metric_catalog_insert_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_insert_privileged', $ddl$
-CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17391,7 +17474,7 @@ $ddl$);
 
 -- metric_catalog metric_catalog_update_privileged :: POLICY
 SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_update_privileged', $ddl$
-CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17405,7 +17488,7 @@ ALTER TABLE public.metric_groups ENABLE ROW LEVEL SECURITY;
 -- metric_groups metric_groups_insert_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.metric_groups', 'metric_groups_insert_privileged', $ddl$
-CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17419,7 +17502,7 @@ $ddl$);
 
 -- metric_groups metric_groups_update_privileged :: POLICY
 SELECT public.replay_policy('public.metric_groups', 'metric_groups_update_privileged', $ddl$
-CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17632,14 +17715,14 @@ ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 -- schemas schemas_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.schemas', 'schemas_delete_privileged', $ddl$
-CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- schemas schemas_insert_privileged :: POLICY
 SELECT public.replay_policy('public.schemas', 'schemas_insert_privileged', $ddl$
-CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17653,7 +17736,7 @@ $ddl$);
 
 -- schemas schemas_update_privileged :: POLICY
 SELECT public.replay_policy('public.schemas', 'schemas_update_privileged', $ddl$
-CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17681,7 +17764,7 @@ $ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 -- system_settings system_settings_update_admin :: POLICY
 SELECT public.replay_policy('public.system_settings', 'system_settings_update_admin', $ddl$
-CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -18386,6 +18469,13 @@ GRANT ALL ON FUNCTION public.may_manage_captures() TO authenticated;
 
 --
 
+-- FUNCTION mfa_satisfied() :: ACL
+REVOKE ALL ON FUNCTION public.mfa_satisfied() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.mfa_satisfied() TO service_role;
+GRANT ALL ON FUNCTION public.mfa_satisfied() TO authenticated;
+
+--
+
 -- FUNCTION peek_gateway_enrollment_token(p_token text) :: ACL
 REVOKE ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) TO service_role;
@@ -18669,6 +18759,13 @@ REVOKE ALL ON FUNCTION public.require_backup_service_caller(p_fn text) FROM PUBL
 REVOKE ALL ON FUNCTION public.require_ingestion_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO authenticated;
+
+--
+
+-- FUNCTION require_mfa() :: ACL
+REVOKE ALL ON FUNCTION public.require_mfa() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.require_mfa() TO service_role;
+GRANT ALL ON FUNCTION public.require_mfa() TO authenticated;
 
 --
 

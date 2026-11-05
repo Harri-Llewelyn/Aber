@@ -7465,7 +7465,7 @@ ON CONFLICT (template_id, id_short) DO UPDATE SET
   ordinal          = EXCLUDED.ordinal;
 
 -- -------------------------------------------------------------------------------------------
--- Declared settings  (16 rows)
+-- Declared settings  (17 rows)
 -- -------------------------------------------------------------------------------------------
 -- Through seed_setting(), not as INSERTs: the function refreshes label, description and bounds
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
@@ -7555,6 +7555,25 @@ SELECT public.seed_setting(
     'prune removes it. What an approval CHANGED lives in audit_trail under its own retention; '
     'this governs only the queue entry and the rationale attached to it.',
     'ninety days, in prune_closed_proposals()'
+);
+
+-- ---------------------------------------------------------------------------------------------
+-- Security
+-- ---------------------------------------------------------------------------------------------
+-- Off on every install, so a fresh stack's first sign-in is not an enrolment. mfa_satisfied()
+-- (0001) reads it on every check, so a change applies to the next request; turning it on also ends
+-- every covered person's app sessions but Grafana's (0251).
+SELECT public.seed_setting(
+    'security.require_mfa_for_managers',
+    to_jsonb(false),
+    'boolean',
+    'Security',
+    'Require MFA to change the platform',
+    'When on, an Administrator or Shopfloor Manager needs MFA to make any change their role allows, '
+    'and to sign in to Node-RED, Studio or the forge. Reading is never refused, and Grafana is not '
+    'covered. Each person adds an authenticator on Profile › MFA. Turning it on signs every covered '
+    'person out of those apps.',
+    'off: nobody is asked for MFA'
 );
 
 -- ---------------------------------------------------------------------------------------------

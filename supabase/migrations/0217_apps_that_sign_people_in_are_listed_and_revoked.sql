@@ -254,6 +254,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to remove an app'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF p_client_id = ANY (public.stack_app_ids()) THEN
     RAISE EXCEPTION 'this app is part of Aber: it is registered again each time Aber starts, so it cannot be removed'
       USING ERRCODE = 'insufficient_privilege';

@@ -230,6 +230,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to change a device''s schemas'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF p_schema_ids IS NULL THEN
         RAISE EXCEPTION 'p_schema_ids is required; pass an empty array to detach every schema'

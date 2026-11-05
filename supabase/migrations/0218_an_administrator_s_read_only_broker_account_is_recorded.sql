@@ -38,6 +38,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to record a read-only broker account'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF p_username IS NULL OR p_username !~ '^sub[0-9a-f]{21}$' THEN
     RAISE EXCEPTION '% is not a read-only broker account ("sub" and 21 lowercase hex characters)',
       coalesce(quote_literal(p_username), 'NULL')
@@ -96,6 +97,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to record a read-only broker account'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF p_username IS NULL OR p_username !~ '^sub[0-9a-f]{21}$' THEN
     RAISE EXCEPTION '% is not a read-only broker account ("sub" and 21 lowercase hex characters)',
       coalesce(quote_literal(p_username), 'NULL')
