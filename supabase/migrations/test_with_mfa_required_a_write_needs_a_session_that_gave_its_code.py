@@ -16,6 +16,7 @@ What is held here, with `request.jwt.claims` at aal1 and aal2, and with a federa
     raised for an Operator or a machine identity, whom has_role() refuses on its own;
   * real writes and every function that calls require_mfa(), the same way, and a machine identity
     with schema:manage and proposal:create unaffected where it writes;
+  * a suppression window scheduled (0240) and the webhook's address set (0248), the same way;
   * the exemption list: every has_role() site naming a covered role in the database calls
     require_mfa() or is in supabase/mfa-exemptions.json, and a planted one is caught;
   * the app sessions that end, with their refresh tokens, when the switch turns on and when a
@@ -396,6 +397,58 @@ class TheExemptionList(MfaBase):
             " BEGIN IF NOT public.has_role(ARRAY['Shopfloor_Manager']) THEN RAISE EXCEPTION 'no'; END IF; END $$;"
         )
         self.assertEqual(self.unguarded(), ["function planted_write", "policy public.areas planted_insert"])
+
+
+class AWindowAndTheWebhookAskToo(MfaBase):
+    """A suppression window's writers (0240) and the webhook's Administrator functions (0248) ask
+    after their role check, as every function 0251 gates does."""
+
+    WINDOW_DEVICE_ID = "0240a251-0000-4000-8000-0000000000d1"
+    HOOK_URL = "https://hooks.example.net/receiver/path-0248"
+    SCHEDULE = ("SELECT id FROM public.schedule_alert_suppression_window('device', %s, NULL,"
+                " now() + interval '1 hour', 'Belt change');")
+
+    def setUp(self):
+        super().setUp()
+        self.cur.execute("SELECT to_regprocedure('public.schedule_alert_suppression_window(text, uuid,"
+                         " timestamp with time zone, timestamp with time zone, text)'),"
+                         " to_regprocedure('public.set_notification_webhook_url(text)');")
+        if None in self.cur.fetchone():
+            self.skipTest("0240 or 0248 is not in this database")
+        self.cur.execute("INSERT INTO public.devices (id, name) VALUES (%s, 'Test_0251_Press');", (self.WINDOW_DEVICE_ID,))
+
+    def test_a_window_is_scheduled_only_from_a_session_that_gave_its_code(self):
+        self.switch(True)
+        self.claims(MANAGER_ID, "aal1")
+        err, _ = self.attempt(self.SCHEDULE, (self.WINDOW_DEVICE_ID,))
+        self.assert_mfa_refusal(err, "scheduling a window at aal1")
+        self.claims(MANAGER_ID, "aal2")
+        err, rows = self.attempt(self.SCHEDULE, (self.WINDOW_DEVICE_ID,))
+        self.assertIsNone(err, err)
+        self.assertEqual(len(rows), 1)
+        self.claims(OPERATOR_ID, "aal2")
+        err, _ = self.attempt(self.SCHEDULE, (self.WINDOW_DEVICE_ID,))
+        self.assertIsInstance(err, psycopg2.errors.InsufficientPrivilege)
+        self.assertFalse(self.is_mfa_refusal(err), "an Operator was refused for MFA, not for their role")
+        self.switch(False)
+        self.claims(MANAGER_ID, "aal1")
+        err, rows = self.attempt(self.SCHEDULE, (self.WINDOW_DEVICE_ID,))
+        self.assertIsNone(err, err)
+        self.assertEqual(len(rows), 1, "with the switch off, aal1 is enough")
+
+    def test_the_webhook_s_address_is_set_only_from_a_session_that_gave_its_code(self):
+        call = "SELECT public.set_notification_webhook_url(%s);"
+        self.switch(True)
+        self.claims(ADMIN_ID, "aal1")
+        err, _ = self.attempt(call, (self.HOOK_URL,))
+        self.assert_mfa_refusal(err, "setting the webhook's address at aal1")
+        self.claims(ADMIN_ID, "aal2")
+        err, _ = self.attempt(call, (self.HOOK_URL,))
+        self.assertIsNone(err, err)
+        self.switch(False)
+        self.claims(ADMIN_ID, "aal1")
+        err, _ = self.attempt(call, (self.HOOK_URL,))
+        self.assertIsNone(err, err)
 
 
 class DoorSessions(MfaBase):

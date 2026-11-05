@@ -3359,7 +3359,8 @@ policy and no write grant. `schedule_alert_suppression_window(p_subject_kind, p_
 p_starts_at, p_ends_at, p_reason)`, `change_alert_suppression_window(p_window_id, p_starts_at,
 p_ends_at, p_reason)` and `end_alert_suppression_window(p_window_id)` are `SECURITY DEFINER`. An
 Administrator or a Shopfloor Manager calls them; every other caller is `42501`, an Operator
-included, whose one direct write stays the acknowledgement. Functions rather than write policies,
+included, whose one direct write stays the acknowledgement. Each asks `require_mfa()` after its role
+check, so with MFA required a window needs a session that gave its code (`0251`). Functions rather than write policies,
 because ending a window early needs the server's clock and the name of who ended it, and because
 the audit row belongs in the subject's lane, which the generic audit trigger cannot reach.
 
@@ -3632,7 +3633,9 @@ keys and changes none of these.
 of at most 2,048 characters with no user name in it (`22023`); a credential belongs in the path or
 the query, where the receiver issued it. The Settings page enters it with `CredentialField`.
 `clear_notification_webhook_url()` removes it, which stops the webhook, and drops what was waiting
-for it. Each is the Administrator's alone (`42501`).
+for it. Each is the Administrator's alone (`42501`). Each asks `require_mfa()` after its role check,
+as `issue_notification_signing_key()` and `queue_test_notification()` do, so with MFA required the
+webhook is changed only from a session that gave its code (`0251`).
 
 **Three closed settings, in the Notifications category**, each checked by
 `notification_setting_guard()` beside the table's own type and bound CHECKs (`23514`):
@@ -3780,7 +3783,7 @@ next request.
 - **Where each is declared.** db-init replays every file on every boot, so each policy and body is
   changed where it is stated, as `0235` changed `has_role()`'s: `0001` for the two functions, its
   write policies and the functions whose final form it holds; each later function in its own file
-  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`); and the same line
+  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`); and the same line
   in `0001`'s and `0164`'s and `0203`'s earlier copies, so no boot serves an ungated body between two
   replays. The policies `0177` and `0204` restate (`STATED_LATER`) are all reads, so neither
   changes. `supabase/storage-policies.sql` puts the guard in each storage write arm. `0251` holds no
@@ -3904,14 +3907,17 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `authorize_host_gateway_credential()` | `0196` | yes | Authorises a gateway's broker credential |
 | `backup_summary()` | `0179` | no | A read: the Backups page's figures. |
 | `cancel_backup_job()` | `0001` | yes | Cancels a backup |
+| `change_alert_suppression_window()` | `0240` | yes | Changes a suppression window |
 | `check_person_act()` | `0166` | yes | Every People act: role, access, password, email, sessions, MFA reset, approvals |
 | `clear_backup_offsite_destination()` | `0001` | yes | Removes it |
+| `clear_notification_webhook_url()` | `0248` | yes | Removes the webhook's address |
 | `cold_archive_backlog()` | `0001` | no | A read: the Cold Storage page. |
 | `cold_storage_rows()` | `0001` | no | A read: the Cold Storage page. |
 | `create_machine_principal()` | `0001` | yes | Creates a machine identity |
 | `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
 | `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
 | `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
+| `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
 | `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
 | `end_my_session()` | `0211` | no | A person's own session, in any role. |
 | `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
@@ -3924,6 +3930,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `is_unclaimed_capture_object()` | `0190` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
 | `issue_capture_download()` | `0195` | no | A read: downloading a stored capture, which an Auditor may do too. |
 | `issue_gateway_enrollment_token()` | `0196` | yes | Mints a gateway enrolment token |
+| `issue_notification_signing_key()` | `0248` | yes | Issues or rotates the webhook's signing key |
 | `keep_gateway_credential()` | `0196` | yes | Keeps a gateway's password |
 | `list_apps()` | `0217` | no | A read: the Apps tab. |
 | `list_machine_principals()` | `0001` | no | A read: Machine identities. |
@@ -3933,12 +3940,14 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `list_user_accounts()` | `0001` | no | A read: the accounts list. |
 | `may_decide_proposal()` | `0001` | no | A predicate: approve_proposal() and reject_proposal() call require_mfa() themselves, and list_proposer_names() reads by it. |
 | `may_manage_captures()` | `0001` | yes | Every capture and playback act, and a gateway rebirth request |
+| `notification_webhook_status()` | `0248` | no | A read: whether the webhook has an address and a signing key, never what they are. |
 | `person_session_summary()` | `0207` | no | A read: a person's drawer. |
 | `person_sessions()` | `0212` | no | A read: a person's drawer. |
 | `platform_backup_state()` | `0173` | no | A read: the Backups page. |
 | `playback_delivery_targets()` | `0183` | no | A read the playback dialog makes. |
 | `playback_stale_credentials()` | `0184` | no | A read the playback dialog makes. |
 | `publish_schema_version()` | `0165` | yes | Publishes a schema (schema:manage) |
+| `queue_test_notification()` | `0248` | yes | Sends a test to the webhook |
 | `raw_telemetry_window()` | `0001` | no | A read: the Cold Storage page. |
 | `record_broker_account_created()` | `0218` | yes | Records a read-only broker account |
 | `record_broker_account_deleted()` | `0218` | yes | Records its deletion |
@@ -3952,10 +3961,12 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `request_backup()` | `0001` | yes | Takes a backup |
 | `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
 | `revoke_service_token()` | `0001` | yes | Revokes a service token |
+| `schedule_alert_suppression_window()` | `0240` | yes | Schedules a suppression window, which keeps a machine's alerts quiet |
 | `set_backup_offsite_destination()` | `0001` | yes | Sets the off-site backup destination |
 | `set_device_schemas()` | `0168` | yes | Changes a device's schemas |
 | `set_display_name()` | `0213` | yes | Names another person (your own name is yours at any assurance) |
 | `set_foreign_credential()` | `0178` | yes | Writes a credential to Vault: the archive, the backups, and each later one |
+| `set_notification_webhook_url()` | `0248` | yes | Sets where the platform's alerts are sent |
 | `set_own_picture()` | `0213` | no | A person's own picture, in any role. |
 | `show_gateway_credential()` | `0164` | no | Shows a stored gateway credential again: a read, which the switch never refuses. |
 | `withdraw_alert_acknowledgement()` | `0231` | no | The other half of acknowledging an alert, which an Operator may do too. |

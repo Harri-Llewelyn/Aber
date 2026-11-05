@@ -14,6 +14,7 @@
     "end_my_other_sessions": "A person's own sessions, in any role.",
     "end_my_session": "A person's own session, in any role.",
     "foreign_credential_is_set": "A read: whether a credential is set, never what it is.",
+    "notification_webhook_status": "A read: whether the webhook has an address and a signing key, never what they are.",
     "gateway_is_playback_delivery_target": "A read the playback dialog makes.",
     "historian_backup_state": "A read: the Backups page.",
     "is_active_capture_object": "A storage predicate; the write policies call require_mfa() in the arm beside it.",
