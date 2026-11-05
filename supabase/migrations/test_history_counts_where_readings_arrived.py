@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.errors
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -64,9 +65,9 @@ class CoverageBase(unittest.TestCase):
             self.skipTest("0245 is not applied to this database")
         # The historian's relations as local tables, shaped and granted as the foreign ones are.
         for rollup in ("telemetry_device_5m", "telemetry_device_1h"):
-            self.cur.execute(f"DROP FOREIGN TABLE timescale.{rollup} CASCADE;"
-                             f"CREATE TABLE timescale.{rollup} (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
-                             f"GRANT SELECT ON timescale.{rollup} TO authenticated, service_role;")
+            self.cur.execute(sql.SQL("DROP FOREIGN TABLE timescale.{0} CASCADE;"
+                                     "CREATE TABLE timescale.{0} (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
+                                     "GRANT SELECT ON timescale.{0} TO authenticated, service_role;").format(sql.Identifier(rollup)))
         self.cur.execute(
             "DROP FOREIGN TABLE timescale.telemetry_device_coverage CASCADE;"
             "CREATE TABLE timescale.telemetry_device_coverage (relation text, computed_from timestamptz,"
@@ -90,7 +91,8 @@ class CoverageBase(unittest.TestCase):
 
     # ---- fixtures ----------------------------------------------------------------------------
     def count(self, rollup, at, n, asset=DEVICE):
-        self.cur.execute(f"INSERT INTO timescale.{rollup} (bucket, asset_id, n_rows) VALUES (%s, %s, %s);", (at, asset, n))
+        self.cur.execute(sql.SQL("INSERT INTO timescale.{} (bucket, asset_id, n_rows) VALUES (%s, %s, %s);")
+                         .format(sql.Identifier(rollup)), (at, asset, n))
 
     def call(self, sql, args=(), role="authenticated"):
         """Run `sql` as PostgREST would for an Operator's token (or as `role`). A refusal rolls back
