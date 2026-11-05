@@ -101,6 +101,9 @@ export const appUrl = (id) => pageUrl('access-control', { app: id }, 'apps')
 /** One setting, by its key, on the category that holds it. */
 export const settingUrl = (key) => pageUrl('settings', { setting: key })
 
+/** Settings › Notifications: the webhook, its routes and the delivery log. */
+export const notificationsUrl = () => pageUrl('settings', {}, 'notifications')
+
 /** The Metric Catalog with Unmapped on. */
 export const unmappedMetricsUrl = () => pageUrl('metrics', { unmapped: true })
 
