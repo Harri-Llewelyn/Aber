@@ -22,8 +22,9 @@ turned on and off through the API with the secret key. With it on:
 Needs SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY, NODERED_OAUTH_CLIENT_SECRET and
 GRAFANA_OAUTH_CLIENT_SECRET (`dev-cluster test` passes them from the cluster's Secret). Turning the
 switch on ends every covered person's app sessions but Grafana's, the seeded people's included. The
-switch is set back to the value the suite found, and the person is deleted at the end, with their
-factor, sessions and approvals. The Audit Trail keeps the person's role being given and going, the
+switch is set back to the value the suite found. At the end the person is removed as Access Control
+removes one: the Audit Trail names them, so they cannot be deleted, and they keep no role and cannot
+sign in. The Audit Trail keeps the person's role being given and going, the
 switch's changes, their approvals of Node-RED and Grafana, and the SESSIONS_ENDED row.
 """
 import base64
@@ -247,7 +248,18 @@ class ASecondFactorGuardsWhatChangesThePlatform(unittest.TestCase):
             problems.append(f"{err}; set security.require_mfa_for_managers back to {cls.found} on Settings")
         if cls.person_id:
             status, _, text = as_service(f"/auth/v1/admin/users/{cls.person_id}", method="DELETE")
-            if status != 200:
+            if status != 200 and "23503" in text:
+                # The Audit Trail names the person (audit_trail_changed_by_fkey), so they cannot be
+                # deleted. Remove them as manage-people's "remove" does: no role, sign-in blocked.
+                gone, _, why = as_service(f"/rest/v1/user_roles?user_id=eq.{cls.person_id}",
+                                          method="DELETE", prefer="return=minimal")
+                if gone not in (200, 204):
+                    problems.append(f"{cls.email} keeps their role ({gone} {why[:200]}): remove them on Access Control")
+                banned, _, why = as_service(f"/auth/v1/admin/users/{cls.person_id}", method="PUT",
+                                            body={"ban_duration": "876000h"})
+                if banned != 200:
+                    problems.append(f"{cls.email} can still sign in ({banned} {why[:200]}): remove them on Access Control")
+            elif status != 200:
                 problems.append(f"{cls.email} was not deleted ({status} {text[:200]}): delete it with GoTrue's admin API")
         if problems:
             raise AssertionError("; ".join(problems))
