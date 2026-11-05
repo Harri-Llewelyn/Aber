@@ -115,13 +115,14 @@ class WindowsBase(unittest.TestCase):
 
         # Two cells; a gateway in the first; a device filed in the first, one inheriting it from
         # the gateway, and one in no cell.
-        self.cell = self.make("cells", name="Test_0240_Cell_A")
-        self.other_cell = self.make("cells", name="Test_0240_Cell_B")
-        self.gateway = self.make("gateways", name="Test_0240_GW", cell_id=self.cell, deployment="remote")
-        self.device = self.make("devices", name="Test_0240_Press", cell_id=self.cell, status="ONLINE",
-                                first_dbirth_at="2026-11-01T00:00:00Z")
-        self.inheriting = self.make("devices", name="Test_0240_Inheriting", gateway_id=self.gateway)
-        self.loose = self.make("devices", name="Test_0240_Loose")
+        self.cell = self.make_cell("Test_0240_Cell_A")
+        self.other_cell = self.make_cell("Test_0240_Cell_B")
+        self.gateway = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO public.gateways (id, name, cell_id, deployment) VALUES (%s, %s, %s, 'remote');",
+                         (self.gateway, "Test_0240_GW", self.cell))
+        self.device = self.make_device("Test_0240_Press", cell_id=self.cell, online=True)
+        self.inheriting = self.make_device("Test_0240_Inheriting", gateway_id=self.gateway)
+        self.loose = self.make_device("Test_0240_Loose")
 
     def tearDown(self):
         self.conn.rollback()
@@ -131,24 +132,33 @@ class WindowsBase(unittest.TestCase):
     def email(user_id):
         return f"{user_id[-4:]}@suppression.test"
 
-    def make(self, table, **columns):
-        row_id = str(uuid.uuid4())
-        names = ", ".join(["id"] + list(columns))
-        marks = ", ".join(["%s"] * (len(columns) + 1))
-        self.cur.execute(f"INSERT INTO public.{table} ({names}) VALUES ({marks});", [row_id, *columns.values()])
-        return row_id
+    def make_cell(self, name):
+        cell_id = str(uuid.uuid4())
+        self.cur.execute("INSERT INTO public.cells (id, name) VALUES (%s, %s);", (cell_id, name))
+        return cell_id
 
-    def sparkplug_id(self, table, row_id):
+    def make_device(self, name, cell_id=None, gateway_id=None, online=False):
+        device_id = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, cell_id, gateway_id, status, first_dbirth_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s);",
+            (device_id, name, cell_id, gateway_id, "ONLINE" if online else None,
+             "2026-11-01T00:00:00Z" if online else None))
+        return device_id
+
+    def sparkplug_id(self, entity_type, row_id):
         """The subject's wire id, or a made-up one for an id its table does not hold."""
-        self.cur.execute(f"SELECT sparkplug_id FROM public.{table} WHERE id = %s;", (row_id,))
-        row = self.cur.fetchone()
-        return row[0] if row else "dev0240000000000000000000"
+        self.cur.execute(
+            "SELECT coalesce((SELECT d.sparkplug_id FROM public.devices d WHERE %s = 'device' AND d.id = %s),"
+            "                (SELECT g.sparkplug_id FROM public.gateways g WHERE %s = 'gateway' AND g.id = %s));",
+            (entity_type, row_id, entity_type, row_id))
+        return self.cur.fetchone()[0] or "dev0240000000000000000000"
 
     def alert(self, entity_id=None, entity_type="device", fingerprint=None, starts_at=None, status="firing"):
         """An occurrence as the webhook writes it, about `entity_id`; firing an hour ago by default."""
         sparkplug_id = None
         if entity_type in ("device", "gateway"):
-            sparkplug_id = self.sparkplug_id(entity_type + "s", entity_id)
+            sparkplug_id = self.sparkplug_id(entity_type, entity_id)
         self.cur.execute("SELECT now() - interval '1 hour';")
         default_start = self.cur.fetchone()[0]
         self.cur.execute(UPSERT, {
@@ -161,12 +171,14 @@ class WindowsBase(unittest.TestCase):
         return self.cur.fetchone()[0]
 
     def window(self, starts="-1 hour", ends="+1 hour", reason="Planned maintenance", **subject):
-        """A window written as the owner, past the functions, with its start and end relative to now."""
-        column, subject_id = next(iter(subject.items()))
+        """A window written as the owner, past the functions, with its start and end relative to now.
+        `subject` is one of device_id, gateway_id and cell_id."""
         self.cur.execute(
-            f"INSERT INTO public.alert_suppression_windows ({column}, starts_at, ends_at, reason, created_by)"
-            " VALUES (%s, now() + %s::interval, now() + %s::interval, %s, %s) RETURNING id;",
-            (subject_id, starts, ends, reason, MANAGER_ID))
+            "INSERT INTO public.alert_suppression_windows"
+            "       (device_id, gateway_id, cell_id, starts_at, ends_at, reason, created_by)"
+            " VALUES (%s, %s, %s, now() + %s::interval, now() + %s::interval, %s, %s) RETURNING id;",
+            (subject.get("device_id"), subject.get("gateway_id"), subject.get("cell_id"),
+             starts, ends, reason, MANAGER_ID))
         return self.cur.fetchone()[0]
 
     def as_person(self, user_id, sql, args=()):
@@ -246,15 +258,18 @@ class WindowsBase(unittest.TestCase):
 
 class TheTable(WindowsBase):
     def write(self, **columns):
-        """Insert a window as the owner, past the functions."""
-        row = {"starts_at": "2026-11-05T09:00:00Z", "ends_at": "2026-11-05T10:00:00Z",
-               "reason": "Planned maintenance", "created_by": MANAGER_ID, **columns}
-        names = ", ".join(row)
-        marks = ", ".join(["%s"] * len(row))
+        """Insert a window as the owner, past the functions, with one fixed statement; a column not
+        named takes the value below, or NULL."""
+        row = {"device_id": None, "gateway_id": None, "cell_id": None, "starts_at": "2026-11-05T09:00:00Z",
+               "ends_at": "2026-11-05T10:00:00Z", "reason": "Planned maintenance", "created_by": MANAGER_ID,
+               "ended_by": None, "ended_by_email": None, **columns}
         self.cur.execute("SAVEPOINT direct;")
         try:
-            self.cur.execute(f"INSERT INTO public.alert_suppression_windows ({names}) VALUES ({marks});",
-                             list(row.values()))
+            self.cur.execute(
+                "INSERT INTO public.alert_suppression_windows"
+                "       (device_id, gateway_id, cell_id, starts_at, ends_at, reason, created_by, ended_by, ended_by_email)"
+                " VALUES (%(device_id)s, %(gateway_id)s, %(cell_id)s, %(starts_at)s, %(ends_at)s, %(reason)s,"
+                "         %(created_by)s, %(ended_by)s, %(ended_by_email)s);", row)
         except psycopg2.Error:
             self.cur.execute("ROLLBACK TO SAVEPOINT direct;")
             raise
