@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
 import { alertPage } from '../routes'
+import { isSuppressed, nextSuppressionChange } from '../utils/alertSuppression'
 
 /**
  * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
@@ -11,6 +12,42 @@ import { alertPage } from '../routes'
 export const RECONCILE_MS = 60000
 /** Fallback poll interval used only when Realtime is unavailable. */
 export const POLL_INTERVAL_MS = 15000
+
+/**
+ * How long after a window's start or end the counter reads again, and the least it waits: the
+ * server's clock decides, so a reader whose clock runs ahead asks again until the answer changes.
+ */
+export const SUPPRESSION_SLACK_MS = 1000
+export const SUPPRESSION_RETRY_MS = 2000
+
+/** What a writer of suppression windows dispatches on `window` so the counter reads again at once. */
+export const ALERTS_REFRESH_EVENT = 'aber:platform-alerts-refresh'
+
+/**
+ * Ask every mounted counter to read the alerts again: a window just scheduled, changed or ended
+ * changes what is suppressed, and an early end writes nothing to `platform_alerts`.
+ */
+export function requestAlertsRefresh() {
+  window.dispatchEvent(new Event(ALERTS_REFRESH_EVENT))
+}
+
+/**
+ * The starts of the windows still to come, for the re-read at the next one. A failed read is none:
+ * the minute's reconcile still finds the change.
+ */
+async function upcomingWindowStarts() {
+  try {
+    const { data, error } = await supabase
+      .from('alert_suppression_windows')
+      .select('starts_at')
+      .gt('starts_at', new Date().toISOString())
+      .order('starts_at', { ascending: true })
+      .limit(1)
+    return error ? [] : (data ?? []).map((w) => w.starts_at)
+  } catch {
+    return []
+  }
+}
 
 /**
  * Where an alert's toast leads: the page in the dashboard that alertPage() names, such as a machine
@@ -30,12 +67,19 @@ export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
  * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link where
  * alertToastUrl() says. Neither is recorded in the bell's history: the alert counter shows what is
  * firing, and Grafana keeps what has fired.
+ *
+ * A suppressed alert toasts nothing, firing or resolved. When its window ends while it still fires
+ * it toasts as if it had just fired. Whether an alert is suppressed changes at a window's start and
+ * end with nothing written, so the hook reads again at the nearest one it knows of.
  */
 export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
   const showToastRef = useRef(showToast)
+  // The re-read at the next window start or end, and whether the hook is still mounted to make it.
+  const changeTimerRef = useRef(null)
+  const liveRef = useRef(false)
 
   useEffect(() => { showToastRef.current = showToast }, [showToast])
 
@@ -48,7 +92,8 @@ export function usePlatformAlerts(showToast) {
     const { data, error } = await supabase
       .from('platform_alerts_active')
       .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels, '
-        + 'acknowledged_at, acknowledged_by, acknowledged_by_email, acknowledgement_reason, acknowledgement_note')
+        + 'acknowledged_at, acknowledged_by, acknowledged_by_email, acknowledgement_reason, acknowledgement_note, '
+        + 'suppressed, suppressing_window_id, suppression_reason, suppressed_until')
       .order('starts_at', { ascending: false })
 
     if (error) {
@@ -63,7 +108,9 @@ export function usePlatformAlerts(showToast) {
 
     if (primedRef.current) {
       for (const [fingerprint, row] of next) {
-        if (!knownRef.current.has(fingerprint)) {
+        // New, or out of a window that has ended while it still fires.
+        const was = knownRef.current.get(fingerprint)
+        if (!isSuppressed(row) && (!was || isSuppressed(was))) {
           // No emoji prefix: Toast draws the Alert group's icon itself.
           showToastRef.current?.(
             row.alert_name,
@@ -75,7 +122,7 @@ export function usePlatformAlerts(showToast) {
       // Cleared alerts are announced too. A toast that only ever appears is a toast an operator
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
-        if (!next.has(fingerprint)) {
+        if (!next.has(fingerprint) && !isSuppressed(row)) {
           showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: alertToastUrl(row), record: false })
         }
       }
@@ -84,6 +131,15 @@ export function usePlatformAlerts(showToast) {
     knownRef.current = next
     primedRef.current = true
     setActive(rows)
+
+    const at = nextSuppressionChange(rows, await upcomingWindowStarts())
+    clearTimeout(changeTimerRef.current)
+    changeTimerRef.current = null
+    if (at !== null && liveRef.current) {
+      const wait = Math.max(at - Date.now() + SUPPRESSION_SLACK_MS, SUPPRESSION_RETRY_MS)
+      // setTimeout's limit; the reconcile arms it again long before.
+      if (wait < 2 ** 31) changeTimerRef.current = setTimeout(() => { if (liveRef.current) refresh() }, wait)
+    }
   }, [])
 
   useEffect(() => {
@@ -91,6 +147,7 @@ export function usePlatformAlerts(showToast) {
     let channel = null
     let timer = null
     let debounce = null
+    liveRef.current = true
 
     const run = () => {
       if (cancelled) return
@@ -112,6 +169,8 @@ export function usePlatformAlerts(showToast) {
 
       await refresh()
       if (cancelled) return
+      // A window's writer asks for a read in this tab; another tab's reconciles.
+      window.addEventListener(ALERTS_REFRESH_EVENT, fire)
 
       if (REALTIME_ENABLED) {
         channel = supabase
@@ -135,6 +194,9 @@ export function usePlatformAlerts(showToast) {
 
     return () => {
       cancelled = true
+      liveRef.current = false
+      window.removeEventListener(ALERTS_REFRESH_EVENT, fire)
+      clearTimeout(changeTimerRef.current)
       clearTimeout(debounce)
       if (timer) clearInterval(timer)
       if (channel) supabase.removeChannel(channel)

@@ -38,12 +38,13 @@ const DROP = JSON.stringify({
 });
 
 /**
- * GoTrue, PostgREST and Loki, answered from `replies` keyed "METHOD /path". The caller is an
+ * GoTrue, PostgREST and Loki, answered from `replies` keyed "METHOD /path", each a reply or a
+ * function of the request that answers it. The caller is an
  * Administrator unless `role` says otherwise. The record function writes a row only when the
  * parameters differ from the caller's last recorded ones, as 0225 does, so a sequence of requests
  * shows what the handler sends it. Every request is recorded in order.
  */
-function stack(replies: Record<string, Reply> = {}, role: string | null = "Administrator") {
+function stack(replies: Record<string, Reply | ((call: Call) => Reply)> = {}, role: string | null = "Administrator") {
   const calls: Call[] = [];
   let last: string | null = null;
   let rows = 0;
@@ -68,16 +69,18 @@ function stack(replies: Record<string, Reply> = {}, role: string | null = "Admin
     const url = new URL(req.url);
     const text = await req.text();
     const body = text ? JSON.parse(text) : null;
-    calls.push({
+    const call = {
       method: req.method,
       host: url.host,
       path: url.pathname,
       params: Object.fromEntries(url.searchParams),
       body,
       auth: req.headers.get("Authorization"),
-    });
+    };
+    calls.push(call);
     const key = `${req.method} ${url.pathname}`;
-    let reply = replies[key] ?? defaults[key];
+    const given = replies[key];
+    let reply = (typeof given === "function" ? given(call) : given) ?? defaults[key];
     if (!reply && key === "POST /rest/v1/rpc/record_service_logs_read") {
       const read = JSON.stringify(body);
       reply = read === last ? { status: 200, body: null } : { status: 200, body: ++rows };
@@ -227,7 +230,70 @@ Deno.test("a service the store does not list is refused with no read and no row"
   const s = stack();
   const { response, body } = await run(get(`service=${encodeURIComponent('ingestion"} or {service="auth')}`), s);
   assert.equal(response.status, 400);
-  assert.ok(/7 days/.test(body.details));
+  assert.equal(body.details, `No service called ${JSON.stringify('ingestion"} or {service="auth')} wrote a line in the last 7 days.`);
+  assert.equal(s.toLoki().map((c) => c.path), ["/loki/api/v1/label/service/values"]);
+  assert.equal(s.records(), []);
+});
+
+Deno.test("a rolling range lists the services of the last 7 days, however short the range", async () => {
+  for (const query of ["range=15m", "range=1h", "service=ingestion&range=15m"]) {
+    env();
+    const s = stack();
+    const { response, body } = await run(get(query), s);
+    assert.equal(response.status, 200, query);
+    assert.equal(body.services, ["auth", "ingestion", "mosquitto"], query);
+    const { start, end } = s.toLoki().find((c) => c.path === "/loki/api/v1/label/service/values")!.params;
+    assert.equal(String((BigInt(end) - BigInt(start)) / 1_000_000n), String(RANGES["7d"]), query);
+  }
+});
+
+/** A store whose services differ by when they wrote: `old` alone in the window `[from, to)`, `recent` in the last 7 days. */
+function storeOverTime(from: number, to: number, old: string[], recent: string[]) {
+  return stack({
+    "GET /loki/api/v1/label/service/values": (call) => {
+      const [start, end] = [Number(BigInt(call.params.start) / 1_000_000n), Number(BigInt(call.params.end) / 1_000_000n)];
+      return { status: 200, body: { status: "success", data: start === from && end === to ? old : recent } };
+    },
+  });
+}
+
+Deno.test("a fixed window older than 7 days lists, and reads, a service that wrote then and not since", async () => {
+  const minute = 60_000;
+  const from = Math.floor((Date.now() - 20 * 24 * 60 * minute) / minute) * minute;
+  const to = from + 24 * 60 * minute;
+  const window = `from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`;
+
+  env();
+  let s = storeOverTime(from, to, ["auth", "backup-worker"], ["auth", "ingestion"]);
+  let { response, body } = await run(get(window), s);
+  assert.equal(response.status, 200);
+  assert.equal(body.services, ["auth", "backup-worker"]);
+  assert.equal(s.records(), []);
+
+  env();
+  s = storeOverTime(from, to, ["auth", "backup-worker"], ["auth", "ingestion"]);
+  ({ response, body } = await run(get(`service=backup-worker&${window}`), s));
+  assert.equal(response.status, 200);
+  assert.equal([body.service, body.from, body.to], ["backup-worker", new Date(from).toISOString(), new Date(to).toISOString()]);
+  assert.equal(s.toLoki().map((c) => c.path), ["/loki/api/v1/label/service/values", "/loki/api/v1/query_range"]);
+  assert.equal(s.records().length, 1);
+
+  // The same service over a rolling range: it wrote nothing in the last 7 days.
+  env();
+  s = storeOverTime(from, to, ["auth", "backup-worker"], ["auth", "ingestion"]);
+  ({ response, body } = await run(get("service=backup-worker&range=7d"), s));
+  assert.equal(response.status, 400);
+  assert.equal(body.details, 'No service called "backup-worker" wrote a line in the last 7 days.');
+
+  // A service that writes now, and wrote nothing in the old window, is refused there, naming it.
+  env();
+  s = storeOverTime(from, to, ["auth", "backup-worker"], ["auth", "ingestion"]);
+  ({ response, body } = await run(get(`service=ingestion&${window}`), s));
+  assert.equal(response.status, 400);
+  assert.equal(
+    body.details,
+    `No service called "ingestion" wrote a line between ${new Date(from).toISOString()} and ${new Date(to).toISOString()}.`,
+  );
   assert.equal(s.toLoki().map((c) => c.path), ["/loki/api/v1/label/service/values"]);
   assert.equal(s.records(), []);
 });
@@ -303,9 +369,9 @@ Deno.test("a fixed window is read between its ends, recorded as them, and answer
 
   const read = s.toLoki().find((c) => c.path === "/loki/api/v1/query_range")!;
   assert.equal([read.params.start, read.params.end], [`${Date.UTC(2026, 10, 1)}000000`, `${Date.UTC(2026, 10, 2)}000000`]);
-  // The service list is still the last 7 days', whatever the window.
+  // The service list is the window's own.
   const listed = s.toLoki().find((c) => c.path === "/loki/api/v1/label/service/values")!;
-  assert.equal(String((BigInt(listed.params.end) - BigInt(listed.params.start)) / 1_000_000n), String(RANGES["7d"]));
+  assert.equal([listed.params.start, listed.params.end], [read.params.start, read.params.end]);
 
   const [record] = s.records();
   assert.equal(record.body, {

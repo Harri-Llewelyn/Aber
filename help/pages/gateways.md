@@ -28,6 +28,7 @@ A gateway serves a cell, a whole area (**Area-Wide**) or the whole site (**Site-
 - **The Platform and Custom rows** in the drawer show the last convergence. **Platform** is the playbook version this gateway is actually on, so different versions across the fleet mean a rollout is in progress. **Custom** is what this gateway's own playbook did: empty when it has none, and **failed** when its adapter is not running. Watch for that one. An adapter has no heartbeat of its own, so the gateway keeps publishing and still reads ONLINE while its adapter is down; this row is the only place it shows.
 - **A Host or Simulated gateway has no repository.** It runs in Aber's own Node-RED, and one Node-RED can carry several of them, so its `flows.json` belongs to the whole instance rather than one gateway. Edit those flows in the Node-RED editor.
 - **A Third-party gateway has no repository either.** Aber does not manage the software on its machine, so change the node on the node itself.
+- **Suppression windows**, at the foot of the details panel, keep the gateway's own alerts quiet during planned work. Its devices' alerts are not covered: give a device, or its cell, a window of its own. Scheduling, changing and ending a window work as on the Devices page. See [Suppression windows](devices.md#suppression-windows).
 
 ## What the states mean
 

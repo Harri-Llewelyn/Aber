@@ -74,7 +74,7 @@ describe('the first read', () => {
   it('lists the services, then reads ingestion\'s last hour, the most lines a read returns', async () => {
     render(<SystemLogs showToast={vi.fn()} />)
     await waitFor(() => expect(table()).toBeTruthy())
-    expect(api.readServiceLogs.mock.calls[0][0]).toEqual({})
+    expect(api.readServiceLogs.mock.calls[0][0]).toEqual({ range: '1h' })
     expect(reads()).toEqual([{ service: 'ingestion', level: 'any', filter: '', range: '1h', limit: LOG_LINES_MAX }])
     expect(screen.getByRole('combobox', { name: 'Service' })).toHaveValue('ingestion')
     expect([...screen.getByRole('combobox', { name: 'Service' }).options].map(o => o.value)).toEqual(SERVICES)
@@ -87,11 +87,18 @@ describe('the first read', () => {
     expect(words()).toHaveTextContent('Last 24 hours')
   })
 
-  it('reads the default service when the address names one the store does not list', async () => {
+  it('keeps a service the address names and the store does not list, says so, and reads nothing for it', async () => {
     window.history.pushState({}, '', '/system/logs?service=gone')
     render(<SystemLogs showToast={vi.fn()} />)
-    await waitFor(() => expect(table()).toBeTruthy())
-    expect(reads().map(r => r.service)).toEqual(['ingestion'])
+    expect(await screen.findByText('No lines from gone in the last 7 days.')).toBeInTheDocument()
+    expect(reads()).toEqual([])
+    const select = screen.getByRole('combobox', { name: 'Service' })
+    expect(select).toHaveValue('gone')
+    expect(select.selectedOptions[0]).toHaveTextContent('gone (no lines in the last 7 days)')
+    expect(window.location.search).toBe('?service=gone')
+
+    fireEvent.change(select, { target: { value: 'auth' } })
+    await waitFor(() => expect(reads().map(r => r.service)).toEqual(['auth']))
     expect(defaultLogService(['auth', 'mosquitto'])).toBe('auth')
     expect(defaultLogService([])).toBe('')
   })
@@ -275,6 +282,71 @@ describe('the time window', () => {
     window.history.pushState({}, '', '/system/logs?span=day&at=2026-11-01')
     render(<SystemLogs showToast={vi.fn()} />)
     expect(await screen.findByText('ingestion wrote nothing in this time window.')).toBeInTheDocument()
+  })
+
+  describe('the Service list', () => {
+    // 10 October, three weeks before now: the backup worker wrote that day and ingestion did not.
+    const OLD_DAY = logWindowParams({ kind: 'calendar', span: 'day', at: '2026-10-10' })
+    const OLD_SERVICES = ['auth', 'backup-worker']
+
+    /** The function's answers when the list depends on the window, as service-logs's does. */
+    function answersOverTime() {
+      api.readServiceLogs.mockImplementation(async (params = {}) => {
+        const services = params.from === OLD_DAY.from ? OLD_SERVICES : SERVICES
+        if (!params.service) return { observability: true, services, lines: [] }
+        if (!services.includes(params.service)) throw new Error(`No service called "${params.service}" wrote a line.`)
+        return { observability: true, services, service: params.service, level: 'any', filter: '', limit: params.limit, lines: LINES, more: false, clamped: [], audit: 'recorded' }
+      })
+    }
+    const lists = () => api.readServiceLogs.mock.calls.map(([params]) => params).filter(p => !p.service)
+    const options = () => [...screen.getByRole('combobox', { name: 'Service' }).options].map(o => o.textContent)
+
+    it('follows a fixed window, read again when the window moves, and keeps a service it lacks', async () => {
+      answersOverTime()
+      window.history.pushState({}, '', '/system/logs?span=day&at=2026-10-11')
+      render(<SystemLogs showToast={vi.fn()} />)
+      await waitFor(() => expect(reads()).toHaveLength(1))
+      expect(reads()[0]).toMatchObject({ service: 'ingestion' })
+
+      fireEvent.click(arrow('Previous day'))
+      expect(await screen.findByText('No lines from ingestion in this time window.')).toBeInTheDocument()
+      // The list for the new day was read, alone, between its ends; no lines were asked of ingestion.
+      expect(lists().at(-1)).toEqual(OLD_DAY)
+      expect(reads()).toHaveLength(1)
+      expect(screen.getByRole('combobox', { name: 'Service' })).toHaveValue('ingestion')
+      expect(options()).toEqual(['ingestion (no lines in this time window)', ...OLD_SERVICES])
+      expect(table()).toBeNull()
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Service' }), { target: { value: 'backup-worker' } })
+      await waitFor(() => expect(reads()).toHaveLength(2))
+      expect(reads()[1]).toMatchObject({ service: 'backup-worker', ...OLD_DAY })
+      await waitFor(() => expect(table()).toBeTruthy())
+      expect(options()).toEqual(OLD_SERVICES)
+    })
+
+    it('lists the last 7 days for every rolling range, so a short one does not shrink it', async () => {
+      answersOverTime()
+      window.history.pushState({}, '', '/system/logs?span=day&at=2026-10-10&service=backup-worker')
+      render(<SystemLogs showToast={vi.fn()} />)
+      await waitFor(() => expect(reads()).toHaveLength(1))
+
+      fireEvent.click(words())
+      fireEvent.click(within(choices()).getByRole('button', { name: 'Last 15 minutes' }))
+      expect(await screen.findByText('No lines from backup-worker in the last 7 days.')).toBeInTheDocument()
+      expect(lists().at(-1)).toEqual({ range: '15m' })
+      expect(options()).toEqual(['backup-worker (no lines in the last 7 days)', ...SERVICES])
+      expect(reads()).toHaveLength(1)
+
+      // Another rolling range lists the same 7 days, so it reads lines without asking for the list.
+      fireEvent.change(screen.getByRole('combobox', { name: 'Service' }), { target: { value: 'auth' } })
+      await waitFor(() => expect(reads()).toHaveLength(2))
+      const listed = lists().length
+      fireEvent.click(words())
+      fireEvent.click(within(choices()).getByRole('button', { name: 'Last 24 hours' }))
+      await waitFor(() => expect(reads()).toHaveLength(3))
+      expect(reads()[2]).toMatchObject({ service: 'auth', range: '24h' })
+      expect(lists()).toHaveLength(listed)
+    })
   })
 
   it('sends a custom window missing an end as the end it has, which the function refuses with the reason', () => {

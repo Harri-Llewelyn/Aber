@@ -330,7 +330,10 @@ slides back when they leave.
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
   control's tooltip must carry the whole text.
 - It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
-  drawer opening needs no listener.
+  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
+- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
+  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
+  heading's sr-only words already give a screen reader the whole value.
 - The whole text is always in the DOM, so a screen reader hears all of it.
 
 The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
@@ -504,6 +507,21 @@ Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gate
 actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
 height is not known, and above the actions it could push Edit Details off the drawer.
 
+- **Suppression windows are a tool, after the actions.** The device, gateway and cell drawers pass
+  `common/SuppressionWindows.jsx` as `children`, since its list has no fixed height. It lists the
+  current and upcoming windows with `context-panel-section-label`, as a gateway's Devices are, each
+  with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
+  it. A device's drawer passes its current cell, whose windows are listed marked From cell and
+  changed from the cell's drawer. A Shopfloor Manager or an Administrator (`maySuppress()`) gets
+  Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
+  (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
+  custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
+  The section reads again at its next window's start or end.
+- **The alert names no evaluator.** The banner above the fields (`ContextPanel`'s `alert`) says
+  Alert firing, Alert acknowledged or Alert suppressed, since when, with the counter's lines under
+  it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one
+  takes a dashed neutral outline and a crossed bell, since it colours nothing. The Devices page
+  hands the banner the device's alert from `alertIndex(..., { suppressed: true })`.
 - **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
   under its header and above the fields. It continues the header's band, takes the header's rule,
   and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
@@ -1185,7 +1203,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1278,9 +1296,11 @@ yes-or-no choice stays a toggle button in the toolbar.
   toolbar's counted toggles are. Several may be on, none on is every class, and the address keeps
   them as `?class=lifecycle,read`. `AUDIT_TRAIL_CLASSES` lists them in the legend's order and mirror
   check 44 holds them, and `MARKERS`, to the function and its indexes. Read is a grey eye in
-  `--text-muted`, which holds 3:1 on the card (`themeContrast.test.js`). The legend sits at the
-  right-hand end of the row above the timeline, with Expand all and Collapse all at its start, over
-  the section headings they act on.
+  `--text-muted`. In a toggle each marker sits on a disc in `--bg-card` (`.trail-legend-disc`), as
+  it sits on the card on the track, so a pressed toggle's accent fill never meets it.
+  `themeContrast.test.js` holds every marker at 3:1 on the track and in its toggle, pressed or not,
+  in both themes. The legend sits at the right-hand end of the row above the timeline, with Expand
+  all and Collapse all at its start, over the section headings they act on.
 - **Checks.** Check 193 (`scripts/check-docs-drift.mjs`) refuses a select in a toolbar, but System ›
   Logs' Service and Level, each one value `service-logs` takes. Check 194 holds the Audit Trail
   help's group names to `constants.js`. Mirror check 42 (`scripts/check-mirror-drift.mjs`) holds
@@ -2023,6 +2043,19 @@ passes `{ record: false }`, as a Grafana alert does.
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
   acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
   outranks any acknowledged one.
+- **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
+  whether a suppression window covers each alert as it is read, with the window's reason and end.
+  `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
+  the pill's number, the tab title and the favicon, and `alertIndex()` leaves a suppressed one out,
+  so no pin, chip or row colours it. The list keeps it, after the acknowledged ones, with a muted
+  ring struck through, a crossed bell, "Suppressed until" its end, and the reason under it. **A
+  window's start and end write nothing**, so `usePlatformAlerts` reads again a second after the
+  nearest end of a window that covers an alert, or start of one still to come (`nextSuppressionChange()`),
+  and at least two seconds after a read, so a clock ahead of the server's asks again until the
+  answer changes. An alert whose window ends while it fires toasts as if it had just fired; a
+  suppressed alert toasts neither firing nor resolved. A drawer that schedules, changes or ends a
+  window calls `requestAlertsRefresh()`, so this tab reads at once; another tab learns of an early
+  end at its next reconcile. The windows table is not in the realtime publication.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a

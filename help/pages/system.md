@@ -59,6 +59,7 @@ The Logs tab shows the newest lines one service wrote to its log, newest first. 
 4. Choose how far back to look in the **time window**, after the search box. It opens on **Last 1 hour**. Select the words between its arrows to jump to a day or set a custom range. The same list has ranges from the last 15 minutes to the last 7 days. Choose **Day** or **Week** to see a whole day or week, and **‹** or **›** to step back or forward one at a time.
 5. Select **Refresh** to read again. To read again on its own, pick an interval in the right half of the same button, such as **30 s**.
 
+- **The Service list follows the time window.** For a day, a week or a custom range, it lists the services that wrote a line in it. For a rolling window it lists those that wrote in the last 7 days, so it does not shrink at 15 minutes. If the service you picked wrote nothing in a new window, the tab keeps it and says so.
 - **Time** is when the service wrote the line, in your time zone, to the thousandth of a second.
 - **Level** is how serious the service said the line is. Only lines written as JSON, a structured format, name a level. The ingestion and playback services write JSON. A line in any other format shows **none**, and appears only under **Any level**.
 - **Message** is the line. For a JSON line it is the message alone, with the fields **reason**, **device** and **edge_node** under it when the line has them. A traceback stays under its message, as one entry.

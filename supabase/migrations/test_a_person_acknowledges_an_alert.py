@@ -56,11 +56,11 @@ REASONS = ["investigating", "known_cause", "planned_work", "sensor_or_model_faul
 ACK_COLUMNS = [
     "acknowledged_at", "acknowledged_by", "acknowledged_by_email", "acknowledgement_reason", "acknowledgement_note",
 ]
-# The view's columns: 1.7.0's, 0220's, then 0231's.
+# The view's columns: 1.7.0's, 0220's, 0231's, then 0240's.
 ACTIVE_VIEW_COLUMNS = [
     "id", "fingerprint", "entity_type", "entity_id", "sparkplug_id", "alert_name", "severity",
     "status", "summary", "starts_at", "ends_at", "recorded_at", "rule_uid", "labels", "values",
-] + ACK_COLUMNS
+] + ACK_COLUMNS + ["suppressed", "suppressing_window_id", "suppression_reason", "suppressed_until"]
 
 # What the webhook upserts, as PostgREST's merge-duplicates writes it: every column it sends is
 # updated on a conflict with the occurrence key, and the acknowledgement is not among them.

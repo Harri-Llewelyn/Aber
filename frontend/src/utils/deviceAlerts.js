@@ -1,5 +1,6 @@
 import { deviceIds } from './sparkplugId';
 import { isAcknowledged } from './alertAcknowledgement';
+import { isSuppressed } from './alertSuppression';
 
 /**
  * Matching a firing alert to the device it is about, shared by the Site Map, Cells, Gateways and
@@ -15,26 +16,32 @@ const SEVERITY_RANK = { critical: 3, warning: 2, info: 1 };
 
 /**
  * An unacknowledged alert outranks any acknowledged one, whatever their severities: a device with
- * one of each shows Alert firing, because something on it is still nobody's.
+ * one of each shows Alert firing, because something on it is still nobody's. A suppressed one ranks
+ * below both, where an index holds it at all.
  */
-const rank = (alert) => (isAcknowledged(alert) ? 0 : 10) + (SEVERITY_RANK[alert?.severity] || 0);
+const rank = (alert) =>
+  (isSuppressed(alert) ? 0 : isAcknowledged(alert) ? 10 : 20) + (SEVERITY_RANK[alert?.severity] || 0);
 
 /**
  * Index the active alerts by every identifier that can reach a device, the unacknowledged and then
- * the worst severity winning.
+ * the worst severity winning. A suppressed alert colours nothing, so it is left out, except for a
+ * drawer's banner, which says it is suppressed (`suppressed: true`).
  *
  * @param {Array} activeAlerts rows from `platform_alerts_active`; see hooks/usePlatformAlerts.
  *
  * @param {string} entityType which kind of subject to index. Defaults to 'device'.
  *
+ * @param {object} options `{ suppressed }`: whether suppressed alerts are indexed too, below the rest.
+ *
  * @returns {Map<string, object>} identifier -> the alert that decides its state
  */
-export function alertIndex(activeAlerts = [], entityType = 'device') {
+export function alertIndex(activeAlerts = [], entityType = 'device', { suppressed = false } = {}) {
   const worst = new Map();
   for (const alert of activeAlerts) {
     // A row without `entity_type` is a device alert: the webhook wrote nothing else before the
     // column existed.
     if ((alert?.entity_type ?? 'device') !== entityType) continue;
+    if (!suppressed && isSuppressed(alert)) continue;
     for (const key of [alert?.sparkplug_id, alert?.entity_id]) {
       if (!key) continue;
       const held = worst.get(key);
@@ -64,9 +71,11 @@ export function alertForDevice(index, device) {
 
 /**
  * The state an alert gives what it colours: 'alert' (Alert firing) while nobody has acknowledged
- * it, 'acknowledged' (Alert acknowledged) once somebody has, and null for no alert.
+ * it, 'acknowledged' (Alert acknowledged) once somebody has, and null for no alert. A suppressed
+ * alert is 'suppressed', which colours nothing: only a drawer's banner is handed one.
  */
 export function alertState(alert) {
   if (!alert) return null;
+  if (isSuppressed(alert)) return 'suppressed';
   return isAcknowledged(alert) ? 'acknowledged' : 'alert';
 }
