@@ -645,6 +645,21 @@ export function coverageBlock(startMs, endMs, widthPx, devices = 1, { blocks = C
 /** The devices one coverage read carries: the function's bound. */
 export const COVERAGE_PER_READ = COVERAGE_MAX_DEVICES
 
+/** A PostgreSQL interval as the read returns it ("01:00:00", "1 day 02:00:00") in minutes, or null. */
+export function intervalMinutes(text) {
+  const m = /^(?:(\d+) days? ?)?(\d+):(\d{2}):(\d{2})$/.exec(String(text ?? '').trim())
+  return m ? Number(m[1] || 0) * 1440 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 60 : null
+}
+
+/**
+ * The block width a read came back in, in minutes: `asked` unless the rows say another. A window
+ * older than the 5-minute device rollup reaches is read in hours (telemetry_coverage(), 0245).
+ */
+export function readWidth(rows, asked) {
+  const width = intervalMinutes(rows[0]?.block_width)
+  return width && width > 0 ? width : asked
+}
+
 /** A coverage bound as milliseconds: an instant, or -Infinity and Infinity for PostgreSQL's infinities. */
 export function coverageTime(value) {
   if (value === '-infinity') return -Infinity

@@ -20,11 +20,11 @@ import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceDotStyle, deviceLifecycleStatus, deviceStatusTitle } from '../../utils/deviceStatus'
 import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
 import {
-  CHART_SEVERAL_REASON, COVERAGE_KEY, uncountedStretches, uncountedWords, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON,
-  HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, axisTicks, blockWords, boxWords, bucketStarts, coverageBlock,
-  COVERAGE_PER_READ, TOO_LONG_FOR_MANY, coverageCounts, coverageRuns, coverageSteps, coverageSummary, deviceMatches, deviceMetrics,
-  groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress, readOverviewGroups,
-  readingsStopWords, telemetryKey, writeOverviewGroups,
+  CHART_SEVERAL_REASON, COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
+  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockWords,
+  boxWords, bucketStarts, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary, deviceMatches,
+  deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
+  readOverviewGroups, readWidth, readingsStopWords, telemetryKey, uncountedStretches, uncountedWords, writeOverviewGroups,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -274,7 +274,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     }
     const { minutes } = chosen
     const starts = bucketStarts(from, to, minutes)
-    const span = { start: from, end: to, minutes, starts, at, devices: chosen.keys.length }
+    const span = { start: from, end: to, minutes, asked: minutes, starts, at, devices: chosen.keys.length }
     if (chosen.keys.length === 0) {
       setReading({ ...span, counts: new Map(), counted: { from: -Infinity, to: Infinity, complete: true }, reads: 0 })
       return
@@ -286,7 +286,10 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         from: start.toISOString(), to: end.toISOString(), blockMinutes: minutes, assetIds: part,
       }, { signal })))
       if (id !== latestRead.current) return
-      setReading({ ...span, ...coverageCounts(rows.flat(), chosen.keys, starts.length), reads: parts.length })
+      // A window older than the 5-minute rollup reaches comes back in hours (block_width).
+      const shown = readWidth(rows.flat(), minutes)
+      const laid = shown === minutes ? starts : bucketStarts(from, to, shown)
+      setReading({ ...span, minutes: shown, starts: laid, ...coverageCounts(rows.flat(), chosen.keys, laid.length), reads: parts.length })
     } catch (e) {
       if (e?.name !== 'AbortError' && !signal?.aborted && id === latestRead.current) {
         setReading({ ...span, error: e?.message || 'Where readings arrived could not be read.' })
@@ -319,7 +322,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   }, [])
   useEffect(() => {
     if (settledPx === null || !reading?.counts) return
-    if (coverageBlock(reading.start, reading.end, settledPx, reading.devices) !== reading.minutes) read().catch(() => {})
+    if (coverageBlock(reading.start, reading.end, settledPx, reading.devices) !== reading.asked) read().catch(() => {})
     // On a settled width only: a new read settles `reading` and must not re-pick by itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledPx])

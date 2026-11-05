@@ -18,7 +18,7 @@ import {
   AREA_WIDE_GROUP, CHART_SEVERAL_REASON, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
   TOO_LONG_FOR_MANY, UNFILED_GROUP, boxWords, coverageBlock, coverageCounts, coverageRuns, coverageSteps, groupIsOpen,
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
-  uncountedWords, writeOverviewGroups,
+  intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
 } from '../utils/history'
 
 const MACHINE_TZ = process.env.TZ
@@ -68,13 +68,17 @@ const AREAS = [{ area_id: 'a1', area_name: 'Hall B', name: 'Hall B' }, { area_id
 
 let fleet = DEVICES
 let counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
+/** Where the 5-minute rollup reaches back to: a window older than this comes back in hours, as 0245 reads it. */
+let fiveMinuteReach = -Infinity
 /** A row per device: 6 readings in every block but the last third, where Press has none. */
-const coverage = ({ from, to, blockMinutes, assetIds }) => {
+const coverage = ({ from, to, blockMinutes: asked, assetIds }) => {
+  const blockMinutes = asked < 60 && Date.parse(from) < fiveMinuteReach ? 60 : asked
   const width = blockMinutes * 60000
   const first = Math.floor(Date.parse(from) / width) * width
   const blocks = Math.ceil((Date.parse(to) - first) / width)
   return Promise.resolve(assetIds.map(id => ({
-    asset_id: id, first_block: new Date(first).toISOString(), block_width: `00:${String(blockMinutes).padStart(2, '0')}:00`,
+    asset_id: id, first_block: new Date(first).toISOString(),
+    block_width: `${String(Math.floor(blockMinutes / 60)).padStart(2, '0')}:${String(blockMinutes % 60).padStart(2, '0')}:00`,
     counts: Array.from({ length: blocks }, (_, i) => (id === telemetryKey(PRESS) && i > blocks * 0.6 ? 0 : 6)),
     ...counted,
   })))
@@ -92,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   polls.length = 0
   fleet = DEVICES
+  fiveMinuteReach = -Infinity
   counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
   window.localStorage.clear()
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -216,6 +221,15 @@ describe('the blocks a selection takes', () => {
     expect(c).toEqual({ from: Date.parse('2026-11-01T00:00:00Z'), to: Date.parse('2026-11-02T15:00:00Z'), complete: false })
     const infinite = coverageCounts([{ asset_id: 'a', counts: [1], computed_from: '-infinity', computed_to: 'infinity', complete: true }], ['a'], 1)
     expect(infinite.counted).toEqual({ from: -Infinity, to: Infinity, complete: true })
+  })
+  it('reads the width a read comes back in', () => {
+    expect(intervalMinutes('00:05:00')).toBe(5)
+    expect(intervalMinutes('01:00:00')).toBe(60)
+    expect(intervalMinutes('24:00:00')).toBe(1440)
+    expect(intervalMinutes('1 day 02:00:00')).toBe(1560)
+    expect(intervalMinutes('soon')).toBeNull()
+    expect(readWidth([{ block_width: '01:00:00' }], 5)).toBe(60)
+    expect(readWidth([], 5)).toBe(5)
   })
   it('names the stretch not counted yet, apart from the future', () => {
     const span = { start: day, end: day + 24 * h, now: day + 15 * h }
@@ -353,6 +367,17 @@ describe("History's Overview", () => {
     expect(document.querySelector('.history-meta')).toHaveTextContent('Coverage before 2 Nov is still being computed')
     expect(document.querySelectorAll('.overview-layer .overview-uncounted')).toHaveLength(2)
     expect(screen.getByText(COVERAGE_KEY.uncounted)).toBeInTheDocument()
+  })
+
+  it('shows an old day in hours, as the read returns it', async () => {
+    fleet = Array.from({ length: 60 }, (_, i) => place(100 + i, `Press ${String(i).padStart(2, '0')}`, inCell('c1')))
+    fiveMinuteReach = new Date(2026, 4, 6).getTime()
+    await visit('/history/overview?span=day&at=2026-04-16')
+    expect(api.readCoverage.mock.calls[0][0].blockMinutes).toBe(5)
+    expect(document.querySelector('.history-meta').textContent).toMatch(/^60 devices, in 1-hour blocks/)
+    // One run of one shade a lane, across the day's 24 hourly blocks.
+    expect(lanes()).toHaveLength(60)
+    expect(lanes()[0].querySelectorAll('.overview-run')).toHaveLength(1)
   })
 
   it('reads a long window only for a small selection, and says why otherwise', async () => {
