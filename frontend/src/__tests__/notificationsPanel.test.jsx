@@ -122,7 +122,7 @@ describe('for an Administrator', () => {
 
   it('shows the signing key once, then never again', async () => {
     api.notificationWebhook.mockResolvedValueOnce({ ...SET_UP, signingKeyIssuedAt: null })
-    api.issueNotificationSigningKey.mockResolvedValue('whsec_dGhlLWtleS1zaG93bi1vbmNl')
+    api.issueNotificationSigningKey.mockResolvedValue('whsec_fixture-not-a-real-key')
     await show()
     fireEvent.click(within(toolbar()).getByRole('button', { name: /Issue signing key/ }))
     const dialog = screen.getByRole('dialog')
@@ -130,7 +130,7 @@ describe('for an Administrator', () => {
     expect(within(dialog).queryByDisplayValue(/whsec_/)).toBeNull()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: /Issue Key/ })) })
 
-    expect(within(screen.getByRole('dialog')).getByDisplayValue('whsec_dGhlLWtleS1zaG93bi1vbmNl')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByDisplayValue('whsec_fixture-not-a-real-key')).toBeInTheDocument()
     expect(screen.getByText('Copy this now — it is not shown again.')).toBeInTheDocument()
     expect(showToast).toHaveBeenCalledWith('Signing key issued', 'success', { to: '/settings/notifications' })
 
