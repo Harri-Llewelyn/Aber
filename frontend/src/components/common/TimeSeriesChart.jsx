@@ -36,6 +36,9 @@ import {
 
 const DAY_S = 24 * 60 * 60
 
+/** No plugins: hoisted, so a chart without any is not drawn again on each render. */
+const NO_PLUGINS = Object.freeze([])
+
 /**
  * The theme's chart colours, read again whenever `<html data-theme>` changes, so a chart follows a
  * theme switch without a reload.
@@ -93,14 +96,18 @@ const drawValidRange = (validRange, palette) => (u) => {
 export const PLOT_LEFT_PX = 56
 export const PLOT_RIGHT_PX = 28
 
-/** uPlot's options for one chart. Its own drag selection is off: the page's window is the only zoom. */
-function plotOptions({ width, height, series, start, end, validRange, palette, syncKey, onHover }) {
+/**
+ * uPlot's options for one chart. Its own drag selection is off: the page's window is the only zoom.
+ * `plugins` are the page's own uPlot plugins, such as the alert bands (alertBands.js).
+ */
+function plotOptions({ width, height, series, start, end, validRange, palette, syncKey, onHover, plugins }) {
   const flag = series.kind === 'flag'
   const axis = { stroke: palette.text, font: palette.font, grid: { stroke: palette.grid, width: 1 }, ticks: { stroke: palette.grid, width: 1 } }
   const line = { stroke: palette.line, width: 1.5, spanGaps: false, ...(flag ? { paths: uPlot.paths.stepped({ align: 1 }) } : {}) }
   return {
     width,
     height,
+    plugins,
     legend: { show: false },
     // Top, right, bottom, left; null is uPlot's own. The right is fixed so a strip can match it.
     padding: [null, PLOT_RIGHT_PX, null, null],
@@ -231,7 +238,10 @@ function StateKey({ stateKey: key, carried }) {
  * a colour a value with its name kept, carried stretches hatched, and a key of each value's share
  * of the time under it. The head reads the bucket under the pointer, or the run under it on a
  * state strip, and otherwise the latest reading (latestWords()). `band` is a drag's band, which the
- * page shades on every chart; uPlot's own drag selection stays off.
+ * page shades on every chart; uPlot's own drag selection stays off. `plugins` are uPlot plugins
+ * the page adds to a number or flag chart, such as the periods an alert was firing; a state strip
+ * is not drawn by uPlot and takes none. Pass the same array while they are the same: a new one
+ * draws the chart again.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -242,6 +252,7 @@ function StateKey({ stateKey: key, carried }) {
  */
 export function TimeSeriesChart({
   metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
+  plugins = NO_PLUGINS,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -265,7 +276,7 @@ export function TimeSeriesChart({
     let plot
     try {
       plot = new uPlot(
-        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, palette, syncKey, onHover: setHover }),
+        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, palette, syncKey, onHover: setHover, plugins }),
         [starts, series.max, series.min, read, held],
         box,
       )
@@ -284,7 +295,7 @@ export function TimeSeriesChart({
       plot.destroy()
       setOver(null)
     }
-  }, [drawn, starts, series, start, end, height, validRange, palette, syncKey])
+  }, [drawn, starts, series, start, end, height, validRange, palette, syncKey, plugins])
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)

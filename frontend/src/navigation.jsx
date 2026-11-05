@@ -129,6 +129,7 @@ export const SETTINGS_TABS = [
 /** History's views. Device is the only one, so it is the bare page: /history picks a device. */
 export const HISTORY_TABS = [
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 
 /** The ids are the page's anchors: the search bar opens one by id. */

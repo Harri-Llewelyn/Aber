@@ -22,6 +22,9 @@ import { IconChartLine, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useBandDrag } from '../../hooks/useBandDrag'
+import { useAlertBands } from '../../hooks/useAlertBands'
+import { alertsAddress } from '../../utils/alertHistory'
+import { deviceIds } from '../../utils/sparkplugId'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
@@ -152,6 +155,22 @@ function metaWords({ names, total, groups, refused, reads }) {
   const why = refused ? `: ${refused.words} are too many for this window` : ''
   const parts = reads > groups.length ? `, read in ${reads} parts` : ''
   return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}`
+}
+
+/**
+ * The key to the alert shading, beside the status line: its swatch named in words, and how many
+ * alerts fired in the window, a link to them on the Alerts tab.
+ */
+function AlertKey({ count, to }) {
+  return (
+    <p className="history-alert-key">
+      <span className="history-alert-swatch" aria-hidden="true" />
+      Shaded while an alert was firing:{' '}
+      <RouteLink to={to} className="count-link" title="List them on the Alerts tab">
+        {count} {count === 1 ? 'alert' : 'alerts'} in this window
+      </RouteLink>
+    </p>
+  )
 }
 
 /** How long a change of width settles before the text charts' buckets are picked again. */
@@ -347,6 +366,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   const busy = Boolean(reading?.loading) || reading === null
 
+  // The periods an alert on this device was firing, over the window the charts drew.
+  const alertSpan = reading?.byMetric ? { start: reading.start, end: reading.end, at: reading.at } : null
+  const alerts = useAlertBands(deviceIds(device).issued, alertSpan)
+
   // A drag across a chart: its fractions are of the window the charts draw, the read's.
   const drawnSpan = reading?.byMetric ? { start: reading.start, ms: reading.end - reading.start } : null
   const atFraction = (f) => drawnSpan.start + drawnSpan.ms * f
@@ -431,6 +454,9 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
               {metaWords({ names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads })}
               {reading.loading && ' · reading again…'}
             </p>
+            {alerts.bands.length > 0 && (
+              <AlertKey count={new Set(alerts.bands.map(b => b.id)).size} to={alertsAddress(win, { assets: [deviceIds(device).issued] })} />
+            )}
           </div>
           {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
           <div className="history-groups" onPointerDown={startBand}>
@@ -466,6 +492,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                         summary={c.summary}
                         syncKey={`history-${device.asset_id}`}
                         band={shownBand}
+                        plugins={alerts.plugins}
                       />
                     ))}
                   </div>

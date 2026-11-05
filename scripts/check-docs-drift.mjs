@@ -4941,18 +4941,17 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 104. The alert counter's history link has a history to show.
+// 104. Grafana's Alerting > History has a history to show.
 //
-// The dashboard records no Grafana alert (frontend/README.md, Toasts and the notification history),
-// so the record of what fired and cleared is Grafana's Alerting > History, which the alert
-// counter's footer links to. That page answers only from Loki: on Grafana's default annotations
-// backend it shows an error. So grafana.ini sends state history to Loki, the chart gives Grafana
-// the Loki URL the logs datasource uses, and grafana/README.md says why.
+// The dashboard's record of what fired is History's Alerts tab, which the alert counter's footer
+// links to. Grafana keeps its own for its own pages, and Alerting > History answers only from Loki:
+// on Grafana's default annotations backend it shows an error. So grafana.ini sends state history
+// to Loki, the chart gives Grafana the Loki URL the logs datasource uses, and grafana/README.md
+// says why.
 // -------------------------------------------------------------------------------------------------
 {
   const INI = 'grafana/grafana.ini';
   const TEMPLATE = 'deploy/helm/aber/templates/obs/grafana.yaml';
-  const CONSTANTS = 'frontend/src/constants.js';
   const README = 'grafana/README.md';
   const ENV = 'GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL';
 
@@ -4970,16 +4969,15 @@ const OPERATOR_PAIRS = [
   const env = read(TEMPLATE).split('\n').findIndex(l => l.trim() === `- name: ${ENV}`);
   const value = env < 0 ? '' : read(TEMPLATE).split('\n')[env + 1].trim();
   if (value !== 'value: {{ include "aber.lokiUrl" . | quote }}') problems104.push(`${TEMPLATE}: ${ENV} is not set from aber.lokiUrl, the logs datasource's URL`);
-  if (!read(CONSTANTS).includes('export const GRAFANA_ALERT_HISTORY_URL = `${GRAFANA_URL}/alerting/history')) problems104.push(`${CONSTANTS}: GRAFANA_ALERT_HISTORY_URL no longer opens /alerting/history`);
   if (!read(README).includes('\n## Alert state history\n')) problems104.push(`${README}: no "Alert state history" section`);
 
   if (problems104.length) {
     fail(
-      'alert state history: the alert counter links to Grafana\'s Alerting > History, which needs:\n' +
+      'alert state history: Grafana\'s Alerting > History needs:\n' +
         problems104.map(p => `      - ${p}`).join('\n')
     );
   } else {
-    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so the alert counter\'s history link has a page to open');
+    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so its Alerting > History has a page to show');
   }
 }
 
@@ -5018,7 +5016,7 @@ const OPERATOR_PAIRS = [
     if (named(bullet)) problems214.push(`${HELP}: the **${words[key]}** bullet names what raised the alert`);
   }
   const pill = read(PILL);
-  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('Alert history in Grafana'));
+  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('className="alert-pill-history"'));
   if (!foot || /Evaluated by|silences/i.test(foot.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))) {
     problems214.push(`${PILL}: the counter's footer names an evaluator or says where silences live`);
   }
