@@ -12,7 +12,9 @@ wider one, a whole number of 5 minutes, for 40 devices or fewer, is summed from 
 that divides it. More than 40 devices take the rollups' own widths only, and nothing is finer than
 5 minutes.
 Each row carries what the rollup has counted (computed_from to computed_to), so a block not counted
-yet is told from one with no reading. Bounds are refused before any read. Whoever reads the
+yet is told from one with no reading. An hourly block comes from the hourly rollup up to its
+watermark and from the 5-minute one after it, each bucket once, and a window older than the
+5-minute rollup reaches is read in hours. Bounds are refused before any read. Whoever reads the
 telemetry views may call it, and anon may not.
 
 The db lane has no historian, so local tables stand in for the foreign device rollups and the
@@ -191,14 +193,80 @@ class Summed(CoverageBase):
 
 
 class NotCountedYet(CoverageBase):
-    def test_each_row_says_what_its_rollup_has_counted(self):
-        self.cur.execute("UPDATE timescale.telemetry_device_coverage SET computed_from = %s, computed_to = %s, complete = %s"
-                         " WHERE relation = 'telemetry_device_1h';", (T0 + timedelta(hours=1), T0 + timedelta(hours=2), True))
+    def cover(self, relation, start, end, complete=False):
+        self.cur.execute("UPDATE timescale.telemetry_device_coverage SET computed_from = %s, computed_to = %s,"
+                         " complete = %s WHERE relation = %s;", (start, end, complete, relation))
+
+    def test_each_row_says_what_the_read_covers(self):
+        self.cover("telemetry_device_1h", T0 + timedelta(hours=1), T0 + timedelta(hours=2), complete=True)
         five = self.read(T0, T0 + minutes(10))[DEVICE]
         self.assertEqual((five["computed_from"], five["computed_to"], five["complete"]), (COUNTED_FROM, COUNTED_TO, False))
+        # The hourly rollup from its reach, then the 5-minute one to its watermark.
         hour = self.read(T0, T0 + timedelta(hours=3), block="1 hour")[DEVICE]
         self.assertEqual((hour["computed_from"], hour["computed_to"], hour["complete"]),
-                         (T0 + timedelta(hours=1), T0 + timedelta(hours=2), True))
+                         (T0 + timedelta(hours=1), COUNTED_TO, True))
+
+    def test_an_old_window_is_read_in_hours(self):
+        # The 5-minute rollup reaches back to T0 only: a day before it is read hourly.
+        self.cover("telemetry_device_5m", T0, COUNTED_TO)
+        self.count("telemetry_device_1h", T0 - timedelta(hours=24), 60)
+        self.count("telemetry_device_1h", T0 - timedelta(hours=22), 62)
+        self.count("telemetry_device_5m", T0 - timedelta(hours=24), 999)
+        row = self.read(T0 - timedelta(hours=24), T0 - timedelta(hours=21))[DEVICE]
+        self.assertEqual((row["block_width"], row["first_block"]), (timedelta(hours=1), T0 - timedelta(hours=24)))
+        self.assertEqual(row["counts"], [60, 0, 62])
+        self.assertEqual(row["computed_from"], COUNTED_FROM)
+
+
+class TheStitch(CoverageBase):
+    """The hourly rollup up to its watermark, the 5-minute one after it: each bucket read once."""
+
+    def test_the_blocks_after_the_hourly_watermark_come_from_the_5_minute_rollup(self):
+        self.cover_hourly_to(T0 + timedelta(hours=2))
+        self.count("telemetry_device_1h", T0, 60)
+        self.count("telemetry_device_1h", T0 + timedelta(hours=1), 61)
+        # At the watermark and after it: not the hourly rollup's to give.
+        self.count("telemetry_device_1h", T0 + timedelta(hours=2), 999)
+        # Before the watermark: not the 5-minute rollup's.
+        self.count("telemetry_device_5m", T0 + minutes(5), 1000)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=2), 5)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=2, minutes=55), 6)
+        row = self.read(T0, T0 + timedelta(hours=4), block="1 hour")[DEVICE]
+        self.assertEqual(row["counts"], [60, 61, 11, 0])
+        self.assertEqual((row["computed_from"], row["computed_to"]), (COUNTED_FROM, COUNTED_TO))
+
+    def test_a_block_the_watermark_falls_inside_takes_each_part_once(self):
+        self.cover_hourly_to(T0 + timedelta(hours=1))
+        self.count("telemetry_device_1h", T0, 60)
+        self.count("telemetry_device_1h", T0 + timedelta(hours=1), 999)
+        self.count("telemetry_device_5m", T0 + minutes(5), 1000)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=1), 5)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=1, minutes=30), 7)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=3), 4)
+        row = self.read(T0, T0 + timedelta(hours=4), block="2 hours")[DEVICE]
+        self.assertEqual(row["counts"], [72, 4])
+
+    def test_every_device_has_the_stitched_blocks(self):
+        self.cover_hourly_to(T0 + timedelta(hours=1))
+        self.count("telemetry_device_1h", T0, 3, asset=OTHER)
+        self.count("telemetry_device_5m", T0 + timedelta(hours=1), 4)
+        rows = self.read(T0, T0 + timedelta(hours=2), block="1 hour", assets=(DEVICE, OTHER, QUIET))
+        self.assertEqual({k: r["counts"] for k, r in rows.items()}, {DEVICE: [0, 4], OTHER: [3, 0], QUIET: [0, 0]})
+
+    def test_an_hourly_rollup_far_behind_is_filled_for_six_hours_at_most(self):
+        # Behind by more than the stretch the 5-minute rollup fills: the gap is not counted yet.
+        self.cover_hourly_to(T0 - timedelta(days=1))
+        for h in range(12):
+            self.count("telemetry_device_5m", T0 + timedelta(hours=h), 10 + h)
+        row = self.read(T0, T0 + timedelta(hours=12), block="1 hour")[DEVICE]
+        self.assertEqual(row["counts"], [0] * 6 + [16, 17, 18, 19, 20, 21])
+        self.assertEqual((row["computed_from"], row["computed_to"]), (T0 + timedelta(hours=6), COUNTED_TO))
+        self.assertFalse(row["complete"])
+
+    def cover_hourly_to(self, watermark):
+        self.cur.execute("UPDATE timescale.telemetry_device_coverage SET computed_to = %s"
+                         " WHERE relation = 'telemetry_device_1h';", (watermark,))
+
 
 class Refusals(CoverageBase):
     def test_bad_bounds_are_refused_before_any_read(self):

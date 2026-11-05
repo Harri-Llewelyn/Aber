@@ -22,9 +22,9 @@
 -- -------------------------------------------------------------------------------------------------
 -- 1. The read
 -- -------------------------------------------------------------------------------------------------
--- The bounds and the list reach the historian as parameters, so postgres_fdw ships the WHERE and
--- the aggregate: array_agg() for a read at a rollup's own width, date_bin() and sum() for a summed
--- one. A device or block with no row still has its 0.
+-- The bounds and the list reach the historian as parameters, so postgres_fdw ships each WHERE and
+-- its aggregate: array_agg() for a read at a rollup's own width, date_bin() and sum() for a summed
+-- one. Each part is its own remote query, joined here. A device or block with no row has its 0.
 CREATE OR REPLACE FUNCTION public.telemetry_coverage(
     from_ts timestamp with time zone,
     to_ts timestamp with time zone,
@@ -49,18 +49,27 @@ DECLARE
     -- larger one reads the rollups' own.
     c_small        CONSTANT integer := 40;
     -- Device-buckets one read may take from the historian: 1,000 devices over 26 hours of
-    -- 5-minute buckets, or 40 over a year of hourly ones.
+    -- 5-minute buckets, or 40 over a year of hourly ones, with the stretch below.
     c_max_buckets  CONSTANT bigint := 360000;
-    v_ids      text[];
-    v_secs     numeric;
-    v_src_secs integer;
-    v_source   text;
-    v_step     interval;
-    v_from     timestamp with time zone;
-    v_blocks   integer;
-    v_cfrom    timestamp with time zone;
-    v_cto      timestamp with time zone;
-    v_done     boolean;
+    -- The most of the hourly rollup's refresh lag the 5-minute one fills. Past it, not counted yet.
+    c_stitch       CONSTANT interval := INTERVAL '6 hours';
+    v_ids    text[];
+    v_secs   numeric;
+    v_step   interval;
+    v_from   timestamp with time zone;
+    v_blocks integer;
+    v_r5     timestamp with time zone;
+    v_w5     timestamp with time zone;
+    v_c5     boolean;
+    v_r1     timestamp with time zone;
+    v_w1     timestamp with time zone;
+    v_c1     boolean;
+    v_one_to timestamp with time zone;
+    v_tail   timestamp with time zone;
+    v_k      integer;
+    v_cfrom  timestamp with time zone;
+    v_cto    timestamp with time zone;
+    v_done   boolean;
 BEGIN
     IF from_ts IS NULL OR to_ts IS NULL OR to_ts <= from_ts THEN
         RAISE EXCEPTION 'telemetry_coverage: to_ts (%) must be after from_ts (%)', to_ts, from_ts
@@ -81,68 +90,181 @@ BEGIN
         RAISE EXCEPTION 'telemetry_coverage: % devices is more than % a read; read them in parts',
               cardinality(v_ids), c_max_devices USING ERRCODE = '22023';
     END IF;
-
-    -- On the epoch grid, as the rollups' buckets are, so each source bucket falls in one block.
-    -- In seconds, so a day is 24 hours in any session time zone, as date_bin() counts it.
-    IF v_secs % 3600 = 0 THEN
-        v_source := 'telemetry_device_1h'; v_src_secs := 3600;
-    ELSE
-        v_source := 'telemetry_device_5m'; v_src_secs := 300;
-    END IF;
     IF cardinality(v_ids) > c_small AND v_secs NOT IN (300, 3600) THEN
         RAISE EXCEPTION 'telemetry_coverage: % devices read 5-minute or 1-hour blocks only, not %; more than % are never summed on the historian',
               cardinality(v_ids), block, c_small USING ERRCODE = '22023';
     END IF;
-    v_step := make_interval(secs => v_secs);
-    v_from := date_bin(v_step, from_ts, timestamptz 'epoch');
-    v_blocks := ceil(extract(epoch FROM to_ts - v_from) / v_secs)::integer;
-    IF cardinality(v_ids)::bigint * ceil(extract(epoch FROM to_ts - v_from) / v_src_secs)::bigint > c_max_buckets THEN
+
+    -- The buckets the read takes from the historian, at the block asked for: reading a window hourly
+    -- instead, below, takes fewer. A plpgsql IF ends its condition at the first THEN, so the count
+    -- is taken first.
+    v_k := CASE WHEN v_secs % 3600 = 0
+                THEN ceil(extract(epoch FROM to_ts - date_bin(INTERVAL '1 hour', from_ts, timestamptz 'epoch')) / 3600) + extract(epoch FROM c_stitch) / 300
+                ELSE ceil(extract(epoch FROM to_ts - date_bin(INTERVAL '5 minutes', from_ts, timestamptz 'epoch')) / 300) END;
+    IF cardinality(v_ids)::bigint * v_k > c_max_buckets THEN
         RAISE EXCEPTION 'telemetry_coverage: % devices over this window is more than % buckets to read; choose a shorter window or fewer devices',
               cardinality(v_ids), c_max_buckets USING ERRCODE = '22023';
     END IF;
 
-    -- What the device rollup has counted, from the historian's catalogue.
-    SELECT c.computed_from, c.computed_to, c.complete INTO v_cfrom, v_cto, v_done
-      FROM timescale.telemetry_device_coverage c WHERE c.relation = v_source;
+    -- What each rollup holds: its reach and its watermark (timescaledb/aggregates.sql). A rollup
+    -- the historian does not report holds nothing.
+    SELECT c.computed_from, c.computed_to, c.complete INTO v_r5, v_w5, v_c5
+      FROM timescale.telemetry_device_coverage c WHERE c.relation = 'telemetry_device_5m';
+    SELECT c.computed_from, c.computed_to, c.complete INTO v_r1, v_w1, v_c1
+      FROM timescale.telemetry_device_coverage c WHERE c.relation = 'telemetry_device_1h';
+    v_r5 := coalesce(v_r5, 'infinity'); v_w5 := coalesce(v_w5, '-infinity');
+    v_r1 := coalesce(v_r1, 'infinity'); v_w1 := coalesce(v_w1, '-infinity');
 
-    -- A block the rollup's own width is one of its rows: the historian sends each device's buckets
-    -- and counts as two arrays, so a row a device crosses, and a device with every block filled
-    -- takes its counts as they came. A wider block, for a small selection, is summed on the
-    -- historian and laid on a grid of every device and block here.
-    IF v_secs = v_src_secs THEN
-        RETURN QUERY EXECUTE format($q$
-          WITH obs AS MATERIALIZED (
-            SELECT o.asset_id AS aid, array_agg(o.bucket ORDER BY o.bucket) AS bs, array_agg(o.n_rows ORDER BY o.bucket) AS ns
-              FROM timescale.%I o
-             WHERE o.bucket >= $4 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
-             GROUP BY 1
-          )
-          SELECT d.aid, $4, $3,
-                 CASE WHEN obs.aid IS NULL THEN array_fill(0, ARRAY[$10])
-                      WHEN cardinality(obs.bs) = $10 THEN obs.ns::integer[]
-                      ELSE ARRAY(SELECT coalesce(x.n, 0)::integer
-                                   FROM generate_series(0, $10 - 1) AS g(i)
-                                   LEFT JOIN unnest(obs.bs, obs.ns) AS x(b, n) ON x.b = $4 + g.i * $3
-                                  ORDER BY g.i)
-                 END,
-                 $7, $8, $9
-            FROM unnest($5::text[]) AS d(aid)
-            LEFT JOIN obs ON obs.aid = d.aid
-           ORDER BY d.aid
-        $q$, v_source)
-        USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_cfrom, v_cto, v_done, v_blocks;
+    -- A block under an hour over a window older than the 5-minute rollup reaches is read hourly,
+    -- as block_width says.
+    IF v_secs % 3600 <> 0 AND from_ts < v_r5 THEN
+        v_secs := 3600;
+    END IF;
+
+    -- On the epoch grid, as the rollups' buckets are, so each source bucket falls in one block.
+    -- In seconds, so a day is 24 hours in any session time zone, as date_bin() counts it.
+    v_step := make_interval(secs => v_secs);
+    v_from := date_bin(v_step, from_ts, timestamptz 'epoch');
+    v_blocks := ceil(extract(epoch FROM to_ts - v_from) / v_secs)::integer;
+
+    -- Under an hour: the 5-minute rollup alone, which covers the window by the rule above.
+    IF v_secs % 3600 <> 0 THEN
+        IF v_secs = 300 THEN
+            RETURN QUERY EXECUTE $q$
+              WITH obs AS MATERIALIZED (
+                SELECT o.asset_id AS aid, array_agg(o.bucket ORDER BY o.bucket) AS bs, array_agg(o.n_rows ORDER BY o.bucket) AS ns
+                  FROM timescale.telemetry_device_5m o
+                 WHERE o.bucket >= $4 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
+                 GROUP BY 1
+              )
+              SELECT d.aid, $4, $3,
+                     CASE WHEN obs.aid IS NULL THEN array_fill(0, ARRAY[$10])
+                          WHEN cardinality(obs.bs) = $10 THEN obs.ns::integer[]
+                          ELSE ARRAY(SELECT coalesce(x.n, 0)::integer
+                                       FROM generate_series(0, $10 - 1) AS g(i)
+                                       LEFT JOIN unnest(obs.bs, obs.ns) AS x(b, n) ON x.b = $4 + g.i * $3
+                                      ORDER BY g.i)
+                     END,
+                     $7, $8, $9
+                FROM unnest($5::text[]) AS d(aid)
+                LEFT JOIN obs ON obs.aid = d.aid
+               ORDER BY d.aid
+            $q$
+            USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_r5, v_w5, v_c5, v_blocks;
+        ELSE
+            RETURN QUERY EXECUTE $q$
+              WITH obs AS MATERIALIZED (
+                SELECT o.asset_id AS aid, date_bin($3, o.bucket, timestamptz 'epoch') AS b, sum(o.n_rows) AS n
+                  FROM timescale.telemetry_device_5m o
+                 WHERE o.bucket >= $4 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
+                 GROUP BY 1, 2
+              ),
+              cells AS (
+                SELECT obs.aid, (extract(epoch FROM obs.b - $4) / $6)::integer AS i, obs.n FROM obs
+              )
+              SELECT d.aid, $4, $3,
+                     array_agg(least(coalesce(c.n, 0), 2147483647)::integer ORDER BY g.i),
+                     $7, $8, $9
+                FROM unnest($5::text[]) AS d(aid)
+               CROSS JOIN generate_series(0, $10 - 1) AS g(i)
+                LEFT JOIN cells c ON c.aid = d.aid AND c.i = g.i
+               GROUP BY d.aid
+               ORDER BY d.aid
+            $q$
+            USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_r5, v_w5, v_c5, v_blocks;
+        END IF;
         RETURN;
     END IF;
 
-    RETURN QUERY EXECUTE format($q$
-      WITH obs AS MATERIALIZED (
+    -- An hour and longer: the hourly rollup up to its watermark, then the 5-minute one from there,
+    -- summed to the block on the historian, for at most c_stitch and never before its reach. Each
+    -- bucket is read from one of them, so no reading counts twice.
+    v_one_to := LEAST(to_ts, v_w1);
+    v_tail := GREATEST(v_from, v_w1, to_ts - c_stitch, v_r5);
+    IF isfinite(v_tail) THEN
+        -- On the hour, so the stretch starts on a block of the hourly grid.
+        v_tail := date_bin(INTERVAL '1 hour', v_tail - INTERVAL '1 microsecond', timestamptz 'epoch') + INTERVAL '1 hour';
+    END IF;
+    -- What the read covers: one stretch from the hourly rollup's reach to the 5-minute one's
+    -- watermark, or the part a gap between them leaves after it.
+    IF v_tail < LEAST(to_ts, v_w5) THEN
+        IF v_one_to > GREATEST(v_from, v_r1) AND v_one_to >= LEAST(v_tail, to_ts) THEN
+            v_cfrom := v_r1; v_done := v_c1;
+        ELSE
+            v_cfrom := v_tail; v_done := false;
+        END IF;
+        v_cto := v_w5;
+    ELSIF v_one_to > GREATEST(v_from, v_r1) THEN
+        v_cfrom := v_r1; v_cto := v_w1; v_done := v_c1;
+    ELSE
+        v_cfrom := 'infinity'; v_cto := '-infinity'; v_done := false;
+    END IF;
+
+    IF v_secs = 3600 THEN
+        -- The blocks before the 5-minute stretch come from the hourly rollup as arrays, a row a
+        -- device; the few after it are laid on a small grid.
+        v_k := LEAST(v_blocks, GREATEST(0, floor(extract(epoch FROM LEAST(v_tail, to_ts) - v_from) / 3600)::integer));
+        IF v_tail >= to_ts THEN
+            v_k := v_blocks;
+        END IF;
+        RETURN QUERY EXECUTE $q$
+          WITH hourly AS MATERIALIZED (
+            SELECT o.asset_id AS aid, array_agg(o.bucket ORDER BY o.bucket) AS bs, array_agg(o.n_rows ORDER BY o.bucket) AS ns
+              FROM timescale.telemetry_device_1h o
+             WHERE o.bucket >= $4 AND o.bucket < $11 AND o.asset_id = ANY ($5::text[])
+             GROUP BY 1
+          ),
+          recent AS MATERIALIZED (
+            SELECT o.asset_id AS aid, date_bin($3, o.bucket, timestamptz 'epoch') AS b, sum(o.n_rows) AS n
+              FROM timescale.telemetry_device_5m o
+             WHERE o.bucket >= $12 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
+             GROUP BY 1, 2
+          ),
+          tails AS (
+            SELECT d.aid, array_agg(least(coalesce(r.n, 0), 2147483647)::integer ORDER BY g.i) AS arr
+              FROM unnest($5::text[]) AS d(aid)
+             CROSS JOIN generate_series($13, $10 - 1) AS g(i)
+              LEFT JOIN recent r ON r.aid = d.aid AND r.b = $4 + g.i * $3
+             GROUP BY d.aid
+          )
+          SELECT d.aid, $4, $3,
+                 CASE WHEN $13 = 0 THEN '{}'::integer[]
+                      WHEN h.aid IS NULL THEN array_fill(0, ARRAY[$13])
+                      WHEN cardinality(h.bs) = $13 THEN h.ns::integer[]
+                      ELSE ARRAY(SELECT coalesce(x.n, 0)::integer
+                                   FROM generate_series(0, $13 - 1) AS g(i)
+                                   LEFT JOIN unnest(h.bs, h.ns) AS x(b, n) ON x.b = $4 + g.i * $3
+                                  ORDER BY g.i)
+                 END || coalesce(t.arr, '{}'::integer[]),
+                 $7, $8, $9
+            FROM unnest($5::text[]) AS d(aid)
+            LEFT JOIN hourly h ON h.aid = d.aid
+            LEFT JOIN tails t ON t.aid = d.aid
+           ORDER BY d.aid
+        $q$
+        USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_cfrom, v_cto, v_done, v_blocks, v_one_to, v_tail, v_k;
+        RETURN;
+    END IF;
+
+    -- Wider than an hour, for a small selection: both parts summed into the block, so a block the
+    -- watermark falls inside takes each part once.
+    RETURN QUERY EXECUTE $q$
+      WITH hourly AS MATERIALIZED (
         SELECT o.asset_id AS aid, date_bin($3, o.bucket, timestamptz 'epoch') AS b, sum(o.n_rows) AS n
-          FROM timescale.%I o
-         WHERE o.bucket >= $4 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
+          FROM timescale.telemetry_device_1h o
+         WHERE o.bucket >= $4 AND o.bucket < $11 AND o.asset_id = ANY ($5::text[])
+         GROUP BY 1, 2
+      ),
+      recent AS MATERIALIZED (
+        SELECT o.asset_id AS aid, date_bin($3, o.bucket, timestamptz 'epoch') AS b, sum(o.n_rows) AS n
+          FROM timescale.telemetry_device_5m o
+         WHERE o.bucket >= $12 AND o.bucket < $2 AND o.asset_id = ANY ($5::text[])
          GROUP BY 1, 2
       ),
       cells AS (
-        SELECT obs.aid, (extract(epoch FROM obs.b - $4) / $6)::integer AS i, obs.n FROM obs
+        SELECT u.aid, (extract(epoch FROM u.b - $4) / $6)::integer AS i, sum(u.n) AS n
+          FROM (SELECT * FROM hourly UNION ALL SELECT * FROM recent) u
+         GROUP BY 1, 2
       )
       SELECT d.aid, $4, $3,
              array_agg(least(coalesce(c.n, 0), 2147483647)::integer ORDER BY g.i),
@@ -152,8 +274,8 @@ BEGIN
         LEFT JOIN cells c ON c.aid = d.aid AND c.i = g.i
        GROUP BY d.aid
        ORDER BY d.aid
-    $q$, v_source)
-    USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_cfrom, v_cto, v_done, v_blocks;
+    $q$
+    USING from_ts, to_ts, v_step, v_from, v_ids, v_secs, v_cfrom, v_cto, v_done, v_blocks, v_one_to, v_tail;
 END;
 $fn$;
 

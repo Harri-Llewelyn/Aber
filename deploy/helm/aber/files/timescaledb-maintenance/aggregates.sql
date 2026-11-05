@@ -95,10 +95,28 @@ ALTER MATERIALIZED VIEW telemetry_5m SET (timescaledb.materialized_only = false)
 ALTER MATERIALIZED VIEW telemetry_1h SET (timescaledb.materialized_only = false);
 
 -- How many readings each device sent in each bucket, over every metric: History's Overview reads
--- these, one row a device a bucket, ten times fewer than a series rollup at ten metrics. Built as
--- the series rollups are, 5m from 1m and 1h from 5m. Materialised only: a real-time read would
--- walk the raw tail's index for every device it names. WITH NO DATA: the policies below and
+-- these, one row a device a bucket, ten times fewer than a series rollup at ten metrics. 5m from
+-- 1m, kept as long as 1m's source reaches (180 days by default); 1h from the series 1h rollup, so it
+-- reaches as far back as that does (5 years). Materialised only: a real-time read would walk the
+-- raw tail's index for every device it names. WITH NO DATA: the policies below and
 -- backfill_device_rollups() fill them in the background, never a boot.
+--
+-- A stack that ran an unreleased build of this file built the hourly one from telemetry_device_5m,
+-- and kept one backfill row. Rebuilt here, so the definitions below take; nothing released had it.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM timescaledb_information.continuous_aggregates
+              WHERE view_schema = 'public' AND view_name = 'telemetry_device_1h'
+                AND view_definition LIKE '%telemetry_device_5m%') THEN
+    DROP MATERIALIZED VIEW public.telemetry_device_1h;
+    RAISE NOTICE 'telemetry_device_1h: rebuilt from telemetry_1h, as it is declared now';
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'device_rollup_backfill' AND column_name = 'id') THEN
+    DROP TABLE public.device_rollup_backfill;
+  END IF;
+END $$;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_device_5m
 WITH (timescaledb.continuous) AS
 SELECT time_bucket(INTERVAL '5 minutes', bucket) AS bucket,
@@ -113,7 +131,7 @@ WITH (timescaledb.continuous) AS
 SELECT time_bucket(INTERVAL '1 hour', bucket) AS bucket,
        asset_id,
        sum(n_rows) AS n_rows
-  FROM telemetry_device_5m
+  FROM telemetry_1h
  GROUP BY 1, 2
 WITH NO DATA;
 
@@ -342,66 +360,88 @@ BEGIN
                'recorded in rollup_refresh_requests', v_job, schedule;
 END $$;
 
--- How far back the device rollups are filled: their policies refresh the last 25 hours, and
--- backfill_device_rollups() walks back from there to telemetry_1m's oldest bucket. One row, kept
--- across boots; `reached` NULL until the first chunk, `done` once nothing older is left to count.
+-- How far back each device rollup is filled: their policies refresh the last 25 hours, and
+-- backfill_device_rollups() walks each back from there to its own source's oldest bucket, a chunk at
+-- a time. A row a rollup, kept across boots; `reached` NULL until its first chunk, `done` once
+-- nothing older is left to count, `chunk_ms` its last chunk's time.
 CREATE TABLE IF NOT EXISTS public.device_rollup_backfill (
-    id          boolean PRIMARY KEY DEFAULT true CHECK (id),
+    view_name   text PRIMARY KEY,
+    source      text NOT NULL,
+    chunk       interval NOT NULL,
     reached     timestamptz,
     done        boolean NOT NULL DEFAULT false,
     chunk_ms    integer,
     updated_at  timestamptz
 );
-INSERT INTO public.device_rollup_backfill (id) VALUES (true) ON CONFLICT DO NOTHING;
+-- Six hours of telemetry_1m (3.6 million rows at the storage basis) or a week of telemetry_1h
+-- (1.7 million): each a few seconds, so one run never holds the historian long.
+INSERT INTO public.device_rollup_backfill (view_name, source, chunk) VALUES
+  ('telemetry_device_5m', 'telemetry_1m', INTERVAL '6 hours'),
+  ('telemetry_device_1h', 'telemetry_1h', INTERVAL '7 days')
+ON CONFLICT (view_name) DO UPDATE SET source = EXCLUDED.source, chunk = EXCLUDED.chunk;
 
 COMMENT ON TABLE public.device_rollup_backfill IS
-  'How far back backfill_device_rollups() has filled telemetry_device_5m and telemetry_device_1h, '
-  'and whether it is done. chunk_ms is its last chunk''s time.';
+  'How far back backfill_device_rollups() has filled each device rollup from its source, and '
+  'whether it is done. chunk_ms is its last chunk''s time.';
 
--- Fills the device rollups one chunk older each run, both rollups, 5m first, and commits. Hour
--- aligned, so each chunk holds whole buckets of both. Stops at telemetry_1m's oldest bucket: a
--- refresh over a range its source has dropped would empty it. No SET clause, as
--- refresh_requested_rollups() has none.
+-- The next chunk to fill: the `chunk` before `reached` (`start_at` before the first), hour aligned
+-- and never older than the hour holding `oldest`, the source's oldest bucket. `done` once nothing
+-- older is left; no window then. A refresh over a range its source has dropped would empty it.
+CREATE OR REPLACE FUNCTION public.device_backfill_window(
+    reached timestamptz, oldest timestamptz, chunk interval, start_at timestamptz,
+    OUT from_ts timestamptz, OUT to_ts timestamptz, OUT done boolean)
+LANGUAGE sql IMMUTABLE
+SET search_path = pg_catalog, public
+AS $fn$
+  WITH b AS (
+    SELECT public.time_bucket(INTERVAL '1 hour', coalesce(reached, start_at)) AS upto,
+           public.time_bucket(INTERVAL '1 hour', oldest) AS floor
+  )
+  SELECT CASE WHEN b.floor IS NULL OR b.upto <= b.floor THEN NULL ELSE GREATEST(b.upto - chunk, b.floor) END,
+         CASE WHEN b.floor IS NULL OR b.upto <= b.floor THEN NULL ELSE b.upto END,
+         b.floor IS NULL OR b.upto - chunk <= b.floor
+    FROM b;
+$fn$;
+
+-- Fills each device rollup one chunk older a run, 5m then 1h, each from its own source, and
+-- commits after each. No SET clause, as refresh_requested_rollups() has none.
 CREATE OR REPLACE PROCEDURE public.backfill_device_rollups(job_id integer, config jsonb)
 LANGUAGE plpgsql
 AS $proc$
 DECLARE
-    -- Where the refresh policies start (late_data above), and how much one run fills.
+    -- Where the refresh policies start: late_data above.
     c_policy_reach CONSTANT interval := INTERVAL '25 hours';
-    c_chunk        CONSTANT interval := INTERVAL '6 hours';
-    v_state  record;
+    v_row    record;
     v_oldest timestamptz;
-    v_to     timestamptz;
-    v_from   timestamptz;
+    v_next   record;
     v_began  timestamptz;
 BEGIN
-    SELECT * INTO v_state FROM public.device_rollup_backfill WHERE id;
-    IF v_state.done THEN
-        RETURN;
-    END IF;
-    SELECT public.time_bucket(INTERVAL '1 hour', h.oldest) INTO v_oldest
-      FROM public.telemetry_horizons h WHERE h.relation = 'telemetry_1m';
-    v_to := coalesce(v_state.reached, public.time_bucket(INTERVAL '1 hour', pg_catalog.now() - c_policy_reach));
-    IF v_oldest IS NULL OR v_to <= v_oldest THEN
-        UPDATE public.device_rollup_backfill SET done = true, updated_at = pg_catalog.now() WHERE id;
+    FOR v_row IN
+        SELECT * FROM public.device_rollup_backfill b WHERE NOT b.done ORDER BY b.chunk
+    LOOP
+        SELECT h.oldest INTO v_oldest FROM public.telemetry_horizons h WHERE h.relation = v_row.source;
+        SELECT * INTO v_next FROM public.device_backfill_window(
+            v_row.reached, v_oldest, v_row.chunk, pg_catalog.now() - c_policy_reach);
+        IF v_next.from_ts IS NULL THEN
+            UPDATE public.device_rollup_backfill SET done = true, updated_at = pg_catalog.now()
+             WHERE view_name = v_row.view_name;
+            COMMIT;
+            RAISE LOG 'backfill_device_rollups: % reaches its source''s oldest bucket', v_row.view_name;
+            CONTINUE;
+        END IF;
+        v_began := pg_catalog.clock_timestamp();
+        CALL public.refresh_continuous_aggregate(('public.' || v_row.view_name)::regclass, v_next.from_ts, v_next.to_ts);
+        UPDATE public.device_rollup_backfill
+           SET reached = v_next.from_ts, done = v_next.done, updated_at = pg_catalog.now(),
+               chunk_ms = (extract(epoch FROM pg_catalog.clock_timestamp() - v_began) * 1000)::integer
+         WHERE view_name = v_row.view_name;
         COMMIT;
-        RAISE LOG 'backfill_device_rollups: done, the device rollups reach %', v_to;
-        RETURN;
-    END IF;
-    v_from := GREATEST(v_to - c_chunk, v_oldest);
-    v_began := pg_catalog.clock_timestamp();
-    CALL public.refresh_continuous_aggregate('public.telemetry_device_5m'::regclass, v_from, v_to);
-    CALL public.refresh_continuous_aggregate('public.telemetry_device_1h'::regclass, v_from, v_to);
-    UPDATE public.device_rollup_backfill
-       SET reached = v_from, done = v_from <= v_oldest, updated_at = pg_catalog.now(),
-           chunk_ms = (extract(epoch FROM pg_catalog.clock_timestamp() - v_began) * 1000)::integer
-     WHERE id;
-    COMMIT;
+    END LOOP;
 END $proc$;
 REVOKE ALL ON PROCEDURE public.backfill_device_rollups(integer, jsonb) FROM PUBLIC;
 
--- Scheduled as refresh_requested_rollups() is, and found by name the same way. Each run fills one
--- chunk, a few seconds at the storage basis, so the history fills over hours without a long run.
+-- Scheduled as refresh_requested_rollups() is, and found by name the same way. Each run fills a
+-- chunk of each rollup, a few seconds at the storage basis, so history fills without a long run.
 DO $$
 DECLARE
   schedule CONSTANT interval := INTERVAL '2 minutes';
@@ -418,9 +458,9 @@ BEGIN
   RAISE NOTICE 'device rollups (job %): every % one more chunk of history is counted', v_job, schedule;
 END $$;
 
--- What the device rollups hold, for History's Overview to tell a block not yet counted from one with no
--- reading. Each rollup is counted from the backfill's reach (the policies' 25 hours before its first
--- chunk), or from where its retention drops buckets if that is later, up to its watermark. Read from
+-- What each device rollup holds, for History's Overview to tell a block not yet counted from one
+-- with no reading: its reach, the backfill's (the policies' 25 hours before its first chunk), or
+-- where its retention drops buckets if that is later, and its watermark. Read from
 -- the catalogue as the owner: no scan, so it is cheap over postgres_fdw.
 CREATE OR REPLACE FUNCTION public.telemetry_device_coverage_rows()
 RETURNS TABLE (relation text, computed_from timestamptz, computed_to timestamptz, complete boolean)
@@ -438,7 +478,7 @@ AS $fn$
             FROM _timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(c.mat_hypertable_id)) AS w),
          coalesce(b.done, false)
     FROM _timescaledb_catalog.continuous_agg c
-    LEFT JOIN public.device_rollup_backfill b ON b.id
+    LEFT JOIN public.device_rollup_backfill b ON b.view_name = c.user_view_name::text
    WHERE c.user_view_schema = 'public' AND c.user_view_name IN ('telemetry_device_5m', 'telemetry_device_1h');
 $fn$;
 REVOKE ALL ON FUNCTION public.telemetry_device_coverage_rows() FROM PUBLIC;
@@ -447,8 +487,8 @@ CREATE OR REPLACE VIEW public.telemetry_device_coverage AS
 SELECT * FROM public.telemetry_device_coverage_rows();
 
 COMMENT ON VIEW public.telemetry_device_coverage IS
-  'Each device rollup''s counted range, computed_from to computed_to (its watermark), and whether '
-  'the backfill is done. Two rows from the catalogue, so it is cheap over postgres_fdw.';
+  'Each device rollup''s reach (computed_from) and watermark (computed_to), and whether its '
+  'backfill is done. Two rows from the catalogue, so it is cheap over postgres_fdw.';
 
 -- Carries the last observation forward across buckets nobody reported in: under report-by-exception
 -- a gap means unchanged, not unknown. Plain-SQL gaps-and-islands LOCF over a grid built from the
