@@ -29,6 +29,9 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   // Grafana as the BROWSER reaches it, for the "View in Grafana" links on active alerts. Same
   // origin as GRAFANA_PUBLIC_URL / GF_SERVER_ROOT_URL on the server side.
   VITE_GRAFANA_URL: '',
+  // "true" | "false": supabaseStudio.enabled. "false" means no Studio, so sign-out beacons no
+  // Studio door. Blank reads as on.
+  VITE_STUDIO_ENABLED: '',
   // Supabase Studio's door as the BROWSER reaches it -- the same origin as STUDIO_PUBLIC_URL on
   // the server side, HOST INCLUDED. Used only to end Studio's own session at sign-out; cookies
   // ignore the port but not the host, so localhost and 127.0.0.1 are two different sessions.

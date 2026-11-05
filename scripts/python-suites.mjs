@@ -1121,6 +1121,15 @@ export const SUITES = {
       'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
       "row naming who did it, while a boot's re-seed writes none.",
   },
+  'supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py': {
+    lanes: ['db'],
+    why:
+      "0002 -- that Studio's client block, run as db-init's psql runs it, says Studio is off in a " +
+      'NOTICE and never a WARNING; that it removes a client an earlier boot registered, approvals ' +
+      'and sessions with it, recorded once and not on the next boot, and restores it when Studio ' +
+      'is on again; that Studio on without its secret warns naming the login and the secret to ' +
+      'set; and that an unset value is today\'s behaviour and never removes.',
+  },
   'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1209,6 +1218,16 @@ export const SUITES = {
       'or acknowledged one, Other without a note and every other role are refused; who withdraws; ' +
       'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
       'audit rows, their lane, their class and who reads them.',
+  },
+  'supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py': {
+    lanes: ['db'],
+    why:
+      '0240 and 0241 -- that a Shopfloor Manager and an Administrator schedule, change and end a ' +
+      'suppression window and every other role is refused; the CHECKs; that a window covers its ' +
+      "device, its gateway's own alerts, or each device in its cell when the alert is read, and never " +
+      'a platform or machine identity alert; that platform_alerts_active says suppressed before, ' +
+      'during and after it and keeps its columns; that an occurrence records the window that first ' +
+      "covered it and nothing clears it; and the audit rows in the subject's lane.",
   },
   'supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py': {
     lanes: ['db'],

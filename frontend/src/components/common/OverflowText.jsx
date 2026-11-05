@@ -16,12 +16,16 @@ const RETURN_MS = 250
  *
  * The control is the nearest button, link or focusable element around it; without one, the text
  * reacts to the pointer alone. Measured as it activates (`scrollWidth` against `clientWidth`), so
- * a drawer opening or the window narrowing needs no listener.
+ * a drawer opening or the window narrowing needs no listener. `onMeasure(cut)` hears each
+ * measurement, so the control can give its tooltip only to text that is really cut.
  *
  *   <button type="button" onClick={open}><OverflowText className="trail-lane-name">{name}</OverflowText></button>
  */
-export function OverflowText({ children, className = '' }) {
+export function OverflowText({ children, className = '', onMeasure }) {
   const outer = useRef(null)
+  // The latest callback, read when the effect's listeners measure.
+  const measured = useRef(onMeasure)
+  measured.current = onMeasure
 
   useEffect(() => {
     const el = outer.current
@@ -36,6 +40,7 @@ export function OverflowText({ children, className = '' }) {
     const update = () => {
       clearTimeout(settle)
       const shift = el.scrollWidth - el.clientWidth
+      measured.current?.(shift > 0)
       if ((hovered || focused) && shift > 0 && !still()) {
         el.style.setProperty('--overflow-ms', `${Math.max(SLIDE_MIN_MS, Math.round((shift / SLIDE_PX_PER_SECOND) * 1000))}ms`)
         el.style.setProperty('--overflow-shift', `${-shift}px`)

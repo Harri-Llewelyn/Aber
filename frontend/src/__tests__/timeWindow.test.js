@@ -9,7 +9,8 @@ import { describe, it, expect, afterAll } from 'vitest'
 import {
   ALL_TIME, SPAN_IDS, TIME_PRESETS, ZOOM_FLOOR_MS, bandWindow, bandWords, calendarTicks, canStep,
   canZoomIn, canZoomOut, chooseSpan, holdsNow, jumpTo, lengthWords, parseLocal, rollingWindow, stepNames,
-  stepWindow, timeWindow, windowBounds, windowFromQuery, windowToQuery, windowWords, zoomIn, zoomOut
+  stepWindow, timeWindow, windowBounds, windowEndsWords, windowFromQuery, windowToQuery, windowWords, zoomIn,
+  zoomOut
 } from '../utils/timeWindow'
 
 const MACHINE_TZ = process.env.TZ
@@ -231,6 +232,29 @@ describe('choosing a span or a day', () => {
     expect(canStep(day('2026-11-01'), 1, NOW)).toBe(true)
     expect(canStep(ALL_TIME, -1, NOW)).toBe(false)
     expect(canStep(ALL_TIME, 1, NOW)).toBe(false)
+  })
+})
+
+describe('a stored window\'s ends in words', () => {
+  it('reads UTC instants as local time, "3 Nov 09:00 – 4 Nov 09:00", in GMT and in BST', () => {
+    expect(windowEndsWords('2026-11-03T09:00:00.000Z', '2026-11-04T09:00:00.000Z', NOW)).toBe('3 Nov 09:00 – 4 Nov 09:00')
+    expect(windowEndsWords('2026-07-01T08:00:00.000Z', '2026-07-01T16:30:00.000Z', NOW)).toBe('1 Jul 09:00 – 1 Jul 17:30')
+    // Across the clocks going back: 25 hours apart, and 09:00 at each end.
+    expect(windowEndsWords('2026-10-24T08:00:00.000Z', '2026-10-25T09:00:00.000Z', NOW)).toBe('24 Oct 09:00 – 25 Oct 09:00')
+  })
+
+  it('names the year of an end that is not in this one', () => {
+    expect(windowEndsWords('2025-12-31T12:00:00.000Z', '2026-01-01T12:00:00.000Z', NOW)).toBe('31 Dec 2025 12:00 – 1 Jan 12:00')
+  })
+
+  it('names the seconds on both ends where either has them, as a window zoomed to the second does', () => {
+    expect(windowEndsWords('2026-11-02T10:05:30.000Z', '2026-11-02T10:06:00.000Z', NOW)).toBe('2 Nov 10:05:30 – 2 Nov 10:06:00')
+  })
+
+  it('has no words unless both ends are instants', () => {
+    expect(windowEndsWords('2026-11-03T09:00:00.000Z', undefined, NOW)).toBeNull()
+    expect(windowEndsWords(null, '2026-11-03T09:00:00.000Z', NOW)).toBeNull()
+    expect(windowEndsWords('2026-11-03T09:00:00.000Z', 'soon', NOW)).toBeNull()
   })
 })
 

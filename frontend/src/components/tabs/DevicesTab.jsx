@@ -29,6 +29,7 @@ import { TagList } from '../common/TagList'
 import { Model3DUploader, Model3DLabel } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { SuppressionWindows } from '../common/SuppressionWindows'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { FiltersPopover } from '../common/FiltersPopover'
@@ -95,6 +96,11 @@ import { DEVICES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 
+// The status sort's bands: a firing alert, then an acknowledged one, then the lifecycle badge. Each
+// band holds the severity ranks, which run 0 to 8.
+const STATUS_RANK_ACKNOWLEDGED = 10
+const STATUS_RANK_LIFECYCLE = 20
+
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
@@ -127,12 +133,14 @@ const QUARANTINE_SORT = {
   discovered_at: { type: 'time', value: q => q.discovered_at },
 }
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, activeAlerts = [], unmappedMetricsTo }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, userRole = null, activeAlerts = [], unmappedMetricsTo }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
-   * Gateways resolve alerts the same way.
+   * Gateways resolve alerts the same way. A suppressed alert colours nothing, so only the drawer's
+   * banner, which says it is suppressed, is handed one.
    */
   const alertsByDevice = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
+  const bannerAlerts = React.useMemo(() => alertIndex(activeAlerts, 'device', { suppressed: true }), [activeAlerts])
 
   const alertFor = React.useCallback(
     (device) => alertForDevice(alertsByDevice, device),
@@ -632,10 +640,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     unmodelledFor, cellById,
   ])
 
-  // Each column sorts on what its cell shows. Status takes the more severe of the lifecycle badge
-  // and a firing alert. An archived device has no lifecycle state (archived is its own axis,
-  // utils/deviceStatus.js), so it goes last either way, as does a device with no modelled group or
-  // no cell resolved.
+  // Each column sorts on what its cell shows. Status puts a firing alert first, the worst severity
+  // first, then an acknowledged one, then the lifecycle badge; a suppressed alert is no alert. An
+  // archived device has no lifecycle state (archived is its own axis, utils/deviceStatus.js), so it
+  // goes last either way, as does a device with no modelled group or no cell resolved.
   const rosterSortColumns = useMemo(() => ({
     name: { type: 'text', value: a => a.asset_name },
     uuid: { type: 'text', value: a => a.asset_id },
@@ -645,7 +653,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         if (a.is_archived) return null
         const alert = alertFor(a)
         const lifecycle = severityRank(deviceStatusBadge(a).tone)
-        return alert ? Math.min(lifecycle, severityRank(alert.severity === 'critical' ? 'danger' : 'warning')) : lifecycle
+        if (!alert) return STATUS_RANK_LIFECYCLE + lifecycle
+        const severity = severityRank(alert.severity === 'critical' ? 'danger' : 'warning')
+        return (alertState(alert) === 'acknowledged' ? STATUS_RANK_ACKNOWLEDGED : 0) + severity
       }
     },
     type: {
@@ -1072,7 +1082,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                       icon={alert.severity === 'critical'
                                         ? <IconAlertCircle size={11} />
                                         : <IconAlertTriangle size={11} />}
-                                      title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
+                                      title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}`}
                                     >
                                       {alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
                                     </Badge>
@@ -1528,7 +1538,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         onClose={() => setSelectedId(null)}
         type="DEVICE"
         onCopy={showToast}
-        alert={selectedDevice ? alertFor(selectedDevice) : null}
+        alert={selectedDevice ? alertForDevice(bannerAlerts, selectedDevice) : null}
         icon={<IconCpu size={16} />}
         title={selectedDevice?.asset_name || ''}
         subtitle={selectedDevice && (
@@ -1802,7 +1812,22 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Archive this device: take it out of commission'
           },
         ].filter(Boolean) : []}
-      />
+      >
+        {/* A tool of unknown height, so after the actions. The device's own windows, and its cell's. */}
+        {selectedDevice && (
+          <SuppressionWindows
+            kind="device"
+            subjectId={selectedDevice.asset_id}
+            subjectName={selectedDevice.asset_name}
+            cell={cellById.get(selectedLocation?.effective_cell_id)
+              ? { id: selectedLocation.effective_cell_id, name: cellById.get(selectedLocation.effective_cell_id).cell_name }
+              : null}
+            userRole={userRole}
+            showToast={showToast}
+            open={!!selectedDevice}
+          />
+        )}
+      </ContextPanel>
     </div>
   )
 }

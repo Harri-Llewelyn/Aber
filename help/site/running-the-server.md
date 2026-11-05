@@ -460,15 +460,16 @@ database owner.
 ### What a browser may load: the Content-Security-Policy
 
 **The dashboard tells browsers what its pages may load, and browsers refuse the rest.** It sends a
-`Content-Security-Policy` header naming its own origin, the API and the two sign-in doors. A script
-injected into a page can then load nothing from elsewhere, and send what it reads nowhere.
+`Content-Security-Policy` header naming its own origin, the API and the sign-in doors: the forge's,
+and Studio's where the site runs Studio. A script injected into a page can then load nothing from
+elsewhere, and send what it reads nowhere.
 
 The chart builds the policy from the addresses it hands the dashboard in `/config.js`
 (`publicUrls.supabase`, `publicUrls.studio` and `publicUrls.gitea`, or their defaults):
 
 | Directive | Allows | Because |
 | :--- | :--- | :--- |
-| `connect-src` | the API over HTTP and WebSocket, the Studio and forge doors, `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
+| `connect-src` | the API over HTTP and WebSocket, the forge's door and Studio's (only with Studio on), `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
 | `script-src` | the dashboard, `'wasm-unsafe-eval'` | The 3D viewer's decoders are WebAssembly |
 | `worker-src` | the dashboard, `blob:` | The decoders run in a worker made from a `blob:` address |
 | `img-src` | the dashboard, `data:`, `blob:` | Icons in the stylesheet, and area plans |

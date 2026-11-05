@@ -109,8 +109,12 @@ describe('a window with older events not loaded', () => {
     served = Object.assign([event(2, 12), event(1, 9)], { nextCursor: { recorded_at: 'x', id: 1 } })
     await show('?span=day&at=2026-11-02')
 
-    const heading = shades('unloaded').find(s => s.closest('.trail-section'))
-    expect(heading).toHaveTextContent('Older events not loaded')
+    // Waited for: the shade is drawn once the window's paging stops, a fetch after the first events.
+    const heading = await waitFor(() => {
+      const shade = shades('unloaded').find(s => s.closest('.trail-section'))
+      expect(shade).toHaveTextContent('Older events not loaded')
+      return shade
+    })
     expect(fractionOf(heading.style.width)).toBeCloseTo(9 / 24, 6)
     expect(shades('unloaded').some(s => s.closest('.trail-gridlines'))).toBe(true)
   })

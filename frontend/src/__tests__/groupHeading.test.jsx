@@ -4,10 +4,11 @@
  * its place, which reports a press and leaves the page to keep which groups are open.
  */
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { GroupHeading } from '../components/common/GroupHeading'
 import { IconCpu } from '../components/common/Icons'
+import { TOOLTIP_DELAY_MS } from '../components/common/Tooltip'
 
 const UP = '18 15 12 9 6 15'
 const DOWN = '6 9 12 15 18 9'
@@ -69,5 +70,90 @@ describe('GroupHeading', () => {
     expect(document.querySelector('.group-heading-chevron')).toHaveAttribute('aria-hidden', 'true')
     expect(document.querySelector('.group-heading-icon')).toHaveAttribute('aria-hidden', 'true')
     expect(screen.getByRole('button')).toHaveAccessibleName('Devices')
+  })
+})
+
+/**
+ * A cut `detail` is the button's tooltip as well: under reduced motion the cut text does not slide,
+ * so the tooltip is the only way to read the rest. jsdom lays nothing out, so each test gives the
+ * line the widths a browser would measure.
+ */
+describe('GroupHeading with a detail cut short', () => {
+  const LONG = 'Assembly line one, press seven hydraulic pressure'
+  const had = Object.prototype.hasOwnProperty.call(window, 'matchMedia')
+  const before = window.matchMedia
+  /** jsdom has no matchMedia of its own; this one answers for reduced motion. */
+  const reduceMotion = (on) => {
+    window.matchMedia = (query) => ({ matches: on && query === '(prefers-reduced-motion: reduce)', media: query })
+  }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => {
+    vi.useRealTimers()
+    if (had) window.matchMedia = before
+    else delete window.matchMedia
+  })
+
+  /** The heading, its detail measured `scrollWidth` wide in a `clientWidth` box. */
+  const heading = (scrollWidth, clientWidth) => {
+    render(<GroupHeading open={false} label="Entity" detail={LONG} onToggle={() => {}} />)
+    const line = document.querySelector('.group-heading-detail .overflow-text')
+    Object.defineProperty(line, 'scrollWidth', { configurable: true, value: scrollWidth })
+    Object.defineProperty(line, 'clientWidth', { configurable: true, value: clientWidth })
+    return screen.getByRole('button')
+  }
+  const tooltip = () => screen.queryByRole('tooltip')
+  const rest = () => act(() => { vi.advanceTimersByTime(TOOLTIP_DELAY_MS) })
+
+  it('shows the whole value in the tooltip on hover, under reduced motion', () => {
+    reduceMotion(true)
+    const button = heading(400, 120)
+    fireEvent.mouseEnter(button)
+    rest()
+    expect(tooltip()).toHaveTextContent(LONG)
+    // Still: the tooltip carries the rest, not a slide.
+    expect(document.querySelector('.overflow-text')).not.toHaveClass('overflow-text-sliding')
+    fireEvent.mouseLeave(button)
+    expect(tooltip()).toBeNull()
+  })
+
+  it('shows it at once on keyboard focus, under reduced motion', () => {
+    reduceMotion(true)
+    const button = heading(400, 120)
+    fireEvent.focusIn(button)
+    expect(tooltip()).toHaveTextContent(LONG)
+    fireEvent.focusOut(button)
+    expect(tooltip()).toBeNull()
+  })
+
+  it('shows it as well where the cut text slides, on hover and on focus', () => {
+    reduceMotion(false)
+    const button = heading(400, 120)
+    fireEvent.mouseEnter(button)
+    rest()
+    expect(tooltip()).toHaveTextContent(LONG)
+    fireEvent.mouseLeave(button)
+    fireEvent.focusIn(button)
+    expect(tooltip()).toHaveTextContent(LONG)
+  })
+
+  it('gives a value that fits no tooltip', () => {
+    reduceMotion(true)
+    const button = heading(100, 120)
+    fireEvent.mouseEnter(button)
+    rest()
+    expect(tooltip()).toBeNull()
+    fireEvent.focusIn(button)
+    expect(tooltip()).toBeNull()
+  })
+
+  it('is not read a second time: the button is named with the value, and the tooltip describes nothing', () => {
+    reduceMotion(true)
+    const button = heading(400, 120)
+    fireEvent.focusIn(button)
+    expect(tooltip()).toHaveTextContent(LONG)
+    expect(button).toHaveAccessibleName(`Entity, ${LONG}`)
+    expect(button).not.toHaveAttribute('aria-describedby')
+    expect(button).toHaveAccessibleDescription('')
   })
 })

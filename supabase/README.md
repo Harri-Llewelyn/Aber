@@ -2319,7 +2319,9 @@ or by SQL.
   key and no edge function, and the Audit Trail rows carry the Administrator. It returns `{name,
   approvals_ended, sessions_ended}`.
 - **Aber's own four cannot be removed** (`42501`). `0002` upserts each with `deleted_at = NULL` on
-  every boot, so a removal would undo itself at the next one; the four are part of the stack.
+  every boot, so a removal would undo itself at the next one; the four are part of the stack. The
+  one exception is `0002`'s own: with Studio off it removes Studio's client itself
+  ([Studio's login](#the-second-listener-which-is-studios-login-archived-migration-0081)).
 - **Each act is an Audit Trail row, written by a trigger**, because registration and approval happen
   inside GoTrue. On `auth.oauth_clients`, in the app's lane (`entity_type = 'oauth_clients'`, filed
   under `security` by `audit_domain_for()`'s default): `APP_REGISTERED` for an insert,
@@ -2340,7 +2342,8 @@ or by SQL.
 - **A boot writes nothing.** `0002`'s upsert of an existing row is an UPDATE that leaves `deleted_at`
   NULL, and the update trigger fires only when `deleted_at` changes between NULL and a time. The
   first seed of a stack app on a stack that already has `0217` writes one `APP_REGISTERED`, by
-  `migration`; on a fresh install `0002` runs before `0217` and writes none.
+  `migration`; on a fresh install `0002` runs before `0217` and writes none. The first boot with
+  Studio off after it was on writes its removal, once.
 - **The triggers are on GoTrue's tables, which `postgres` does not own.** It creates them with the
   TRIGGER privilege the image's default privileges give it on every table `supabase_auth_admin`
   creates; the file checks it first and names it if absent. Disabling a trigger needs the owner.
@@ -2745,7 +2748,8 @@ browser never reaches it: the `service-logs` function reads it for an Administra
   `0230`) and `limit`. Any other parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
   `| json aber_level="level" | aber_level=~"(?i)(?:…)"` for a level, with every caller value a
   quoted string, escaped as LogQL reads one (Go's `strconv.Unquote`). `service` must be a value
-  Loki lists for the label over the last 7 days.
+  Loki lists for the label over the window: between `from` and `to`, or the last 7 days for any
+  `range`, so the list does not shrink at 15 minutes. The refusal names the window it checked.
 - **A level is a JSON line's.** Alloy keeps two stream labels, `service` and `container`, and no
   level. Ingestion and playback write JSON (`logging_config.py`), so their lines carry `level`. A
   line in any other format has none and shows only under *Any level*; the tab says so. The level is
@@ -2812,8 +2816,9 @@ the range key.
   never both. The ends are in order and at most 169 hours apart: the 7 days a read covers, and the
   hour a calendar week gains when the clocks go back, so the control's Week is never refused.
   Anything else is `400` with the reason, before the store is asked. A rolling window is still
-  measured back from the function's own now, and the services listed are still those of the last 7
-  days, whatever the window.
+  measured back from the function's own now. The services listed, and the check on a read's
+  `service`, follow the window: a fixed one's own, and for every range the last 7 days. The tab
+  reads the list again when the window moves, and keeps a chosen service the new list lacks.
 - **The row records what was asked for.** `record_service_logs_read()` takes `p_from` and `p_to`
   after `p_range`, each `DEFAULT NULL`. A rolling read's `new_data` is `name`, `level`, `filter`
   and `range`, as before, so a poll of the last hour writes nothing, and the first poll after an
@@ -3296,6 +3301,125 @@ a row a role gates, the read the Realtime gap keeps, and an empty or null `clien
 `test_each_app_s_token_reaches_only_its_own_routes.py`, in the stack lane, holds the same through
 the gateway with a real token for each of the four apps.
 
+### An alert stays quiet during planned work (0240)
+
+A machine down for a planned belt change fired for the whole shift, and its red buried everything
+else. A suppression window is a scheduled period on one device, gateway or cell: an alert that fires
+in it is recorded and marked suppressed, is not counted, colours nothing and is not sent. A window
+ends by itself. It is not a maintenance switch on the asset, because a forgotten switch would
+silence a machine for good. Grafana's mute timings are not used: the windows live beside the assets,
+and Aber's own evaluator ([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)) never reaches
+Grafana.
+
+- **`alert_suppression_windows`**, one row per window. Exactly one of `device_id`, `gateway_id`
+  and `cell_id` (`alert_suppression_windows_one_subject`, `num_nonnulls() = 1`). None is a foreign
+  key: a window outlives its subject, as an alert and its audit rows do, so purging a device, gateway
+  or cell never waits on one, and no child of `cells` cascades (`test_archive_purge_cascade.py`).
+  The writers refuse a subject that is not there.
+  `starts_at` and `ends_at` are required, `ends_at` after `starts_at`. `reason` is required, trimmed
+  and 1 to 200 characters, as an acknowledgement's note is. `created_by`, its email from the token
+  and `created_at` say who scheduled it, and `ended_by` and its email who ended it early. A window
+  has no maximum length.
+- **What a window covers.** A device window covers the alerts whose `entity_type` is `device` and
+  whose `entity_id` is that device. A gateway window covers the gateway's own alerts, not its
+  devices'. A cell window covers every device whose cell is that cell when the alert is read, by
+  `device_locations.effective_cell_id`: move a device out and its alert counts again, with nothing
+  written. A replay lane or a simulated device is in no cell, so no cell window covers it. A
+  `platform` or `service_identity` alert is never covered, nor one whose `entity_id` matched no row.
+- **"Suppressed now" is decided when a row is read**, so a window's start and its end take effect
+  with no write to `platform_alerts`. `platform_alert_suppressing_window(p_entity_type, p_entity_id,
+  p_at)` is the one place it is decided: it returns the window covering that subject's alert at
+  `p_at` (from `starts_at`, up to but not including `ends_at`), or NULL. Of several, the one that
+  ends last answers, so the alert reads as suppressed until then. The cell is read when the function
+  runs, whatever `p_at`. It is a `STABLE` SQL function run as its caller, granted to
+  `authenticated` and `service_role`; every signed-in role reads every window, device, gateway and
+  cell, so the answer does not depend on who asks. **Its signature stays as it is**: the sender
+  calls it too.
+- **`platform_alerts_active` returns it.** `suppressed`, and the covering window's id
+  (`suppressing_window_id`), `suppression_reason` and `suppressed_until`, after every column it
+  returned before. The function is in the view's `FROM`, so it runs once per firing alert, and the
+  window's reason and end are joined by its answer. `0001` states the view, the table, its read
+  policy and grants, and the function, so the view can join them on every boot; `0001`'s guard drops
+  the view once when its column list differs, as for `0231`'s columns.
+- **Each occurrence records the window that first covered it**, for history, in
+  `platform_alerts.suppression_window_id`, which `0001` states. `trg_platform_alerts_stamp_suppression`,
+  a `BEFORE INSERT` trigger, stamps an occurrence that starts in a window, or one that arrives
+  firing while a window covers it now. `stamp_platform_alerts_suppression()` stamps the newest
+  occurrence of each fingerprint that is still firing, unstamped and covered now. The writers call it
+  as they write, so a window that starts now covers what is already firing, and pg_cron runs it every
+  minute as `stamp_platform_alerts_suppression`, for a window whose start arrives later. It is a job
+  of its own rather than a line in another every-minute job, so its failure stops nothing else and
+  `cron.job_run_details` names it. The stamp is history only, so its minute of lag never changes
+  what is counted. `trg_platform_alerts_keep_suppression` keeps a stamp once it is there: an
+  `UPDATE` that names the column can neither clear it nor move it, not even when the window changes
+  or ends. The webhook's upsert does not name it.
+
+**Three functions write a window, and nothing else does.** The table has row security, one read
+policy and no write grant. `schedule_alert_suppression_window(p_subject_kind, p_subject_id,
+p_starts_at, p_ends_at, p_reason)`, `change_alert_suppression_window(p_window_id, p_starts_at,
+p_ends_at, p_reason)` and `end_alert_suppression_window(p_window_id)` are `SECURITY DEFINER`. An
+Administrator or a Shopfloor Manager calls them; every other caller is `42501`, an Operator
+included, whose one direct write stays the acknowledgement. Functions rather than write policies,
+because ending a window early needs the server's clock and the name of who ended it, and because
+the audit row belongs in the subject's lane, which the generic audit trigger cannot reach.
+
+- **A start in the past is now**, at scheduling and when an upcoming window's start moves. A window
+  may start in the future.
+- **A change keeps history.** A NULL argument keeps what the window has. A window that has started
+  keeps its start, and one that has ended is kept as it was (`23514`). The end must stay after now:
+  ending is `end_alert_suppression_window()`'s.
+- **Ending early** sets `ends_at` to now and records who ended it. A window that has not started
+  covered nothing, so ending it cancels it: the row is deleted, and its audit row keeps it.
+- **Each act writes one audit row** in the subject's own lane: `devices`, `gateways` or `cells`, with
+  the subject's id. `SUPPRESSION_WINDOW_SCHEDULED`, `SUPPRESSION_WINDOW_CHANGED` (the window before
+  and after; nothing when nothing changed), `SUPPRESSION_WINDOW_ENDED` and
+  `SUPPRESSION_WINDOW_CANCELLED`. The snapshot is `alert_suppression_window_audit_identity()`: the
+  subject's `name`, which the Audit Trail labels the lane by after the subject is gone, its kind, id
+  and name, the times, the reason and who scheduled and ended it. `0241` files them.
+
+**Sending holds, it does not drop.** The dispatcher
+([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function. Its
+suppression arm calls `platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the
+occurrence `a` it would send, and **holds** the send while that answers a window: nothing is sent,
+and the occurrence is not marked sent. When the window ends, or is ended early, and the alert is
+still firing, the next pass finds the function answering NULL and sends it, as if it had just fired.
+Otherwise a machine that comes back from maintenance broken never alerts. An occurrence that
+resolves inside the window is never sent: there is nothing left to say. The dispatcher reads the
+function, not the stamp: the stamp says what covered an occurrence, not whether one covers it now.
+
+**What the dashboard does with it.** It counts, colours and toasts only the rows that are neither
+acknowledged nor suppressed, and lists a suppressed one after the others, with the window's reason
+and end. Nothing is written when a window ends, so the dashboard re-reads at the nearest start or end
+it knows of. The table is not in the realtime publication: a window that starts now stamps the
+alerts it covers, an `UPDATE` that Realtime carries, and an early end reaches other dashboards at
+their next re-read, within a minute.
+
+The file's self-check asserts the table's row security, its one read policy and that no browser or
+service role writes it; each constraint; the stamp column, its two triggers and the minute job; the
+view's four columns under `security_invoker`; the function's one form, volatility, pin and grants,
+and that it covers no platform alert and no alert without a subject; the writers' `SECURITY DEFINER`,
+pin and grants; and that a request with no identity is refused by each.
+`test_an_alert_stays_quiet_during_planned_work.py` holds each role's writes, the CHECKs, what each
+kind of window covers before, during and after, a device moved out of its cell, the stamp, and the
+audit rows.
+
+### The Audit Trail files a suppression window's acts (0241)
+
+`0240`'s four actions are written in the lane of the window's subject: a device, a gateway or a
+cell. Those are the asset lane's already, and the classifier's rules for a named act on an asset row
+class them, so `audit_domain_for()` and `audit_event_class()` are unchanged. A window's snapshot
+carries no configuration field and no flag, so each act is Operational.
+
+**`audit_trail_action_kinds()`** lists the four on `devices`, `gateways` and `cells`, with
+`operational`, `configuration` and `lifecycle`: the classes the rules allow a named act on an asset
+row, which the map states whether or not a window's acts reach them. `AUDIT_TRAIL_ACTION_KINDS`
+mirrors it (mirror check 43). It is redeclared whole, unchanged but for those rows: `0229` and
+`0232` replay first on every boot, and the last declaration stands.
+
+The file's self-check asserts the lane, the Operational class of each act on each kind, the map's
+rows, that `0232`'s rows are still there, and who may run it.
+`test-harness/fixtures/audit-event-classes.json` holds two of the acts' classes.
+
 ### An alert is queued for each channel that carries it (0247)
 
 An alert reached the dashboard and nowhere else: nobody who was not looking at the dashboard or
@@ -3517,10 +3641,12 @@ backs. It needs one line in the map of kinds and nothing else:
 - **The class** is `configuration`, by `audit_event_class()`'s rule for the security lane. The class
   indexes are unchanged, so nothing is rebuilt.
 - **`audit_trail_action_kinds()`** lists the action on its kind. It is redeclared whole from `0232`,
-  unchanged but for that line, and `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43).
+  unchanged but for that line and `0241`'s four suppression window rows, and
+  `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43). `0241` declares the map too, and replays
+  first on every boot: the last declaration stands, so this one carries `0241`'s rows.
 
-The file's self-check asserts the lane, the class and the map's row, and that `0232`'s rows are
-still there.
+The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
+rows are still there.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -3901,6 +4027,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes as `service_role` |
+| `alert_suppression_windows` | `authenticated` (`0240`) | none — `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and `end_alert_suppression_window()`, as `Administrator` / `Shopfloor_Manager` |
 | `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
@@ -7276,9 +7403,31 @@ states it rather than absorbing it.
 
 **Two operational consequences.** The listener is `supabase-envoy:8001`, which the Ingress serves
 as `studio.<domain>`; `supabase-studio` itself has no route. And both halves fail closed: without
-`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` and the
-substituter renders credentials that cannot authenticate — a stack that runs normally with a console
-nobody can open, which is the same posture as the loopback binding it replaces.
+`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` naming the Studio login
+and the secret to set, and the substituter renders credentials that cannot authenticate — a stack
+that runs normally with a console nobody can open, which is the same posture as the loopback binding
+it replaces.
+
+**With Studio off, `0002` removes the client rather than leaving it.** db-init passes
+`studio_enabled` from `supabaseStudio.enabled`, which is false by default. Only `true` is a fault
+without the secret, so only `true` warns:
+
+| `studio_enabled` | What `0002` does |
+| :--- | :--- |
+| `false` | A `NOTICE` that Studio is off, so its client is not registered. A client an earlier boot registered is removed as `remove_app()` removes one: every approval revoked, every session ended, then `deleted_at` set. The trigger records one `APP_REMOVED` and an `APP_APPROVAL_REVOKED` per approval, by `migration`. The `NOTICE` gives the counts. |
+| `true` | As before: registered with the secret, or a `WARNING` and nothing without it. A client removed while Studio was off is restored by the upsert (`APP_RESTORED`), and each person approves it again. |
+| unset | An older chart or a hand-run `psql`: as `true`, so nothing that worked before changes. |
+
+Any other value fails the boot, naming it. So a site that had Studio on and turns it off ends with
+the clients in force that a default install has. `list_apps()`, the Apps tab and GoTrue's own reads
+(`deleted_at IS NULL`) no longer find Studio's. A later boot finds nothing to remove and records
+nothing.
+
+Nothing else needs the row. `stack_app_ids()` still names the id, so the id stays Part of Aber and
+`remove_app()` still refuses it. `end_my_door_sessions()` (`0208`) deletes by id and finds none.
+The gateway's rules for the door cannot match: the chart drops the studio listener, and the API
+listener names the id in no rule. GoTrue issues no new token for a removed client, and the API
+refuses one issued before, since its session has ended (`0205`).
 
 ---
 

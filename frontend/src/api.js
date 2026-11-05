@@ -1670,7 +1670,8 @@ const apiMethods = {
 
   /**
    * A service's newest log lines, newest first, for System › Logs: `{ service, level, filter,
-   * range, limit }`, each optional. Without `service` the answer is the list of services alone.
+   * range, from, to, limit }`, each optional. Without `service` the answer is the list of services
+   * alone: those that wrote between `from` and `to`, or in the last 7 days for a `range`.
    * Administrator only, through service-logs, which builds the query from these and records each
    * read whose parameters differ from the caller's last in the Audit Trail.
    *
@@ -1815,6 +1816,57 @@ const apiMethods = {
   withdrawAlertAcknowledgement: async (alertId) => {
     const { data, error } = await supabase.rpc('withdraw_alert_acknowledgement', { p_alert_id: alertId });
     if (error) throw new Error(error.message || 'Could not withdraw the acknowledgement');
+    return data;
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // Suppression windows (0240), from the drawer of the device, gateway or cell a window covers.
+  // Each write is one Audit Trail row in that subject's lane. The database's refusals are
+  // sentences, shown as they come.
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * The windows on a subject that have not ended, soonest first. For a device, `cellId` adds the
+   * windows on the cell it is in now, which cover it too.
+   */
+  listSuppressionWindows: async (kind, id, { cellId = null } = {}) => {
+    if (!isUuid(id) || (cellId && !isUuid(cellId))) return [];
+    const column = kind === 'gateway' ? 'gateway_id' : kind === 'cell' ? 'cell_id' : 'device_id';
+    let query = supabase
+      .from('alert_suppression_windows')
+      .select('id, device_id, gateway_id, cell_id, starts_at, ends_at, reason, created_by, created_by_email, created_at')
+      .gt('ends_at', new Date().toISOString())
+      .order('starts_at', { ascending: true });
+    query = kind === 'device' && cellId
+      ? query.or(`device_id.eq.${id},cell_id.eq.${cellId}`)
+      : query.eq(column, id);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message || 'Could not read the suppression windows');
+    return data ?? [];
+  },
+
+  /** Schedule a window on a device, a gateway or a cell. A start of null is now. Returns the window. */
+  scheduleSuppressionWindow: async (kind, id, { startsAt = null, endsAt, reason }) => {
+    const { data, error } = await supabase.rpc('schedule_alert_suppression_window', {
+      p_subject_kind: kind, p_subject_id: id, p_starts_at: startsAt, p_ends_at: endsAt, p_reason: reason,
+    });
+    if (error) throw new Error(error.message || 'Could not schedule the window');
+    return data;
+  },
+
+  /** Change a window's start, end or reason; null keeps what it has. Returns the window. */
+  changeSuppressionWindow: async (windowId, { startsAt = null, endsAt = null, reason = null }) => {
+    const { data, error } = await supabase.rpc('change_alert_suppression_window', {
+      p_window_id: windowId, p_starts_at: startsAt, p_ends_at: endsAt, p_reason: reason,
+    });
+    if (error) throw new Error(error.message || 'Could not change the window');
+    return data;
+  },
+
+  /** End a window now, or cancel one that has not started. Returns the window as it ended. */
+  endSuppressionWindow: async (windowId) => {
+    const { data, error } = await supabase.rpc('end_alert_suppression_window', { p_window_id: windowId });
+    if (error) throw new Error(error.message || 'Could not end the window');
     return data;
   },
 

@@ -9,14 +9,15 @@
 --   * The class needs no rule either: audit_event_class() answers configuration for the security
 --     lane, so the class indexes are unchanged and nothing is rebuilt.
 --   * audit_trail_action_kinds() lists the action on its kind, redeclared whole from 0232, unchanged
---     but for that line: 0229 and 0232 replay first on every boot, and the last declaration stands.
+--     but for that line and 0241's four suppression window rows: 0229, 0232 and 0241 replay first on
+--     every boot, and the last declaration stands.
 --
 -- Reasoning: supabase/README.md, "The Audit Trail files a webhook's signing key (0249)". Idempotent.
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The map of kinds
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0232 but for the signing key, after the alerts.
+-- Unchanged from 0232 but for 0241's suppression window rows and the signing key, after the alerts.
 CREATE OR REPLACE FUNCTION public.audit_trail_action_kinds()
 RETURNS TABLE (action text, entity_type text, classes text[])
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
@@ -88,6 +89,12 @@ RETURNS TABLE (action text, entity_type text, classes text[])
       -- Alerts, in the alert's lane, or a machine identity's alert in the identity's.
       ('ALERT_ACKNOWLEDGED', ARRAY['platform_alerts', 'service_principals'], ARRAY['operational']),
       ('ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ARRAY['platform_alerts', 'service_principals'], ARRAY['operational']),
+      -- A suppression window's acts, in its subject's lane. Named acts on an asset row, so the
+      -- snapshots decide the class.
+      ('SUPPRESSION_WINDOW_SCHEDULED', ARRAY['devices', 'gateways', 'cells'], ARRAY['operational', 'configuration', 'lifecycle']),
+      ('SUPPRESSION_WINDOW_CHANGED', ARRAY['devices', 'gateways', 'cells'], ARRAY['operational', 'configuration', 'lifecycle']),
+      ('SUPPRESSION_WINDOW_ENDED', ARRAY['devices', 'gateways', 'cells'], ARRAY['operational', 'configuration', 'lifecycle']),
+      ('SUPPRESSION_WINDOW_CANCELLED', ARRAY['devices', 'gateways', 'cells'], ARRAY['operational', 'configuration', 'lifecycle']),
       -- The webhook's signing key, issued or rotated, in the webhook's lane.
       ('SIGNING_KEY_ISSUED', ARRAY['notification_channels'], ARRAY['configuration'])
     ) AS m(action, kinds, classes)
@@ -118,6 +125,11 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.audit_trail_action_kinds() m
                   WHERE m.action = 'ALERT_ACKNOWLEDGED' AND m.entity_type = 'service_principals') THEN
     RAISE EXCEPTION '0249: audit_trail_action_kinds() lost 0232''s rows';
+  END IF;
+  -- And so are 0241's, which this declaration replaces.
+  IF NOT EXISTS (SELECT 1 FROM public.audit_trail_action_kinds() m
+                  WHERE m.action = 'SUPPRESSION_WINDOW_CANCELLED' AND m.entity_type = 'cells') THEN
+    RAISE EXCEPTION '0249: audit_trail_action_kinds() lost 0241''s rows';
   END IF;
 END
 $check$;
