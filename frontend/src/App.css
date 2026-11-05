@@ -5481,6 +5481,22 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
    marker, so the key reads as it did and the filter as filters do elsewhere. */
 .trail-legend-toggle { gap: 6px; }
 
+/* The marker's ground in a toggle: a disc in the card's colour, which the marker has behind it on
+   the track, so it reads the same pressed (the accent fill) or not. 19px holds each shape whole,
+   centred on whole pixels; the margins keep the toggle as tall as the buttons beside it.
+   themeContrast.test.js holds each marker at 3:1 on it. */
+.trail-legend-disc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 19px;
+  height: 19px;
+  margin: -2px 0;
+  border-radius: 50%;
+  background: var(--bg-card);
+}
+
 .trail-legend-item {
   display: inline-flex;
   align-items: center;

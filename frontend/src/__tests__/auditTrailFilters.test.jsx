@@ -723,6 +723,19 @@ describe('Audit Trail marker shapes', () => {
     }
   })
 
+  it('keeps the same marker on a pressed toggle, on the card-coloured disc it has at rest', async () => {
+    withRead()
+    await showAll()
+    const toggles = () => [...document.querySelectorAll('.trail-legend .trail-legend-toggle')]
+    const marks = () => toggles().map(item => item.querySelector('.trail-legend-disc > .trail-node-mark')?.outerHTML)
+    const atRest = marks()
+    expect(atRest.every(Boolean)).toBe(true)
+    for (const item of toggles()) fireEvent.click(item)
+    await waitFor(() => expect(toggles().map(item => item.getAttribute('aria-pressed'))).toEqual(Array(5).fill('true')))
+    expect(toggles().every(item => item.classList.contains('btn-primary'))).toBe(true)
+    expect(marks()).toEqual(atRest)
+  })
+
   it('keeps every shape inside the 13px box the clustering maths measures', async () => {
     await show()
     const mark = nodes()[0].querySelector('.trail-node-mark')
