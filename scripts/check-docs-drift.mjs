@@ -2480,6 +2480,10 @@ const OPERATOR_PAIRS = [
       'one row saying which forge-sweep pass may run (0156). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
       'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
+    notification_dispatch_lease:
+      'one row saying which notification-dispatch pass may run (0247), as forge_sweep_lease does for ' +
+      'the forge. RLS on with no policy and nothing granted to an API role: it moves through three ' +
+      'RPCs that notification-dispatch calls as service_role',
     schema_bootstrap:
       'one row recording whether db-init reached the end of the migration chain on this boot ' +
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
@@ -5626,6 +5630,7 @@ const OPERATOR_PAIRS = [
   const ALLOWED = {
     'public.set_foreign_credential': 'the one writer every foreign credential shares',
     'public.keep_gateway_credential': 'keeps a copy of a broker password the platform issued, which is not a foreign credential',
+    'public.issue_notification_signing_key': 'generates the webhook\'s signing key, which Aber issues and shows once, so it is not a foreign credential (0248)',
   };
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const last = new Map();

@@ -23,7 +23,7 @@ vi.mock('../api', async () => {
 // read-only broker account (0218), which only an Administrator makes, an app that signs people in,
 // and a read of a service's logs (0225), which only an Administrator may make. So each is an
 // Administrator's and an Auditor's to read.
-const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Broker accounts', 'Apps', 'Service logs', 'Settings', 'Backup jobs', 'Backups']
+const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Broker accounts', 'Apps', 'Service logs', 'Notification channels', 'Settings', 'Backup jobs', 'Backups']
 
 beforeEach(() => {
   vi.clearAllMocks()

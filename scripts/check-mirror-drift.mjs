@@ -1083,6 +1083,59 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 57. How long a Grafana alert's confirmation holds (0247). grafana-alert-webhook stamps
+// last_confirmed_at on every post, and Grafana posts a firing alert again every repeat_interval
+// (policies.yaml). platform_alert_confirmation_window() allows that interval plus a margin before an
+// alert is reminded no more. A shorter window than the interval stops the reminders of every alert
+// still firing; a longer one keeps reminding about a resolve that never arrived.
+{
+  const policies = read('grafana/provisioning/alerting/policies.yaml');
+  const repeat = need(policies, /^\s*repeat_interval:\s*(\d+)h\s*$/m, 'repeat_interval in grafana/provisioning/alerting/policies.yaml');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const arm = fn && need(fn.body, /ELSE interval '(\d+) hours' \+ interval '(\d+) hours?'/,
+    `platform_alert_confirmation_window()'s Grafana arm (${fn.file})`);
+  if (repeat && arm) {
+    compare('alertConfirmationWindow', `Grafana's repeat_interval (hours) and the window's interval (${fn.file})`, repeat[1], arm[1]);
+  }
+}
+
+// 58. The Notifications vocabulary, one closed set in each place it is written (0247, 0248): the
+// severities a route may name, as notification_setting_guard() admits them, notification_severity_carried()
+// ranks them and the Settings page offers them; and the events a message may be, as the queue's CHECK
+// admits them, the delivery log labels them and the dispatcher types them. A severity offered and
+// refused fails every save; an event the log cannot name shows as its raw word.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  const dispatch = read('supabase/functions/notification-dispatch/dispatch.ts');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$$;', 'notification_setting_guard()');
+  const rank = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_severity_carried(', '$$;',
+    'notification_severity_carried()');
+  const offered = need(notifications, /export const SEVERITIES = \[([\s\S]*?)\n\]/, 'SEVERITIES in utils/notifications.js');
+  const admitted = guard && need(guard.body, /NOT \(NEW\.value #>> '\{\}'\) = ANY \(ARRAY\[([^\]]*)\]\)/,
+    `notification_setting_guard()'s severities (${guard.file})`);
+  const ranked = rank && need(rank.body, /array_position\(ARRAY\[([^\]]*)\], p_severity\)/,
+    `notification_severity_carried()'s ranking (${rank.file})`);
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+  if (offered && admitted && ranked) {
+    const js = [...offered[1].matchAll(/value: '([a-z]+)'/g)].map((m) => m[1]).join(', ');
+    compare('notificationSeverities', `the severities the page offers and the guard admits (${guard.file})`, js, words(admitted[1]));
+    compare('notificationSeverities', `the severities the page offers and the route ranks, lowest first (${rank.file})`, js, words(ranked[1]));
+  }
+
+  const check = need(SCHEMA, /CONSTRAINT notification_deliveries_event_valid\s+CHECK \(\(event = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'notification_deliveries_event_valid in the migrations');
+  const labels = need(notifications, /export const EVENT_LABELS = \{([^}]*)\}/, 'EVENT_LABELS in utils/notifications.js');
+  const typed = need(dispatch, /export type Event = ([^;]*);/, 'the Event type in notification-dispatch/dispatch.ts');
+  if (check && labels && typed) {
+    const sql = words(check[1].replace(/::text/g, ''));
+    compare('notificationEvents', 'the events the delivery log labels and the queue admits',
+      [...labels[1].matchAll(/([a-z]+):/g)].map((m) => m[1]).join(', '), sql);
+    compare('notificationEvents', 'the events the dispatcher types and the queue admits',
+      [...typed[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]).join(', '), sql);
+  }
+}
+
 // -------------------------------------------------------------------------------------------------
 // 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect row of the example metrics carries (#457):

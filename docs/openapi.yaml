@@ -2066,6 +2066,138 @@ paths:
         '404': { description: 'No alert with that id that you may read.' }
 
   # ------------------------------------------------------------ Registry ----
+  /rest/v1/rpc/notification_webhook_status:
+    post:
+      tags: [Registry]
+      summary: Whether the webhook is set up
+      description: |
+        For an Administrator: whether the webhook's address is in the vault, and when its signing
+        key was issued (`0248`). Never either value. Anybody else is told `visible: false` and
+        nothing more.
+      responses:
+        '200':
+          description: The webhook's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visible: { type: boolean }
+                  url_set: { type: boolean, nullable: true }
+                  signing_key_issued_at: { type: string, format: date-time, nullable: true }
+
+  /rest/v1/rpc/set_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Set the webhook's address
+      description: |
+        Writes the address Aber posts each alert to into the vault, through
+        `set_foreign_credential()` (`0248`). A webhook URL is a bearer secret its receiver issued,
+        so nothing reads it back. Its host must also be on `notifications.webhook_allowed_hosts`,
+        which is checked as each message is sent. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_url]
+              properties:
+                p_url: { type: string, maxLength: 2048, description: 'An http or https URL with no user name in it. Trimmed.' }
+      responses:
+        '204': { description: 'Stored.' }
+        '400': { description: 'Not an http or https URL, or one naming a user (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/clear_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Remove the webhook
+      description: |
+        Deletes the webhook's address from the vault, which stops the webhook, and drops each
+        message still waiting for it (`0248`). The signing key is kept. Administrator only.
+      responses:
+        '200':
+          description: How many waiting messages were dropped.
+          content:
+            application/json:
+              schema: { type: integer }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/issue_notification_signing_key:
+    post:
+      tags: [Registry]
+      summary: Issue or rotate the webhook's signing key, shown once
+      description: |
+        Generates the key each webhook message is signed with, `whsec_` and 32 random bytes in
+        base64 as Standard Webhooks writes one, keeps it in the vault and returns it: the only time
+        it is shown (`0248`). Issuing again rotates it, and the old key stops signing at once.
+        Writes one `SIGNING_KEY_ISSUED` row in the Audit Trail, which never holds the key.
+        Administrator only.
+      responses:
+        '200':
+          description: The key.
+          content:
+            application/json:
+              schema: { type: string, example: whsec_<base64> }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/queue_test_notification:
+    post:
+      tags: [Registry]
+      summary: Send the webhook a test
+      description: |
+        Queues an `aber.test` message to the webhook and returns its id (`0248`). The row with that
+        id in `/rest/v1/notification_deliveries` says how it went once the dispatcher has sent it;
+        a test is tried once. Keeps the newest 20 finished tests. Administrator only.
+      responses:
+        '200':
+          description: The delivery log row's id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { description: 'Not an Administrator (`42501`).' }
+        '409': { description: 'The webhook has no address, or no signing key, yet (`55000`).' }
+
+  /rest/v1/notification_deliveries:
+    get:
+      tags: [Registry]
+      summary: Read the delivery log
+      description: |
+        One row per message to one channel: an alert occurrence starting to fire, resolving or
+        reminding, or a test (`0247`). It is the queue `notification-dispatch` drains and the log
+        the Settings page shows. Every signed-in role reads it; a row about an alert is read
+        through that alert's own policy, so a row about a machine identity's alert reaches an
+        Administrator alone. No role writes it.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [pending, sent, dropped, dead] }, description: 'e.g. `eq.dead`' }
+        - { name: event, in: query, schema: { type: string, enum: [firing, resolved, reminder, test] } }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching messages.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid, description: 'Also the CloudEvents id and the webhook-id header, the same on every retry.' }
+                    alert_id: { type: string, format: uuid, nullable: true, description: 'The occurrence; null for a test.' }
+                    event: { type: string, enum: [firing, resolved, reminder, test] }
+                    channel: { type: string, enum: [webhook] }
+                    state: { type: string, enum: [pending, sent, dropped, dead] }
+                    attempts: { type: integer, description: 'Posts made. A hold is not one.' }
+                    next_attempt_at: { type: string, format: date-time }
+                    last_attempt_at: { type: string, format: date-time, nullable: true }
+                    finished_at: { type: string, format: date-time, nullable: true }
+                    response_status: { type: integer, nullable: true }
+                    last_error: { type: string, nullable: true, maxLength: 500, description: 'In the dispatcher''s words; never the address.' }
+                    requested_by: { type: string, format: uuid, nullable: true, description: 'For a test, the Administrator who sent it.' }
+                    created_at: { type: string, format: date-time }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/asset_config:
     get:
       tags: [Registry]
@@ -5788,6 +5920,62 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
+  /functions/v1/notification-dispatch:
+    post:
+      tags: [Edge Functions]
+      summary: Send what the notification queue holds (Aber's dispatcher)
+      description: |
+        **Called by the database, not by a browser.** `request_notification_dispatch()` (migration
+        `0247`) reaches this through the gateway with `pg_net` as a message is queued, and
+        `sweep_notifications()` every minute from `pg_cron` while one is due.
+
+        One pass takes each due row of `notification_deliveries`, oldest first, asks
+        `platform_alert_send_decision()` whether it still applies, and posts it to the webhook: a
+        CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers
+        `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the base64
+        HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused, a
+        redirect is a failure and is not followed, and a receiver has 10 seconds to answer. A
+        failure is retried after 30 seconds, doubling to an hour, and is dead after the tenth
+        attempt.
+
+        Authorised by the dispatch secret in the `x-dispatch-secret` header, **not** by the
+        publishable key. The database generated it and alone sends it. Every message comes from the
+        queue, never from the request.
+
+        **One pass at a time**, under `notification_dispatch_lease`: a call that finds it held does
+        nothing and answers 200 with `already_dispatching: true`.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: x-dispatch-secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Ignored; a pass takes no parameters.
+      responses:
+        '200':
+          description: >-
+            The pass completed, with how many rows were `sent`, `dropped`, `held`, `failed` (to be
+            retried) and `dead`. Or, with the body `{"already_dispatching": true}` and nothing else,
+            another pass holds the lease and this call did nothing.
+        '401':
+          description: The secret is missing or wrong.
+        '405':
+          description: Not a POST.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '502':
+          description: >-
+            The caller, the lease or the queue could not be read, and the pass stopped there.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
+        '503':
+          description: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured.
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
@@ -6441,7 +6629,8 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
+                 notification_channels]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6457,7 +6646,7 @@ components:
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
-                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN]
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN, SIGNING_KEY_ISSUED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6484,7 +6673,9 @@ components:
             from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
             written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
             `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
-            alert about its token.
+            alert about its token. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or
+            rotating the webhook's signing key, in the webhook's `notification_channels` lane,
+            written by `issue_notification_signing_key()`; the key is never in the row.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -7273,6 +7464,14 @@ components:
           nullable: true
           enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other]
         acknowledgement_note: { type: string, nullable: true, maxLength: 200, description: 'Their own words, trimmed. Required with the reason `other`.' }
+        last_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the row's writer last said it still holds (0247): `grafana-alert-webhook` stamps
+            it on every post, Grafana's repeats included. A firing row confirmed more than 13 hours
+            ago is sent no reminder. Not returned by `platform_alerts_active`.
 
     DeviceNameplate:
       type: object

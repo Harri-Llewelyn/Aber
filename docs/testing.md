@@ -323,6 +323,15 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # reads it from there.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
+# Aber's dispatcher, end to end (0247, 0248). A receiver pod of the ingestion image prints each
+# request it is sent; the webhook is pointed at it as the database owner, and what the stack held
+# is put back afterwards. A firing alert written with psql arrives signed with the Standard
+# Webhooks headers, an acknowledgement before the reminder stops it, an unacknowledged alert is
+# reminded, a resolve follows its firing message, and an address whose host is not allowed is
+# refused with nothing posted. Needs kubectl, notification-dispatch in the functions image and
+# NetworkPolicies off; skips without the keys.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,

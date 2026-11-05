@@ -106,10 +106,24 @@ CREATE INDEX IF NOT EXISTS notification_deliveries_newest
 REVOKE ALL ON TABLE public.notification_deliveries FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON TABLE public.notification_deliveries TO authenticated;
 
+-- SECURITY INVOKER, so the lookup runs under the reader's own policy on platform_alerts.
+CREATE OR REPLACE FUNCTION public.notification_delivery_is_readable(p_alert_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT p_alert_id IS NULL OR EXISTS (SELECT 1 FROM public.platform_alerts a WHERE a.id = p_alert_id);
+$$;
+
+ALTER FUNCTION public.notification_delivery_is_readable(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.notification_delivery_is_readable(uuid) FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.notification_delivery_is_readable(uuid) TO authenticated;
+
+COMMENT ON FUNCTION public.notification_delivery_is_readable(uuid) IS
+  'Whether the caller may read a delivery log row about p_alert_id: a test always, an alert when '
+  'platform_alerts'' own policy lets them read it. The log''s select policy (0247).';
+
 SELECT public.replay_policy('public.notification_deliveries', 'notification_deliveries_select_authenticated', $ddl$
-CREATE POLICY notification_deliveries_select_authenticated ON public.notification_deliveries FOR SELECT TO authenticated USING (((alert_id IS NULL) OR (EXISTS ( SELECT 1
-   FROM public.platform_alerts a
-  WHERE (a.id = notification_deliveries.alert_id)))));
+CREATE POLICY notification_deliveries_select_authenticated ON public.notification_deliveries FOR SELECT TO authenticated USING (public.notification_delivery_is_readable(alert_id));
 $ddl$);
 
 -- -------------------------------------------------------------------------------------------------

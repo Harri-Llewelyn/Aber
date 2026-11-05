@@ -123,6 +123,9 @@ export const AUDIT_TRAIL_ACTIONS = {
   // alert's lane, or a machine identity's alert in the identity's.
   ALERT_ACKNOWLEDGED:              'Alert acknowledged',
   ALERT_ACKNOWLEDGEMENT_WITHDRAWN: 'Acknowledgement withdrawn',
+  // An Administrator issuing or rotating the webhook's signing key on Settings › Notifications
+  // (0248), in the webhook's lane. The key itself is never in the row.
+  SIGNING_KEY_ISSUED:              'Signing key issued',
 };
 
 /**
@@ -159,6 +162,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // Reads of a service's log lines (0225), one lane per service, filed under security by
   // audit_domain_for()'s fail-closed default: the lines carry sign-ins and addresses.
   { kind: 'SERVICE LOGS',     table: 'service_logs',       label: 'Service logs',       domain: 'security', group: 'security' },
+  // The webhook's signing key, issued or rotated (0248), one lane per channel, filed under security
+  // by audit_domain_for()'s fail-closed default: only an Administrator issues it.
+  { kind: 'NOTIFICATION CHANNEL', table: 'notification_channels', label: 'Notification channels', domain: 'security', group: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
@@ -220,7 +226,7 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
   {
     label: 'Machine identities and credentials',
     actions: ['PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED'],
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'SIGNING_KEY_ISSUED'],
   },
   {
     label: 'Backups',
@@ -306,6 +312,8 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   // Alerts, in the alert's lane, or a machine identity's alert in the identity's.
   ['ALERT_ACKNOWLEDGED', ['platform_alerts', 'service_principals'], ['operational']],
   ['ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ['platform_alerts', 'service_principals'], ['operational']],
+  // The webhook's signing key, issued or rotated, in the webhook's lane.
+  ['SIGNING_KEY_ISSUED', ['notification_channels'], ['configuration']],
 ];
 
 /**

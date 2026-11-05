@@ -55,7 +55,7 @@ const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes
 describe('the action filter offers every action the database can record', () => {
   /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
      so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
-  it('lists every action, including the forty-five the generic trigger does not write, in groups', async () => {
+  it('lists every action, including the forty-six the generic trigger does not write, in groups', async () => {
     await show()
     const values = labels().map(l => LABEL_TO_ACTION[l])
 
@@ -71,7 +71,7 @@ describe('the action filter offers every action the database can record', () => 
       'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET',
       'APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED',
       'PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED',
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'SIGNING_KEY_ISSUED',
       'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED',
       // The reads, the legend's Read class, together.

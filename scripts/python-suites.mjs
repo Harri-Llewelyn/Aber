@@ -1395,6 +1395,16 @@ export const SUITES = {
       'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
   },
+  'supabase/functions/notification-dispatch/test_notification_dispatch.py': {
+    lanes: ['stack'],
+    why:
+      'Aber\'s dispatcher end to end (0247, 0248): a firing alert written with psql reaches a ' +
+      'receiver pod signed with the Standard Webhooks headers; an acknowledgement before the ' +
+      'reminder stops it, an unacknowledged alert is reminded, a resolve follows its firing ' +
+      'message, and an address whose host is not allowed is refused before anything is posted. ' +
+      'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
+      'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
+  },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
     why:
