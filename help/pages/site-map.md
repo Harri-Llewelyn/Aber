@@ -46,3 +46,5 @@ To acknowledge an alert:
 The alert stays in the list, after the others, with a tick. It says who acknowledged it, when, and why. It leaves the number until it resolves. If it fires again before it resolves, it stays acknowledged. Once it resolves, the next time it fires it counts again.
 
 Operators, Shopfloor Managers and Administrators can acknowledge an alert. If someone else acknowledged it first, the dialog says who and when. **Withdraw**, under an acknowledged alert, puts it back in the number. The person who acknowledged it can withdraw it, and so can a Shopfloor Manager or an Administrator. Each acknowledgement and withdrawal is recorded in the Audit Trail.
+
+To see the alerts that fired and cleared, select **Alert history** at the foot of the list. It opens the **Alerts** tab of the History page on the last 24 hours, with who acknowledged each and why. See [Alerts](history.md#alerts).

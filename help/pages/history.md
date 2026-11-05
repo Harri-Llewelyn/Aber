@@ -2,7 +2,10 @@
 
 History charts a machine's readings over a period you choose. Open it to see how a device has behaved: whether a temperature crept up overnight, when a spindle stopped, or what a reading was last Tuesday.
 
-The page has one tab, **Device**. It draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+The page has two tabs:
+
+- **Device** draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+- **Alerts** lists every alert that fired over the window, with who acknowledged it and why. See [Alerts](#alerts).
 
 Everyone who can sign in can open History. Each chart shows only what your account may read.
 
@@ -87,6 +90,8 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **The key** under a state's strip lists each state with its colour and its share of the charted time, the most first. Time after now does not count. The key names the six states with the most time; the rest are counted together as **others**.
 - **Pointing at a state's strip** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward.
 - **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched and says **No readings yet**.
+- **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
+- **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab. A state's strip is not shaded.
 
 A chart with nothing to draw says **No readings in this window, and none before it**. A metric is listed when the device declared it the last time it started, or when one of its schemas includes it.
 
@@ -126,11 +131,44 @@ An export holds at most 50,000 rows, shared across the metrics. Once it reaches 
 
 Exporting needs permission to read telemetry. Without it, **Export CSV** is off and names the roles that have it.
 
+## Alerts
+
+The **Alerts** tab lists every alert that fired over the window, newest first. An alert that started before the window and was still firing in it is listed too.
+
+1. Select **Alerts** under the page's name. It opens on **Last 24 hours**.
+2. Choose the period in the **time window**, as on the Device tab. **Zoom in** and **Zoom out** work here too.
+3. To see only some devices' or gateways' alerts, select **Asset** and tick them. It starts at **Every asset**.
+4. Type in the search box to find an alert by its name, its summary, what it is about, or who acknowledged it.
+5. Select a column's name to sort by it. Select it again to reverse the order, and a third time to go back to newest first.
+
+You can also start from the alert counter in the top bar: select **Alert history** at the foot of its list. From a device's charts, select the number of alerts in the line above them.
+
+Each row says:
+
+- **Alert**: its name, with the summary it was raised with.
+- **Severity**: **Critical**, **Warning** or **Info**.
+- **Subject**: the device or gateway it was about. Select it to open its panel on the Devices or Gateways page. An alert about the whole platform says **Platform-wide**.
+- **Started** and **Ended**: when it started and stopped firing. **Firing** means it still is.
+- **Duration**: how long it fired, or how long so far.
+- **Acknowledged**: who acknowledged it, the reason, when, and their note. A dash means nobody did. Acknowledging is done from the alert counter: see [The alert counter](site-map.md#the-alert-counter).
+
+A few things to know:
+
+- **An alert that fired again without first resolving** ends where the next one started. Its **Ended** says **(fired again)**. Point at it to see why.
+- **The list shows at most 1,000 alerts.** When more fired, the line above the list says so. Choose a shorter window or fewer assets.
+- **Alerts are kept for 90 days.** An Administrator can change that on the **Settings** page: **Alert history kept for (days)**, on the **Retention** tab. A window older than that lists none, and the page says so. Who acknowledged an alert stays in the Audit Trail after the alert is gone.
+- **Only an Administrator sees an alert about a machine identity's token.** For anyone else, an empty list says **No alert you may see fired in this window**.
+- **Refresh** and its timer work as on the Device tab.
+- **The address keeps the window, the assets and the search**, so a link you share opens the same list.
+
 ## What the states mean
 
 - **Loading readings…** means the page is reading the device's metrics. A long window takes longer.
 - **The readings could not be read** names what went wrong. Usually the database that holds the readings could not be reached. Select **Refresh** to try again.
 - **No device answers to this address** means the link names a device that no longer exists. Select **Choose another device**.
 - **This device has declared no metrics** means it has not started up since it was registered, and no schema attached to it lists any metric.
+- **Loading alerts…** means the Alerts tab is reading the alerts in the window.
+- **No alert fired in this window** means just that. With assets chosen, it says **No alert fired on the assets chosen in this window**.
+- **The alerts could not be read** names what went wrong. Select **Refresh** to try again.
 
 Nothing on this page changes anything.

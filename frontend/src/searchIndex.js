@@ -90,6 +90,7 @@ export const CARDS = [
   // Administrator only, as the tab is: buildTargets offers a card only while its tab is the viewer's.
   { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
+  { id: 'history-alerts',       ...tabCard('history', 'alerts'), keywords: ['alert history', 'past alerts', 'fired', 'resolved alerts', 'acknowledged alerts', 'acknowledgements'] },
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },

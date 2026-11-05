@@ -1699,6 +1699,22 @@ The two are on or off together, and the render fails if only one is on. So does
 - **The System page** shows Studio's row with no image recorded, as for any service the chart does
   not deploy.
 
+### From 1.8.0, alert history is kept for 90 days
+
+From 1.8.0, Aber keeps a resolved alert for 90 days, not 7. The History page's new **Alerts** tab
+lists them, with who acknowledged each and why. The alert counter's **Alert history** link opens
+that tab, in place of Grafana's alert history.
+
+- **A site at 7 days moves to 90 at the upgrade.** The upgrade cannot tell 7 chosen on purpose from
+  7 never changed, so both move. It happens once, on the first start of 1.8.0, and the Audit Trail
+  records it as a change to the setting, with no person named.
+- **Any other value is kept.** A site that chose 30 days keeps 30.
+- **To keep 7 days**, set **Alert history kept for (days)** back to 7 after the upgrade. It is on
+  the **Settings** page, on the **Retention** tab. Later restarts and upgrades leave it at 7.
+
+The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
+alert that is still firing is never removed, however old it is.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write
