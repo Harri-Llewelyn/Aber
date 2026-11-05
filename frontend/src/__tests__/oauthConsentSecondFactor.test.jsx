@@ -89,3 +89,28 @@ describe('consent with a second factor', () => {
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
   })
 })
+
+describe('consent that MFA refuses', () => {
+  const REFUSAL = { code: 403, error_code: 'mfa_required',
+    msg: 'MFA is required for this. Add an authenticator on Profile › MFA, then try again.' }
+
+  it("shows the gateway's refusal with a link to Profile › MFA, and no word of expiry", async () => {
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue(level('aal1', 'aal1'))
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify(REFUSAL), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+    render(<OAuthConsent />)
+    expect(await screen.findByRole('heading', { name: 'MFA is required' })).toBeInTheDocument()
+    expect(screen.getByText(REFUSAL.msg)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open Profile › MFA' })).toHaveAttribute('href', '/profile/mfa')
+    expect(screen.queryByText(/expire a few minutes/)).not.toBeInTheDocument()
+  })
+
+  it('keeps any other refusal as it was', async () => {
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue(level('aal1', 'aal1'))
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify({ code: 404, msg: 'authorization not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }))
+    render(<OAuthConsent />)
+    expect(await screen.findByRole('heading', { name: 'Authorization failed' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open Profile › MFA' })).not.toBeInTheDocument()
+  })
+})

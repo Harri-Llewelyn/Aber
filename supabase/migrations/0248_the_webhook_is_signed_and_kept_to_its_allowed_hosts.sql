@@ -127,6 +127,7 @@ BEGIN
     RAISE EXCEPTION 'only an Administrator may set the webhook''s address'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF char_length(v_url) > 2048 OR v_url !~ '^https?://[^\s/?#@]+(/[^\s]*)?$' THEN
     RAISE EXCEPTION 'The webhook''s address is a URL starting http:// or https://, with no spaces and no user name in it.'
       USING ERRCODE = 'invalid_parameter_value';
@@ -171,6 +172,7 @@ BEGIN
     RAISE EXCEPTION 'only an Administrator may remove the webhook'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   DELETE FROM vault.secrets WHERE name = 'notification_webhook_url';
   UPDATE public.notification_deliveries
      SET state = 'dropped', finished_at = now()
@@ -207,6 +209,7 @@ BEGIN
     RAISE EXCEPTION 'only an Administrator may issue the webhook''s signing key'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT created_at INTO v_prior FROM vault.secrets WHERE name = 'notification_webhook_signing_key';
   DELETE FROM vault.secrets WHERE name = 'notification_webhook_signing_key';
@@ -300,6 +303,7 @@ BEGIN
     RAISE EXCEPTION 'only an Administrator may send a test'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'notification_webhook_url') THEN
     RAISE EXCEPTION 'Set the webhook''s address before sending a test.'
       USING ERRCODE = 'object_not_in_prerequisite_state';

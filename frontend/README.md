@@ -830,8 +830,9 @@ factor. The screen lists the person's factors from GoTrue, takes six digits, and
 them with `challengeAndVerify()`. The `aal2` session reaches `App.jsx` through
 `onAuthStateChange`. Sign Out is on the screen. `pages/OAuthConsent.jsx` asks the same before it
 reads an authorization request, because Grafana, Node-RED, Studio and the forge sign in through
-the dashboard's session. The question is a prompt, not a gate: nothing on the server reads `aal`
-yet, and an answer that cannot be read opens the dashboard.
+the dashboard's session. The question is a prompt, not a gate, and an answer that cannot be read
+opens the dashboard. The gate is the server's, while Settings requires MFA (`0251`): the consent
+page shows the gateway's refusal with a link to Profile › MFA and no note about expiry.
 
 ### Profile, and the preferences that follow the person
 
@@ -2169,6 +2170,12 @@ passes `{ record: false }`, as a Grafana alert does.
   a failure of what was just tried, since the person is still on the form; a failure whose fix is
   elsewhere still links there. `__tests__/notificationLinks.test.js` reads every `showToast` call:
   one that is not an error passes `to`, or is in its `NO_LINK` list with the reason.
+- **A refusal for want of MFA links to Profile › MFA, from any page.** While Settings requires MFA,
+  the database, the edge functions and the gateway's consent step refuse a manager or an
+  Administrator whose session gave no code with one sentence, `MFA_REQUIRED_MESSAGE` in
+  `utils/secondFactor.js` (mirror check 60). `showToast` recognises it (`destinationOf` in
+  `hooks/useToast.js`): an error or warning carrying it, given no `to`, links to `MFA_TAB_URL`. So
+  no page recognises it itself. A form's own inline error shows the sentence as text.
 - **Every action that writes an Audit Trail row ends with a success toast** (#1316), so the bell
   lists it as well as the trail. Save Turn, Show Credential, a capture's Download, Prepare replay
   lanes and your own display name's Save each toast, as every other audited action does. It is one

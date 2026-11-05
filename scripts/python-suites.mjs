@@ -531,7 +531,8 @@ export const SUITES = {
     why:
       'Prints what has_role() and has_authority() cost per call, and the plan of a read their ' +
       "policy guards, so a change to either is measured before and after on the same database; " +
-      "and what they cost for an app's token, which holds nothing (0235). " +
+      "and what they cost for an app's token, which holds nothing (0235), and beside the MFA " +
+      'predicate a write policy adds (0251). ' +
       'Fails only on a wrong answer, never on a number.',
   },
   'supabase/migrations/test_first_administrator.py': {
@@ -1058,6 +1059,16 @@ export const SUITES = {
       'auth_pre_request() before any other arm and holds no role or permission in has_role() and ' +
       "has_authority(), so a row a role gates is closed to it; and that a token with no client_id " +
       'is served and answered as before: a false refusal here is the whole API down.',
+  },
+  'supabase/migrations/test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py': {
+    lanes: ['db'],
+    why:
+      "0251 -- that with security.require_mfa_for_managers on, every write policy and function " +
+      'that calls require_mfa() refuses an Administrator or a Shopfloor Manager at aal1 and admits ' +
+      'them at aal2, federated or with the switch off; that an Operator and a machine identity are ' +
+      "never asked; that every has_role() site naming a covered role asks or is in " +
+      'supabase/mfa-exemptions.json; and that turning it on, or granting a covered role while it is ' +
+      "on, ends the app sessions Grafana's excepted, with one SESSIONS_ENDED row per person.",
   },
   'supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py': {
     lanes: ['db'],
@@ -1693,6 +1704,17 @@ export const SUITES = {
       'A throwaway Auditor enrols a TOTP factor, signs in again at aal1 and reaches aal2 with a code ' +
       'computed here (RFC 6238), and an Administrator resets it, which leaves one MFA_RESET row and ' +
       'the session signed in. Phone and WebAuthn enrolment are refused.',
+  },
+  'supabase/test_a_second_factor_guards_what_changes_the_platform.py': {
+    lanes: ['stack'],
+    why:
+      "With MFA required, a manager's change to the platform needs a session that gave its code " +
+      '(0251), which only the running gateway, GoTrue and the edge runtime show together. A ' +
+      'throwaway Shopfloor Manager, made with the secret key, enrols a TOTP factor: the consent step ' +
+      "refuses its aal1 session on both of Node-RED's consent calls and admits its aal2 session, " +
+      "Grafana's sign-in passes at aal1, gateway-bundle refuses aal1 before it reads a gateway, and " +
+      "turning the switch on ends its Node-RED session while its Grafana session refreshes. The " +
+      'switch goes back to what it was and the person is deleted.',
   },
   'supabase/test_no_service_accepts_the_shared_secret.py': {
     lanes: ['stack'],

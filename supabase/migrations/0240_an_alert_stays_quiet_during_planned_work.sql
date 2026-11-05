@@ -310,6 +310,7 @@ BEGIN
     RAISE EXCEPTION 'Only a Shopfloor Manager or an Administrator may schedule a suppression window.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   IF p_subject_kind IS NULL OR NOT p_subject_kind = ANY (ARRAY['device', 'gateway', 'cell']) THEN
     RAISE EXCEPTION 'A window is on a device, a gateway or a cell, not %.', coalesce(quote_literal(p_subject_kind), 'NULL')
       USING ERRCODE = 'invalid_parameter_value';
@@ -414,6 +415,7 @@ BEGIN
     RAISE EXCEPTION 'Only a Shopfloor Manager or an Administrator may change a suppression window.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_window FROM public.alert_suppression_windows WHERE id = p_window_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -530,6 +532,7 @@ BEGIN
     RAISE EXCEPTION 'Only a Shopfloor Manager or an Administrator may end a suppression window.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_window FROM public.alert_suppression_windows WHERE id = p_window_id FOR UPDATE;
   IF NOT FOUND THEN

@@ -46,6 +46,7 @@ import {
   UUID_RE,
 } from "../_shared/aas/shell.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { logFailure, requestIdOf, serverError } from "../_shared/failure.ts";
@@ -189,6 +190,10 @@ export default async function handler(req: Request): Promise<Response> {
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return json({ error: "Forbidden: Insufficient privileges" }, 403);
     }
+    // Read as the caller, as every role may read the switch: the service key stays unused until the
+    // caller has passed every refusal.
+    const mfa = await secondFactorRefusal(supabaseUser, userRole, authHeader);
+    if (mfa) return json(mfa.body, mfa.status);
 
     const body = await req.json().catch(() => ({}));
     const { device_id } = body;

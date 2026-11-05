@@ -29,6 +29,7 @@ BEGIN
     RAISE EXCEPTION 'only an Administrator may set %', p_label
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
   -- An empty key cannot authenticate, and the probe would then report a configured stack.
   IF p_secret IS NULL OR btrim(p_secret) = '' THEN
     RAISE EXCEPTION '% cannot be empty', p_label

@@ -94,6 +94,21 @@ static_resources:
                         text_format_source:
                           inline_string: '{"message":"This token was issued to an app, and reaches only that app''s own routes"}'
                         content_type: application/json
+                    # The consent step's own failure, when consent-gate gave no answer or a 5xx, in GoTrue's shape
+                    # so the consent page shows it. UAEX is the flag only the ext_authz filter sets; its refusals
+                    # are consent-gate's 403s, which keep their body.
+                    - filter:
+                        and_filter:
+                          filters:
+                            - status_code_filter:
+                                comparison:
+                                  op: EQ
+                                  value: { default_value: 503, runtime_key: gateway.consent_check_status }
+                            - response_flag_filter: { flags: [UAEX] }
+                      body_format_override:
+                        text_format_source:
+                          inline_string: '{"code":503,"error_code":"consent_check_unavailable","msg":"The sign-in could not be checked. Try again in a moment."}'
+                        content_type: application/json
                 # Realtime is a WebSocket upstream.
                 upgrade_configs:
                   - upgrade_type: websocket
@@ -179,6 +194,39 @@ static_resources:
                                     tokens_per_fill: __SIGN_IN_LIMIT_TOTAL__
                                     fill_interval: 60s
                               max_dynamic_descriptors: 1000
+
+                        # The consent step: the consent page's GET of an app's sign-in request and its POST of the
+                        # approval, which GoTrue serves under this prefix and no other. The one route consent-gate
+                        # is asked on (the ext_authz filter below is off everywhere else); a plain prefix, so it
+                        # holds on any path the router sees. The rest is auth-v1-routes'.
+                        - name: auth-v1-consent-routes
+                          match: { prefix: "/auth/v1/oauth/authorizations/" }
+                          route:
+                            cluster: auth-v1
+                            prefix_rewrite: "/oauth/authorizations/"
+                          request_headers_to_add:
+                            - header: { key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%" }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          response_headers_to_add:
+                            - header: { key: cache-control, value: no-store }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              name: translate_bearer
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              check_settings: {}
+
+                        # Any other spelling of that prefix: a doubled slash, another case, an encoded slash. GoTrue
+                        # routes none of them to its consent handler (its router matches the path as sent), and the
+                        # gateway answers them itself, so none reaches GoTrue past the step above.
+                        - name: auth-v1-consent-spellings
+                          match:
+                            safe_regex: { regex: "(?i)/auth/v1/+oauth(?:/|%2f)+authorizations(?:/|%2f).*" }
+                          direct_response:
+                            status: 404
+                            body: { inline_string: "The consent endpoints are /auth/v1/oauth/authorizations/{id} and /auth/v1/oauth/authorizations/{id}/consent.\n" }
 
                         - name: auth-v1-routes
                           match: { prefix: "/auth/v1/" }
@@ -615,6 +663,34 @@ static_resources:
                                     filter: envoy.filters.http.jwt_authn
                                     path: [{ key: jwt_payload }, { key: client_id }]
                                     value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000002 } }
+
+                  # THE CONSENT STEP. While Settings requires MFA, a manager or an Administrator approves an
+                  # app's sign-in only from a session that gave its code: consent-gate reads their role, the
+                  # token's aal, the switch and the sign-in's app on every call, and lets Grafana's through.
+                  # Off here, and on for auth-v1-consent-routes alone. It fails closed: a 5xx or no answer
+                  # refuses the consent, Grafana's too, as no claim here can stand in for the check (the doors
+                  # fail open because rbac has checked one). The dashboard and open app sessions go on.
+                  - name: envoy.filters.http.ext_authz
+                    disabled: true
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: false
+                      status_on_error: { code: ServiceUnavailable }
+                      allowed_headers:
+                        patterns:
+                          - exact: authorization
+                      http_service:
+                        server_uri:
+                          uri: http://supabase-functions:9000
+                          cluster: functions-v1
+                          timeout: 3s
+                        # The edge runtime routes on the first path segment.
+                        path_prefix: /consent-gate
+                        authorization_response:
+                          allowed_client_headers:
+                            patterns:
+                              - exact: content-type
 
                   - name: envoy.filters.http.router
                     typed_config:

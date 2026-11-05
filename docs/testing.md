@@ -130,6 +130,16 @@ python supabase/test_a_token_s_use_is_recorded.py
 # Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
 # reset and a non-Administrator's are refused. The account's access is removed at the end.
 python supabase/test_a_person_can_enrol_a_second_factor.py
+# With MFA required, a change to the platform needs a session that gave its code (0251). Needs the
+# stack up, with the secret key and the Grafana and Node-RED client secrets. A throwaway Shopfloor
+# Manager, made with the secret key, enrols a TOTP factor (codes computed from its secret). With
+# security.require_mfa_for_managers on, the consent step refuses its aal1 session on both of
+# Node-RED's consent calls and admits its aal2 one, Grafana's sign-in passes at aal1, and
+# gateway-bundle refuses aal1 before it reads a gateway. Turning the switch on ends its Node-RED
+# session, won at aal1, while its Grafana session still refreshes, and writes one SESSIONS_ENDED
+# row. The switch is set back and the person deleted. Turning it on ends every covered person's app
+# sessions but Grafana's.
+python supabase/test_a_second_factor_guards_what_changes_the_platform.py
 # No service accepts a token signed with the shared secret. Needs the stack up, with the release
 # Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
 # session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
@@ -443,8 +453,9 @@ python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_user_roles_name_their_person_by_uuid.py
 # What has_role() and has_authority() cost per call (median of 5 runs of 10,000), beside the loop
 # alone, and EXPLAIN ANALYZE of a read user_roles' policy guards, and the two for an app's token
-# (0235). Printed, never asserted: run it on the same database before and after a change to either
-# function or the table they read.
+# (0235), and has_role() beside mfa_satisfied() with the MFA switch off and on, with the plan of an
+# UPDATE whose policy reads the switch once (0251). Printed, never asserted: run it on the same
+# database before and after a change to either function or the table they read.
 python supabase/migrations/test_role_checks_are_timed.py
 # The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
@@ -836,6 +847,17 @@ python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.
 # signed-in account reads is not, the gap Realtime keeps. A token with no client_id, or an empty or
 # null one, is served and answered as before. Every test rolls back.
 python supabase/migrations/test_an_app_s_token_reaches_only_its_own_routes.py
+# MFA required (0251), with request.jwt.claims at aal1, aal2 and a federated amr. The Settings row
+# is off by default and every role reads it; an Administrator turns it on from any session and off
+# only with a code. mfa_satisfied() for every role, a machine identity and no role, the switch on
+# and off. Every write policy and function that calls require_mfa() refuses an Administrator or a
+# Shopfloor Manager at aal1 while it is on (42501, detail mfa_required) and admits them otherwise;
+# an Operator and a machine identity are refused by role alone, never asked for MFA. Every has_role()
+# site naming a covered role asks, or is in supabase/mfa-exemptions.json, and a planted one is
+# caught. Turning it on ends every covered person's app sessions but Grafana's, refresh tokens with
+# them, with one SESSIONS_ENDED row each; a covered role granted while it is on ends that person's.
+# Every test rolls back.
+python supabase/migrations/test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py
 # A person's own sessions (0206). list_my_sessions() returns the caller's and nobody else's, the
 # one their token names first, a service's by its name, refreshed_at read as UTC, and no address
 # or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses

@@ -17,6 +17,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getNumericDate } from "djwt";
 import { signServiceToken } from "./sign.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 // Imported from another function's directory: this validator exists in exactly two places, the
 // frontend and that file, and CI asserts the two regexes are byte-identical by path. A third copy
@@ -85,6 +86,9 @@ export default async function handler(req: Request): Promise<Response> {
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return jsonResponse({ error: "Forbidden: Insufficient privileges" }, 403);
     }
+    // No service-role key here: the caller's client reads the switch, which every role may read.
+    const mfa = await secondFactorRefusal(supabaseUser, userRole, authHeader);
+    if (mfa) return jsonResponse(mfa.body, mfa.status);
 
     // What was asked for
     let body: { principal_id?: unknown; days?: unknown };

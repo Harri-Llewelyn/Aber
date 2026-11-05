@@ -3359,7 +3359,8 @@ policy and no write grant. `schedule_alert_suppression_window(p_subject_kind, p_
 p_starts_at, p_ends_at, p_reason)`, `change_alert_suppression_window(p_window_id, p_starts_at,
 p_ends_at, p_reason)` and `end_alert_suppression_window(p_window_id)` are `SECURITY DEFINER`. An
 Administrator or a Shopfloor Manager calls them; every other caller is `42501`, an Operator
-included, whose one direct write stays the acknowledgement. Functions rather than write policies,
+included, whose one direct write stays the acknowledgement. Each asks `require_mfa()` after its role
+check, so with MFA required a window needs a session that gave its code (`0251`). Functions rather than write policies,
 because ending a window early needs the server's clock and the name of who ended it, and because
 the audit row belongs in the subject's lane, which the generic audit trigger cannot reach.
 
@@ -3714,7 +3715,9 @@ keys and changes none of these.
 of at most 2,048 characters with no user name in it (`22023`); a credential belongs in the path or
 the query, where the receiver issued it. The Settings page enters it with `CredentialField`.
 `clear_notification_webhook_url()` removes it, which stops the webhook, and drops what was waiting
-for it. Each is the Administrator's alone (`42501`).
+for it. Each is the Administrator's alone (`42501`). Each asks `require_mfa()` after its role check,
+as `issue_notification_signing_key()` and `queue_test_notification()` do, so with MFA required the
+webhook is changed only from a session that gave its code (`0251`).
 
 **Three closed settings, in the Notifications category**, each checked by
 `notification_setting_guard()` beside the table's own type and bound CHECKs (`23514`):
@@ -3829,6 +3832,259 @@ acknowledgement's drop, keeps its volatility, `SECURITY DEFINER`, pin and grants
 about an occurrence that is gone. `test_aber_sends_each_alert_to_a_webhook.py` holds a firing
 message held inside a window and sent once it is ended early, a reminder held, and an occurrence that
 resolved inside its window sending nothing.
+
+### With MFA required, a change to the platform needs a session that gave its code (0251)
+
+From 1.7.0 a person may enrol a TOTP factor (`0216`), and nothing read `aal`. A Settings row now
+asks for one: **Require MFA to change the platform**, `security.require_mfa_for_managers`, in the
+Security category. `0002` declares it a boolean, off, readable by every role. Only an Administrator
+may change it (`system_settings_update_admin`), and each change is an Audit Trail row. While it is
+on, an Administrator or a Shopfloor Manager changes the platform only from a session that gave its
+code (`aal2`), or one another identity provider signed in (`amr` names `oauth` or `sso/saml`).
+Every other role, and every machine identity, is never asked, and no read is ever refused. A
+database setting, not a Helm value, because a policy reads it at query time and it applies to the
+next request.
+
+- **One predicate, `mfa_satisfied()`** (`0001`, `STABLE`, as the caller, `search_path` pinned):
+  true while the switch is off, for a caller who holds neither role, for an `aal2` session and for
+  a federated one. The switch is read first, so a site that never turns it on pays one index
+  lookup. `require_mfa()` is its guard: true, or `42501` (PostgREST's 403) with the sentence *MFA
+  is required for this. Add an authenticator on Profile › MFA, then try again.*, the detail
+  `mfa_required` and a hint. A guard, not a boolean, because a `USING` clause that answered false
+  would turn an UPDATE or DELETE into a silent zero rows, which the dashboard reads as success.
+- **Beside `has_role()` only.** Every write policy that admits either role is `has_role(…) AND (SELECT
+  require_mfa())`, and every function that changes the platform for them calls `PERFORM
+  public.require_mfa()` after its role check. A machine identity never satisfies `has_role()`, and
+  the predicate admits any caller without a covered role, so no machine's write can meet the guard.
+  Three schema functions, guarded by `schema:manage`, which a machine may hold, call it too: a
+  person publishes a schema through them, and a machine passes the guard as it passes everywhere.
+  `has_role()` and `has_authority()` themselves are unchanged.
+- **Cached per statement.** A policy calls the guard as `(SELECT public.require_mfa())`, an initplan
+  evaluated once per statement however many rows it reads (the plan below), as `0177` made the
+  role checks of the policies it restated.
+- **Where each is declared.** db-init replays every file on every boot, so each policy and body is
+  changed where it is stated, as `0235` changed `has_role()`'s: `0001` for the two functions, its
+  write policies and the functions whose final form it holds; each later function in its own file
+  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`); and the same line
+  in `0001`'s and `0164`'s and `0203`'s earlier copies, so no boot serves an ungated body between two
+  replays. The policies `0177` and `0204` restate (`STATED_LATER`) are all reads, so neither
+  changes. `supabase/storage-policies.sql` puts the guard in each storage write arm. `0251` holds no
+  copy of any of them.
+- **Not covered**, each with its reason in [`mfa-exemptions.json`](mfa-exemptions.json): every read;
+  a person's own sessions, picture, name and factors; an alert's acknowledgement, an Operator's
+  write too. Mirror check 59 fails on a write policy or a function that names a covered role in
+  `has_role()` and neither asks nor is listed, and on a stale entry. Check 60 holds the setting, the
+  roles, the federated methods, the sentence and Grafana's id to one value in `0001`, `0251`,
+  `_shared/secondFactor.ts`, `consent-gate` and `utils/secondFactor.js`.
+- **The edge functions** that check a role and then act with a key the policies never see ask
+  `_shared/secondFactor.ts`, the same predicate, before they act: `aas-export`, `approve-quarantine`,
+  `broker-inventory`, `broker-subscriber`, `gateway-bundle`, `gateway-credential`, `manage-people` and
+  `mint-service-token`. A function with no service-role key reads the switch as the caller, which
+  every role may read. Each answers 403 with `code: mfa_required` and the sentence in `details`.
+- **The consent step.** Every app's token is `aal1` (GoTrue's code exchange issues it with no
+  factor), so no door can read the assurance. The gateway asks `consent-gate` on
+  `/auth/v1/oauth/authorizations/` alone, where both of the consent page's calls carry the person's
+  own session, and fails closed. `oauth_authorization_client(p_authorization_id)`, `service_role`
+  only, reads the app a pending sign-in is for, so Grafana's passes at `aal1`.
+  [`docs/security-model.md`](../docs/security-model.md#mfa-required-to-change-the-platform) has the
+  whole surface.
+- **App sessions end.** `end_covered_door_sessions()` deletes the `auth.sessions` rows with an
+  `oauth_client_id` (their refresh tokens cascade) of every person holding a covered role,
+  Grafana's excepted, as `0217` and `0208` end a session. A trigger on `system_settings` runs it for
+  everyone when the switch turns on; one on `user_roles` runs it for one person given a covered role
+  from another or none while it is on. A promotion within the covered roles ends nothing: those
+  sessions were won under the switch. One `SESSIONS_ENDED` row per person, in their lane, names the
+  apps and the reason, with the Administrator who acted in `changed_by`. No new action, so no
+  Audit Trail arm. The triggers are two functions, one per table:
+  `mfa_switch_ends_door_sessions()` and `mfa_grant_ends_door_sessions()`.
+
+**Every `has_role()` policy**, final forms: 56 in the migrations (as on `45b87e43`) and 13 in
+`storage-policies.sql`. A, M, Au and O are Administrator, Shopfloor_Manager, Auditor and Operator.
+
+| Table | Policy | For | Roles | MFA term | Why |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `areas` | `areas_delete_privileged` | DELETE | A, M | yes | Removes an area |
+| `areas` | `areas_insert_privileged` | INSERT | A, M | yes | Adds an area |
+| `areas` | `areas_update_privileged` | UPDATE | A, M | yes | Changes an area |
+| `asset_config` | `asset_config_delete_privileged` | DELETE | A, M | yes | Removes a device's asset configuration |
+| `asset_config` | `asset_config_insert_privileged` | INSERT | A, M | yes | Adds a device's asset configuration |
+| `asset_config` | `asset_config_update_privileged` | UPDATE | A, M | yes | Changes a device's asset configuration |
+| `asset_exports` | `asset_exports_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `audit_trail` | `audit_trail_select_asset` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `audit_trail` | `audit_trail_select_security` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `backup_jobs` | `backup_jobs_select_administrator` | SELECT | A | no | A read, which the switch never refuses |
+| `backups` | `backups_select_administrator` | SELECT | A | no | A read, which the switch never refuses |
+| `capture_jobs` | `capture_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `captures` | `captures_delete_privileged` | DELETE | A, M | yes | Removes a stored capture |
+| `captures` | `captures_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `cells` | `cells_delete_privileged` | DELETE | A, M | yes | Removes a cell |
+| `cells` | `cells_insert_privileged` | INSERT | A, M | yes | Adds a cell |
+| `cells` | `cells_update_privileged` | UPDATE | A, M | yes | Changes a cell |
+| `change_proposals` | `change_proposals_select_own_or_approver` | SELECT | A, M | no | A read, which the switch never refuses |
+| `device_nameplate` | `device_nameplate_delete_privileged` | DELETE | A, M | yes | Removes a device's nameplate |
+| `device_nameplate` | `device_nameplate_insert_privileged` | INSERT | A, M | yes | Adds a device's nameplate |
+| `device_nameplate` | `device_nameplate_update_privileged` | UPDATE | A, M | yes | Changes a device's nameplate |
+| `device_submodels` | `device_submodels_delete_privileged` | DELETE | A, M | yes | Removes a device's schemas |
+| `device_submodels` | `device_submodels_insert_privileged` | INSERT | A, M | yes | Adds a device's schemas |
+| `device_submodels` | `device_submodels_update_privileged` | UPDATE | A, M | yes | Changes a device's schemas |
+| `devices` | `devices_delete_privileged` | DELETE | A, M | yes | Removes a device |
+| `devices` | `devices_insert_privileged` | INSERT | A, M | yes | Adds a device |
+| `devices` | `devices_update_privileged` | UPDATE | A, M | yes | Changes a device |
+| `directory_services` | `directory_services_delete_privileged` | DELETE | A, M | yes | Removes a Directory service |
+| `directory_services` | `directory_services_insert_privileged` | INSERT | A, M | yes | Adds a Directory service |
+| `directory_services` | `directory_services_update_privileged` | UPDATE | A, M | yes | Changes a Directory service |
+| `gateways` | `gateways_delete_privileged` | DELETE | A, M | yes | Removes a gateway |
+| `gateways` | `gateways_insert_privileged` | INSERT | A, M | yes | Adds a gateway |
+| `gateways` | `gateways_update_privileged` | UPDATE | A, M | yes | Changes a gateway |
+| `links` | `links_delete_privileged` | DELETE | A, M | yes | Removes an asset's link |
+| `links` | `links_insert_privileged` | INSERT | A, M | yes | Adds an asset's link |
+| `links` | `links_update_privileged` | UPDATE | A, M | yes | Changes an asset's link |
+| `machine_principals` | `machine_principals_select_admin_or_auditor` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `metric_catalog` | `metric_catalog_insert_privileged` | INSERT | A | yes | Adds a catalogued metric |
+| `metric_catalog` | `metric_catalog_update_privileged` | UPDATE | A | yes | Changes a catalogued metric |
+| `metric_groups` | `metric_groups_insert_privileged` | INSERT | A | yes | Adds a metric group |
+| `metric_groups` | `metric_groups_update_privileged` | UPDATE | A | yes | Changes a metric group |
+| `platform_alerts` | `platform_alerts_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
+| `playback_jobs` | `playback_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `playback_worker_status` | `playback_worker_status_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `principal_permissions` | `principal_permissions_select_own_or_admin` | SELECT | A | no | A read, which the switch never refuses |
+| `rebirth_requests` | `rebirth_requests_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `revoked_service_principals` | `revoked_service_principals_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `revoked_service_tokens` | `revoked_service_tokens_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `schemas` | `schemas_delete_privileged` | DELETE | A | yes | Removes a schema |
+| `schemas` | `schemas_insert_privileged` | INSERT | A | yes | Adds a schema |
+| `schemas` | `schemas_update_privileged` | UPDATE | A | yes | Changes a schema |
+| `service_token_last_use` | `service_token_last_use_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `area_plans_delete_privileged` | DELETE | A, M | yes | Removes an area plan |
+| `storage.objects` | `area_plans_insert_privileged` | INSERT | A, M | yes | Adds an area plan |
+| `storage.objects` | `area_plans_update_privileged` | UPDATE | A, M | yes | Changes an area plan |
+| `storage.objects` | `asset_3d_models_delete_privileged` | DELETE | A, M | yes | Removes a 3D model |
+| `storage.objects` | `asset_3d_models_insert_privileged` | INSERT | A, M | yes | Adds a 3D model |
+| `storage.objects` | `asset_3d_models_select_privileged` | SELECT | A, M | no | A read, which the switch never refuses |
+| `storage.objects` | `asset_3d_models_update_privileged` | UPDATE | A, M | yes | Changes a 3D model |
+| `storage.objects` | `asset_exports_delete_admin` | DELETE | A | yes | Removes an export |
+| `storage.objects` | `asset_exports_read_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `broker_captures_delete_privileged` | DELETE | A, M | yes | Removes a capture's file |
+| `storage.objects` | `broker_captures_insert_privileged` | INSERT | A, M | yes | Adds a capture's file |
+| `storage.objects` | `broker_captures_read_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `broker_captures_update_privileged` | UPDATE | A, M | yes | Changes a capture's file |
+| `system_settings` | `system_settings_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
+| `system_settings` | `system_settings_update_admin` | UPDATE | A | yes | Changes a setting, this switch among them |
+| `user_roles` | `user_roles_select_own_or_privileged` | SELECT | A, M | no | A read, which the switch never refuses |
+| `webhook_endpoints` | `webhook_endpoints_select_privileged` | SELECT | A | no | A read, which the switch never refuses |
+
+**Every function that names a covered role in `has_role()`**, final forms, and the three schema
+functions guarded by `schema:manage`. A function that asks calls `require_mfa()` after its role
+check; one that does not is in `mfa-exemptions.json` with the reason given here. Capture and
+playback acts ask through `may_manage_captures()`, and every People act through
+`check_person_act()`, so their callers need no line of their own.
+
+| Function | Final form | Asks | Why |
+| :--- | :--- | :--- | :--- |
+| `acknowledge_alert()` | `0231` | no | An Operator's write as much as a manager's: acknowledging an alert changes no platform state. |
+| `app_approvals()` | `0217` | no | A read: who allows an app. |
+| `approve_proposal()` | `0165` | yes | Applies a proposed change |
+| `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |
+| `audit_trail_user_ids_matching()` | `0203` | no | A read: the Audit Trail's search. |
+| `authorize_host_gateway_credential()` | `0196` | yes | Authorises a gateway's broker credential |
+| `backup_summary()` | `0179` | no | A read: the Backups page's figures. |
+| `cancel_backup_job()` | `0001` | yes | Cancels a backup |
+| `change_alert_suppression_window()` | `0240` | yes | Changes a suppression window |
+| `check_person_act()` | `0166` | yes | Every People act: role, access, password, email, sessions, MFA reset, approvals |
+| `clear_backup_offsite_destination()` | `0001` | yes | Removes it |
+| `clear_notification_webhook_url()` | `0248` | yes | Removes the webhook's address |
+| `cold_archive_backlog()` | `0001` | no | A read: the Cold Storage page. |
+| `cold_storage_rows()` | `0001` | no | A read: the Cold Storage page. |
+| `create_machine_principal()` | `0001` | yes | Creates a machine identity |
+| `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
+| `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
+| `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
+| `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
+| `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
+| `end_my_session()` | `0211` | no | A person's own session, in any role. |
+| `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
+| `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
+| `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
+| `historian_backup_state()` | `0001` | no | A read: the Backups page. |
+| `is_active_capture_object()` | `0184` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
+| `is_active_playback_capture()` | `0184` | no | A storage predicate the read policy calls. |
+| `is_own_avatar_object()` | `0213` | no | A person's own picture, in any role. |
+| `is_unclaimed_capture_object()` | `0190` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
+| `issue_capture_download()` | `0195` | no | A read: downloading a stored capture, which an Auditor may do too. |
+| `issue_gateway_enrollment_token()` | `0196` | yes | Mints a gateway enrolment token |
+| `issue_notification_signing_key()` | `0248` | yes | Issues or rotates the webhook's signing key |
+| `keep_gateway_credential()` | `0196` | yes | Keeps a gateway's password |
+| `list_apps()` | `0217` | no | A read: the Apps tab. |
+| `list_machine_principals()` | `0001` | no | A read: Machine identities. |
+| `list_my_app_approvals()` | `0217` | no | A read: a person's own approvals. |
+| `list_my_sessions()` | `0206` | no | A read: a person's own sessions. |
+| `list_people()` | `0166` | no | A read: People. |
+| `list_user_accounts()` | `0001` | no | A read: the accounts list. |
+| `may_decide_proposal()` | `0001` | no | A predicate: approve_proposal() and reject_proposal() call require_mfa() themselves, and list_proposer_names() reads by it. |
+| `may_manage_captures()` | `0001` | yes | Every capture and playback act, and a gateway rebirth request |
+| `notification_webhook_status()` | `0248` | no | A read: whether the webhook has an address and a signing key, never what they are. |
+| `person_session_summary()` | `0207` | no | A read: a person's drawer. |
+| `person_sessions()` | `0212` | no | A read: a person's drawer. |
+| `platform_backup_state()` | `0173` | no | A read: the Backups page. |
+| `playback_delivery_targets()` | `0183` | no | A read the playback dialog makes. |
+| `playback_stale_credentials()` | `0184` | no | A read the playback dialog makes. |
+| `publish_schema_version()` | `0165` | yes | Publishes a schema (schema:manage) |
+| `queue_test_notification()` | `0248` | yes | Sends a test to the webhook |
+| `raw_telemetry_window()` | `0001` | no | A read: the Cold Storage page. |
+| `record_broker_account_created()` | `0218` | yes | Records a read-only broker account |
+| `record_broker_account_deleted()` | `0218` | yes | Records its deletion |
+| `record_gateway_credential_issued()` | `0001` | yes | Records an issued gateway credential |
+| `record_service_logs_read()` | `0225` | no | Records a read of a service's logs: reading is never refused. |
+| `reinstate_service_principal()` | `0001` | yes | Reinstates a machine identity |
+| `reject_proposal()` | `0165` | yes | Decides a proposal |
+| `release_backup()` | `0001` | yes | Releases a kept backup |
+| `relocate_devices()` | `0165` | yes | Moves devices between cells |
+| `remove_app()` | `0217` | yes | Removes an app |
+| `request_backup()` | `0001` | yes | Takes a backup |
+| `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
+| `revoke_service_token()` | `0001` | yes | Revokes a service token |
+| `schedule_alert_suppression_window()` | `0240` | yes | Schedules a suppression window, which keeps a machine's alerts quiet |
+| `set_backup_offsite_destination()` | `0001` | yes | Sets the off-site backup destination |
+| `set_device_schemas()` | `0168` | yes | Changes a device's schemas |
+| `set_display_name()` | `0213` | yes | Names another person (your own name is yours at any assurance) |
+| `set_foreign_credential()` | `0178` | yes | Writes a credential to Vault: the archive, the backups, and each later one |
+| `set_notification_webhook_url()` | `0248` | yes | Sets where the platform's alerts are sent |
+| `set_own_picture()` | `0213` | no | A person's own picture, in any role. |
+| `show_gateway_credential()` | `0164` | no | Shows a stored gateway credential again: a read, which the switch never refuses. |
+| `withdraw_alert_acknowledgement()` | `0231` | no | The other half of acknowledging an alert, which an Operator may do too. |
+
+**What it costs.** `test_role_checks_are_timed.py` times `has_role()` alone and `has_role() AND
+mfa_satisfied()`, a write policy's two calls, in the same run, so both see one load. It was run three
+times on a freshly migrated test database, as #1194's baseline was, on a laptop shared with seven
+other sessions. `has_role()` admitting measured 20.08 / 21.07 / 49.24, against #1194's 13.83-16.95
+and #1186's 21.68, so read the difference within each run. µs per call, the median of 5 × 10,000
+calls, runs 1 / 2 / 3:
+
+| µs per call | has_role() alone | has_role() + mfa_satisfied() |
+| :--- | :--- | :--- |
+| the switch off | 21.94 / 30.64 / 55.93 | 41.57 / 53.01 / 106.31 |
+| the switch on, an `aal2` Administrator | 19.43 / 18.96 / 48.34 | 51.91 / 49.94 / 150.06 |
+
+With the switch off the predicate costs about one `has_role()`: the setting's lookup and the call.
+With it on, a covered `aal2` caller also pays the role and the claims, two to three `has_role()`s
+in all. A policy pays it once per statement, as an initplan. `EXPLAIN ANALYZE` of an UPDATE over
+10,000 areas, as an `aal2` Administrator with the switch on, shows the guard's initplan run once
+(`loops=1`) while `has_role()`, as before, is in the per-row filter. The median of 5 runs was
+707 / 665 / 1763 ms, most of it the audit trigger's 10,000 rows.
+
+The file's self-check asserts the two functions' language, volatility, that both run as their
+caller, and their pin; that `authenticated` and `service_role` may run them and `anon` may not;
+that this file's four functions are `SECURITY DEFINER` and pinned, the gate's reader
+`service_role`'s alone; that both triggers are in place; that a caller with no role is admitted
+whatever the switch says; that the owner may read GoTrue's authorizations and end its sessions;
+and that `0002` declared the row.
+`test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py` holds every gated policy and
+function at `aal1` and `aal2`, the switch on and off, a federated `amr`, an Operator and a machine
+identity, the exemption list against the live catalog with a planted policy and function caught,
+and the sessions that end with their refresh tokens. In the stack lane,
+`test_a_second_factor_guards_what_changes_the_platform.py` drives the consent step, a gated function
+and the ending of a Node-RED session with a throwaway person and a computed TOTP code, and
+`check-gateway-surface.mjs --runtime --consent` holds the gate's decisions at the live gateway.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

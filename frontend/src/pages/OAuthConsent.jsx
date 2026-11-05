@@ -3,7 +3,8 @@ import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
 import { api } from '../api'
 import { SecondFactorChallenge } from '../components/auth/SecondFactorChallenge'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-import { secondFactorDue } from '../utils/secondFactor'
+import { MFA_TAB_URL } from '../hooks/useToast'
+import { isMfaRequired, secondFactorDue } from '../utils/secondFactor'
 import { signOutOfThisBrowser } from '../utils/signOut'
 
 /**
@@ -151,6 +152,22 @@ export function OAuthConsent() {
   }
 
   if (state.status === 'error') {
+    // The gateway's consent step refuses a manager or an Administrator who has given no code
+    // while Settings requires MFA; its msg says so, and the way on is Profile › MFA.
+    if (isMfaRequired(state.message)) {
+      return shell(
+        <>
+          <h2 style={{ marginTop: 0 }}>MFA is required</h2>
+          <p>{state.message}</p>
+          <p>
+            <a className="auth-link" href={MFA_TAB_URL}>Open Profile › MFA</a>
+          </p>
+          <p style={{ fontSize: 13, opacity: 0.75 }}>
+            Once you have added one, start the sign-in again from the application.
+          </p>
+        </>
+      )
+    }
     return shell(
       <>
         <h2 style={{ marginTop: 0 }}>Authorization failed</h2>

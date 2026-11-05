@@ -4220,7 +4220,7 @@ paths:
                   data: { type: array, items: { $ref: '#/components/schemas/Device' } }
         '400': { description: 'Missing or malformed `device_id`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: insufficient privileges.' }
+        '403': { description: 'Forbidden: insufficient privileges. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
 
@@ -4315,7 +4315,7 @@ paths:
               schema: { type: string, format: binary }
         '400': { description: '`gateway_id` missing, or the gateway is Host or Third-party, not Remote.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such gateway. }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
@@ -4417,7 +4417,7 @@ paths:
                       and password on its Security tab instead.
         '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '500':
           description: >-
             The credential service is not configured for this deployment.
@@ -4529,7 +4529,7 @@ paths:
             it can sign in, does not exist, or the mint could not be recorded. In the last case no
             token is returned even though one was signed.
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '500':
           description: >-
             `JWT_KEYS` is not set, so this worker cannot sign.
@@ -4631,7 +4631,7 @@ paths:
                   factors_removed: { type: integer, description: '`reset-mfa`: how many second factors GoTrue deleted.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Requires Administrator; or your own access, password, second factor or address.' }
+        '403': { description: 'Requires Administrator; or your own access, password, second factor or address. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, a removed person, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
@@ -4789,7 +4789,7 @@ paths:
                               allow: { type: boolean }
                   read_at: { type: string, format: date-time }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '405': { description: Method not allowed. }
         '500':
           description: >-
@@ -4859,7 +4859,7 @@ paths:
                   audit_recorded: { type: boolean, description: 'False when the Audit Trail row could not be written; the act was done.' }
         '400': { description: 'Malformed request, an unknown action, a missing or malformed name or description, or a username outside the subscriber scheme.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: '`delete`: the broker holds no account by that name. Nothing was recorded.' }
         '405': { description: Method not allowed. }
         '500':
@@ -5234,7 +5234,7 @@ paths:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
+        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such device. }
         '500':
           description: |
@@ -6036,6 +6036,32 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
+  /functions/v1/consent-gate:
+    get:
+      tags: [Edge Functions]
+      summary: Whether the MFA switch lets this person approve this app's sign-in (the API listener's ext_authz step)
+      description: |
+        Called by the gateway's API listener on GoTrue's consent endpoints alone,
+        `/auth/v1/oauth/authorizations/{id}` and `…/{id}/consent`, with the original method and path
+        under `/consent-gate` and the caller's bearer. Asks GoTrue whether the session exists, then
+        reads the person's role from `user_roles`, the token's `aal` and `amr`, the Settings row
+        `security.require_mfa_for_managers` and the authorization's app, on every call.
+
+        Admits a role the switch does not cover, a session that gave its code or another identity
+        provider signed in, a switch that is off, and Grafana's sign-in. Answers in GoTrue's error
+        shape, whose `msg` the consent page shows. The listener fails closed: a 5xx or no answer
+        within 3 seconds refuses the consent. **Acts only on the caller.** Any method is accepted.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Admitted. The listener passes the request to GoTrue.
+        '401':
+          description: No bearer, or one GoTrue refuses. `error_code` is `no_authorization` or `bad_jwt`.
+        '403':
+          description: An Administrator or Shopfloor_Manager whose session gave no code, while Settings requires MFA, for an app that is not Grafana. `error_code` is `mfa_required`, and `msg` says to add an authenticator on Profile › MFA.
+        '503':
+          description: GoTrue, the role, the switch or the authorization could not be read (`error_code` `consent_check_unavailable`). The listener refuses the consent.
   /functions/v1/studio-admission:
     post:
       tags: [Edge Functions]
@@ -6347,7 +6373,11 @@ components:
     Unauthorized:
       description: Missing or invalid credentials.
     Forbidden:
-      description: Authenticated, but the role is not permitted. RLS policies fail closed.
+      description: >-
+        Authenticated, but the role is not permitted. RLS policies fail closed. While Settings
+        requires MFA, a write an Administrator or Shopfloor_Manager makes from a session that gave
+        no code is refused too: `code` 42501, `details` `mfa_required`, and a `message` that says to
+        add an authenticator on Profile › MFA.
     NotFound:
       description: |
         A row the call names does not exist: the proposal, the schema, or the asset a proposal

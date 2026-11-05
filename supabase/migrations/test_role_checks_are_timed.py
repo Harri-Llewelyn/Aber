@@ -14,7 +14,10 @@ database both times. It signs in as one person, as `authenticated`, and prints:
   * EXPLAIN ANALYZE of one RLS-guarded read whose policy calls has_role(), with the median
     execution time of RUNS runs;
   * the same checks for a token GoTrue issued to an app, which carries a client_id and holds no
-    role (0235).
+    role (0235);
+  * has_role() with mfa_satisfied() beside it, as a write policy asks (0251): with the MFA switch
+    off, and on for an aal2 session, beside has_role() alone in the same run; and EXPLAIN ANALYZE of
+    an UPDATE over WRITE_ROWS rows, whose policy reads the switch once, as an initplan.
 
 It fails only when a check gives the wrong answer. A slow database prints a bigger number.
 Every test rolls back.
@@ -75,6 +78,15 @@ APP_CASES = [
     ("has_role(), an app's token", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), False),
     ("has_authority(), an app's token", loop("public.has_authority(ARRAY['audit_trail:read'])"), False),
 ]
+
+# A write policy's two calls (0251), against has_role() alone in the same run, so both see one load.
+MFA_SETTING = "security.require_mfa_for_managers"
+GUARDED_CASES = [
+    ("has_role() alone", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])"), True),
+    ("has_role() + mfa_satisfied()", loop("public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND public.mfa_satisfied()"), True),
+]
+WRITE_ROWS = 10_000
+GUARDED_WRITE = "EXPLAIN (ANALYZE, COSTS OFF, SUMMARY ON) UPDATE public.areas SET name = name WHERE name LIKE 'timing %';"
 
 # user_roles' own policy calls has_role() beside a column comparison, so it shows both halves.
 GUARDED_READ = "SELECT user_id, role_id FROM public.user_roles"
@@ -146,6 +158,47 @@ class TheRoleChecksAreTimed(unittest.TestCase):
             self.assertEqual(answer, expected, label)
             runs = ", ".join(f"{t:.2f}" for t in per_call)
             print(f"    {label:28} {statistics.median(per_call):8.2f}   ({runs})")
+
+    def test_a_write_policy_s_mfa_term_is_timed(self):
+        for on, aal in ((False, "aal1"), (True, "aal2")):
+            self.cur.execute("RESET ROLE;")
+            self.cur.execute("UPDATE public.system_settings SET value = %s::jsonb WHERE key = %s;",
+                             ("true" if on else "false", MFA_SETTING))
+            self.cur.execute("SET ROLE authenticated;")
+            self.cur.execute(
+                "SELECT set_config('request.jwt.claims', %s, true);",
+                (json.dumps({"sub": ADMIN_ID, "role": "authenticated", "aal": aal}),),
+            )
+            print(f"\n  {CALLS} calls x {RUNS} runs, as {ADMIN_ID} at {aal}, MFA {'on' if on else 'off'}, median us per call:")
+            for label, statement, expected in GUARDED_CASES:
+                per_call, answer = self.timed(statement)
+                self.assertEqual(answer, expected, label)
+                runs = ", ".join(f"{t:.2f}" for t in per_call)
+                print(f"    {label:28} {statistics.median(per_call):8.2f}   ({runs})")
+
+    def test_a_guarded_write_reads_the_switch_once(self):
+        self.cur.execute("RESET ROLE;")
+        self.cur.execute("INSERT INTO public.areas (name) SELECT 'timing ' || n FROM generate_series(1, %s) n;",
+                         (WRITE_ROWS,))
+        self.cur.execute("UPDATE public.system_settings SET value = 'true' WHERE key = %s;", (MFA_SETTING,))
+        self.cur.execute("SET ROLE authenticated;")
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true);",
+            (json.dumps({"sub": ADMIN_ID, "role": "authenticated", "aal": "aal2"}),),
+        )
+        executions, plan = [], []
+        for _ in range(RUNS):
+            self.cur.execute(GUARDED_WRITE)
+            plan = [row[0] for row in self.cur.fetchall()]
+            executions.append(float(next(line for line in plan if line.startswith("Execution Time"))
+                                    .split(":")[1].split()[0]))
+        self.assertTrue(any("InitPlan" in line for line in plan), "the MFA term is not an initplan")
+        updated = next(line for line in plan if line.lstrip().startswith("Update on areas"))
+        self.assertIn("actual", updated)
+        print(f"\n  EXPLAIN ANALYZE of an UPDATE over {WRITE_ROWS} areas, as an aal2 Administrator with MFA on, "
+              f"median execution {statistics.median(executions):.3f} ms of {RUNS} runs. The last plan:")
+        for line in plan:
+            print(f"    {line}")
 
     def test_an_operator_is_refused_what_an_administrator_is_admitted(self):
         self.cur.execute(

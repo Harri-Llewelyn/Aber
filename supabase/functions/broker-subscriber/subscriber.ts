@@ -21,6 +21,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 
 /** "sub" and 21 lowercase hex characters, as scripts/lib/mosquitto-credentials.mjs spells it. */
 export const SUBSCRIBER_USERNAME = /^sub[0-9a-f]{21}$/;
@@ -204,6 +205,9 @@ export async function handler(req: Request): Promise<Response> {
         details: "Only an Administrator may create or delete a read-only broker account.",
       });
     }
+    // No service-role key here: the caller's client reads the switch, which every role may read.
+    const mfa = await secondFactorRefusal(caller, "Administrator", authHeader);
+    if (mfa) return json(mfa.status, mfa.body);
 
     let body: Record<string, unknown>;
     try {

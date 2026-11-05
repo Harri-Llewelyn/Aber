@@ -35,6 +35,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to mint a gateway broker credential'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -88,6 +89,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to keep a gateway credential'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -149,6 +151,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to issue a gateway enrolment token'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   -- Bounded, because the TTL arrives from a client: a day at most.
   IF p_ttl_minutes IS NULL OR p_ttl_minutes < 1 OR p_ttl_minutes > 1440 THEN

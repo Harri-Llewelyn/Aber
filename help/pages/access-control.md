@@ -50,6 +50,8 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Reset MFA** asks you to confirm. Then it removes every authenticator the person has added for [MFA](../guides/glossary.md#mfa-multi-factor-authentication), so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
 - Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new authenticator on their **Profile** page's **MFA** tab.
 - Each reset is recorded in the Audit Trail, with how many authenticators it removed. You cannot reset your own here: remove your authenticators on your **Profile** page's **MFA** tab.
+- **While Settings requires MFA**, every change on this page needs it: adding a person, a role, a password, ending sessions, Reset MFA, an app, a machine identity or a broker account. Add an authenticator on your **Profile** page first. Reading the page does not need it.
+- Giving someone the Administrator or Shopfloor Manager role while MFA is required signs them out of Node-RED, Studio and the forge. Their next sign-in there asks for MFA.
 - **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as the [security model](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.

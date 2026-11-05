@@ -25,6 +25,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 // The validator CI keeps byte-identical with the frontend's; see mint-service-token.
 import { isUuid } from "../approve-quarantine/isUuid.ts";
@@ -445,6 +446,9 @@ export async function handler(req: Request): Promise<Response> {
         details: "Only an Administrator may add people, or change their access, password or email address.",
       });
     }
+    // Reset MFA among them: an Administrator who has given their own code resets someone else's.
+    const mfa = await secondFactorRefusal(serviceRoleClient(supabaseUrl, serviceKey), "Administrator", authHeader);
+    if (mfa) return json(mfa.status, mfa.body);
 
     let body: Record<string, unknown>;
     try {

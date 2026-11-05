@@ -124,6 +124,7 @@ export const SETTINGS_TABS = [
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
   { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
+  { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
 ]
 
@@ -139,7 +140,7 @@ export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
   { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them. Ending one stops its access at once.' },
-  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: the authenticator apps that give a code after your password. Optional for every role.' },
+  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: apps that give a code after your password. Settings can require one of managers and Administrators.' },
   { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you. Revoking one signs it out.' },
 ]
 

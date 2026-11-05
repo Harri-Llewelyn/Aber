@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { isUuid } from "./isUuid.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
@@ -58,6 +59,8 @@ export default async function handler(req: Request): Promise<Response> {
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return jsonResponse({ error: "Forbidden: Insufficient privileges" }, 403);
     }
+    const mfa = await secondFactorRefusal(serviceRoleClient(supabaseUrl, supabaseServiceRoleKey), userRole, authHeader);
+    if (mfa) return jsonResponse(mfa.body, mfa.status);
 
 
     const {

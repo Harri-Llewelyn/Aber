@@ -170,6 +170,22 @@ CREATE TABLE IF NOT EXISTS auth.oauth_consents (
 ALTER TABLE auth.oauth_consents OWNER TO supabase_auth_admin;
 GRANT ALL ON auth.oauth_consents TO postgres;
 
+-- `auth.oauth_authorizations` is GoTrue's pending sign-in to an app, named by `authorization_id` in
+-- the consent page's calls. The columns the consent gate's reader (0251) needs and a suite writes,
+-- with GoTrue's types; nullable or defaulted where GoTrue's are not, so a row needs only its ids.
+CREATE TABLE IF NOT EXISTS auth.oauth_authorizations (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  authorization_id text NOT NULL UNIQUE,
+  client_id        uuid NOT NULL REFERENCES auth.oauth_clients (id) ON DELETE CASCADE,
+  user_id          uuid REFERENCES auth.users (id) ON DELETE CASCADE,
+  redirect_uri     text NOT NULL DEFAULT '',
+  scope            text NOT NULL DEFAULT '',
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  expires_at       timestamptz NOT NULL DEFAULT (now() + interval '3 minutes')
+);
+ALTER TABLE auth.oauth_authorizations OWNER TO supabase_auth_admin;
+GRANT ALL ON auth.oauth_authorizations TO postgres;
+
 -- A suite makes GoTrue's own writes (a person's approval on the consent page, their revoke, the
 -- admin API's registration) as GoTrue's role, inside its own transaction: `postgres` may SET ROLE
 -- to it, and inherits none of its privileges.

@@ -1,5 +1,17 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { GRAFANA_URL } from '../constants'
+import { tabUrl } from '../routes'
+import { isMfaRequired } from '../utils/secondFactor'
+
+/** Where a refusal by the MFA switch links: the tab where a person adds an authenticator. */
+export const MFA_TAB_URL = tabUrl('profile', 'mfa')
+
+/**
+ * A message's link: the one it was given, or Profile › MFA for a failure that is the MFA switch's
+ * refusal, whichever write or function it came from, so no page has to recognise it itself.
+ */
+export const destinationOf = (msg, type, to) =>
+  to ?? ((type === 'error' || type === 'warning') && isMfaRequired(msg) ? MFA_TAB_URL : undefined)
 
 /**
  * The toast types, which are severity: how long a toast stays and which live region reads it out
@@ -90,7 +102,8 @@ export function clearStoredHistory() {
  * false }`: its toast shows, and the alert counter, not the history, keeps it. `options.group` is
  * needed only where the type's group is wrong. `options.to` is where the message is about, as
  * text: a path from routes.js or a Grafana URL, which makes the toast's message and its row in the
- * history a link (see Toast). One that fails isSafeDestination is ignored. Every callback is
+ * history a link (see Toast). One that fails isSafeDestination is ignored. An error or warning
+ * that is the MFA switch's refusal and names nowhere links to Profile › MFA. Every callback is
  * stable, so passing them down re-renders nothing.
  */
 export function useToast() {
@@ -104,12 +117,14 @@ export function useToast() {
 
   const showToast = useCallback((msg, type = 'success', { group, to, record = true } = {}) => {
     const known = TOAST_TYPES.includes(type) ? type : 'info'
+    const text = msg == null ? '' : String(msg)
+    const destination = destinationOf(text, known, to)
     const entry = {
       id: nextId.current++,
-      msg: msg == null ? '' : String(msg),
+      msg: text,
       type: known,
       group: groupOf({ type: known, group }),
-      ...(isSafeDestination(to) ? { to } : {}),
+      ...(isSafeDestination(destination) ? { to: destination } : {}),
       at: Date.now()
     }
     const same = (e) => e.msg === entry.msg && e.type === entry.type && e.group === entry.group && e.to === entry.to
