@@ -137,7 +137,7 @@ export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
   { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them. Ending one stops its access at once.' },
-  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: the authenticator apps that give a code after your password. While Settings requires it, managers and Administrators need one to change the platform.' },
+  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: apps that give a code after your password. Settings can require one of managers and Administrators.' },
   { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you. Revoking one signs it out.' },
 ]
 
