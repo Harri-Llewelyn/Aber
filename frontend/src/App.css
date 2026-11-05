@@ -5895,14 +5895,15 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
 }
 
-/* The row above the charts: Expand all or Collapse all at its start, as .trail-header has it, then
-   the line saying what is shown. */
+/* The row above the charts and Overview's lanes: Expand all or Collapse all at its start, as
+   .trail-header has it, then the line saying what is shown. The same room above and below as
+   .trail-header, so the three pages' rows read alike; what follows it adds none of its own. */
 .history-header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 16px;
-  padding: 8px var(--inset) 0;
+  padding: 10px var(--inset);
 }
 .history-meta {
   margin: 0;
@@ -6035,7 +6036,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
    Vocabulary page's sections are drawn. */
-.history-groups { display: flex; flex-direction: column; min-width: 0; padding-top: 12px; }
+.history-groups { display: flex; flex-direction: column; min-width: 0; }
 .history-group { min-width: 0; }
 .history-group-head {
   background: var(--bg-base);
