@@ -9,6 +9,11 @@
  * and no rule reads what it could not parse, so a finding there would pass unseen. UNPARSED below
  * names the exceptions, with their reasons.
  *
+ * So does a tracked file Semgrep never read. What the scan leaves out is .semgrepignore's list,
+ * which replaces Semgrep's own (that one leaves out every test/ directory), and every other tracked
+ * file must be in the report's paths.scanned. The run passes --max-target-bytes 0, no size limit:
+ * past its default of 1 MB, Semgrep drops a file from the scan and reports nothing.
+ *
  *   node scripts/scan-source.mjs
  *
  * Interim until the repository is public, when CodeQL's default setup is free (#387). Needs Docker
@@ -16,12 +21,13 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const IMAGE = 'semgrep/semgrep:1.140.0'
+export const IGNORE_FILE = '.semgrepignore'
 
 // Semgrep's error types for a file, or a stretch of one, that no parser read.
 const PARSE_ERRORS = new Set(['Lexical error', 'Syntax error', 'Other syntax error', 'AST builder error', 'PartialParsing'])
@@ -80,18 +86,59 @@ export function parseFailures (errors, tracked, excused = UNPARSED) {
   }
 }
 
+/**
+ * An ignore file's patterns as a test of a path: true when the file leaves the path out. Only the
+ * part of gitignore's syntax that Semgrep and this test read the same way is accepted: `*` and `?`
+ * within a name, a `/` at the start or in the middle to match from the root, and a trailing `/`
+ * for a directory. Anything else throws, rather than be read differently from Semgrep.
+ */
+export function ignoreRules (text) {
+  const rules = text.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => {
+    if (/[\s!\\[\]]|\*\*|^:/.test(line)) throw new Error(`${IGNORE_FILE}: "${line}" uses syntax this check does not read`)
+    const dirOnly = line.endsWith('/')
+    const body = dirOnly ? line.slice(0, -1) : line
+    const glob = [...body.replace(/^\//, '')]
+      .map((c) => (c === '*' ? '[^/]*' : c === '?' ? '[^/]' : c.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&'))).join('')
+    return { re: new RegExp(`^${glob}$`), anchored: body.includes('/'), dirOnly }
+  })
+  return (path) => {
+    const parts = path.split('/')
+    return rules.some(({ re, anchored, dirOnly }) => parts.some((name, i) =>
+      !(dirOnly && i === parts.length - 1) && re.test(anchored ? parts.slice(0, i + 1).join('/') : name)))
+  }
+}
+
+/**
+ * The tracked files the scan did not read as its ignore list says. `missing`: outside the list
+ * and not in the report's paths.scanned, which Semgrep does without an error (a size limit, an
+ * ignore list of its own). `ignoredButRead`: left out by the list as `ignored` reads it, yet read,
+ * so this test and Semgrep read the list differently. `tracked` holds only files on disk.
+ */
+export function unscanned (tracked, scanned, ignored) {
+  const read = new Set(scanned)
+  const files = [...tracked].sort()
+  return {
+    missing: files.filter((p) => !ignored(p) && !read.has(p)),
+    ignoredButRead: files.filter((p) => ignored(p) && read.has(p)),
+  }
+}
+
 function main () {
+  // Read here for the check after the run, and by Semgrep from /src for the run: no --exclude, so
+  // the file is the one list. Without it Semgrep would apply its own.
+  if (!existsSync(join(REPO, IGNORE_FILE))) {
+    console.error(`${IGNORE_FILE} is missing, and without it Semgrep leaves out every test/ directory.`)
+    process.exit(2)
+  }
+  const ignored = ignoreRules(readFileSync(join(REPO, IGNORE_FILE), 'utf8'))
+
   // The checkout, walked rather than listed through git: a worktree's .git names a host path the
   // container cannot resolve, and Semgrep then scans nothing and reports success. No time limit per
   // rule: check-docs-drift.mjs takes some taint rules past the default 5 s, and three rules timing
   // out on a file skip it for every rule.
   const r = spawnSync('docker', ['run', '--rm', '-v', `${REPO.replace(/\\/g, '/')}:/src:ro`, '-w', '/src', IMAGE,
     'semgrep', 'scan', '--config', 'p/default', '--config', 'p/security-audit', '--metrics', 'off',
-    '--no-git-ignore', '--json', '--quiet', '--timeout', '0',
-    '--exclude', 'node_modules', '--exclude', '.cache', '--exclude', '*.generated.ts',
-    '--exclude', 'coverage', '--exclude', 'dist',
-    // Go templates, which no YAML parser reads; the rendered chart is scanned by scan-config.mjs.
-    '--exclude', 'deploy/helm/aber/templates'],
+    '--no-git-ignore', '--json', '--quiet', '--timeout', '0', '--max-target-bytes', '0'],
   { encoding: 'utf8', maxBuffer: 1 << 28, env: { ...process.env, MSYS_NO_PATHCONV: '1' } })
   let report
   try { report = JSON.parse(r.stdout) } catch {
@@ -133,10 +180,26 @@ function main () {
   for (const e of report.errors.filter((e) => e.path && !PARSE_ERRORS.has(Array.isArray(e.type) ? e.type[0] : e.type))) {
     console.log(`  note: ${e.type} on ${e.path}${e.rule_id ? ` (${e.rule_id.split('.').pop()})` : ''}`)
   }
+
+  // Every tracked file on disk, against what Semgrep read. One deleted from the checkout and not
+  // yet from git is not there to read.
+  const { missing, ignoredButRead } = tracked
+    ? unscanned([...tracked].filter((p) => existsSync(join(REPO, p))), report.paths.scanned, ignored)
+    : { missing: null, ignoredButRead: [] }
+  if (!missing) console.log('  git could not list the tracked files, so nothing shows Semgrep read them all')
+  for (const p of missing ?? []) console.log(`  UNSCANNED ${p}`)
+  if (missing?.length) {
+    console.log(`        tracked and outside ${IGNORE_FILE}, yet Semgrep read none of these and said nothing:`
+      + ` find why, or add them to ${IGNORE_FILE} with the reason`)
+  }
+  for (const p of ignoredButRead) {
+    console.log(`  READ ANYWAY ${p}\n        ${IGNORE_FILE} leaves it out, yet Semgrep read it: this script reads the file differently`)
+  }
   const partial = parseFailures(report.errors, tracked, {}).failing.length
-  console.log(`\n${scanned} files, ${partial + untracked.length} not wholly parsed (${partial - failing.length} accepted), `
+  console.log(`\n${scanned} files, ${missing ? missing.length : 'unknown'} tracked not read, `
+    + `${partial + untracked.length} not wholly parsed (${partial - failing.length} accepted), `
     + `${findings.length} findings: ${findings.length - fresh.length} reviewed, ${fresh.length} new.`)
-  process.exit(fresh.length || failing.length ? 1 : 0)
+  process.exit(fresh.length || failing.length || !missing || missing.length || ignoredButRead.length ? 1 : 0)
 }
 
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
