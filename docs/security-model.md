@@ -371,6 +371,21 @@ holds their client ids to the apps the stack registers and their functions to th
 **Revisit when** an app that is not Aber's is given more than a sign-in. What such an app may reach
 is then a grant an Administrator chooses for that app, designed once with the MCP clients' sign-in.
 
+## An alert that leaves the site
+
+**Aber posts an alert to one webhook, and only where an Administrator has said it may** (`0247`,
+`0248`). The address is a foreign credential in the vault, and its host must be on
+`notifications.webhook_allowed_hosts`, an Administrator-only setting matched exactly, or the message
+is refused before it is posted. The post follows no redirect, so a receiver cannot send it anywhere
+the list does not name. Each message is signed with an HMAC-SHA256 key Aber generates and shows once
+(the Standard Webhooks headers), so a receiver can tell it came from this site, unaltered. The
+dispatcher runs as the service role, past RLS, so the database applies each row's visibility
+itself: **no alert about a machine identity's token ever leaves**, because only an Administrator may
+read one and a webhook is read by whoever the receiver lets in. The dispatcher itself answers only
+the database, which proves itself with a secret it generated. **Revisit when** a second channel can
+reach named roles: email (#325 part 2) could carry a machine identity's alert to Administrators
+alone.
+
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
 live below.
