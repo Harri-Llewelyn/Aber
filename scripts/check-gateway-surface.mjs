@@ -6,24 +6,32 @@
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
  * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to the substituter, every
  * API route has a row in EXPECTED, each exemption sits above the gate it is carved out of, and the
- * API listener keeps its sign-in limit, response headers and access log, and admits an app's token
- * on /auth/v1/ and APP_ROUTES alone. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
+ * API listener keeps its sign-in limit, response headers and access log, admits an app's token
+ * on /auth/v1/ and APP_ROUTES alone, and asks consent-gate on GoTrue's consent endpoints alone,
+ * failing closed. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
  * gated routes refused before their upstream and open ones through, the response headers present,
- * and a burst of password grants from one client address refused with 429 while another address
- * and a token refresh pass. The burst names its addresses in X-Forwarded-For, which the gateway
- * trusts from a direct caller only: run it against a port-forward. `--authenticated`: extends --runtime with
+ * a burst of password grants from one client address refused with 429 while another address
+ * and a token refresh pass, and every other spelling of the consent prefix answered by the gateway
+ * itself. The burst names its addresses in X-Forwarded-For, which the gateway trusts from a
+ * direct caller only: run it against a port-forward. `--authenticated`: extends --runtime with
  * a credentialled pass, presenting a valid key by header and by query and an unregistered key,
  * and asserting that on a route which hides credentials the header and query forms are
  * indistinguishable upstream, that a token naming an app which verifies against no key still
  * reaches its upstream, and that GoTrue refuses dynamic OAuth client registration to the
- * publishable key. Both modes share EXPECTED so two inventories cannot drift.
+ * publishable key. `--consent`: extends --runtime with the consent step's decisions, for two
+ * throwaway people it makes with the secret key: a Shopfloor Manager at aal1 refused on both
+ * consent calls while MFA is required, and admitted for Grafana and once it is not; an Operator
+ * admitted. It turns security.require_mfa_for_managers on and back to what it found, which ends
+ * every covered person's app sessions but Grafana's, and deletes both people. Every mode shares
+ * EXPECTED so two inventories cannot drift.
  *
  * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
- * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY). The base URL is the first non-flag
- * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
- * runtime modes use `node:http`; see probeOnce.
+ * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY) | --runtime --consent [baseUrl] (needs
+ * SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY). The base URL is the first non-flag argument,
+ * or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the runtime modes
+ * use `node:http`; see probeOnce.
  */
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -60,6 +68,18 @@ const EXPECTED = [
   { service: 'auth-v1', route: 'auth-v1-limited-routes', paths: ['/auth/v1/token', '/auth/v1/recover'],
     strip: true, auth: 'open', exemption: 'sign-in',
     probe: null, marker: null, unprobeable: 'POST only; the sign-in limit pass sends to it' },
+
+  // GoTrue's consent endpoints, behind consent-gate (assertion 8). Open as sign-in is, so the
+  // evidence is the gate's own answer to no bearer, which GoTrue never words this way.
+  { service: 'auth-v1', route: 'auth-v1-consent-routes', paths: ['/auth/v1/oauth/authorizations/'], strip: true,
+    auth: 'open', exemption: 'sign-in',
+    probe: '/auth/v1/oauth/authorizations/gateway-surface-probe', marker: '"msg":"Sign in to the dashboard first' },
+
+  // A refusal, not a route to an upstream: every other spelling of that prefix, answered 404 by the
+  // gateway after the key check. The consent-spellings pass of --runtime sends them.
+  { service: 'auth-v1', route: 'auth-v1-consent-spellings', paths: ['/auth/v1/'], strip: false,
+    auth: 'refused', probe: null, marker: null,
+    unprobeable: 'answers other spellings of the consent prefix only; the consent-spellings pass sends them' },
 
   { service: 'auth-v1', route: 'auth-v1-routes', paths: ['/auth/v1/'], strip: true,
     auth: 'open', exemption: 'sign-in',
@@ -176,6 +196,28 @@ const APP_ROUTES = {
 /** The gateway's answer to an app's token off its own routes; clients and this script read it. */
 const APP_REFUSAL = '{"message":"This token was issued to an app, and reaches only that app\'s own routes"}';
 
+/**
+ * The consent step: GoTrue's consent endpoints, the one route the gateway asks consent-gate on.
+ * Its refusal is GoTrue's error shape with MFA_REFUSAL_CODE, pointing to Profile › MFA; its 401
+ * to no bearer carries CONSENT_NO_BEARER. Every other spelling of the prefix is the gateway's own
+ * 404. GoTrue's router matches the path as sent, case-sensitively and with no slash cleaning or
+ * decoding of an encoded slash, so it would answer each of these with its own 404, never with its
+ * consent handler.
+ */
+const CONSENT_PREFIX = '/auth/v1/oauth/authorizations/';
+const CONSENT_NO_BEARER = '"msg":"Sign in to the dashboard first';
+const CONSENT_SPELLING_BODY = 'The consent endpoints are';
+const MFA_REFUSAL_CODE = 'mfa_required';
+const CONSENT_SPELLINGS = [
+  { name: 'a doubled slash', path: '/auth/v1//oauth/authorizations/gateway-surface-probe' },
+  { name: 'an upper-case segment', path: '/auth/v1/OAUTH/authorizations/gateway-surface-probe' },
+  { name: 'an upper-case prefix', path: '/AUTH/v1/oauth/authorizations/gateway-surface-probe' },
+  { name: 'an encoded slash after authorizations', path: '/auth/v1/oauth/authorizations%2Fgateway-surface-probe' },
+  { name: 'an encoded slash before authorizations', path: '/auth/v1/oauth%2Fauthorizations/gateway-surface-probe' },
+];
+/** Paths the spellings route must leave to the routes after it. */
+const NOT_CONSENT_SPELLINGS = ['/auth/v1/health', '/auth/v1/oauth/authorize', '/auth/v1/oauth/token'];
+
 // Runtime mode: `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`. What survives a
 // gateway swap is the observable posture of each route, so the inventory above is shared. The
 // discriminator is whether the request reached the upstream, not the status code: an open route may
@@ -187,6 +229,8 @@ const APP_REFUSAL = '{"message":"This token was issued to an app, and reaches on
 const RUNTIME = process.argv.includes('--runtime');
 /** Extends --runtime with the credentialled pass. See the block at the end of that mode. */
 const AUTHENTICATED = process.argv.includes('--authenticated');
+/** Extends --runtime with the consent step's decisions. See the block at the end of that mode. */
+const CONSENT = process.argv.includes('--consent');
 
 if (RUNTIME) {
   // The first non-flag argument, not whatever follows --runtime, so `--runtime <url>
@@ -406,7 +450,51 @@ if (RUNTIME) {
     }
   }
 
+  // The consent step. With no bearer, consent-gate answers its own 401, so the gateway asked it; an
+  // answer of its own carries no x-envoy-upstream-service-time, which only an upstream's has. Each
+  // other spelling of the prefix is the gateway's 404, after the key check, which a run without the
+  // publishable key meets first. CONSENT_SPELLINGS says what GoTrue would do with each.
+  let consentKeyless = false;
+  {
+    const key = process.env.SUPABASE_PUBLISHABLE_KEY || '';
+    consentKeyless = !key;
+    const withKey = key ? { apikey: key } : {};
+    const own = (r) => !r.error && !r.headers['x-envoy-upstream-service-time'];
+    const before = runtimeProblems.length;
+    const gate = await probeOnce(`${base}${CONSENT_PREFIX}gateway-surface-${randomBytes(4).toString('hex')}`, withKey);
+    if (gate.error) {
+      runtimeProblems.push(`the consent route could not be reached -- ${gate.error}`);
+    } else if (gate.status !== 401 || !gate.body.includes(CONSENT_NO_BEARER) || !own(gate)) {
+      runtimeProblems.push(
+        `${CONSENT_PREFIX}<id> with no bearer answered HTTP ${gate.status} (${gate.body.slice(0, 120)}), not consent-gate's `
+        + '401 from the gateway itself. The consent step is not asked, and an app\'s sign-in is approved whatever MFA requires.'
+      );
+    }
+    for (const s of CONSENT_SPELLINGS) {
+      const r = await probeOnce(`${base}${s.path}`, withKey);
+      if (r.error) {
+        runtimeProblems.push(`${s.path} (${s.name}): ${r.error}`);
+      } else if (!own(r)) {
+        runtimeProblems.push(`${s.path} (${s.name}) reached an upstream (HTTP ${r.status}): another spelling of the consent prefix passes the gateway unasked.`);
+      } else if (key ? r.status !== 404 || !r.body.includes(CONSENT_SPELLING_BODY) : r.status !== 401) {
+        runtimeProblems.push(
+          `${s.path} (${s.name}) answered HTTP ${r.status} (${r.body.slice(0, 120)}), not the gateway's `
+          + `${key ? '404 for another spelling of the consent prefix' : '401 from the key check'}.`
+        );
+      }
+    }
+    if (runtimeProblems.length === before) {
+      runtimeOk.push(
+        `the consent route asks consent-gate, and ${CONSENT_SPELLINGS.length} other spellings of its prefix are `
+        + `the gateway's own ${key ? '404' : '401 (the key check, as no publishable key was given)'}`
+      );
+    }
+  }
+
   for (const line of runtimeOk) console.log(`  ok   ${line}`);
+  if (consentKeyless) {
+    console.log('  --   consent spellings: set SUPABASE_PUBLISHABLE_KEY to see each answered 404 past the key check');
+  }
   for (const row of unprobeable) {
     console.log(`  --   ${row.route}: declared ${row.auth}, ${row.unprobeable || 'not probeable over plain HTTP'}`);
   }
@@ -660,6 +748,165 @@ if (RUNTIME) {
     );
   }
 
+  // Consent mode: `--runtime --consent`. What consent-gate decides, for two throwaway people the
+  // secret key makes: a Shopfloor Manager and an Operator, each signed in with a password (aal1,
+  // with no factor). Each sign-in it starts is denied, so nothing is approved. The switch goes back
+  // to the value it found, and both people are deleted, whatever failed.
+  if (CONSENT) {
+    const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
+    const secretKey = process.env.SUPABASE_SECRET_KEY || '';
+    if (!anonKey || !secretKey) {
+      console.error(
+        '\n--consent needs SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY: the secret key makes the two\n'
+        + 'people and turns the switch, and nothing else here can. Refusing rather than skipping.\n'
+      );
+      process.exit(1);
+    }
+
+    const GRAFANA = 'c0ffee00-0000-4000-8000-000000000001';
+    const NODE_RED = 'c0ffee00-0000-4000-8000-000000000002';
+    const SWITCH = '/rest/v1/system_settings?key=eq.security.require_mfa_for_managers';
+    const asService = { apikey: secretKey, Authorization: `Bearer ${secretKey}` };
+    const consentProblems = [];
+    const consentOk = [];
+    const parsed = (r) => { try { return JSON.parse(r.body); } catch { return null; } };
+    const send = (path, headers, method = 'GET', payload) => probeOnce(
+      `${base}${path}`,
+      payload === undefined ? headers : { ...headers, 'Content-Type': 'application/json' },
+      { method, body: payload === undefined ? null : JSON.stringify(payload) },
+    );
+    const asPerson = (token) => ({ apikey: anonKey, Authorization: `Bearer ${token}` });
+    const details = (id, token) => send(`${CONSENT_PREFIX}${id}`, asPerson(token));
+    const deny = (id, token) => send(`${CONSENT_PREFIX}${id}/consent`, asPerson(token), 'POST', { action: 'deny' });
+    const refusedForMfa = (r) => r.status === 403 && parsed(r)?.error_code === MFA_REFUSAL_CODE
+      && String(parsed(r)?.msg || '').includes('Profile › MFA') && !r.headers['x-envoy-upstream-service-time'];
+    const passedGate = (r) => !r.error && parsed(r)?.error_code !== MFA_REFUSAL_CODE
+      && Boolean(r.headers['x-envoy-upstream-service-time']);
+    const said = (r) => (r.error ? r.error : `HTTP ${r.status}: ${r.body.slice(0, 160)}`);
+
+    const read = await send(`${SWITCH}&select=value`, asService);
+    const found = parsed(read);
+    if (read.status !== 200 || !Array.isArray(found) || found.length !== 1) {
+      console.error(`\nThe switch security.require_mfa_for_managers could not be read (${said(read)}).\n`);
+      process.exit(1);
+    }
+    const wasOn = found[0].value === true;
+    const setSwitch = async (on) => {
+      const r = await send(SWITCH, { ...asService, Prefer: 'return=representation' }, 'PATCH', { value: on });
+      if (r.status !== 200 || parsed(r)?.[0]?.value !== on) throw new Error(`the switch could not be turned ${on ? 'on' : 'off'} (${said(r)})`);
+    };
+
+    // The sign-in limit is shared with the burst above: a 429 from the gateway is waited out.
+    const signIn = async (email, password) => {
+      for (const wait of [0, 2, 4, 8, 16, 30]) {
+        if (wait) await new Promise((done) => setTimeout(done, wait * 1000));
+        const r = await send('/auth/v1/token?grant_type=password', { apikey: anonKey }, 'POST', { email, password });
+        if (r.status === 429) continue;
+        if (r.status !== 200 || !parsed(r)?.access_token) throw new Error(`${email} could not sign in (${said(r)})`);
+        return parsed(r).access_token;
+      }
+      throw new Error(`${email} could not sign in: the sign-in limit refused every attempt for a minute`);
+    };
+
+    const people = [];
+    const person = async (role, roles) => {
+      const email = `gateway-consent-${randomBytes(6).toString('hex')}@aber.local`;
+      const password = randomBytes(24).toString('base64url');
+      const made = await send('/auth/v1/admin/users', asService, 'POST', { email, password, email_confirm: true });
+      if (made.status !== 200 || !parsed(made)?.id) throw new Error(`GoTrue's admin API did not make ${email} (${said(made)})`);
+      people.push({ id: parsed(made).id, email });
+      const roleId = roles.find((r) => r.name === role)?.id;
+      const granted = await send('/rest/v1/user_roles', { ...asService, Prefer: 'return=minimal' }, 'POST',
+        { user_id: parsed(made).id, role_id: roleId });
+      if (granted.status !== 201) throw new Error(`${email} was not given ${role} (${said(granted)})`);
+      return { role, email, token: await signIn(email, password) };
+    };
+
+    // An app's registered address, or null when the stack does not register the app.
+    const redirectOf = async (clientId) => {
+      const r = await send(`/auth/v1/admin/oauth/clients/${clientId}`, asService);
+      const listed = parsed(r)?.redirect_uris;
+      const uris = Array.isArray(listed) ? listed : String(listed || '').split(',').map((u) => u.trim()).filter(Boolean);
+      return r.status === 200 && uris.length ? uris[0] : null;
+    };
+    // A fresh sign-in to the app, as the app starts one: PKCE, no redirect followed.
+    const authorize = async (clientId, redirectUri) => {
+      const query = new URLSearchParams({
+        response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: 'openid email profile',
+        state: randomBytes(9).toString('base64url'),
+        code_challenge: createHash('sha256').update(randomBytes(32).toString('base64url')).digest('base64url'),
+        code_challenge_method: 'S256',
+      });
+      const r = await send(`/auth/v1/oauth/authorize?${query}`, {});
+      let id = null;
+      try { id = new URL(r.headers.location || '', base).searchParams.get('authorization_id'); } catch { /* none */ }
+      if (!id) throw new Error(`GoTrue's authorize for ${clientId} gave no authorization_id (${said(r)}, Location ${JSON.stringify(r.headers.location || '')})`);
+      return id;
+    };
+    const expect = (label, okay, r) => (okay ? consentOk.push(label) : consentProblems.push(`${label}: ${said(r)}`));
+
+    try {
+      const roles = parsed(await send('/rest/v1/roles?select=id,name', asService)) || [];
+      const [nodeRed, grafana] = [await redirectOf(NODE_RED), await redirectOf(GRAFANA)];
+      const manager = await person('Shopfloor_Manager', roles);
+      const operator = await person('Operator', roles);
+      await setSwitch(true);
+
+      if (nodeRed) {
+        const id = await authorize(NODE_RED, nodeRed);
+        const get = await details(id, manager.token);
+        expect("MFA required: a Shopfloor Manager at aal1 is refused Node-RED's sign-in request (GET)", refusedForMfa(get), get);
+        const post = await deny(id, manager.token);
+        expect('MFA required: the same person is refused its consent (POST)', refusedForMfa(post), post);
+        const theirs = await authorize(NODE_RED, nodeRed);
+        const [oget, opost] = [await details(theirs, operator.token), await deny(theirs, operator.token)];
+        expect("MFA required: an Operator at aal1 passes to GoTrue on Node-RED's sign-in (GET)", passedGate(oget), oget);
+        expect('MFA required: and on its consent (POST, denied)', passedGate(opost), opost);
+      } else {
+        console.log(`  --   Node-RED's client (${NODE_RED}) is not registered here: its refusal and the Operator's pass were not probed`);
+      }
+      if (grafana) {
+        const id = await authorize(GRAFANA, grafana);
+        const [get, post] = [await details(id, manager.token), await deny(id, manager.token)];
+        expect("MFA required: the same Shopfloor Manager at aal1 passes to GoTrue on Grafana's sign-in (GET)", passedGate(get), get);
+        expect('MFA required: and on its consent (POST, denied)', passedGate(post), post);
+      } else {
+        console.log(`  --   Grafana's client (${GRAFANA}) is not registered here: its pass was not probed`);
+      }
+
+      await setSwitch(false);
+      if (nodeRed) {
+        const id = await authorize(NODE_RED, nodeRed);
+        const [get, post] = [await details(id, manager.token), await deny(id, manager.token)];
+        expect("MFA not required: the Shopfloor Manager at aal1 passes to GoTrue on Node-RED's sign-in (GET)", passedGate(get), get);
+        expect('MFA not required: and on its consent (POST, denied)', passedGate(post), post);
+      }
+    } catch (err) {
+      consentProblems.push(err instanceof Error ? err.message : String(err));
+    } finally {
+      try {
+        await setSwitch(wasOn);
+      } catch (err) {
+        consentProblems.push(`CLEANUP: ${err.message}; set security.require_mfa_for_managers back to ${wasOn} on Settings`);
+      }
+      for (const p of people) {
+        const r = await send(`/auth/v1/admin/users/${p.id}`, asService, 'DELETE');
+        if (r.status !== 200) consentProblems.push(`CLEANUP: ${p.email} was not deleted (${said(r)}); delete ${p.id} with GoTrue's admin API`);
+      }
+    }
+
+    for (const line of consentOk) console.log(`  ok   ${line}`);
+    if (consentProblems.length) {
+      console.error(`\nThe consent step at ${base} does not decide as reviewed:\n`);
+      for (const p of consentProblems) console.error(`  ${p}\n`);
+      process.exit(1);
+    }
+    console.log(
+      `\nThe consent step at ${base} decides as reviewed: ${consentOk.length} decision(s); the switch is `
+      + `${wasOn ? 'on' : 'off'} again and both people are deleted.`
+    );
+  }
+
   process.exit(0);
 }
 
@@ -846,12 +1093,13 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   need(gateway, 'pack_trace_reason: false', 'with it Envoy rewrites one character of a caller\'s 36-character request id');
 
   const filters = gateway.slice(filtersStart);
-  const order = ['cors', 'local_ratelimit', 'lua', 'jwt_authn', 'rbac', 'router'].map((f) => filters.indexOf(`- name: envoy.filters.http.${f}`));
+  const order = ['cors', 'local_ratelimit', 'lua', 'jwt_authn', 'rbac', 'ext_authz', 'router'].map((f) => filters.indexOf(`- name: envoy.filters.http.${f}`));
   if (order.some((i) => i < 0) || order.some((i, n) => n > 0 && i < order[n - 1])) {
     fail(
       `${ENVOY_TEMPLATE}: the API listener's filters must run CORS, the sign-in limit, the key check, the token's `
-      + 'claims, the app check, then the router; a limit before CORS would spend a token on every preflight, '
-      + 'and an app check before the key check would answer 403 where the key check answers 401.'
+      + 'claims, the app check, the consent step, then the router; a limit before CORS would spend a token on every '
+      + 'preflight, an app check before the key check would answer 403 where the key check answers 401, and a '
+      + 'consent step before the app check would ask consent-gate about a request the app check refuses.'
     );
   }
 
@@ -985,7 +1233,7 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
     return start < 0 ? '' : filters.slice(start, filters.indexOf(`- name: envoy.filters.http.${to}`, start));
   };
   const claims = between('jwt_authn', 'rbac');
-  const decision = between('rbac', 'router');
+  const decision = between('rbac', 'ext_authz');
 
   need(claims, 'requires: { allow_missing_or_failed: {} }',
     'the API listener\'s jwt_authn records claims and refuses nothing, so no token, a key or an expired one go on as before');
@@ -1059,6 +1307,105 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
     pass(
       `an app's token reaches /auth/v1/ and its own functions alone (${Object.keys(wanted).length} app(s) with functions, `
       + `${Object.keys(APP_ROUTES).length - Object.keys(wanted).length} with none), decided on the verified client_id`
+    );
+  }
+}
+
+// ---- 8. The consent step: consent-gate is asked on GoTrue's consent endpoints alone. ------------
+// The ext_authz filter is off on every route but auth-v1-consent-routes, a plain prefix between the
+// sign-in limit and the rest of /auth/v1/, and fails closed. Every other spelling of the prefix is
+// the gateway's own answer. Config lines only: a comment may name what a setting must not be.
+{
+  const before = problems.length;
+  const need = (text, fragment, what) => {
+    if (!text.includes(fragment)) fail(`${ENVOY_TEMPLATE}: ${what} (expected ${JSON.stringify(fragment)}).`);
+  };
+  const config = (text) => text.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  const filters = gateway.slice(filtersStart);
+  const at = filters.indexOf('- name: envoy.filters.http.ext_authz');
+  const step = at < 0 ? '' : config(filters.slice(at, filters.indexOf('- name: envoy.filters.http.', at + 1)));
+  if (!step) {
+    fail(`${ENVOY_TEMPLATE}: the API listener has no ext_authz filter, so an app's sign-in is approved whatever MFA requires.`);
+  } else {
+    for (const [fragment, what] of [
+      ['disabled: true', 'the consent step is off on every route that does not turn it on'],
+      ['failure_mode_allow: false', 'a consent-gate that cannot answer refuses the consent, since no claim here stands in for it'],
+      ['status_on_error: { code: ServiceUnavailable }', 'a check that could not answer is a 503, which the consent page shows'],
+      ['cluster: functions-v1', 'consent-gate runs in the edge runtime'],
+    ]) need(step, fragment, `the consent step: ${what}`);
+    if (!/^\s*path_prefix: \/consent-gate\s*$/m.test(step)) {
+      fail(`${ENVOY_TEMPLATE}: the consent step does not ask /consent-gate; the edge runtime routes on the first path segment.`);
+    }
+    const timeout = step.match(/^\s*timeout: (\d+(?:\.\d+)?)s\s*$/m);
+    if (!timeout || Number(timeout[1]) > 5) {
+      fail(`${ENVOY_TEMPLATE}: the consent step's timeout is ${timeout ? `${timeout[1]}s` : 'unset'}; a person waits on it, so at most 5s.`);
+    }
+    const allowed = (step.match(/allowed_headers:\s*\n\s*patterns:\s*\n((?:\s*- exact: \S+\s*\n)+)/) || [])[1] || '';
+    const sent = [...allowed.matchAll(/- exact: (\S+)/g)].map((m) => m[1]);
+    if (sent.join() !== 'authorization') {
+      fail(`${ENVOY_TEMPLATE}: the consent step sends consent-gate [${sent.join(', ')}]; the Authorization header alone is its to read.`);
+    }
+  }
+
+  const routeConfig = (name) => config(routeText(name));
+  const enabling = routeNames.filter((n) => routeConfig(n).includes('envoy.filters.http.ext_authz'));
+  if (enabling.join() !== 'auth-v1-consent-routes') {
+    fail(
+      `${ENVOY_TEMPLATE}: the consent step is named by [${enabling.join(', ') || 'no route'}]. A route that names it turns `
+      + 'it on, so auth-v1-consent-routes alone may: every other /auth/v1/ route goes to GoTrue unasked.'
+    );
+  }
+  const [limited, consentAt, spellingsAt, rest] = ['auth-v1-limited-routes', 'auth-v1-consent-routes',
+    'auth-v1-consent-spellings', 'auth-v1-routes'].map((n) => routeNames.indexOf(n));
+  if (consentAt < 0 || !(limited < consentAt && consentAt < rest)) {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-consent-routes must come after auth-v1-limited-routes and before auth-v1-routes, which would otherwise answer first.`);
+  }
+  const consent = routeConfig('auth-v1-consent-routes');
+  const matches = consent.split('\n').filter((l) => /^(match|safe_regex|path|prefix|headers):/.test(l));
+  if (matches.join('\n') !== `match: { prefix: "${CONSENT_PREFIX}" }`) {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-consent-routes must match the plain prefix ${CONSENT_PREFIX} alone; it matches ${JSON.stringify(matches)}.`);
+  }
+  for (const [fragment, what] of [
+    ['check_settings: {}', 'the route turns the consent step on'],
+    ['cluster: auth-v1', 'the consent endpoints are GoTrue\'s'],
+    ['prefix_rewrite: "/oauth/authorizations/"', 'GoTrue serves them at /oauth/authorizations/'],
+    ['name: translate_bearer', 'sign-in is not gated by a key: the route keeps the sign-in Lua'],
+    ['key: cache-control, value: no-store', 'its answers carry what no cache may keep'],
+    ['key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"', 'GoTrue keys its limits on the client address alone'],
+  ]) need(consent, fragment, `auth-v1-consent-routes: ${what}`);
+
+  const spellings = routeConfig('auth-v1-consent-spellings');
+  if (spellingsAt < 0 || !(consentAt < spellingsAt && spellingsAt < rest)) {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-consent-spellings must come after auth-v1-consent-routes and before auth-v1-routes.`);
+  }
+  if (!spellings.includes('direct_response:') || !spellings.includes('status: 404') || /\bcluster:/.test(spellings)
+    || !spellings.includes(CONSENT_SPELLING_BODY)) {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-consent-spellings must be the gateway's own 404 ("${CONSENT_SPELLING_BODY} ..."), routed nowhere.`);
+  }
+  const pattern = (spellings.match(/safe_regex: \{ regex: "([^"]+)" \}/) || [])[1];
+  if (!pattern) {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-consent-spellings has no double-quoted safe_regex this script can read.`);
+  } else {
+    // RE2 matches the path in full; `(?i)` is JavaScript's i flag.
+    const re = new RegExp(`^(?:${pattern.replace(/^\(\?i\)/, '')})$`, pattern.startsWith('(?i)') ? 'i' : '');
+    const missed = CONSENT_SPELLINGS.filter((s) => !re.test(s.path)).map((s) => `${s.name} (${s.path})`);
+    const caught = NOT_CONSENT_SPELLINGS.filter((p) => re.test(p));
+    if (missed.length) fail(`${ENVOY_TEMPLATE}: auth-v1-consent-spellings lets through ${missed.join(', ')}, to auth-v1-routes and GoTrue.`);
+    if (caught.length) fail(`${ENVOY_TEMPLATE}: auth-v1-consent-spellings answers ${caught.join(', ')}, which are GoTrue's own routes.`);
+  }
+
+  const registry = read('supabase/functions/main/index.ts');
+  if (!/^\s+"consent-gate": \[/m.test(registry)) {
+    fail('supabase/functions/main/index.ts: consent-gate is not in FUNCTION_REGISTRY, so the router answers the consent step 404 and every consent is refused.');
+  }
+  need(gateway, 'response_flag_filter: { flags: [UAEX] }', 'the consent step\'s own failure is mapped on the flag only ext_authz sets');
+  need(gateway, 'runtime_key: gateway.consent_check_status', 'the mapper matches the consent step\'s 503');
+  need(gateway, '"error_code":"consent_check_unavailable"', 'the consent step\'s own failure answers in GoTrue\'s shape, which the consent page reads');
+
+  if (problems.length === before) {
+    pass(
+      `consent-gate is asked on ${CONSENT_PREFIX} alone, fails closed within ${(step.match(/^\s*timeout: (\S+)$/m) || [])[1]}, `
+      + `and ${CONSENT_SPELLINGS.length} other spellings of the prefix are the gateway's own 404`
     );
   }
 }

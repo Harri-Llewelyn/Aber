@@ -379,6 +379,105 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 59. Every site that changes the platform for a covered role asks the MFA switch (0251). A write
+// policy calls require_mfa() beside each has_role() arm naming Administrator or Shopfloor_Manager,
+// in its final form and in storage-policies.sql; a function whose final body names either role in
+// has_role() calls it too. Anything else is in supabase/mfa-exemptions.json with its reason, and an
+// entry there that names no such site is stale. A new write policy or function with neither fails.
+{
+  const before = problems.length;
+  const exemptions = JSON.parse(read('supabase/mfa-exemptions.json'));
+  const COVERED = /has_role\(ARRAY\[[^\]]*'(?:Administrator|Shopfloor_Manager)'/g;
+  const count = (text, re) => (text.match(re) || []).length;
+  // A machine-capable permission guards these, and require_mfa() admits every caller without a
+  // covered role, so they call it though has_role() is not theirs.
+  const GATED_BY_AUTHORITY = ['fork_schema', 'publish_schema_version', 'discard_schema_draft'];
+
+  // Final policy forms: the last CREATE POLICY of each name on each table, in replay order.
+  const policies = new Map();
+  for (const m of SCHEMA.matchAll(/^CREATE POLICY (\S+) ON (\S+) FOR (\w+) [^\n]*$/gm)) policies.set(`${m[2]} ${m[1]}`, { cmd: m[3], text: m[0] });
+  for (const m of read('supabase/storage-policies.sql').matchAll(/^CREATE POLICY "([^"]+)" ON storage\.objects\s+FOR (\w+)([\s\S]*?\);)$/gm)) {
+    policies.set(`storage.objects ${m[1]}`, { cmd: m[2], text: m[3] });
+  }
+  const writes = [...policies].filter(([, p]) => p.cmd !== 'SELECT' && count(p.text, COVERED) > 0);
+  for (const [name, p] of writes) {
+    if (name in exemptions.policies) continue;
+    if (count(p.text, /require_mfa\(\)/g) < count(p.text, COVERED)) {
+      problems.push(`mfaSites: the ${p.cmd} policy ${name} admits Administrator or Shopfloor_Manager without require_mfa() beside each has_role(): add it, or exempt it in supabase/mfa-exemptions.json with its reason`);
+    }
+  }
+  for (const name of Object.keys(exemptions.policies)) {
+    if (!writes.some(([n]) => n === name)) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts the policy ${name}, which is no write policy naming a covered role`);
+  }
+
+  // Final function bodies, by name.
+  const bodies = new Map();
+  for (const m of SCHEMA.matchAll(/CREATE OR REPLACE FUNCTION\s+public\.([a-z0-9_]+)\s*\([\s\S]*?\bAS (\$[a-z_]*\$)([\s\S]*?)\2/g)) bodies.set(m[1], m[3]);
+  const sites = [...bodies].filter(([, body]) => count(body, COVERED) > 0).map(([name]) => name);
+  const ungated = sites.filter((name) => !bodies.get(name).includes('require_mfa()') && !(name in exemptions.functions));
+  for (const name of ungated) {
+    problems.push(`mfaSites: ${name}() names Administrator or Shopfloor_Manager in has_role() and calls no require_mfa(): call it after the role check if it changes the platform, or exempt it in supabase/mfa-exemptions.json with its reason`);
+  }
+  for (const name of Object.keys(exemptions.functions)) {
+    if (!sites.includes(name)) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts ${name}(), whose final body names no covered role in has_role()`);
+    else if (bodies.get(name).includes('require_mfa()')) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts ${name}(), which calls require_mfa(): drop the entry`);
+    if (!String(exemptions.functions[name]).trim()) problems.push(`mfaSites: the exemption of ${name}() gives no reason`);
+  }
+  for (const name of GATED_BY_AUTHORITY.filter((n) => !bodies.get(n)?.includes('require_mfa()'))) {
+    problems.push(`mfaSites: ${name}() no longer calls require_mfa(); a person changes the platform through it`);
+  }
+  if (!writes.length || !sites.length) {
+    problems.push('mfaSites: found no write policy or function naming a covered role -- the shape changed, so this check is no longer checking anything');
+  } else if (problems.length === before) {
+    const gated = sites.filter((n) => bodies.get(n).includes('require_mfa()')).length;
+    ok.push(`mfaSites: ${writes.length} write policies and ${gated + GATED_BY_AUTHORITY.length} functions ask require_mfa(); ${Object.keys(exemptions.functions).length} functions are exempt, each with its reason`);
+  }
+}
+
+// 60. The MFA switch's predicate, in its four places (0251): mfa_satisfied() and require_mfa() in
+// 0001, the session ending in 0251, the edge functions' _shared/secondFactor.ts with the consent
+// gate, and the dashboard's utils/secondFactor.js. Each names the same setting, roles, federated
+// methods, refusal sentence and code, and the gate's Grafana is stack_app_ids()'s first app.
+{
+  const before = problems.length;
+  const satisfied = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_satisfied()', '$$;', 'mfa_satisfied() in the applied chain');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.require_mfa()', '$$;', 'require_mfa() in the applied chain');
+  const ending = lastDefinition('CREATE OR REPLACE FUNCTION public.end_covered_door_sessions(', '$$;', 'end_covered_door_sessions() in the applied chain');
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_ends_door_sessions()', '$$;', 'mfa_ends_door_sessions() in the applied chain');
+  const ids = lastDefinition('CREATE OR REPLACE FUNCTION public.stack_app_ids()', '$$;', 'stack_app_ids() in the applied chain');
+  const ts = read('supabase/functions/_shared/secondFactor.ts');
+  const gate = read('supabase/functions/consent-gate/gate.ts');
+  const web = read('frontend/src/utils/secondFactor.js');
+  const seed = read(`${MIGRATION_DIR}/0002_seed_data.sql`);
+  const list = (src) => (src ? [...src.matchAll(/["']([A-Za-z_/]+)["']/g)].map((m) => m[1]).sort().join(', ') : null);
+  const tsConst = (name) => need(ts, new RegExp(`export const ${name} = ([^;]+);`), `${name} in _shared/secondFactor.ts`)?.[1];
+  if (satisfied && guard && ending && trigger && ids) {
+    const setting = tsConst('MFA_SETTING')?.replace(/"/g, '');
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['mfa_ends_door_sessions()', trigger.body]]) {
+      if (!body.includes(`'${setting}'`)) problems.push(`mfaPredicate: ${where} does not read ${setting}, the setting _shared/secondFactor.ts reads`);
+    }
+    if (!seed.includes(`'${setting}',\n    to_jsonb(false),\n    'boolean'`)) problems.push(`mfaPredicate: 0002 does not declare ${setting} as a boolean, off`);
+    const roles = list(tsConst('COVERED_ROLES'));
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['end_covered_door_sessions()', ending.body], ['mfa_ends_door_sessions()', trigger.body]]) {
+      compare('mfaPredicate', `the covered roles in ${where} and _shared/secondFactor.ts`, roles, list((body.match(/ARRAY\[([^\]]*)\]/) || [])[1]));
+    }
+    const federated = list(tsConst('FEDERATED_METHODS'));
+    compare('mfaPredicate', 'the federated methods in mfa_satisfied() and _shared/secondFactor.ts', federated,
+      [...satisfied.body.matchAll(/"method": "([^"]+)"/g)].map((m) => m[1]).sort().join(', '));
+    compare('mfaPredicate', 'the federated methods in utils/secondFactor.js and _shared/secondFactor.ts', federated,
+      list((web.match(/export const FEDERATED_METHODS = \[([^\]]*)\]/) || [])[1]));
+    const sentence = tsConst('MFA_REFUSAL')?.replace(/^"|"$/g, '');
+    compare('mfaPredicate', 'the refusal in require_mfa() and _shared/secondFactor.ts', sentence, (guard.body.match(/RAISE EXCEPTION '([^']+)'/) || [])[1]);
+    compare('mfaPredicate', 'the refusal in utils/secondFactor.js and _shared/secondFactor.ts', sentence, (web.match(/export const MFA_REQUIRED_MESSAGE = '([^']+)'/) || [])[1]);
+    compare('mfaPredicate', 'the refusal code in require_mfa() and _shared/secondFactor.ts', tsConst('MFA_REFUSAL_CODE')?.replace(/"/g, ''),
+      (guard.body.match(/DETAIL = '([^']+)'/) || [])[1]);
+    const grafana = (ids.body.match(/'([0-9a-f-]{36})'/) || [])[1];
+    compare('mfaPredicate', "Grafana's app in consent-gate and stack_app_ids()", (gate.match(/GRAFANA_CLIENT_ID = "([0-9a-f-]{36})"/) || [])[1], grafana);
+    compare('mfaPredicate', "the app end_covered_door_sessions() keeps and stack_app_ids()'s Grafana", (ending.body.match(/<> '([0-9a-f-]{36})'::uuid/) || [])[1], grafana);
+    if (problems.length === before) ok.push('mfaPredicate: the setting, roles, federated methods, refusal and Grafana agree across 0001, 0251, the functions and the dashboard');
+  }
+}
+
 // 2. Gateway staleness, derived at read time on both sides, so the two thresholds must agree. The
 // view is built inside `ensure_gateway_status_view()`, which later migrations call after adding a
 // gateways column; the latest redeclaration is the one that runs.

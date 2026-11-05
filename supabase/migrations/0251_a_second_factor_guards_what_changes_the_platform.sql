@@ -56,7 +56,9 @@ CREATE OR REPLACE FUNCTION public.end_covered_door_sessions(p_user_id uuid, p_re
     SET search_path TO 'public'
     AS $$
 DECLARE
-  v_ended integer;
+  v_people jsonb;
+  v_ended  integer := 0;
+  v_person record;
 BEGIN
   WITH ended AS (
     DELETE FROM auth.sessions s
@@ -76,22 +78,23 @@ BEGIN
       FROM ended e
       LEFT JOIN auth.oauth_clients c ON c.id = e.oauth_client_id
      GROUP BY e.user_id
-  ), logged AS (
-    -- Run whether or not the query below reads it, as every data-modifying WITH is.
+  )
+  SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) INTO v_people FROM per_person p;
+
+  FOR v_person IN SELECT * FROM jsonb_to_recordset(v_people) AS x(user_id uuid, sessions integer, apps text[]) LOOP
     INSERT INTO public.audit_trail (
         entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
         causation_id, recorded_at
-    )
-    SELECT 'user_roles', p.user_id, 'SESSIONS_ENDED', NULL,
-           jsonb_build_object('email', (SELECT u.email::text FROM auth.users u WHERE u.id = p.user_id),
-                              'sessions_ended', p.sessions,
-                              'apps', to_jsonb(p.apps),
-                              'reason', p_reason),
-           auth.uid(), public.audit_actor_source(), txid_current(), now()
-      FROM per_person p
-    RETURNING 1
-  )
-  SELECT coalesce(sum(p.sessions), 0)::integer INTO v_ended FROM per_person p;
+    ) VALUES (
+        'user_roles', v_person.user_id, 'SESSIONS_ENDED', NULL,
+        jsonb_build_object('email', (SELECT u.email::text FROM auth.users u WHERE u.id = v_person.user_id),
+                           'sessions_ended', v_person.sessions,
+                           'apps', to_jsonb(v_person.apps),
+                           'reason', p_reason),
+        auth.uid(), public.audit_actor_source(), txid_current(), now()
+    );
+    v_ended := v_ended + v_person.sessions;
+  END LOOP;
   RETURN v_ended;
 END
 $$;
