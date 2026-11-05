@@ -1,0 +1,23 @@
+# What `npm run scan:source` leaves out. This file replaces Semgrep's built-in list, which would
+# also leave out every test/ and tests/ directory. scripts/scan-source.mjs reads it too, and fails
+# when a tracked file outside it is not in Semgrep's report. One reason per pattern. The syntax is
+# gitignore's, limited to `*`, `?`, a leading or middle `/` (from the root) and a trailing `/`.
+
+# Installed packages: the dashboard's dependencies, and the pinned ESLint under .cache/lint.
+node_modules
+.cache
+
+# Build and test output, never tracked.
+coverage
+dist
+
+# Python virtual environments, never tracked: installed packages, as node_modules is.
+.venv
+venv
+
+# Generated from forge/ by scripts/sync-gateway-platform.mjs. The scan reads the sources.
+*.generated.ts
+
+# Go templates, which no YAML parser reads, the Helm tests under templates/tests/ included.
+# scripts/scan-config.mjs scans the rendered chart.
+deploy/helm/aber/templates/

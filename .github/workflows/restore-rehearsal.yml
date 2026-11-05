@@ -284,7 +284,9 @@ jobs:
       # Every file uploaded, encrypted, and checked by the store and by a HEAD, before the volume
       # holding the only other copy is destroyed.
       - name: Wait For The Off-site Copy
-        run: bash scripts/rehearse-restore.sh offsite-wait "${{ steps.backup.outputs.stamp }}"
+        env:
+          STAMP: ${{ steps.backup.outputs.stamp }}
+        run: bash scripts/rehearse-restore.sh offsite-wait "$STAMP"
 
       # --------------------------------------------------------------------------------------
       # DESTROY -- and the PVCs are the point
@@ -358,15 +360,18 @@ jobs:
       # The runbook's first step after losing the site: the copy from the bucket, decrypted and
       # checked against its manifest, and then byte for byte against the copy taken off the volume.
       - name: Fetch The Backup From The Bucket
+        env:
+          STAMP: ${{ steps.backup.outputs.stamp }}
         run: |
           set -eu
-          STAMP="${{ steps.backup.outputs.stamp }}"
           bash scripts/rehearse-restore.sh fetch "$OFFSITE_DIR" "$STAMP" "$RUNNER_TEMP/offsite-identity.txt"
           diff -r "$BACKUP_DIR/$STAMP" "$OFFSITE_DIR/$STAMP"
           echo "the bucket's copy is the volume's, byte for byte"
 
       - name: Restore The Backup
-        run: bash scripts/rehearse-restore.sh restore "$OFFSITE_DIR" "${{ steps.backup.outputs.stamp }}"
+        env:
+          STAMP: ${{ steps.backup.outputs.stamp }}
+        run: bash scripts/rehearse-restore.sh restore "$OFFSITE_DIR" "$STAMP"
 
       - name: Snapshot The Counts After
         run: bash scripts/rehearse-restore.sh snapshot "$RUNNER_TEMP/after.txt"

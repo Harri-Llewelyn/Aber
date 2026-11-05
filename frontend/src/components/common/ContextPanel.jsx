@@ -1,11 +1,14 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react'
-import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './Icons'
+import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink, IconCheck, IconBellOff } from './Icons'
 import CopyableId from './CopyableId'
 import { HelpTip } from './HelpTip'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
+import { formatDateTime, formatRelative } from '../../utils/format'
+import { isAcknowledged, reasonLabel } from '../../utils/alertAcknowledgement'
+import { isSuppressed } from '../../utils/alertSuppression'
 
 /**
  * Below this width only one drawer shows: an open help drawer hides a page's (the media query in
@@ -72,6 +75,10 @@ export const HelpDrawerContext = createContext(null)
  * different row (`.context-panel-app`).
  *
  * @param {node} headerActions Controls drawn in the header before the X: the help drawer's Expand.
+ *
+ * @param {object} alert The firing alert that decides the entity's state, drawn above the fields: its
+ * name, severity and summary, whether it is firing, acknowledged or suppressed, as the alert counter
+ * says it, and since when. It names nothing that raised it: more than one thing writes alerts.
  */
 export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '', headerActions = null }) {
   const closeRef = useRef(null)
@@ -141,40 +148,7 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
         <div className="context-panel-body">
           {/* The alert goes above the metadata: it is the one item with a deadline. Rendered from a
               prop, because this panel knows nothing about entities. */}
-          {alert && (
-            <div
-              className={`context-alert context-alert-${alert.severity || 'warning'}`}
-              role="status"
-            >
-              <div className="context-alert-head">
-                {/* Circle for critical, triangle for warning, the same glyphs the Devices table and
-                    the alert pill use. */}
-                {alert.severity === 'critical' ? <IconAlertCircle size={13} /> : <IconAlertTriangle size={13} />}
-                <span className="context-alert-name">{alert.alert_name}</span>
-                <span className="context-alert-sev">{(alert.severity || 'warning').toUpperCase()}</span>
-              </div>
-              {alert.summary && <div className="context-alert-summary">{alert.summary}</div>}
-              <div className="context-alert-foot">
-                <span>
-                  Raised by Grafana{alert.starts_at ? ` · since ${new Date(alert.starts_at).toLocaleTimeString()}` : ''}
-                </span>
-                {/* The one place this panel links on its own initiative. A real anchor with
-                    target=_blank, so middle-click and copy link address work. To the rule by its
-                    uid, or by its name for an older row. See grafanaAlertUrl. */}
-                <Tooltip text="Open this rule in Grafana Alerting, where its thresholds, state history and silences live">
-                  <a
-                    className="context-alert-link"
-                    href={grafanaAlertUrl(alert)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    tabIndex={open ? 0 : -1}
-                  >
-                    View in Grafana <IconExternalLink size={11} />
-                  </a>
-                </Tooltip>
-              </div>
-            </div>
-          )}
+          {alert && <AlertBanner alert={alert} open={open} />}
 
           {fields.length > 0 && (
             <dl className="context-panel-fields">
@@ -244,6 +218,79 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
         </div>
       </div>
     </aside>
+  )
+}
+
+/**
+ * The alert above a drawer's fields: its name, severity and summary, and whether it is firing,
+ * acknowledged or suppressed, in the alert counter's words, since when. `open` is the drawer's, so a
+ * closed drawer's controls stay out of the tab order.
+ */
+function AlertBanner({ alert, open }) {
+  const acked = isAcknowledged(alert)
+  const quieted = isSuppressed(alert)
+  const state = quieted ? 'Alert suppressed' : acked ? 'Alert acknowledged' : 'Alert firing'
+  return (
+    <div
+      className={`context-alert context-alert-${alert.severity || 'warning'}${acked ? ' context-alert-acknowledged' : ''}${quieted ? ' context-alert-suppressed' : ''}`}
+      role="status"
+    >
+      <div className="context-alert-head">
+        {/* Circle for critical, triangle for warning, the same glyphs the Devices table and
+            the alert pill use; a crossed bell once a window keeps it quiet. */}
+        {quieted
+          ? <IconBellOff size={13} />
+          : alert.severity === 'critical' ? <IconAlertCircle size={13} /> : <IconAlertTriangle size={13} />}
+        <span className="context-alert-name">{alert.alert_name}</span>
+        <span className="context-alert-sev">{(alert.severity || 'warning').toUpperCase()}</span>
+      </div>
+      {alert.summary && <div className="context-alert-summary">{alert.summary}</div>}
+      {/* The alert counter's lines, in its words: who acknowledged it, and until when a window
+          keeps it quiet, each with its reason under it. */}
+      {acked && (
+        <>
+          <div className="context-alert-state">
+            <IconCheck size={12} aria-hidden="true" />
+            <span>
+              Acknowledged by {alert.acknowledged_by_email || 'someone'},{' '}
+              <Tooltip text={formatDateTime(alert.acknowledged_at)}>
+                <span tabIndex={open ? 0 : -1}>{formatRelative(alert.acknowledged_at)}</span>
+              </Tooltip>
+              {' '}· {reasonLabel(alert.acknowledgement_reason)}
+            </span>
+          </div>
+          {alert.acknowledgement_note && <div className="context-alert-note">{alert.acknowledgement_note}</div>}
+        </>
+      )}
+      {quieted && (
+        <>
+          <div className="context-alert-state">
+            <IconBellOff size={12} aria-hidden="true" />
+            <span>Suppressed until {formatDateTime(alert.suppressed_until)}</span>
+          </div>
+          {alert.suppression_reason && <div className="context-alert-note">{alert.suppression_reason}</div>}
+        </>
+      )}
+      <div className="context-alert-foot">
+        <span>
+          {state}{alert.starts_at ? ` · since ${formatDateTime(alert.starts_at)}` : ''}
+        </span>
+        {/* The one place this panel links on its own initiative. A real anchor with
+            target=_blank, so middle-click and copy link address work. To the rule by its
+            uid, or by its name for an older row. See grafanaAlertUrl. */}
+        <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
+          <a
+            className="context-alert-link"
+            href={grafanaAlertUrl(alert)}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={open ? 0 : -1}
+          >
+            View in Grafana <IconExternalLink size={11} />
+          </a>
+        </Tooltip>
+      </div>
+    </div>
   )
 }
 

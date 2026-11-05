@@ -1171,7 +1171,7 @@ function edgeFunctionNames() {
     'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts there, the lane of an alert\'s acknowledgement, which an Operator, a Shopfloor Manager or an Administrator makes',
     'public.audit_event_class': '0232 answers operational for ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane\'s rule, so a machine identity\'s alert acknowledged in that identity\'s lane is the same class as any other; it rebuilds the class indexes while a row they could hold wrongly exists (check 199)',
-    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write',
+    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write. 0241 lists the four SUPPRESSION_WINDOW_ actions on devices, gateways and cells, the subjects\' lanes 0240\'s window writers write',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
@@ -5130,6 +5130,111 @@ const OPERATOR_PAIRS = [
       problems216.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`docs/openapi.yaml documents ${functions.join(' and ')}, the ${columns.length} acknowledgement columns and both audit actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 235. The API reference documents the suppression windows as 0240 declares them: each writer
+// granted to authenticated under its own path, the table's path, the view's four columns and the
+// stamp on DeviceAlert, and the four actions on AuditTrailEntry.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const MIGRATION = 'supabase/migrations/0240_an_alert_stays_quiet_during_planned_work.sql';
+  const spec = read(SPEC);
+  const sql = read(MIGRATION);
+  const problems235 = [];
+  const writers = [...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\([^)]*\) TO authenticated/g)].map((m) => m[1]);
+  if (writers.length !== 3) problems235.push(`${MIGRATION}: expected three writers granted to authenticated, found ${writers.join(', ') || 'none'}`);
+  for (const fn of writers) {
+    if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems235.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
+  }
+  if (!spec.includes('\n  /rest/v1/alert_suppression_windows:\n')) problems235.push(`${SPEC} has no /rest/v1/alert_suppression_windows`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const documented = new Set(schema.split('\n').filter((l) => /^ {8}\w+:/.test(l)).map((l) => l.trim().split(':')[0]));
+  for (const column of ['suppression_window_id', 'suppressed', 'suppressing_window_id', 'suppression_reason', 'suppressed_until']) {
+    if (!documented.has(column)) problems235.push(`${SPEC}: DeviceAlert does not document ${column}`);
+  }
+  const actions = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const written = [...new Set([...sql.matchAll(/'(SUPPRESSION_WINDOW_[A-Z]+)'/g)].map((m) => m[1]))];
+  if (written.length !== 4) problems235.push(`${MIGRATION}: expected four SUPPRESSION_WINDOW_ actions, found ${written.join(', ') || 'none'}`);
+  for (const action of written) {
+    if (!actions.includes(action)) problems235.push(`${SPEC}: AuditTrailEntry does not list ${action}`);
+  }
+  if (problems235.length) {
+    fail('the API reference does not document the suppression windows as 0240 declares them:\n' +
+      problems235.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/openapi.yaml documents ${writers.join(', ')}, the windows table, the five suppression columns and the four window actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 236. The suppression predicate keeps one signature, in one place. platform_alerts_active and the
+// sender call platform_alert_suppressing_window(p_entity_type, p_entity_id, p_at), and the sender's
+// call is written against it, so 0001 declares it in place and no other file holds a copy (a copy
+// replayed later would stand as the body the view and the sender run). supabase/README.md names it
+// with those arguments and says the sender holds a send while it answers.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const SIGNATURE = 'CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone DEFAULT now()) RETURNS uuid';
+  const problems236 = [];
+  const baseline = read(`${dir}/0001_baseline_schema.sql`);
+  if (!baseline.includes(SIGNATURE)) problems236.push(`${dir}/0001_baseline_schema.sql does not declare ${SIGNATURE}`);
+  const others = readdirSync(join(REPO, dir))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && f !== '0001_baseline_schema.sql')
+    .filter((f) => read(`${dir}/${f}`).includes('CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window('));
+  if (others.length) problems236.push(`a later file declares it again: ${others.join(', ')}`);
+  const view = baseline.slice(baseline.indexOf('CREATE OR REPLACE VIEW public.platform_alerts_active'), baseline.indexOf('ALTER VIEW public.platform_alerts_active'));
+  if (!view.includes('public.platform_alert_suppressing_window(newest.entity_type, newest.entity_id, now())')) {
+    problems236.push('platform_alerts_active does not call platform_alert_suppressing_window(entity_type, entity_id, now())');
+  }
+  const readme = read('supabase/README.md');
+  const section = readme.slice(readme.indexOf('### An alert stays quiet during planned work (0240)'), readme.indexOf('### The Audit Trail files a suppression window'));
+  if (!section.includes('platform_alert_suppressing_window(a.entity_type, a.entity_id, now())') || !section.includes('**holds**')) {
+    problems236.push("supabase/README.md's 0240 section does not give the sender's call, or does not say the send is held");
+  }
+  if (problems236.length) {
+    fail('the suppression predicate is not one function with one signature:\n' + problems236.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('platform_alert_suppressing_window(p_entity_type, p_entity_id, p_at) is declared once, in 0001, called by the view, and documented for the sender');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 237. The help names the Suppression windows section's controls as the drawer draws them. The
+// labels are SuppressionWindows.jsx's and the dialog's; devices.md holds the section, and the
+// gateway and cell pages and the Site Map's counter link to it. The counter's help says a
+// suppressed alert is not counted, and the Site Map's states that one colours nothing.
+// -------------------------------------------------------------------------------------------------
+{
+  const SECTION = 'frontend/src/components/common/SuppressionWindows.jsx';
+  const DIALOG = 'frontend/src/components/modals/SuppressionWindowModal.jsx';
+  const code = read(SECTION) + read(DIALOG);
+  const devices = read('help/pages/devices.md');
+  const problems237 = [];
+  const help = devices.slice(devices.indexOf('## Suppression windows'));
+  if (!devices.includes('## Suppression windows')) problems237.push('help/pages/devices.md has no "## Suppression windows" section');
+  for (const label of ['Schedule window…', 'Change…', 'End now', 'Cancel window', 'From cell', 'NOW']) {
+    if (!code.includes(label)) problems237.push(`${SECTION}: no longer draws "${label}"`);
+    if (!help.includes(`**${label}**`)) problems237.push(`help/pages/devices.md: the section does not name **${label}**`);
+  }
+  if (!code.includes("'Schedule window'") || !help.includes('Select **Schedule window**.')) {
+    problems237.push("the dialog's confirm and the help's last step do not both say Schedule window");
+  }
+  for (const page of ['help/pages/gateways.md', 'help/pages/cells.md', 'help/pages/site-map.md']) {
+    if (!read(page).includes('(devices.md#suppression-windows)')) problems237.push(`${page} does not link to devices.md#suppression-windows`);
+  }
+  const siteMap = read('help/pages/site-map.md');
+  const states = siteMap.slice(siteMap.indexOf('## What the states mean'), siteMap.indexOf('## The alert counter'));
+  const counter = siteMap.slice(siteMap.indexOf('## The alert counter'));
+  if (!states.includes('A suppressed alert colours nothing.')) problems237.push('help/pages/site-map.md: the states do not say a suppressed alert colours nothing');
+  if (!counter.includes('A suppressed alert is not counted')) problems237.push("help/pages/site-map.md: the counter's help does not say a suppressed alert is not counted");
+  if (problems237.length) {
+    fail('the help and the Suppression windows section disagree:\n' + problems237.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the help names the Suppression windows controls as the drawer draws them, and says a suppressed alert is not counted and colours nothing');
   }
 }
 

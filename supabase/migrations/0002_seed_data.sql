@@ -2791,10 +2791,17 @@ SELECT set_config('aber.grafana_oauth_client_secret', '', false);
 
 -- Studio's door: the client the gateway's studio listener authenticates as (`...0003`).
 -- Registered here since the fold of archived migration 0081, in the shape of the Grafana client
--- above. An absent secret skips the registration with a WARNING; the gateway then answers with a
--- login that cannot complete rather than with an error naming this row.
+-- above. db-init passes studio_enabled from supabaseStudio.enabled:
+--   false  a NOTICE, and a client an earlier boot registered is removed as remove_app() removes
+--          one, so the site holds the clients a default install holds; true again restores it.
+--   true   registered; an absent secret skips it with a WARNING, and the door's login then
+--          cannot complete.
+--   unset  (an older chart, a hand-run psql) as true.
+-- Reasoning: supabase/README.md, "The second listener, which is Studio's login".
+\if :{?studio_enabled} \else \set studio_enabled '' \endif
 \if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
 
+SELECT set_config('aber.studio_enabled',             :'studio_enabled',             false) \g /dev/null
 SELECT set_config('aber.studio_oauth_client_secret', :'studio_oauth_client_secret', false) \g /dev/null
 SELECT set_config('aber.studio_public_url',          :'studio_public_url',          false) \g /dev/null
 
@@ -2803,6 +2810,7 @@ DECLARE
   -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
   -- fresh UUID on every stack rebuild would silently break the login.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000003';
+  v_enabled   TEXT := coalesce(current_setting('aber.studio_enabled', true), '');
   v_secret    TEXT := current_setting('aber.studio_oauth_client_secret', true);
   v_base      TEXT := rtrim(
                         COALESCE(
@@ -2810,10 +2818,42 @@ DECLARE
                           'http://127.0.0.1:54323'),
                         '/');
   v_hash      TEXT;
+  v_approvals INTEGER;
+  v_sessions  INTEGER;
+  v_removed   INTEGER;
 BEGIN
+  IF v_enabled NOT IN ('', 'true', 'false') THEN
+    RAISE EXCEPTION 'studio_enabled is %, not true or false: db-init passes supabaseStudio.enabled', v_enabled;
+  END IF;
+
+  -- remove_app()'s three statements, approvals and sessions first, so each revoked approval is a row
+  -- in its person's lane and the client's removal one row in its own. Each matches nothing once
+  -- done, so a later boot changes and records nothing.
+  IF v_enabled = 'false' THEN
+    UPDATE auth.oauth_consents k
+       SET revoked_at = greatest(clock_timestamp(), k.granted_at)
+     WHERE k.client_id = v_client_id AND k.revoked_at IS NULL;
+    GET DIAGNOSTICS v_approvals = ROW_COUNT;
+    DELETE FROM auth.sessions s WHERE s.oauth_client_id = v_client_id;
+    GET DIAGNOSTICS v_sessions = ROW_COUNT;
+    UPDATE auth.oauth_clients c
+       SET deleted_at = clock_timestamp(), updated_at = clock_timestamp()
+     WHERE c.id = v_client_id AND c.deleted_at IS NULL;
+    GET DIAGNOSTICS v_removed = ROW_COUNT;
+    IF v_removed > 0 THEN
+      RAISE NOTICE 'Studio is off (supabaseStudio.enabled), so its OAuth client is not registered. '
+                   'The one an earlier boot registered is removed: % approval(s) revoked, % session(s) ended.',
+                   v_approvals, v_sessions;
+    ELSE
+      RAISE NOTICE 'Studio is off (supabaseStudio.enabled), so its OAuth client is not registered.';
+    END IF;
+    RETURN;
+  END IF;
+
   IF v_secret IS NULL OR v_secret = '' THEN
     RAISE WARNING 'studio_oauth_client_secret not supplied; skipping client registration. '
-                  'The listener will answer a login it cannot complete.';
+                  'The Studio login at % cannot complete until secrets.studioOAuthClientSecret '
+                  '(the Secret key STUDIO_OAUTH_CLIENT_SECRET) is set and the release upgraded.', v_base;
     RETURN;
   END IF;
 

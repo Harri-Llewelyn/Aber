@@ -23,6 +23,7 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 - **Archive Cell** is greyed out while any device or gateway is in the cell, archived and quarantined ones included. Hover it to see how many. Move each one to another cell, or delete it, then archive the cell.
 - **To move an archived device or gateway**, restore it, move it, then archive it again. Archiving it again starts its retention timer again. Or delete it with **Permanent Delete** on the Archived Entities page.
 - **A quarantined device** is in the Quarantine table on the Devices page, not in its list. Approve it into another place, or reject it, which deletes it.
+- **Suppression windows**, at the foot of the details panel, keep the alerts of every device in the cell quiet during planned work. A device is covered while it is in the cell: move it out and its alerts count again. A device's panel lists its cell's windows too, marked **From cell**. Scheduling, changing and ending a window work as on the Devices page. See [Suppression windows](devices.md#suppression-windows).
 
 ## What the states mean
 

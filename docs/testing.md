@@ -383,7 +383,8 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
 # repository's branches, never from its pull request head, tag or stash. And the half of
 # `scripts/scan-source.mjs` that needs no Docker: which of Semgrep's errors fail the scan, a tracked
-# file it could not parse, whole or in part, beyond its named exceptions. And the signing set
+# file it could not parse, whole or in part, beyond its named exceptions, and a tracked file outside
+# `.semgrepignore` that its report does not list as read. And the signing set
 # (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
 # `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
 # it keeps, and that a second run changes nothing.
@@ -888,6 +889,13 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
+# psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
+# client an earlier boot registered is removed, its approvals revoked and its sessions ended, with
+# one APP_REMOVED and an APP_APPROVAL_REVOKED per approval, and the next boot records nothing. True
+# again restores it. True without the secret warns, naming the Studio login and the secret to set.
+# Unset is today's behaviour and never removes; any other value fails the boot. Every test rolls back.
+python supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and
@@ -971,6 +979,16 @@ python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is
 # fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
 # machine identity's own in the security lane. Every test rolls back.
 python supabase/migrations/test_a_person_acknowledges_an_alert.py
+# An alert stays quiet during planned work (0240, 0241). A Shopfloor Manager and an Administrator
+# schedule, change and end a suppression window on a device, a gateway or a cell; an Operator, an
+# Auditor and a machine identity are refused, and nobody writes the table directly. A device window
+# covers the device, a gateway window the gateway's own alerts, and a cell window each device in the
+# cell when the alert is read, so a device moved out is no longer covered. Platform and machine
+# identity alerts are never covered. platform_alerts_active says suppressed before, during and after
+# a window, with every column it returned before. An occurrence records the window that first
+# covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
+# one audit row in the subject's lane. Every test rolls back.
+python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
 # overlaps the window, not only one that started in it, and none that ended at its start or started
 # at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one

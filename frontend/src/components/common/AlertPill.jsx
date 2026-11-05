@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { RouteLink } from './RouteLink'
 import { alertPage, deviceUrl, gatewayUrl } from '../../routes'
-import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink, IconCheck } from './Icons'
+import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink, IconCheck, IconBellOff } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
@@ -10,8 +10,9 @@ import { Tooltip } from './Tooltip'
 import { api } from '../../api'
 import { formatRelative, formatDateTime } from '../../utils/format'
 import {
-  isAcknowledged, unacknowledgedAlerts, reasonLabel, mayAcknowledge, mayWithdraw, alertSubjectUrl,
+  isAcknowledged, reasonLabel, mayAcknowledge, mayWithdraw, alertSubjectUrl,
 } from '../../utils/alertAcknowledgement'
+import { countedAlerts, isSuppressed } from '../../utils/alertSuppression'
 import { AcknowledgeAlertModal, WithdrawAcknowledgementModal } from '../modals/AcknowledgeAlertModal'
 import { ALERTS_PATH, acknowledgerName } from '../../utils/alertHistory'
 
@@ -23,9 +24,10 @@ import { ALERTS_PATH, acknowledgerName } from '../../utils/alertHistory'
  * the state by shape, colour and animation; the count appears as a badge only when it is not zero,
  * because whether one thing or twelve is wrong decides whether an operator walks over.
  *
- * The count is the firing alerts nobody has acknowledged. An acknowledged alert stays in the list,
- * after the others, with who acknowledged it, when and why, and leaves the count until it resolves:
- * red means something nobody has picked up. Acknowledge opens a dialog for the reason; Withdraw is
+ * The count is the firing alerts nobody has acknowledged and no suppression window keeps quiet. An
+ * acknowledged alert stays in the list, after the others, with who acknowledged it, when and why,
+ * and leaves the count until it resolves: red means something nobody has picked up. A suppressed
+ * alert is listed last, with the window's end and reason, and counts again when the window ends. Acknowledge opens a dialog for the reason; Withdraw is
  * offered to the acknowledger, a Shopfloor Manager and an Administrator. Both write an Audit Trail
  * row and end with a toast.
  *
@@ -71,12 +73,15 @@ export function AlertPill({
   // goes on the wrapper so the pill's own click still toggles.
   const wrapRef = useClickOutside(() => setOpen(false), open)
 
-  const counted = unacknowledgedAlerts(alerts)
+  const counted = countedAlerts(alerts)
   const count = counted.length
-  const acknowledged = alerts.length - count
+  const quiet = alerts.filter(isSuppressed)
+  const suppressed = quiet.length
+  const acknowledged = alerts.length - count - suppressed
   const healthy = count === 0
-  // Unacknowledged first: they are what the count is. Each group keeps the view's order, newest first.
-  const listed = [...counted, ...alerts.filter(isAcknowledged)]
+  // What the count is first, then the acknowledged, then the suppressed. Each group keeps the view's
+  // order, newest first.
+  const listed = [...counted, ...alerts.filter((a) => isAcknowledged(a) && !isSuppressed(a)), ...quiet]
 
   // Severity drives the colour, and critical wins outright. A site with one critical and four
   // warnings is a site with a critical on it; averaging the two would be a summary nobody asked for.
@@ -92,9 +97,12 @@ export function AlertPill({
   const spoken = acknowledged === 0
     ? (healthy ? 'No firing alerts' : `${count} ${firing}`)
     : `${healthy ? 'No' : count} unacknowledged ${firing}`
-  const stillFiring = acknowledged > 0
+  const stillFiring = (acknowledged > 0
     ? `${acknowledged} acknowledged ${acknowledged === 1 ? 'alert is' : 'alerts are'} still firing. `
-    : ''
+    : '') + (suppressed > 0
+    ? `${suppressed} suppressed ${suppressed === 1 ? 'alert is' : 'alerts are'} still firing. `
+    : '')
+  const said = suppressed > 0 ? `${spoken}, ${suppressed} suppressed` : spoken
 
   const acknowledge = async (alert, { reason, note }) => {
     await api.acknowledgeAlert(alert.id, reason, note)
@@ -117,7 +125,7 @@ export function AlertPill({
           className={`alert-pill ${tone}`}
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          aria-label={spoken}
+          aria-label={said}
         >
           <Glyph size={15} />
           {/* NOT RENDERED AT ZERO, which is the whole of what makes the resting bar quiet. See the
@@ -160,10 +168,12 @@ export function AlertPill({
                 // The other fleet-wide rules. No page here, so Grafana is the subject's home.
                 const external = !a.sparkplug_id && kind === 'platform' && !inApp
                 const acked = isAcknowledged(a)
+                const quieted = isSuppressed(a)
                 const body = (
                   <>
-                    {/* Hollow once acknowledged, so the two read apart without colour. */}
-                    <span className={`alert-pill-dot alert-pill-dot-${a.severity}${acked ? ' alert-pill-dot-acknowledged' : ''}`} />
+                    {/* Hollow once acknowledged, so the two read apart without colour. Suppressed, it
+                        is a muted ring with a stroke through it: it colours nothing. */}
+                    <span className={`alert-pill-dot alert-pill-dot-${a.severity}${acked ? ' alert-pill-dot-acknowledged' : ''}${quieted ? ' alert-pill-dot-suppressed' : ''}`} />
                     <div className="alert-pill-item-body">
                       <div className="alert-pill-item-name">{a.alert_name}</div>
                       {/* The summary is Grafana's own annotation, already templated with the device
@@ -213,8 +223,9 @@ export function AlertPill({
                   </Tooltip>
                 ) : <div className="alert-pill-item-static">{body}</div>
                 return (
-                  <li key={a.fingerprint} className={`alert-pill-item${acked ? ' alert-pill-item-acknowledged' : ''}`}>
+                  <li key={a.fingerprint} className={`alert-pill-item${acked ? ' alert-pill-item-acknowledged' : ''}${quieted ? ' alert-pill-item-suppressed' : ''}`}>
                     {row}
+                    {quieted && <SuppressionLine alert={a} />}
                     {/* Beside the link, not inside it: a button in a link is two controls in one. */}
                     <AcknowledgementLine
                       alert={a}
@@ -266,6 +277,22 @@ export function AlertPill({
           onCancel={() => setWithdrawing(null)}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * Under a suppressed alert's name: until when, with a crossed bell as well as the words, and the
+ * window's reason under them, as an acknowledgement's note is.
+ */
+function SuppressionLine({ alert }) {
+  return (
+    <div className="alert-pill-ack">
+      <div className="alert-pill-ack-words">
+        <IconBellOff size={12} className="alert-pill-suppression-mark" aria-hidden="true" />
+        <span>Suppressed until {formatDateTime(alert.suppressed_until)}</span>
+      </div>
+      {alert.suppression_reason && <div className="alert-pill-ack-note">{alert.suppression_reason}</div>}
     </div>
   )
 }

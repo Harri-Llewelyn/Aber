@@ -1,4 +1,4 @@
-import { readFlag, readSetting } from './config';
+import { readFlag, readSetting, studioDoorUrl } from './config';
 
 export const SPARKPLUG_TYPES = {
   1: 'Int8', 2: 'Int16', 3: 'Int32', 4: 'Int64',
@@ -123,6 +123,12 @@ export const AUDIT_TRAIL_ACTIONS = {
   // alert's lane, or a machine identity's alert in the identity's.
   ALERT_ACKNOWLEDGED:              'Alert acknowledged',
   ALERT_ACKNOWLEDGEMENT_WITHDRAWN: 'Acknowledgement withdrawn',
+  // A suppression window scheduled, changed, ended early or cancelled before it started, from the
+  // drawer of the device, gateway or cell it covers (0240): in that subject's lane.
+  SUPPRESSION_WINDOW_SCHEDULED: 'Suppression window scheduled',
+  SUPPRESSION_WINDOW_CHANGED:   'Suppression window changed',
+  SUPPRESSION_WINDOW_ENDED:     'Suppression window ended',
+  SUPPRESSION_WINDOW_CANCELLED: 'Suppression window cancelled',
 };
 
 /**
@@ -202,7 +208,11 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     label: 'The plant and the model',
     actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
   },
-  { label: 'Alerts', actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN'] },
+  {
+    label: 'Alerts',
+    actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
+      'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED'],
+  },
   {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
@@ -306,6 +316,11 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   // Alerts, in the alert's lane, or a machine identity's alert in the identity's.
   ['ALERT_ACKNOWLEDGED', ['platform_alerts', 'service_principals'], ['operational']],
   ['ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ['platform_alerts', 'service_principals'], ['operational']],
+  // A suppression window's acts, in its subject's lane.
+  ['SUPPRESSION_WINDOW_SCHEDULED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CHANGED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_ENDED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CANCELLED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
 ];
 
 /**
@@ -373,13 +388,12 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
   .replace(/\/+$/, '');
 
 /**
- * Supabase Studio's door, as the browser reaches it. Not a link (Studio is reached from the
- * System page); this exists for sign-out alone (`utils/studioSignOut.js`). The fallback matches
- * STUDIO_PUBLIC_URL's, `127.0.0.1` and not `localhost`: cookies key on host, so a session opened
- * on one cannot be ended on the other.
+ * Supabase Studio's door, as the browser reaches it, or null where the chart runs no Studio. Not a
+ * link (Studio is reached from the System page); this exists for sign-out alone
+ * (`utils/studioSignOut.js`). The fallback matches STUDIO_PUBLIC_URL's, `127.0.0.1` and not
+ * `localhost`: cookies key on host, so a session opened on one cannot be ended on the other.
  */
-export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323')
-  .replace(/\/+$/, '');
+export const STUDIO_URL = studioDoorUrl('http://127.0.0.1:54323')?.replace(/\/+$/, '') ?? null;
 
 /**
  * The forge's door, as the browser reaches it (GITEA_ROOT_URL on the server side). A link as

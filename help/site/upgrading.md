@@ -1694,8 +1694,10 @@ supabaseMeta:
 The two are on or off together, and the render fails if only one is on. So does
 `ingress.routes.studio: true` with Studio off.
 
-- **Studio's sign-in stays registered.** A site that ran Studio keeps its OAuth client, though
-  nothing uses it with Studio off. Aber registers it again only while Studio is on.
+- **Studio's sign-in is removed.** On a site that ran Studio, the first boot with Studio off removes
+  its OAuth client. Each person's approval of it is revoked and its sessions end. The Audit Trail
+  records each, and db-init's log says so in a NOTICE. Turn Studio on again and Aber registers
+  it again, and each person approves it once more.
 - **The System page** shows Studio's row with no image recorded, as for any service the chart does
   not deploy.
 
