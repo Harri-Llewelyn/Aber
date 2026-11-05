@@ -14500,6 +14500,65 @@ ALTER TABLE timescale.telemetry_raw_window
 
 --
 
+-- telemetry_device_5m :: FOREIGN TABLE
+-- The historian's rollups per device (timescaledb/aggregates.sql), read by telemetry_coverage()
+-- (0245) a device and a bucket a row. 10,000 rows a fetch: an Overview read brings hundreds of
+-- thousands across, and at the default 100 a fetch the round trips were half its time.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_5m (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_5m',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_5m OWNER TO postgres;
+
+--
+
+-- telemetry_device_1h :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_1h (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_1h',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_1h OWNER TO postgres;
+
+--
+
+-- telemetry_device_coverage :: FOREIGN TABLE
+-- What each device rollup holds, so History's Overview can tell a block not yet counted from one with no
+-- reading. Two rows, from the historian's catalogue.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_coverage (
+    relation text,
+    computed_from timestamp with time zone,
+    computed_to timestamp with time zone,
+    complete boolean
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_coverage'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_coverage OWNER TO postgres;
+
+--
+
 -- audit_trail id :: DEFAULT
 ALTER TABLE public.audit_trail ALTER COLUMN id SET DEFAULT nextval('public.audit_trail_id_seq'::regclass);
 
@@ -19257,6 +19316,13 @@ GRANT SELECT ON TABLE timescale.telemetry_1h TO service_role;
 -- TABLE telemetry_1h :: ACL
 GRANT ALL ON TABLE public.telemetry_1h TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
+
+--
+
+-- TABLE telemetry_device_5m, telemetry_device_1h, telemetry_device_coverage :: ACL
+-- Read by telemetry_coverage() (0245) as its caller, as the rollups are read.
+GRANT SELECT ON TABLE timescale.telemetry_device_5m, timescale.telemetry_device_1h,
+    timescale.telemetry_device_coverage TO authenticated, service_role;
 
 --
 

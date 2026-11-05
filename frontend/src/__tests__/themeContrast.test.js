@@ -695,6 +695,32 @@ describe("a state chart's colour, at every hue its values can hash to", () => {
   })
 })
 
+describe("History's Overview shades, fewer readings to more", () => {
+  /*
+   * An ordered (sequential) ramp is read by its order, not by each step on its own: the rule the
+   * dataviz validator holds (`validate_palette.js --ordinal`) is that the steps move one way in
+   * lightness, and that the step nearest the surface clears 2:1 against it, not 3:1 for every step.
+   * A block's count is never in its colour alone: each has a readout in words.
+   */
+  const ORDINAL_FLOOR = 2.0
+  it.each(Object.entries(THEMES))('%s: each step stands further from the card than the last, the nearest at 2:1', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const steps = [1, 2, 3, 4].map(i => rgb(t[`--coverage-${i}`]))
+    const fromCard = steps.map(s => contrast(s, card))
+    expect(fromCard[0]).toBeGreaterThanOrEqual(ORDINAL_FLOOR)
+    for (let i = 1; i < steps.length; i++) {
+      expect(fromCard[i], `step ${i + 1} against the card`).toBeGreaterThan(fromCard[i - 1])
+    }
+    // Monotone in lightness: darker with the count on a light card, lighter on a dark one.
+    const light = luminance(card) > 0.5
+    const lums = steps.map(luminance)
+    for (let i = 1; i < lums.length; i++) {
+      if (light) expect(lums[i], `step ${i + 1}`).toBeLessThan(lums[i - 1])
+      else expect(lums[i], `step ${i + 1}`).toBeGreaterThan(lums[i - 1])
+    }
+  })
+})
+
 describe('theme token hygiene', () => {
   it('defines the same token names in both themes', () => {
     // A token present in one theme and missing in the other resolves to nothing at runtime,

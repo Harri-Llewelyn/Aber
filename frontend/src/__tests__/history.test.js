@@ -183,12 +183,13 @@ describe("History's address", () => {
     expect(DEFAULT_HISTORY_WINDOW).toMatchObject({ kind: 'rolling', range: '24h' })
     expect(pickedAddress('dev0123', DEFAULT_HISTORY_WINDOW)).toBe('/history/device/dev0123')
     expect(Object.values(windowToQuery(DEFAULT_HISTORY_WINDOW, DEFAULT_HISTORY_WINDOW)).filter(Boolean)).toEqual([])
-    expect(pickedAddress('', { kind: 'rolling', range: '7d', ms: 7 * DAY, label: 'Last 7 days' })).toBe('/history?range=7d')
+    expect(pickedAddress('', { kind: 'rolling', range: '7d', ms: 7 * DAY, label: 'Last 7 days' })).toBe('/history/device?range=7d')
   })
 
-  it('reads the picker from any path that names no device', () => {
-    for (const path of ['/history', '/history/device', '/history/elsewhere/x']) {
-      expect(historyPath(pathSegments(path)), path).toEqual({ tab: 'device', deviceId: '' })
+  it('reads the picker from /history/device, and Overview, the default, from any other path', () => {
+    expect(historyPath(pathSegments('/history/device'))).toEqual({ tab: 'device', deviceId: '' })
+    for (const path of ['/history', '/history/overview', '/history/elsewhere/x']) {
+      expect(historyPath(pathSegments(path)), path).toEqual({ tab: 'overview', deviceId: '' })
     }
   })
 

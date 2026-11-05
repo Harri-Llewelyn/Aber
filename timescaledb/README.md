@@ -325,6 +325,48 @@ If a window was not recorded, `help/site/remote-gateways.md` ("Late data after a
 refresh to run by hand, and Grafana's *Late Replay Missing From the Rollups* fires. The restore
 rehearsal asserts the job is registered and scheduled after a restore; a dump carries it.
 
+**History's Overview counts each device's readings, from two rollups of their own.**
+`telemetry_device_5m` is `sum(n_rows)` by device and 5-minute bucket, from `telemetry_1m`, and
+`telemetry_device_1h` is the same by the hour, from `telemetry_1h`. The Overview draws a lane per
+device of where readings arrived, and reading the series rollups for that grouped ten rows a
+device a bucket on every read: 5 to 16 s for 1,000 devices over a day. These hold one.
+
+- **Each reaches as far back as its source.** The 5-minute one counts `telemetry_1m`, kept 180
+  days by default; the hourly one counts `telemetry_1h`, kept 5 years. Built from the 5-minute one,
+  the hourly one would have stopped at 180 days too. Nothing shipped built that way, so the
+  definition changes in place and needs no upgrade migration. A stack that ran the unreleased build
+  has its hourly rollup and backfill row rebuilt on the next boot.
+- **Materialised only** (`timescaledb.materialized_only = true`). A real-time read unions the raw
+  tail, and with no metric named it walks the `(asset_id, metric_name, time)` index for every device:
+  1.2 to 2.5 s measured for a tail with no rows in it. So the newest few minutes are not counted
+  until the policy runs. `telemetry_coverage()` (0245) fills the hourly one's lag from the
+  5-minute one, and History's Overview hatches the rest as not counted yet.
+- **Their policies follow the series rollups':** refreshed every 5 minutes over the last 25 hours,
+  compressed after `rollup_compress_after` (segmented by `asset_id`), and kept as long as the series
+  rollup of their width (`rollup_5m_retain`, `rollup_1h_retain`), never less than the rollup each
+  counts. `refresh_requested_rollups()` refreshes them too, after the series rollups.
+- **They are created `WITH NO DATA`, and no boot fills them.** The policies count the last 25 hours.
+  `backfill_device_rollups()`, a job every 2 minutes, counts one chunk older in each rollup a run
+  and commits after each, until each reaches its own source's oldest bucket: a refresh over a range
+  its source has dropped would empty it. `device_backfill_window()` is that step, a function of its
+  inputs, and `device_rollup_backfill` holds a row a rollup: its source, its chunk, how far it has
+  reached, whether it is done, and its last chunk's time. At the storage basis (1,000 devices of 10
+  metrics), measured on a private historian:
+  - **5 minutes:** six hours of `telemetry_1m` a chunk (3.6 million rows) in 9.4 s, so 180 days take
+    about a day.
+  - **1 hour:** a week of `telemetry_1h` a chunk (1.7 million rows) in 3.9 s, so 5 years take about
+    9 hours.
+  - Both run in the same job, so a run is busy about 13 s of its 2 minutes until the hourly one is
+    done, then about 9 s.
+- **The job is `add_job`, as `refresh_requested_rollups()` is**: a Timescale License feature, like
+  the continuous aggregates and their policies. #1173 counts the two rollups and this job.
+- **`telemetry_device_coverage` says what each holds**: its reach, the backfill's (the policies'
+  25 hours before its first chunk, or where retention drops buckets if that is later), its
+  watermark, and whether its backfill is done. A `SECURITY DEFINER` function reads the catalogue,
+  so the view costs no scan over postgres_fdw. `fdw_reader` may read the rollups and the view, and
+  execute the function behind it. `test_device_rollups.py` holds the definitions, the policies, the
+  backfill's window and the view.
+
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady
 machine, and a gap means "unchanged", not "unknown". LOCF cannot live in the continuous aggregate

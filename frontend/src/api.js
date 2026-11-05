@@ -232,6 +232,18 @@ export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 export const ALERT_HISTORY_LIMIT = 1000;
 
 /**
+ * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so the
+ * 6,300-row LIMIT threshold above does not apply. At most COVERAGE_MAX_DEVICES a read. More than
+ * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
+ * and the page shows them at most COVERAGE_LARGE_MAX_HOURS at once; that many or fewer may take
+ * any block width.
+ */
+export const COVERAGE_MAX_DEVICES = 1000;
+export const COVERAGE_SMALL_SELECTION = 40;
+export const COVERAGE_LARGE_MAX_HOURS = 169;
+export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
+
+/**
  * The lower time bound applied when a caller supplies none.
  *
  * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
@@ -1341,6 +1353,29 @@ const apiMethods = {
     if (signal) call = call.abortSignal(signal);
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read the readings');
+    return data || [];
+  },
+
+  /**
+   * History's Overview read (0245): one row per device of `assetIds`, how many readings it sent in
+   * each block of `blockMinutes` over [from, to), over every metric, as `counts` (oldest block first,
+   * 0 for none, block i starting at `first_block` plus i widths), and the stretch the rollup has
+   * counted (`computed_from` to `computed_to`). `assetIds` are device UUIDs or Sparkplug ids, as
+   * the telemetry routes take them. Throws on a refusal or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, first_block: string, block_width: string,
+   *   counts: number[], computed_from: string, computed_to: string, complete: boolean }>>}
+   */
+  readCoverage: async ({ from, to, blockMinutes, assetIds }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_coverage', {
+      from_ts: from,
+      to_ts: to,
+      block: `${blockMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey)
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read where readings arrived');
     return data || [];
   },
 

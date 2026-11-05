@@ -15,11 +15,16 @@ import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { deviceIdentifiers } from '../../utils/sparkplugId'
 import {
-  DEFAULT_HISTORY_WINDOW, HISTORY_RANGES, HISTORY_SPANS, deviceMatches, historyDevices, historyPath, pickedAddress,
+  DEFAULT_HISTORY_WINDOW, HISTORY_RANGES, HISTORY_SPANS, OVERVIEW_PATH, deviceHistoryPath, deviceMatches, historyDevices,
+  historyPath, pickedAddress,
 } from '../../utils/history'
 import { HistoryDevice } from './HistoryDevice'
 import { HistoryAlerts } from './HistoryAlerts'
 import { ALERTS_PATH, ALERTS_TAB } from '../../utils/alertHistory'
+import { HistoryOverview } from './HistoryOverview'
+
+/** Each tab's own address, where a tab click starts it afresh. */
+const TAB_PATHS = { overview: OVERVIEW_PATH, device: deviceHistoryPath(''), [ALERTS_TAB]: ALERTS_PATH }
 
 /** A read the page can go on without: its rows, or [] when it failed. */
 const tolerated = (load) => load.then(rows => rows || [], () => [])
@@ -75,19 +80,22 @@ function DevicePicker({ devices, search, win }) {
 }
 
 /**
- * The History page: a site's readings over time. Its one tab is Device, each metric of one device
- * charted over the window the time control sets. Ungated, as the Site Map is: what it charts is
- * what the telemetry views let the viewer read; its Export CSV needs `telemetry:read`. The address
- * names the device and the window (`/history/device/<id>?range=24h`); `/history` picks a device.
+ * The History page: a site's readings over time. Overview, its first tab and its default, shows
+ * where readings arrived across every device; Device charts each metric of one device. Both take
+ * the window the time control sets. Ungated, as the Site Map is: what it shows is what the
+ * telemetry views let the viewer read; the Device tab's Export CSV needs `telemetry:read`. The
+ * address names the tab, the device and the window: `/history` and `/history/overview` are the
+ * Overview, `/history/device` picks a device, and `/history/device/<id>?range=24h` charts one.
  * The Alerts tab (`/history/alerts`) lists the alerts that fired over the same window; a row's
  * subject opens through `onSelectDevice` and `onSelectGateway`, and `userRole` lets its empty state
  * say what the viewer may not see.
  */
 export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice, onSelectGateway }) {
   const url = useUrl()
-  const { deviceId } = historyPath(pathSegments(url))
-  // The Alerts tab, `/history/alerts` (HistoryAlerts.jsx); any other path is the Device tab's.
-  const onAlerts = pathSegments(url)[1] === ALERTS_TAB
+  const segments = pathSegments(url)
+  const { tab: pathTab, deviceId } = historyPath(segments)
+  // The Alerts tab, `/history/alerts` (HistoryAlerts.jsx); historyPath() knows the other two.
+  const tab = segments[1] === ALERTS_TAB ? ALERTS_TAB : pathTab
   const [win, setWin] = useTimeWindow({ ranges: HISTORY_RANGES, fallback: DEFAULT_HISTORY_WINDOW, spans: HISTORY_SPANS })
   const [search, setSearch] = useUrlState('search', '')
   const [loaded, setLoaded] = useState(null)
@@ -104,7 +112,7 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
       tolerated(api.get('/api/v1/schemas')),
       tolerated(api.get('/api/v1/metric-catalog')),
     ]).then(([devices, cells, areas, schemas, catalog]) => {
-      if (live) setLoaded({ devices: historyDevices(devices || [], cells, areas), schemas, catalog })
+      if (live) setLoaded({ devices: historyDevices(devices || [], cells, areas), cells, areas, schemas, catalog })
     }).catch(e => { if (live) setError(e.message || 'The devices could not be read.') })
     return () => { live = false }
   }, [])
@@ -114,9 +122,10 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
     [deviceId, loaded]
   )
 
-  // A tab click starts the tab afresh, as the tab bars elsewhere do: the picker, at its own window.
-  const tabHref = (id) => (id === ALERTS_TAB ? ALERTS_PATH : '/history')
-  const openTab = (id) => navigate(tabHref(id))
+  // A tab click starts the tab afresh, as the tab bars elsewhere do: at its own window, the Device
+  // tab at its picker.
+  const tabPath = (id) => TAB_PATHS[id] ?? `/history/${id}`
+  const openTab = (id) => navigate(tabPath(id))
 
   return (
     <div className="page-layout page-fill">
@@ -125,15 +134,26 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
           <CardHeading
             icon={<IconChartLine size={15} />}
             title="History"
-            description="A device's readings over a period you choose, each metric charted on one time axis."
+            description="Where readings arrived across the site, and a device's readings charted, over a period you choose."
           />
-          <TabStrip ariaLabel="History" value={onAlerts ? ALERTS_TAB : 'device'} onChange={openTab} hrefFor={tabHref} tabs={HISTORY_TABS} />
+          <TabStrip ariaLabel="History" value={tab} onChange={openTab} hrefFor={tabPath} tabs={HISTORY_TABS} />
 
           {error ? (
             <div className="callout callout-danger">{`The devices could not be read: ${error}`}</div>
           ) : !loaded ? (
             <LoadingState label="devices" />
-          ) : onAlerts ? (
+          ) : tab === 'overview' ? (
+            <HistoryOverview
+              devices={loaded.devices}
+              cells={loaded.cells}
+              areas={loaded.areas}
+              schemas={loaded.schemas}
+              win={win}
+              setWin={setWin}
+              every={every}
+              setEvery={setEvery}
+            />
+          ) : tab === ALERTS_TAB ? (
             <HistoryAlerts
               devices={loaded.devices}
               win={win}

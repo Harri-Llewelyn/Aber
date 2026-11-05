@@ -126,8 +126,9 @@ export const SETTINGS_TABS = [
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
 ]
 
-/** History's views. Device is the only one, so it is the bare page: /history picks a device. */
+/** History's views. Overview is the first and the default, so it is the bare page as well as /history/overview. */
 export const HISTORY_TABS = [
+  { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
   { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
