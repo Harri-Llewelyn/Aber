@@ -1480,6 +1480,16 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 arrived over the window, a lane per device, before anything is charted. Its arithmetic is in
 `utils/history.js` too, and `__tests__/historyOverview.test.jsx` holds each rule.
 
+- **The layout is the Audit Trail's lane grid**, on its classes (`.trail-swimlanes`, `.trail-axis`,
+  `.trail-section`, `.trail-lane`, `.trail-lane-label`, `.trail-track`): a label column of
+  `--trail-label-width`, then a 28px track a row, under the trail's axis with its empty corner. A
+  group is a section row, its `GroupHeading` in the label column (a cell's a step in, pinned one
+  row below its area's) and, when closed, its merged strip in the track. The grid scrolls inside
+  the card (`.card-fill-scroll.trail-timeline`, then `.trail-scroll`), so the axis and the headings
+  pin and the row above the lanes stays. Overview's axis follows the Audit Trail's, not the Device
+  tab's charts: the tracks run from the label column to the card's edge, and no longer span the
+  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Overview's own rules (`.overview-*`) are
+  only what it adds; the Audit Trail is unchanged.
 - **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
   its readings in each block as an array, and the stretch the historian's device rollups have
   counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
@@ -1500,21 +1510,31 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   counts merged and renders none of its lanes. Which are open is kept in this browser
   (`OVERVIEW_GROUPS_KEY`, `{ key: open }`, in try/catch); on a first visit every group is open
   unless there are more than `OVERVIEW_OPEN_LANES_MAX` (200) lanes.
-- **A lane** is its tick box, its name (a link to its charts), its status dot (`badge-dot` with
-  `deviceDotStyle()`, and "Offline" in words), its metric count, "No readings since 15:00"
-  (`readingsStopWords()`), and its strip: runs of one shade (`coverageSteps()`, `coverageRuns()`),
-  four steps of `--coverage-1` to `--coverage-4` against the strip's busiest block, each run one box.
-  The strip spans the charts' plot area (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`), so a time sits where it
-  does on the Device tab. The future is `.chart-future`; a stretch the rollups have not counted yet
-  (`uncountedStretches()`) is `.overview-uncounted`, cross-hatched, and the status line says
-  "Coverage before 3 Oct is still being computed" (`uncountedWords()`).
-- **The selection box** is a drag across the strips (`useBandDrag` over `.overview-strip`, whose band
-  carries the press's and the pointer's `clientY`; the rows under that stretch are the box's
-  devices). Its bar says its size (`boxWords()`, with `bandWords()`) and offers **Chart**, the Device
-  tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON`, and **Zoom**,
-  which sets the window as a new history entry. Escape or a press outside clears it. The tick boxes
-  (`?device=`, telemetry keys) are the other way: the toolbar's **Chart** charts one at the control's
-  window. Export CSV is the Device tab's alone.
+- **A lane's label** is its tick box, its status dot (`badge-dot` with `deviceDotStyle()`, and
+  "Offline" in words, as the trail's deleted flag is), its name (`OverflowText` in a link to its
+  charts) and its metric count as `.trail-lane-qualifier`. **Its track** holds its strip, runs of
+  one shade (`coverageSteps()`, `coverageRuns()`), four steps of `--coverage-1` to `--coverage-4`
+  against the strip's busiest block, each run one box, a block with none the track's own colour;
+  and at its right-hand end "No readings since 15:00" (`readingsStopWords()`). The steps
+  are one sequential blue ramp a theme, held by `themeContrast.test.js` to the ordered-ramp rule:
+  lightness moves one way and the step nearest the card clears 2:1. The future is the trail's
+  `.trail-shade-future`; a stretch the rollups have not counted yet (`uncountedStretches()`) is
+  `.overview-uncounted`, cross-hatched, and the status line says "Coverage before 3 Oct is still
+  being computed" (`uncountedWords()`).
+- **The readout**: the block under the pointer, on a lane's track or a closed group's, in words
+  (`blockReadoutWords()`): "10:05–10:10 · 412 readings", "No readings", "No readings yet" after
+  now, or "Not counted yet". A step under 3:1 is why: the count never depends on the colour. None
+  is drawn while a box is.
+- **The selection box** is a drag across the tracks (`useBandDrag` over `.overview-swimlanes
+  .trail-track`, whose band carries the press's and the pointer's `clientY`; the rows under that
+  stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
+  inside the track near either end, with `boxWords()`). Once released it stays, and the row above
+  the lanes (`.history-header`) holds its words, **Chart** (the Device tab for one device at the
+  box's window, off for several with `CHART_SEVERAL_REASON`), **Zoom** (the window as a new history
+  entry) and **Clear**, in place of the status line. Nothing is drawn under the box, so the card's
+  edge cannot cut its actions off. Escape or Clear removes it; a press elsewhere keeps it. The tick
+  boxes (`?device=`, telemetry keys) are the other way, in the same row: **Chart** charts one at the
+  control's window. Export CSV is the Device tab's alone.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
   Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 

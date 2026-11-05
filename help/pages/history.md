@@ -9,13 +9,16 @@ Everyone who can sign in can open History. Each lane and chart shows only what y
 ## The Overview: where readings arrived
 
 1. Open **History** in the sidebar, directly below the Site Map. The Overview opens on **Last 24 hours**.
-2. Each device has a **lane**: its name, its status dot, how many metrics it reports, and a strip across the window.
-3. The strip is a row of **blocks**. A block is darker where more readings arrived. The key above the lanes reads **No readings**, then **Fewer readings → More readings**. Each strip is shaded against its own busiest block.
-4. Read the line above the lanes for the block size, for example **48 devices, in 5-minute blocks**.
+2. Each device has a **lane**, laid out as on the Audit Trail's timeline. On the left is a column of names: the device's tick box, its status dot, its name and how many metrics it reports. On the right is its strip across the window, under the time axis.
+3. The strip is a row of **blocks**. The more readings arrived in a block, the more its blue stands out: darker in the light theme, lighter in the dark one. The key above the lanes reads **No readings**, then **Fewer readings → More readings**. Each strip is shaded against its own busiest block.
+4. **Point at a block** to read it in words, for example **10:05–10:10 · 412 readings**, or **No readings**.
+5. Read the line above the lanes for the block size, for example **48 devices, in 5-minute blocks**.
 
-The strip never shows a reading's value, only how many arrived. A lane says **No readings since 15:00** when a device's readings stop inside the window. Machines send a reading only when a value changes, so a steady machine can be quiet for hours. The status dot says whether the device is online.
+The strip never shows a reading's value, only how many arrived. A lane says **No readings since 15:00** when a device's readings stop inside the window. Machines send a reading only when a value changes, so a steady machine can be quiet for hours. The status dot says whether the device is online, and an offline device says **Offline**.
 
-The lanes are grouped as the Site Map places devices: each area and its cells, the cells in no area, then **Site-Wide**, **Simulated** and **Unassigned**. Archived devices are not shown.
+The lanes are grouped as the Site Map places devices: each area and its cells, the cells in no area, then **Site-Wide**, **Simulated** and **Unassigned**. Each group's heading is in the column of names, a cell's a step in from its area's. Archived devices are not shown. With many devices the lanes scroll inside the card, and the time axis and the headings stay in view.
+
+The strips follow the Audit Trail's time axis, after the column of names, so they do not line up with the Device tab's charts.
 
 - **Select a group's name**, such as **Boardroom · 4 devices**, to close it. A closed group draws one strip, its devices' readings added together.
 - **Select Collapse all or Expand all**, at the start of the line above the lanes, to close or open every group.
@@ -26,14 +29,14 @@ The part of the window after now is hatched and says **No readings yet**. A cros
 
 ### Charting or zooming from Overview
 
-1. Press on a strip and drag across the lanes and the stretch of time you want. A box follows the pointer.
-2. Let go. The box says what it holds, for example **3 devices · 10:05 – 14:20, 4 h 15 min**.
+1. Press on a strip and drag across the lanes and the stretch of time you want. A box follows the pointer, and the time axis says what it holds, for example **3 devices · 10:05 – 14:20, 4 h 15 min**.
+2. Let go. The box stays, and the line above the lanes shows what it holds, with **Chart**, **Zoom** and **Clear**.
 3. Select **Zoom** to show that stretch on Overview. **Back** in your browser undoes it.
 4. Or select **Chart** to open that device's charts on the Device tab, over the box's stretch. Chart takes one device. Charting several comes with the Metric tab.
 
-Press **Escape**, or press anywhere outside the box, to clear it.
+Select **Clear**, or press **Escape**, to clear the box. The line above the lanes goes back to the block size.
 
-You don't need to drag. Tick the box at the start of a lane to pick that device, and select **Chart** in the toolbar: it charts the device over the time window. The time window's **Zoom in** and **Zoom out** work here as on the Device tab. A lane's name also opens its charts.
+You don't need to drag. Tick the box at the start of a lane to pick that device. The line above the lanes then shows **Chart**: it charts the device over the time window. The time window's **Zoom in** and **Zoom out** work here as on the Device tab. A lane's name also opens its charts.
 
 ### Long windows and many devices
 
