@@ -883,6 +883,13 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
+# psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
+# client an earlier boot registered is removed, its approvals revoked and its sessions ended, with
+# one APP_REMOVED and an APP_APPROVAL_REVOKED per approval, and the next boot records nothing. True
+# again restores it. True without the secret warns, naming the Studio login and the secret to set.
+# Unset is today's behaviour and never removes; any other value fails the boot. Every test rolls back.
+python supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and

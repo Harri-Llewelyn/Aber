@@ -2319,7 +2319,9 @@ or by SQL.
   key and no edge function, and the Audit Trail rows carry the Administrator. It returns `{name,
   approvals_ended, sessions_ended}`.
 - **Aber's own four cannot be removed** (`42501`). `0002` upserts each with `deleted_at = NULL` on
-  every boot, so a removal would undo itself at the next one; the four are part of the stack.
+  every boot, so a removal would undo itself at the next one; the four are part of the stack. The
+  one exception is `0002`'s own: with Studio off it removes Studio's client itself
+  ([Studio's login](#the-second-listener-which-is-studios-login-archived-migration-0081)).
 - **Each act is an Audit Trail row, written by a trigger**, because registration and approval happen
   inside GoTrue. On `auth.oauth_clients`, in the app's lane (`entity_type = 'oauth_clients'`, filed
   under `security` by `audit_domain_for()`'s default): `APP_REGISTERED` for an insert,
@@ -2340,7 +2342,8 @@ or by SQL.
 - **A boot writes nothing.** `0002`'s upsert of an existing row is an UPDATE that leaves `deleted_at`
   NULL, and the update trigger fires only when `deleted_at` changes between NULL and a time. The
   first seed of a stack app on a stack that already has `0217` writes one `APP_REGISTERED`, by
-  `migration`; on a fresh install `0002` runs before `0217` and writes none.
+  `migration`; on a fresh install `0002` runs before `0217` and writes none. The first boot with
+  Studio off after it was on writes its removal, once.
 - **The triggers are on GoTrue's tables, which `postgres` does not own.** It creates them with the
   TRIGGER privilege the image's default privileges give it on every table `supabase_auth_admin`
   creates; the file checks it first and names it if absent. Disabling a trigger needs the owner.
@@ -7050,9 +7053,31 @@ states it rather than absorbing it.
 
 **Two operational consequences.** The listener is `supabase-envoy:8001`, which the Ingress serves
 as `studio.<domain>`; `supabase-studio` itself has no route. And both halves fail closed: without
-`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` and the
-substituter renders credentials that cannot authenticate — a stack that runs normally with a console
-nobody can open, which is the same posture as the loopback binding it replaces.
+`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` naming the Studio login
+and the secret to set, and the substituter renders credentials that cannot authenticate — a stack
+that runs normally with a console nobody can open, which is the same posture as the loopback binding
+it replaces.
+
+**With Studio off, `0002` removes the client rather than leaving it.** db-init passes
+`studio_enabled` from `supabaseStudio.enabled`, which is false by default. Only `true` is a fault
+without the secret, so only `true` warns:
+
+| `studio_enabled` | What `0002` does |
+| :--- | :--- |
+| `false` | A `NOTICE` that Studio is off, so its client is not registered. A client an earlier boot registered is removed as `remove_app()` removes one: every approval revoked, every session ended, then `deleted_at` set. The trigger records one `APP_REMOVED` and an `APP_APPROVAL_REVOKED` per approval, by `migration`. The `NOTICE` gives the counts. |
+| `true` | As before: registered with the secret, or a `WARNING` and nothing without it. A client removed while Studio was off is restored by the upsert (`APP_RESTORED`), and each person approves it again. |
+| unset | An older chart or a hand-run `psql`: as `true`, so nothing that worked before changes. |
+
+Any other value fails the boot, naming it. So a site that had Studio on and turns it off ends with
+the clients in force that a default install has. `list_apps()`, the Apps tab and GoTrue's own reads
+(`deleted_at IS NULL`) no longer find Studio's. A later boot finds nothing to remove and records
+nothing.
+
+Nothing else needs the row. `stack_app_ids()` still names the id, so the id stays Part of Aber and
+`remove_app()` still refuses it. `end_my_door_sessions()` (`0208`) deletes by id and finds none.
+The gateway's rules for the door cannot match: the chart drops the studio listener, and the API
+listener names the id in no rule. GoTrue issues no new token for a removed client, and the API
+refuses one issued before, since its session has ended (`0205`).
 
 ---
 

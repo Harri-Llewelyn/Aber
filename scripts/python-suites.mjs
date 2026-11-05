@@ -1121,6 +1121,15 @@ export const SUITES = {
       'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
       "row naming who did it, while a boot's re-seed writes none.",
   },
+  'supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py': {
+    lanes: ['db'],
+    why:
+      "0002 -- that Studio's client block, run as db-init's psql runs it, says Studio is off in a " +
+      'NOTICE and never a WARNING; that it removes a client an earlier boot registered, approvals ' +
+      'and sessions with it, recorded once and not on the next boot, and restores it when Studio ' +
+      'is on again; that Studio on without its secret warns naming the login and the secret to ' +
+      'set; and that an unset value is today\'s behaviour and never removes.',
+  },
   'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
     lanes: ['db'],
     why:
