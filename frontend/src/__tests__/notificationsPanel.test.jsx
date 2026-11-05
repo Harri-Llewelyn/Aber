@@ -117,6 +117,8 @@ describe('for an Administrator', () => {
     expect(setUp).toHaveClass('btn-warning')
     expect(setUp).toHaveAccessibleDescription('Nothing is sent: the webhook has no address.')
     expect(within(toolbar()).getByRole('button', { name: /Send a test/ })).toBeDisabled()
+    // Greyed out as every refused action is, not only inert.
+    expect(within(toolbar()).getByRole('button', { name: /Send a test/ })).toHaveClass('btn-disabled')
     expect(within(toolbar()).getByRole('button', { name: /Issue signing key/ })).toBeEnabled()
   })
 

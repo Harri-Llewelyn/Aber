@@ -215,7 +215,11 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
               </button>
             </Tooltip>
             <Tooltip text={testBlocked || 'Post an aber.test message and show how it went'}>
-              <button className="btn btn-primary btn-sm" onClick={sendTest} disabled={!ready || testing}>
+              <button
+                className={`btn btn-primary btn-sm${!ready ? ' btn-disabled' : ''}${testing ? ' btn-loading' : ''}`}
+                onClick={sendTest}
+                disabled={!ready || testing}
+              >
                 <IconZap size={14} /> {testing ? 'Sending…' : 'Send a test'}
               </button>
             </Tooltip>
