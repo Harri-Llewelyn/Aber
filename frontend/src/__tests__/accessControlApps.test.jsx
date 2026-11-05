@@ -15,7 +15,8 @@ import { appUrl } from '../routes'
 import { removeQuestion, revokeQuestion } from '../utils/apps'
 import { tabLink, tabLinks } from '../test/tabBar'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listApps: vi.fn(),
     appApprovals: vi.fn(),

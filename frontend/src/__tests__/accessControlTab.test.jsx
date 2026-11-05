@@ -9,7 +9,8 @@ import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
 import { dropdownButton, pick, valuesShown } from '../test/listFilters'
 import { getAllByTooltip, getByTooltip, tooltipOf } from '../test/tooltips'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listGatewayCredentials: vi.fn(),
     listBrokerInventory: vi.fn(),

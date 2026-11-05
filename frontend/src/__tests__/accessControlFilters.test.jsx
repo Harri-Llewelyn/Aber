@@ -12,7 +12,8 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { dropdownButton, pick, valuesShown } from '../test/listFilters'
 import { api } from '../api'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listPeople: vi.fn(),
     setPersonRole: vi.fn(),

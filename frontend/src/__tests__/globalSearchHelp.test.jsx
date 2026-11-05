@@ -12,7 +12,8 @@ import { TABS, tabIsVisible } from '../navigation'
 import { helpTitle, pageHelpFile } from '../help'
 import { searchHelp } from '../help/searchIndex'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: { resolveId: vi.fn(), searchAssets: vi.fn(), get: vi.fn() }
 }))
 

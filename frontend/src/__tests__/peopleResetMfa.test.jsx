@@ -12,7 +12,8 @@ import { personUrl } from '../routes'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listPeople: vi.fn(),
     personSessionSummary: vi.fn(),
