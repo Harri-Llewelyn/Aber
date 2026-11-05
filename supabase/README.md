@@ -3307,8 +3307,10 @@ and Aber's own evaluator ([#322](https://github.com/Harri-Llewelyn/Aber/issues/3
 Grafana.
 
 - **`alert_suppression_windows`**, one row per window. Exactly one of `device_id`, `gateway_id`
-  and `cell_id` (`alert_suppression_windows_one_subject`, `num_nonnulls() = 1`), each a foreign key
-  that cascades, so a purged subject takes its windows; the Audit Trail keeps their acts.
+  and `cell_id` (`alert_suppression_windows_one_subject`, `num_nonnulls() = 1`). None is a foreign
+  key: a window outlives its subject, as an alert and its audit rows do, so purging a device, gateway
+  or cell never waits on one, and no child of `cells` cascades (`test_archive_purge_cascade.py`).
+  The writers refuse a subject that is not there.
   `starts_at` and `ends_at` are required, `ends_at` after `starts_at`. `reason` is required, trimmed
   and 1 to 200 characters, as an acknowledgement's note is. `created_by`, its email from the token
   and `created_at` say who scheduled it, and `ended_by` and its email who ended it early. A window

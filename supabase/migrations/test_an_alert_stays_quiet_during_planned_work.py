@@ -297,14 +297,19 @@ class TheTable(WindowsBase):
         self.assertRefused("23514", self.write, device_id=self.device, ended_by_email="someone@suppression.test")
         self.write(device_id=self.device, ended_by=MANAGER_ID, ended_by_email="someone@suppression.test")
 
-    def test_a_subject_that_is_not_there_is_refused(self):
-        self.assertRefused("23503", self.write, device_id=str(uuid.uuid4()))
-
-    def test_a_purged_subject_takes_its_windows(self):
-        window = self.window(device_id=self.loose)
-        self.cur.execute("DELETE FROM public.devices WHERE id = %s;", (self.loose,))
-        self.cur.execute("SELECT count(*) FROM public.alert_suppression_windows WHERE id = %s;", (window,))
+    def test_a_window_outlives_its_subject_and_holds_no_purge_back(self):
+        # No foreign key, as for an alert's entity_id: deleting the subject deletes nothing else and
+        # is refused by nothing here. The writers refuse a subject that is not there (Scheduling).
+        self.cur.execute(
+            "SELECT count(*) FROM pg_constraint WHERE contype = 'f'"
+            "   AND conrelid = 'public.alert_suppression_windows'::regclass;")
         self.assertEqual(self.cur.fetchone()[0], 0)
+        windows = [self.window(device_id=self.loose), self.window(cell_id=self.other_cell)]
+        self.cur.execute("DELETE FROM public.devices WHERE id = %s;", (self.loose,))
+        self.cur.execute("DELETE FROM public.cells WHERE id = %s;", (self.other_cell,))
+        self.assertEqual(self.cur.rowcount, 1)
+        self.cur.execute("SELECT count(*) FROM public.alert_suppression_windows WHERE id = ANY (%s::uuid[]);", (windows,))
+        self.assertEqual(self.cur.fetchone()[0], 2)
 
 
 class WhoWrites(WindowsBase):

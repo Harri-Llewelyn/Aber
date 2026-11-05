@@ -106,52 +106,9 @@ DO $c$ BEGIN
   END IF;
 END $c$;
 
--- A window goes with its subject: a purged device, gateway or cell takes its windows with it. The
--- Audit Trail keeps each window's acts.
-DO $c$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'alert_suppression_windows_device_id_fkey'
-                AND conrelid = 'public.alert_suppression_windows'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
-    ALTER TABLE public.alert_suppression_windows DROP CONSTRAINT alert_suppression_windows_device_id_fkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'alert_suppression_windows_device_id_fkey'
-                    AND conrelid = 'public.alert_suppression_windows'::regclass) THEN
-    ALTER TABLE ONLY public.alert_suppression_windows
-        ADD CONSTRAINT alert_suppression_windows_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE;
-  END IF;
-END $c$;
-
-DO $c$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'alert_suppression_windows_gateway_id_fkey'
-                AND conrelid = 'public.alert_suppression_windows'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
-    ALTER TABLE public.alert_suppression_windows DROP CONSTRAINT alert_suppression_windows_gateway_id_fkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'alert_suppression_windows_gateway_id_fkey'
-                    AND conrelid = 'public.alert_suppression_windows'::regclass) THEN
-    ALTER TABLE ONLY public.alert_suppression_windows
-        ADD CONSTRAINT alert_suppression_windows_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
-  END IF;
-END $c$;
-
-DO $c$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'alert_suppression_windows_cell_id_fkey'
-                AND conrelid = 'public.alert_suppression_windows'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE CASCADE') THEN
-    ALTER TABLE public.alert_suppression_windows DROP CONSTRAINT alert_suppression_windows_cell_id_fkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'alert_suppression_windows_cell_id_fkey'
-                    AND conrelid = 'public.alert_suppression_windows'::regclass) THEN
-    ALTER TABLE ONLY public.alert_suppression_windows
-        ADD CONSTRAINT alert_suppression_windows_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE CASCADE;
-  END IF;
-END $c$;
+-- No foreign key to the subject: a window outlives its device, gateway or cell, as an alert and the
+-- audit rows do, and a purge never waits on one. No child of cells cascades
+-- (test_archive_purge_cascade.py). The writers refuse a subject that is not there.
 
 -- A subject's windows by their end: the predicate reads those not yet ended, and a drawer lists them.
 CREATE INDEX IF NOT EXISTS idx_alert_suppression_windows_device ON public.alert_suppression_windows USING btree (device_id, ends_at) WHERE (device_id IS NOT NULL);
@@ -166,7 +123,8 @@ COMMENT ON TABLE public.alert_suppression_windows IS
   'Audit Trail row in the subject''s lane. platform_alert_suppressing_window() decides what it '
   'covers (0240).';
 COMMENT ON COLUMN public.alert_suppression_windows.device_id IS
-  'The device it covers. Exactly one of device_id, gateway_id and cell_id is set (0240).';
+  'The device it covers. Exactly one of device_id, gateway_id and cell_id is set. No foreign key: '
+  'the window outlives its subject, as an alert does (0240).';
 COMMENT ON COLUMN public.alert_suppression_windows.gateway_id IS
   'The gateway it covers: the gateway''s own alerts, not its devices'' (0240).';
 COMMENT ON COLUMN public.alert_suppression_windows.cell_id IS
@@ -701,8 +659,7 @@ BEGIN
   END IF;
   FOREACH v_name IN ARRAY ARRAY['alert_suppression_windows_one_subject', 'alert_suppression_windows_ends_after_start',
                                 'alert_suppression_windows_reason_valid', 'alert_suppression_windows_ended_is_whole',
-                                'alert_suppression_windows_pkey', 'alert_suppression_windows_device_id_fkey',
-                                'alert_suppression_windows_gateway_id_fkey', 'alert_suppression_windows_cell_id_fkey'] LOOP
+                                'alert_suppression_windows_pkey'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_constraint
                     WHERE conname = v_name AND conrelid = 'public.alert_suppression_windows'::regclass
                       AND convalidated) THEN
