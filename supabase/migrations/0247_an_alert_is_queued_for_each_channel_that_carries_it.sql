@@ -658,14 +658,15 @@ COMMENT ON FUNCTION public.sweep_notifications() IS
 -- -------------------------------------------------------------------------------------------------
 -- 11. What the dispatcher reads and writes
 -- -------------------------------------------------------------------------------------------------
--- Only the pass that holds a live lease, so a pass that outlived its lease writes nothing.
+-- Only the pass that holds a live lease, so a pass that outlived its lease writes nothing. now() is
+-- the call's own start: each of the dispatcher's calls is a transaction of its own.
 CREATE OR REPLACE FUNCTION public.require_notification_dispatch_holder(p_holder uuid) RETURNS void
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 BEGIN
   IF p_holder IS NULL OR NOT EXISTS (SELECT 1 FROM public.notification_dispatch_lease
-                                      WHERE id AND holder = p_holder AND held_until > clock_timestamp()) THEN
+                                      WHERE id AND holder = p_holder AND held_until > now()) THEN
     RAISE EXCEPTION 'This pass does not hold the notification-dispatch lease.'
       USING ERRCODE = 'lock_not_available';
   END IF;

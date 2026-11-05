@@ -28,7 +28,7 @@
 -- The allowed hosts: lower-case DNS names or IPv4 addresses, or an IPv6 address in brackets, each
 -- once, at most 20. A host, not a URL: the port and the path are the address's, which is secret.
 CREATE OR REPLACE FUNCTION public.notification_allowed_hosts_problem(p_value jsonb) RETURNS text
-    LANGUAGE plpgsql IMMUTABLE
+    LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
     AS $$
 DECLARE
