@@ -3898,9 +3898,9 @@ a.chip { text-decoration: none; }
   margin-top: 5px;
 }
 
-/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
-   and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
-   band, and a clipped link is worse than a two-line footer. */
+/* The state on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
+   and "Alert acknowledged · since 5 Nov 2026, 14:22" plus the link is close enough to that to wrap on
+   a narrow band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
   display: flex;
   align-items: center;
@@ -3928,6 +3928,29 @@ a.chip { text-decoration: none; }
 
 .context-alert-link:hover { color: var(--text-primary); }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Acknowledged, the banner keeps its severity's outline and drops the tint, as the counter's dot
+   turns hollow. Suppressed, it colours nothing: a dashed neutral outline, and the crossed bell. */
+.context-alert.context-alert-acknowledged { background: transparent; }
+.context-alert.context-alert-suppressed {
+  border-color: var(--border);
+  border-style: dashed;
+  background: transparent;
+}
+.context-alert-suppressed .context-alert-head { color: var(--text-primary); }
+
+/* Who acknowledged it, or until when a window keeps it quiet, with the reason under it. */
+.context-alert-state {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+.context-alert-state svg { flex-shrink: 0; margin-top: 1px; }
+.context-alert-note { font-size: 11px; line-height: 1.35; color: var(--text-primary); margin-top: 3px; overflow-wrap: anywhere; }
 
 /* The top bar's alert counter and the list behind it. Permanent in all three states; see
    AlertPill.jsx. `position: relative` on the wrapper anchors the panel to the pill rather than the
@@ -4117,6 +4140,12 @@ a.chip { text-decoration: none; }
 }
 .alert-pill-dot-warning.alert-pill-dot-acknowledged { box-shadow: inset 0 0 0 1.5px var(--warning); }
 .alert-pill-dot-info.alert-pill-dot-acknowledged    { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* Suppressed: a muted ring with a stroke through it, whatever its severity, since it colours
+   nothing. After the acknowledged rules, so it wins on a row that is both. */
+.alert-pill-dot.alert-pill-dot-suppressed {
+  background: linear-gradient(135deg, transparent 43%, var(--text-muted) 43% 57%, transparent 57%);
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
 
 /* Under an alert's name: Acknowledge, or who acknowledged it, when and why, with Withdraw. Indented
    to the name, past the dot: 12px of row padding, the 7px dot and its 9px gap. */
@@ -4133,6 +4162,7 @@ a.chip { text-decoration: none; }
 
 .alert-pill-ack-words { display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
 .alert-pill-ack-tick { flex-shrink: 0; margin-top: 1px; color: var(--success-text); }
+.alert-pill-suppression-mark { flex-shrink: 0; margin-top: 1px; }
 .alert-pill-ack-note { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
 .alert-pill-ack .btn-sm { padding: 2px 8px; font-size: 11px; }
 
@@ -4978,6 +5008,30 @@ a.chip { text-decoration: none; }
   flex-direction: column;
   gap: 10px;
 }
+
+/* A drawer's Suppression windows section (common/SuppressionWindows.jsx): each window a ruled row,
+   its state as a word beside the reason, the times and who under it, the acts at its foot. The
+   reason wraps rather than cuts: it is what the reader came for, and it is at most 200 characters. */
+.suppression-windows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.suppression-windows > .context-panel-section-label { margin-bottom: 0; }
+.suppression-windows .context-field-empty { font-size: 11px; }
+.suppression-window-list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.suppression-window {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.suppression-window:first-child { border-top: none; padding-top: 2px; }
+.suppression-window-head { display: flex; align-items: flex-start; gap: 6px; }
+.suppression-window-head .badge { flex-shrink: 0; }
+.suppression-window-reason { font-size: 12px; color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
+.suppression-window-meta { color: var(--text-muted); line-height: 1.35; }
+.suppression-window-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+/* The dialog's start and end side by side, one above the other in a narrow dialog. */
+.suppression-window-times { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 
 /* A copyable identifier inside the panel is a block, not an inline chip. It wraps to as many
    lines as the value needs (see `.copyable-id-wrap`), so the negative margin `.copyable-id`

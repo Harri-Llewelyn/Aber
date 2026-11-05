@@ -85,7 +85,7 @@ import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
-import { unacknowledgedAlerts } from './utils/alertAcknowledgement'
+import { countedAlerts } from './utils/alertSuppression'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
@@ -570,10 +570,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
   // visible whichever page is open. Each alert's toast links to its rule in Grafana. The counter,
-  // the title and the favicon count the ones nobody has acknowledged; the pages and the counter's
-  // list are handed them all.
+  // the title and the favicon count the ones nobody has acknowledged and no window suppresses; the
+  // pages and the counter's list are handed them all.
   const firingAlerts = usePlatformAlerts(showToast)
-  const unacknowledgedCount = unacknowledgedAlerts(firingAlerts).length
+  const countedCount = countedAlerts(firingAlerts).length
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
   // under the bar and the tab title.
@@ -583,8 +583,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // page differ, and the pill's count, so the tab and the bar never disagree. The icon's red dot
   // follows the same count, for a pinned tab that shows no title.
   const url = useUrl()
-  useDocumentTitle(pageTitleOf(tab, url), unacknowledgedCount, connection.status !== CONNECTION_OK)
-  useAlertFavicon(unacknowledgedCount)
+  useDocumentTitle(pageTitleOf(tab, url), countedCount, connection.status !== CONNECTION_OK)
+  useAlertFavicon(countedCount)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
@@ -762,9 +762,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
             {tab === 'history'        && <HistoryTab hasPermission={hasPermission} showToast={showToast} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} userRole={userRole} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} userRole={userRole} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (

@@ -212,6 +212,26 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
   })
 })
 
+describe('Devices: Status ranks a firing alert, then an acknowledged one, then the rest', () => {
+  const firing = (d, severity) => ({ alert_name: 'Firing', severity, entity_type: 'device', sparkplug_id: d.sparkplug_id })
+
+  it('puts a warning nobody has picked up before an acknowledged critical, and a suppressed alert with no alert', async () => {
+    api.get.mockImplementation(routeGet(ROSTER, QUEUE))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} activeAlerts={[
+      firing(mill, 'warning'),
+      { ...firing(drill, 'critical'), acknowledged_at: '2026-11-05T09:00:00Z', acknowledged_by_email: 'op@aber.local', acknowledgement_reason: 'investigating' },
+      { ...firing(press, 'critical'), suppressed: true, suppressed_until: '2026-11-05T12:00:00Z', suppression_reason: 'Belt change' },
+    ]} />)
+    await waitFor(() => expect(document.querySelector('.loading-wrap')).toBeNull())
+
+    sortBy('Status')
+    // The overdue lathe's amber badge is the rest's most severe; the suppressed press is ONLINE.
+    expect(listed()).toEqual(['Mill_Offline', 'Drill_Online', 'Lathe_Overdue', 'Press_Alarm'])
+    sortBy('Status')
+    expect(listed()).toEqual(['Press_Alarm', 'Lathe_Overdue', 'Drill_Online', 'Mill_Offline'])
+  })
+})
+
 describe('Devices: sorting the Quarantine queue by a column (#801)', () => {
   const openQueue = () => fireEvent.click(tabLink(/^Quarantine/))
 

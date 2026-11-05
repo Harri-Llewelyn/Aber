@@ -55,7 +55,7 @@ const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes
 describe('the action filter offers every action the database can record', () => {
   /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
      so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
-  it('lists every action, including the forty-five the generic trigger does not write, in groups', async () => {
+  it('lists every action, including the forty-nine the generic trigger does not write, in groups', async () => {
     await show()
     const values = labels().map(l => LABEL_TO_ACTION[l])
 
@@ -64,7 +64,8 @@ describe('the action filter offers every action the database can record', () => 
     expect(values).toEqual([
       'INSERT', 'UPDATE', 'DELETE',
       'SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED',
-      'ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN',
+      'ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
+      'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED',
       'CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
       'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED',
       'PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
