@@ -6052,102 +6052,89 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-bucket-choices .btn { justify-content: flex-start; }
 
 /* ===== History: Overview ===== */
-/* The lanes and their groups, full width as the Device tab's groups are. Every strip, the axis and
-   the layer over them span the charts' plot area: the card's inset, then PLOT_LEFT_PX and
-   PLOT_RIGHT_PX (TimeSeriesChart.jsx), so a time sits where it does on the Device tab's charts. */
-.overview-plot {
-  --overview-left: calc(var(--inset) + 56px);
-  --overview-right: calc(var(--inset) + 28px);
+/* Overview is the Audit Trail's lane grid (.trail-swimlanes, .trail-lane, .trail-section,
+   .trail-axis): a label column, then a track a row, under the same axis, at the same widths and
+   row height. What follows is only what Overview adds to it. */
+.overview-swimlanes {
   position: relative;
   min-width: 0;
-  padding: 4px 0 var(--inset);
+  /* Overview's headings carry no icon, so a lane's label starts past the chevron alone: under its
+     heading's text, as the Audit Trail's does. */
+  --trail-name-indent: calc(var(--inset) + 18px);
 }
-.overview-axis { position: relative; height: 24px; margin: 0 var(--overview-right) 0 var(--overview-left); }
-.overview-axis-tick {
-  position: absolute;
-  top: 5px;
-  transform: translateX(-50%);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.overview-axis-tick-start { transform: none; }
-.overview-axis-tick-end   { transform: translateX(-100%); }
-/* The axis names the hatched part after now; its words start clear of the Now marker on its line. */
-.overview-axis .chart-future { padding-left: 64px; }
-.overview-group { min-width: 0; }
-.overview-group-body[hidden] { display: none; }
-/* A cell's heading under its area's, indented a step. */
-.overview-subgroup-head > .group-heading { padding-left: calc(var(--inset) + 18px); }
-.overview-row { min-width: 0; }
-.overview-lane { padding: 6px 0 4px; }
-.overview-summary { padding: 6px 0; }
-.overview-lane-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 0 var(--inset);
-  font-size: 12px;
-  color: var(--text-muted);
-}
+/* A cell's heading under its area's, a step in, and pinned one row below it. */
+.overview-subsection { top: calc(var(--trail-axis-height) + 1px + 29px); }
+.overview-subsection .group-heading { padding-left: calc(var(--inset) + 18px); }
+.overview-lane-deep .trail-lane-label { padding-left: calc(var(--trail-name-indent) + 18px); }
+/* A lane's label: tick box, status dot, name, then the metric count as the qualifier. */
 .overview-pick { flex-shrink: 0; margin: 0; }
-.overview-lane-name { min-width: 0; font-weight: 600; color: var(--accent-text); text-decoration: none; }
-.overview-lane-name:hover,
-.overview-lane-name:focus-visible { text-decoration: underline; }
-.overview-lane-meta { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
-.overview-lane-offline { color: var(--text-primary); }
-.overview-lane-stop { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
-/* A strip: a run of blocks of one shade is a box across its stretch; a block with none is the ground. */
-.overview-strip {
-  position: relative;
-  height: 12px;
-  margin: 4px var(--overview-right) 0 var(--overview-left);
-  border-radius: 2px;
-  background: var(--bg-base);
-  box-shadow: inset 0 0 0 1px var(--border);
-  cursor: crosshair;
-  user-select: none;
-}
-.overview-run { position: absolute; top: 0; bottom: 0; }
+.overview-status { display: inline-flex; flex-shrink: 0; }
+.overview-lane-name { min-width: 0; text-decoration: none; }
+.overview-lane-name .trail-lane-name { display: block; color: var(--accent-text); }
+.overview-lane-name:hover .trail-lane-name,
+.overview-lane-name:focus-visible .trail-lane-name { text-decoration: underline; }
+.overview-lane-offline { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+/* A track's blocks: a run of one shade a box, between the row's rules, on the track's own colour. */
+.overview-track { cursor: crosshair; user-select: none; }
+.overview-run { position: absolute; top: 7px; bottom: 7px; }
 .overview-step-1 { background: var(--coverage-1); }
 .overview-step-2 { background: var(--coverage-2); }
 .overview-step-3 { background: var(--coverage-3); }
 .overview-step-4 { background: var(--coverage-4); }
-/* Over the strips, below the axis: the hatch after now and the selection box, leaving the pointer to
-   the strips beneath. */
-.overview-layer {
+/* Where a lane's readings stop, at the track's right-hand end, on the card so it reads over a block. */
+.overview-stop {
   position: absolute;
-  top: 28px;
-  bottom: 0;
-  left: var(--overview-left);
-  right: var(--overview-right);
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
   pointer-events: none;
 }
-/* The selection box, with the band's look (.chart-band) on every edge. */
+/* The block under the pointer in words, with the band words' look and held inside the track near
+   either end as they are. */
+.overview-readout {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.overview-readout-start { transform: none; }
+.overview-readout-end   { transform: translateX(-100%); }
+/* The selection box, over the tracks and under the labels, with the band's look on every edge. */
+.overview-box-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--trail-label-width) + var(--trail-lane-gap));
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
 .overview-box {
   position: absolute;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border: 1px solid var(--accent);
   border-radius: 2px;
 }
-/* Its size in words and its actions, under its bottom edge, held inside the strips near the end. */
-.overview-box-bar {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px 4px 10px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-xs);
-  background: var(--bg-card);
-  box-shadow: var(--shadow-popover);
-  white-space: nowrap;
-  pointer-events: auto;
-}
-.overview-box-words { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* The selection's words and actions, in the row above the lanes where the status line is. */
+.overview-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.overview-selection-words { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
 /* The key, at the end of the row above the lanes, as the Audit Trail's legend is. */
 .overview-key {
   display: flex;
@@ -6160,17 +6147,20 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 .overview-key-item { display: inline-flex; align-items: center; gap: 6px; }
 .overview-key-shades { display: inline-flex; gap: 2px; }
+/* A swatch takes its shade from .overview-step-N; the one for no readings is the track's own
+   colour, the card, with an edge. */
 .overview-swatch {
   display: inline-block;
   width: 14px;
   height: 10px;
   border-radius: 2px;
-  background: var(--bg-base);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
-.overview-swatch[class*='overview-step-'] { box-shadow: none; }
+.overview-swatch-none {
+  background: var(--bg-card);
+  box-shadow: inset 0 0 0 1px var(--border-hover);
+}
 /* A stretch the device rollups have not counted yet: dotted crosswise, so it is told from the
-   future's single hatch (.chart-future) and from a block with no readings. */
+   future's single hatch (.trail-shade-future) and from a block with no readings. */
 .overview-uncounted {
   position: absolute;
   top: 0;
@@ -6183,7 +6173,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .overview-swatch-uncounted {
   background:
     repeating-linear-gradient(45deg, var(--text-dim) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(-45deg, var(--text-dim) 0 1px, transparent 1px 4px), var(--bg-base);
+    repeating-linear-gradient(-45deg, var(--text-dim) 0 1px, transparent 1px 4px), var(--bg-card);
 }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead

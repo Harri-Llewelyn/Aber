@@ -11,19 +11,18 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
-import { PLOT_LEFT_PX, PLOT_RIGHT_PX } from '../common/TimeSeriesChart'
-import { IconChartLine, IconCpu, IconZoomIn } from '../common/Icons'
+import { IconChartLine, IconCpu, IconX, IconZoomIn } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useBandDrag } from '../../hooks/useBandDrag'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceDotStyle, deviceLifecycleStatus, deviceStatusTitle } from '../../utils/deviceStatus'
-import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
+import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   CHART_SEVERAL_REASON, COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
-  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockWords,
-  boxWords, bucketStarts, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary, deviceMatches,
-  deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
+  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockReadoutWords,
+  blockWords, boxWords, bucketStarts, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary,
+  deviceMatches, deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
   readOverviewGroups, readWidth, readingsStopWords, telemetryKey, uncountedStretches, uncountedWords, writeOverviewGroups,
 } from '../../utils/history'
 
@@ -36,8 +35,11 @@ const WIDTH_SETTLE_MS = 300
 /** How long typing in the search settles before a long window reads the devices it matches. */
 const SEARCH_SETTLE_MS = 300
 
-/** The band drag (hooks/useBandDrag.js): a press on any strip, each the window's width. */
-const OVERVIEW_BAND = { track: '.overview-strip' }
+/** The band drag (hooks/useBandDrag.js): a press on any of Overview's tracks, each the window's width. */
+const OVERVIEW_BAND = { track: '.overview-swimlanes .trail-track' }
+
+/** The narrowest stretch of a track that holds the hatch's words, "No readings yet". */
+const SHADE_WORDS_PX = 110
 
 /** No device ticked. Hoisted: useUrlList's default is compared, not copied. */
 const NONE = Object.freeze([])
@@ -46,6 +48,12 @@ const NONE = Object.freeze([])
 const NO_COUNTS = Object.freeze([])
 
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/** A fraction of the window as a CSS length across a track. */
+const at = (f) => `${f * 100}%`
+
+/** Words held inside the track near either end, as the Audit Trail's band words and now marker are. */
+const edgeClass = (base, f) => `${base}${f > 0.85 ? ` ${base}-end` : f < 0.15 ? ` ${base}-start` : ''}`
 
 /** The groups, and each area's groups, narrowed to the devices that match `text`; empty ones go. */
 function matchingGroups(groups, text) {
@@ -62,46 +70,46 @@ function matchingGroups(groups, text) {
 }
 
 /**
- * One strip of blocks across the window, a run of blocks of one shade a box: darker where more
- * readings arrived, against the strip's own busiest block (coverageSteps()). A block with none is
- * the strip's ground. Never a value, only how many readings arrived.
+ * A track's blocks, a run of blocks of one shade a box: darker where more readings arrived, against
+ * the strip's own busiest block (coverageSteps()). A block with none is the track's own colour.
+ * Never a value, only how many readings arrived.
  */
-function CoverageStrip({ counts, reading, summary }) {
+function Blocks({ counts, reading }) {
   const runs = useMemo(() => coverageRuns(coverageSteps(counts)), [counts])
   const { start, end, starts, minutes } = reading
   const span = end - start
   const edge = (ms) => Math.min(1, Math.max(0, (ms - start) / span))
-  return (
-    <div className="overview-strip" role="img" aria-label={summary}>
-      {runs.map(r => {
-        const left = edge(starts[r.from] * 1000)
-        const right = edge(starts[r.to - 1] * 1000 + minutes * 60000)
-        return (
-          <span
-            key={r.from}
-            className={`overview-run overview-step-${r.step}`}
-            style={{ left: `${left * 100}%`, width: `${(right - left) * 100}%` }}
-          />
-        )
-      })}
-    </div>
-  )
+  return runs.map(r => {
+    const left = edge(starts[r.from] * 1000)
+    const right = edge(starts[r.to - 1] * 1000 + minutes * 60000)
+    return <span key={r.from} className={`overview-run overview-step-${r.step}`} style={{ left: at(left), width: at(right - left) }} />
+  })
+}
+
+/** The block under the pointer, in words: its stretch and how many readings arrived in it. */
+function Readout({ hover, counts, reading, now }) {
+  const startMs = reading.starts[hover.i] * 1000
+  const words = blockReadoutWords(startMs, reading.minutes, counts[hover.i] ?? 0, {
+    spanMs: reading.end - reading.start, counted: reading.counted, now,
+  })
+  return <span className={edgeClass('overview-readout', hover.f)} style={{ left: at(hover.f) }}>{words}</span>
 }
 
 /**
- * One device's lane: its tick box, its name (a link to its charts at the window shown), its status
- * dot as the Site Map draws it, how many metrics it reports, where its readings stop, then its strip.
+ * One device's row of the grid: its label (tick box, status dot as the Site Map draws it, name as a
+ * link to its charts, and its metric count as the qualifier), then its track of blocks, where its
+ * readings stop in words, and the readout of the block under the pointer.
  */
-function Lane({ device, laneKey, counts, reading, metrics, ticked, onTick, win, now }) {
+function Lane({ device, laneKey, counts, reading, metrics, ticked, onTick, win, now, hover, deep }) {
   const status = deviceLifecycleStatus(device)
   const offline = status !== DEVICE_STATUS.ONLINE
-  // A device a long window's read left out (the search changed since) draws an empty strip, unworded.
+  // A device a long window's read left out (the search changed since) draws an empty track, unworded.
   const stop = counts
     ? readingsStopWords(counts, reading.starts, reading.minutes, { start: reading.start, end: reading.end, now, counted: reading.counted })
     : null
   return (
-    <div className="overview-row overview-lane" data-lanes={laneKey}>
-      <div className="overview-lane-head">
+    <div className={`trail-lane overview-lane${deep ? ' overview-lane-deep' : ''}`} data-lanes={laneKey}>
+      <div className="trail-lane-label">
         <input
           type="checkbox"
           className="overview-pick"
@@ -109,24 +117,29 @@ function Lane({ device, laneKey, counts, reading, metrics, ticked, onTick, win, 
           onChange={e => onTick(laneKey, e.target.checked)}
           aria-label={`Pick ${device.asset_name}`}
         />
-        <RouteLink
-          to={pickedAddress(device.asset_id, win)}
-          className="overview-lane-name"
-          title={`Chart ${device.asset_name}'s readings over this window`}
-        >
-          <OverflowText>{device.asset_name}</OverflowText>
-        </RouteLink>
         <Tooltip text={deviceStatusTitle(status)}>
-          <span className="overview-lane-meta" tabIndex={0}>
+          <span className="overview-status" tabIndex={0}>
             <span className="badge-dot" style={deviceDotStyle(device)} aria-hidden="true" />
             {/* Never colour alone: an offline device says so in words, as the Site Map's chip does. */}
-            {offline ? <span className="overview-lane-offline">Offline</span> : <span className="sr-only">Online</span>}
-            <span>{plural(metrics, 'metric', 'metrics')}</span>
+            {!offline && <span className="sr-only">Online</span>}
           </span>
         </Tooltip>
-        {stop && <span className="overview-lane-stop">{stop}</span>}
+        <RouteLink to={pickedAddress(device.asset_id, win)} className="overview-lane-name" title={`Chart ${device.asset_name}'s readings over this window`}>
+          <OverflowText className="trail-lane-name">{device.asset_name}</OverflowText>
+        </RouteLink>
+        {offline && <span className="overview-lane-offline">Offline</span>}
+        <span className="trail-lane-qualifier">{plural(metrics, 'metric', 'metrics')}</span>
       </div>
-      <CoverageStrip counts={counts || NO_COUNTS} reading={reading} summary={counts ? coverageSummary(device.asset_name, counts, stop) : device.asset_name} />
+      <div
+        className="trail-track overview-track"
+        data-hover={`d:${laneKey}`}
+        role="img"
+        aria-label={counts ? coverageSummary(device.asset_name, counts, stop) : device.asset_name}
+      >
+        <Blocks counts={counts || NO_COUNTS} reading={reading} />
+        {stop && <span className="overview-stop">{stop}</span>}
+        {hover?.id === `d:${laneKey}` && counts && <Readout hover={hover} counts={counts} reading={reading} now={now} />}
+      </div>
     </div>
   )
 }
@@ -136,7 +149,7 @@ function CoverageKey({ uncounted }) {
   return (
     <div className="overview-key" role="group" aria-label="Key">
       <span className="overview-key-item">
-        <span className="overview-swatch" aria-hidden="true" />
+        <span className="overview-swatch overview-swatch-none" aria-hidden="true" />
         {COVERAGE_KEY.none}
       </span>
       <span className="overview-key-item">
@@ -181,20 +194,46 @@ function ChartButton({ keys, win, names }) {
 }
 
 /**
- * History's Overview: where readings arrived over the window, before anything is charted. A lane
- * per device, grouped as the Site Map places devices (overviewGroups()): each area and its cells,
- * the cells in no area, then Site-Wide, Simulated and Unassigned. A lane is a strip of blocks,
- * darker where more readings arrived, from telemetry_coverage() (0245), read for every device at
- * about one block per COVERAGE_BLOCK_PX of the strip, in parts that fit its bound. A closed group
- * draws one strip of its devices' counts merged. Which groups are open is kept in this browser
- * (OVERVIEW_GROUPS_KEY); on a first visit all are, unless the page would draw more lanes than
- * OVERVIEW_OPEN_LANES_MAX.
+ * The selection's words and actions, in the row above the lanes in place of the status line: the
+ * box's (Chart, Zoom and Clear) or the tick boxes' (Chart and Clear). Above the grid, so nothing of it
+ * can fall below the card's edge, however many lanes there are.
+ */
+function SelectionBar({ words, keys, win, names, onZoom, onClear }) {
+  return (
+    <div className="overview-selection" role="group" aria-label="Selection">
+      <span className="overview-selection-words" role="status">{words}</span>
+      <ChartButton keys={keys} win={win} names={names} />
+      {onZoom && (
+        <Tooltip text="Show this stretch of the window, as a new step in your browser's history">
+          <button type="button" className="btn btn-primary btn-sm" onClick={onZoom}>
+            <IconZoomIn size={13} aria-hidden="true" /> Zoom
+          </button>
+        </Tooltip>
+      )}
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>
+        <IconX size={13} aria-hidden="true" /> Clear
+      </button>
+    </div>
+  )
+}
+
+/**
+ * History's Overview: where readings arrived over the window, before anything is charted. The
+ * Audit Trail's lane grid: a label column, then a track per row, under an axis. A row per device,
+ * grouped as the Site Map places devices (overviewGroups()): each area and its cells, the cells in
+ * no area, then Site-Wide, Simulated and Unassigned, each group a section row. A track is a strip of
+ * blocks, darker where more readings arrived, from telemetry_coverage() (0245), read for every
+ * device at about one block per COVERAGE_BLOCK_PX of the track, in parts that fit its bound; the
+ * block under the pointer is read out in words. A closed group's section row carries its devices'
+ * counts merged. Which groups are open is kept in this browser (OVERVIEW_GROUPS_KEY); on a first
+ * visit all are, unless the page would draw more lanes than OVERVIEW_OPEN_LANES_MAX.
  *
- * A drag across the strips draws a selection box: the devices whose rows it covers and the
- * stretch of the window it spans, in words, with Chart (the Device tab, for one device) and Zoom
- * (the page's window, as a new history entry). Escape or a press outside clears it. The box is a
- * shortcut: each lane's tick box picks devices (`?device=`), the toolbar's Chart charts them at the
- * time control's window, and the control zooms.
+ * A drag across the tracks draws a selection box: the devices whose rows it covers and the stretch
+ * of the window it spans, named on the axis while it is drawn. On release the selection stays, and
+ * the row above the lanes holds its words, Chart (the Device tab, for one device), Zoom (the page's
+ * window, as a new history entry) and Clear. Escape clears it too. The box is a shortcut: each
+ * lane's tick box picks devices (`?device=`), and the same row then offers Chart at the time
+ * control's window, and the control zooms.
  */
 export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, every, setEvery }) {
   useClockTick(CLOCK_MS)
@@ -214,21 +253,20 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const isOpen = (key) => groupIsOpen(key, choices, placed.length)
   const groupsId = useId()
   const bodyRef = useRef(null)
-  const plotRef = useRef(null)
+  const gridRef = useRef(null)
   const layerRef = useRef(null)
-  const barRef = useRef(null)
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
   const [reading, setReading] = useState(null)
   const [box, setBox] = useState(null)
+  const [hover, setHover] = useState(null)
 
-  /** The width a strip is drawn at: a strip's, else the page's less its gutters, else a default's. */
+  /** The width a track is drawn at: the axis track's, else the page's less the label column, else a default's. */
   const stripPx = () => {
     const body = bodyRef.current
-    const strip = body?.querySelector('.overview-strip')
-    const inset = body ? parseFloat(getComputedStyle(body).getPropertyValue('--inset')) || 16 : 16
-    const width = strip?.clientWidth || (body ? body.clientWidth - 2 * inset - PLOT_LEFT_PX - PLOT_RIGHT_PX : 0)
-    return width > 0 ? width : DEFAULT_CHART_PX - PLOT_LEFT_PX - PLOT_RIGHT_PX
+    const track = body?.querySelector('.trail-axis-track')
+    const width = track?.clientWidth || (body ? body.clientWidth - Math.min(260, Math.max(140, body.clientWidth * 0.3)) - 10 : 0)
+    return width > 0 ? width : DEFAULT_CHART_PX
   }
 
   // The devices the search matches, once typing settles: a window too long for the whole fleet
@@ -260,8 +298,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     ? matchingKeys.join('\n') : ''
   const read = useCallback(async (signal) => {
     const id = ++latestRead.current
-    const at = Date.now()
-    const { start, end } = windowBounds(win, at)
+    const at0 = Date.now()
+    const { start, end } = windowBounds(win, at0)
     if (!start || !end || end <= start) {
       setReading({ problem: 'Set both ends of the custom range to see where readings arrived in it.' })
       return
@@ -274,7 +312,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     }
     const { minutes } = chosen
     const starts = bucketStarts(from, to, minutes)
-    const span = { start: from, end: to, minutes, asked: minutes, starts, at, devices: chosen.keys.length }
+    const span = { start: from, end: to, minutes, asked: minutes, starts, at: at0, devices: chosen.keys.length }
     if (chosen.keys.length === 0) {
       setReading({ ...span, counts: new Map(), counted: { from: -Infinity, to: Infinity, complete: true }, reads: 0 })
       return
@@ -287,9 +325,9 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
       }, { signal })))
       if (id !== latestRead.current) return
       // A window older than the 5-minute rollup reaches comes back in hours (block_width).
-      const shown = readWidth(rows.flat(), minutes)
-      const laid = shown === minutes ? starts : bucketStarts(from, to, shown)
-      setReading({ ...span, minutes: shown, starts: laid, ...coverageCounts(rows.flat(), chosen.keys, laid.length), reads: parts.length })
+      const width = readWidth(rows.flat(), minutes)
+      const laid = width === minutes ? starts : bucketStarts(from, to, width)
+      setReading({ ...span, minutes: width, starts: laid, ...coverageCounts(rows.flat(), chosen.keys, laid.length), reads: parts.length })
     } catch (e) {
       if (e?.name !== 'AbortError' && !signal?.aborted && id === latestRead.current) {
         setReading({ ...span, error: e?.message || 'Where readings arrived could not be read.' })
@@ -346,9 +384,9 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const drawn = reading?.counts ? { start: reading.start, ms: reading.end - reading.start } : null
   const atFraction = (f) => drawn.start + drawn.ms * f
 
-  /** The rows a stretch of the page from `y0` to `y1` covers: their devices, and their top and height in the layer. */
+  /** The rows a stretch of the page from `y0` to `y1` covers: their devices, and their top and height in the box's layer. */
   const rowsUnder = (y0, y1) => {
-    const host = plotRef.current
+    const host = gridRef.current
     const layer = layerRef.current
     if (!host || !layer) return null
     const [lo, hi] = [Math.min(y0, y1), Math.max(y0, y1)]
@@ -369,21 +407,14 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     const rows = drawn && extent ? rowsUnder(extent.y0, extent.y) : null
     setBox(rows ? { lo: Math.min(a, b), hi: Math.max(a, b), ...rows } : null)
   }, OVERVIEW_BAND)
-  // While a box is drawn: Escape, or a press anywhere but its bar and itself, clears it.
+  // A selection stays until Escape or Clear; a press elsewhere, such as on its own actions, keeps it.
   useEffect(() => {
     if (!box) return undefined
     const key = (e) => { if (e.key === 'Escape') setBox(null) }
-    const press = (e) => {
-      if (barRef.current?.contains(e.target)) return
-      const r = layerRef.current?.querySelector('.overview-box')?.getBoundingClientRect()
-      if (r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return
-      setBox(null)
-    }
     window.addEventListener('keydown', key)
-    document.addEventListener('pointerdown', press, true)
-    return () => { window.removeEventListener('keydown', key); document.removeEventListener('pointerdown', press, true) }
+    return () => window.removeEventListener('keydown', key)
   }, [box])
-  // A new read, or a new window, leaves the box behind: it named the window the strips drew.
+  // A new window leaves the box behind: it named the window the tracks drew.
   useEffect(() => { setBox(null) }, [windowKey])
 
   const dragged = band && drawn ? (() => {
@@ -391,9 +422,26 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     return rows ? { lo: Math.min(band.a, band.b), hi: Math.max(band.a, band.b), ...rows } : null
   })() : null
   const shownBox = dragged ?? (box && drawn ? box : null)
+  // While a box is drawn, the axis names it and no block is read out over it.
+  const pointed = dragged ? null : hover
   const boxWindow = shownBox ? bandWindow(atFraction(shownBox.lo), atFraction(shownBox.hi), drawn.ms) : null
   const boxBounds = boxWindow ? windowBounds(boxWindow) : null
+  const boxText = shownBox ? boxWords(shownBox.keys.length, boxBounds.start.getTime(), boxBounds.end.getTime(), now) : null
   const zoomToBox = () => { setWin(boxWindow, { replace: false }); setBox(null) }
+
+  // ---- The readout -------------------------------------------------------------------------------
+  /** The block under the pointer: which track, which block and where, from the track's own box. */
+  const pointAt = (e) => {
+    const track = e.target.closest?.('[data-hover]')
+    if (!track || !reading?.counts) { setHover(null); return }
+    const r = track.getBoundingClientRect()
+    if (!(r.width > 0)) return
+    const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    const t = reading.start + f * (reading.end - reading.start)
+    const width = reading.minutes * 60000
+    const i = Math.min(reading.starts.length - 1, Math.max(0, Math.floor((t - reading.starts[0] * 1000) / width)))
+    setHover(h => (h && h.id === track.dataset.hover && h.i === i ? h : { id: track.dataset.hover, i, f }))
+  }
 
   // ---- What the page draws -----------------------------------------------------------------------
   const countsOf = (list) => mergeCounts(list.map(d => reading.counts.get(telemetryKey(d))), reading.starts.length)
@@ -401,35 +449,57 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   // What the device rollups have not counted yet: hatched apart from the future, and named.
   const uncounted = reading?.counts ? uncountedStretches(reading.counted, { start: reading.start, end: reading.end, now }) : []
   const uncountedNote = reading?.counts ? uncountedWords(reading.counted, reading.start) : null
-  const ticks = reading?.counts ? axisTicks(win, reading.start, reading.end).filter(t => fraction === null || t.f < fraction) : []
+  const ticks = reading?.counts ? axisTicks(win, reading.start, reading.end) : []
   const busy = Boolean(reading?.loading) || reading === null
   const allKeys = groupKeys(shown)
+  const trackPx = typeof document === 'undefined' ? 0 : (bodyRef.current?.querySelector('.trail-axis-track')?.clientWidth || 0)
+  const futureFits = fraction !== null && (!trackPx || (1 - fraction) * trackPx >= SHADE_WORDS_PX)
+
+  /** The hatched parts of a track that is opaque: a section row's, which the layer behind cannot show through. */
+  const shades = (withWords) => (
+    <>
+      {uncounted.map(u => <span key={u.lo} className="overview-uncounted" aria-hidden="true" style={{ left: at(u.lo), width: at(u.hi - u.lo) }} />)}
+      {fraction !== null && (
+        <span className="trail-shade trail-shade-future" aria-hidden="true" style={{ left: at(fraction) }}>
+          {withWords && futureFits && 'No readings yet'}
+        </span>
+      )}
+    </>
+  )
 
   const renderGroup = (g, depth) => {
     const open = isOpen(g.key)
     const id = `${groupsId}-${g.key}`
     const merged = open ? null : countsOf(g.devices)
+    const hoverId = `g:${g.key}`
     return (
-      <section key={g.key} className="overview-group" aria-label={g.label}>
-        <div className={`history-group-head${depth ? ' overview-subgroup-head' : ''}`}>
-          <GroupHeading
-            open={open}
-            onToggle={() => setGroupsOpen([g.key], !open)}
-            label={g.label}
-            detail={plural(g.devices.length, 'device', 'devices')}
-            controls={id}
-          />
-        </div>
-        {!open && (
-          <div className="overview-row overview-summary" data-lanes={g.devices.map(telemetryKey).join(' ')}>
-            <CoverageStrip
-              counts={merged}
-              reading={reading}
-              summary={coverageSummary(`${g.label}, ${plural(g.devices.length, 'device', 'devices')} merged`, merged, null)}
+      <React.Fragment key={g.key}>
+        {/* A row of the grid: the heading in the label column and a track beside it, as the Audit
+            Trail's sections are. Closed, the track carries its devices' counts merged. */}
+        <div
+          className={`trail-section${open ? '' : ' trail-section-closed'}${depth ? ' overview-subsection' : ''}`}
+          data-lanes={open ? undefined : g.devices.map(telemetryKey).join(' ')}
+        >
+          <div className="trail-lane-label">
+            <GroupHeading
+              open={open}
+              onToggle={() => setGroupsOpen([g.key], !open)}
+              label={g.label}
+              detail={plural(g.devices.length, 'device', 'devices')}
+              controls={id}
             />
           </div>
-        )}
-        <div id={id} className="overview-group-body" hidden={!open}>
+          <div
+            className="trail-track overview-track"
+            data-hover={open ? undefined : hoverId}
+            {...(open ? {} : { role: 'img', 'aria-label': coverageSummary(`${g.label}, ${plural(g.devices.length, 'device', 'devices')} merged`, merged, null) })}
+          >
+            {shades(depth === 0)}
+            {!open && <Blocks counts={merged} reading={reading} />}
+            {!open && pointed?.id === hoverId && <Readout hover={pointed} counts={merged} reading={reading} now={now} />}
+          </div>
+        </div>
+        <div id={id} role="group" aria-label={`${g.label} lanes`} hidden={!open}>
           {open && (g.groups
             ? g.groups.map(s => renderGroup(s, depth + 1))
             : g.devices.map(d => {
@@ -446,13 +516,22 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                   onTick={tick}
                   win={win}
                   now={now}
+                  hover={pointed}
+                  deep={depth > 0}
                 />
               )
             }))}
         </div>
-      </section>
+      </React.Fragment>
     )
   }
+
+  // The selection the row above the lanes names: the box once released, else the devices ticked.
+  const selection = box && !dragged && shownBox
+    ? { words: boxText, keys: shownBox.keys, win: boxWindow, onZoom: zoomToBox, onClear: () => setBox(null) }
+    : ticked.length > 0
+      ? { words: `${plural(ticked.length, 'device', 'devices')} picked · ${windowWords(win, now)}`, keys: ticked, win, onClear: () => setTicked(NONE) }
+      : null
 
   return (
     <>
@@ -466,7 +545,6 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
-          {ticked.length > 0 && <ChartButton keys={ticked} win={win} names={names} />}
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -478,8 +556,9 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         </div>
       </div>
 
-      {/* Measured for the blocks' width (stripPx). */}
-      <div className="history-body" ref={bodyRef}>
+      {/* Measured for the blocks' width (stripPx). The part of the card that gives way, as the Audit
+          Trail's timeline is: the row above the lanes stays, and .trail-scroll scrolls the grid. */}
+      <div className="history-body card-fill-scroll trail-timeline" ref={bodyRef}>
         {placed.length === 0 ? (
           <EmptyState icon={<IconCpu size={36} />} message="No device is in service yet, so no reading has arrived to show." />
         ) : reading?.problem ? (
@@ -490,8 +569,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
           <LoadingState label="where readings arrived" />
         ) : (
           <>
-            {/* The row above the lanes, as on the Device tab: Expand all or Collapse all first,
-                then what is shown, then the key at the row's end. */}
+            {/* The row above the lanes, as on the Device tab: Expand all or Collapse all first, then
+                what is shown or the selection and its actions, then the key at the row's end. */}
             <div className="history-header">
               <ExpandAllToggle
                 anyOpen={allKeys.some(isOpen)}
@@ -500,82 +579,70 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                 noun="groups"
                 disabled={allKeys.length === 0}
               />
-              <p className="history-meta" role="status">
-                {`${plural(reading.devices, 'device', 'devices')}, in ${blockWords(reading.minutes)}`}
-                {uncountedNote && ` · ${uncountedNote}`}
-                {ticked.length > 0 && ` · ${ticked.length} picked`}
-                {reading.loading && ' · reading again…'}
-              </p>
+              {selection ? (
+                <SelectionBar {...selection} names={names} />
+              ) : (
+                <p className="history-meta" role="status">
+                  {`${plural(reading.devices, 'device', 'devices')}, in ${blockWords(reading.minutes)}`}
+                  {uncountedNote && ` · ${uncountedNote}`}
+                  {reading.loading && ' · reading again…'}
+                </p>
+              )}
               <CoverageKey uncounted={uncounted.length > 0} />
             </div>
 
             {shown.length === 0 ? (
               <EmptyState icon={<IconCpu size={36} />} message={`No device matches "${search.trim()}".`} />
             ) : (
-              /* A press on a strip and a drag draws the selection box (useBandDrag). */
-              <div className="overview-plot" ref={plotRef} onPointerDown={startBand}>
-                <div className="overview-axis" aria-hidden="true">
-                  {ticks.map(t => (
-                    <span
-                      key={t.f}
-                      className={`overview-axis-tick${t.f < 0.05 ? ' overview-axis-tick-start' : t.f > 0.95 ? ' overview-axis-tick-end' : ''}`}
-                      style={{ left: `${t.f * 100}%` }}
-                    >
-                      {t.label}
-                    </span>
-                  ))}
-                  {fraction !== null && (
-                    <>
-                      <div className="chart-future" style={{ left: `${fraction * 100}%` }}>{fraction < 0.8 && 'No readings yet'}</div>
-                      <div className={`chart-now${fraction > 0.85 ? ' chart-now-end' : fraction < 0.15 ? ' chart-now-start' : ''}`} style={{ left: `${fraction * 100}%` }}>
-                        Now {clockWords(new Date(now))}
-                      </div>
-                    </>
-                  )}
-                </div>
+              <div className="trail-scroll">
+                {/* A press on a track and a drag draws the selection box (useBandDrag); the pointer
+                    over a track reads out its block. */}
+                <div
+                  className="trail-swimlanes overview-swimlanes"
+                  ref={gridRef}
+                  onPointerDown={startBand}
+                  onPointerMove={pointAt}
+                  onPointerLeave={() => setHover(null)}
+                >
+                  <div className="trail-lane trail-axis">
+                    <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
+                    <div className="trail-track trail-axis-track" aria-hidden="true">
+                      {ticks.map(t => (
+                        <span key={t.f} className="trail-tick" style={{ left: at(t.f) }}>{t.label}</span>
+                      ))}
+                      {fraction !== null && (
+                        <div className={edgeClass('trail-now', fraction)} style={{ left: at(fraction) }}>
+                          Now {clockWords(new Date(now))}
+                        </div>
+                      )}
+                      {dragged && <div className="trail-band" style={{ left: at(dragged.lo), width: at(dragged.hi - dragged.lo) }} />}
+                      {dragged && (
+                        <div className={edgeClass('trail-band-words', (dragged.lo + dragged.hi) / 2)} style={{ left: at((dragged.lo + dragged.hi) / 2) }}>
+                          {boxText}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-                {shown.map(g => renderGroup(g, 0))}
+                  <div className="trail-body">
+                    {shown.map(g => renderGroup(g, 0))}
 
-                {/* Over the strips, the window's width: the hatch after now and the box. */}
-                <div className="overview-layer" ref={layerRef}>
-                  {fraction !== null && <div className="chart-future" aria-hidden="true" style={{ left: `${fraction * 100}%` }} />}
-                  {uncounted.map(u => (
-                    <div key={u.lo} className="overview-uncounted" aria-hidden="true" style={{ left: `${u.lo * 100}%`, width: `${(u.hi - u.lo) * 100}%` }} />
-                  ))}
-                  {shownBox && (
-                    <>
-                      <div
-                        className="overview-box"
-                        aria-hidden="true"
-                        style={{ left: `${shownBox.lo * 100}%`, width: `${(shownBox.hi - shownBox.lo) * 100}%`, top: shownBox.top, height: shownBox.height }}
-                      />
-                      <div
-                        ref={barRef}
-                        className={`overview-box-bar${shownBox.hi > 0.6 ? ' overview-box-bar-end' : ''}`}
-                        role="group"
-                        aria-label="Selection"
-                        style={{
-                          top: shownBox.top + shownBox.height + 4,
-                          ...(shownBox.hi > 0.6 ? { right: `${(1 - shownBox.hi) * 100}%` } : { left: `${shownBox.lo * 100}%` }),
-                        }}
-                        onPointerDown={e => e.stopPropagation()}
-                      >
-                        <span className="overview-box-words" role="status">
-                          {boxWords(shownBox.keys.length, boxBounds.start.getTime(), boxBounds.end.getTime(), now)}
-                        </span>
-                        {!dragged && (
-                          <>
-                            <ChartButton keys={shownBox.keys} win={boxWindow} names={names} />
-                            <Tooltip text="Show this stretch of the window, as a new step in your browser's history">
-                              <button type="button" className="btn btn-primary btn-sm" onClick={zoomToBox}>
-                                <IconZoomIn size={13} aria-hidden="true" /> Zoom
-                              </button>
-                            </Tooltip>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
+                    {/* Behind the rows, across the track column: a dotted line from each tick, and the
+                        hatched parts of the window, as the Audit Trail draws them. */}
+                    <div className="trail-gridlines" aria-hidden="true">
+                      {ticks.map(t => <span key={t.f} className="trail-gridline" style={{ left: at(t.f) }} />)}
+                      {shades(false)}
+                    </div>
+                    {/* Over the tracks: the selection box. */}
+                    <div className="overview-box-layer" ref={layerRef} aria-hidden="true">
+                      {shownBox && (
+                        <div
+                          className="overview-box"
+                          style={{ left: at(shownBox.lo), width: at(shownBox.hi - shownBox.lo), top: shownBox.top, height: shownBox.height }}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

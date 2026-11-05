@@ -104,10 +104,10 @@ beforeEach(() => {
   api.get.mockImplementation(routeGet)
   api.readCoverage.mockImplementation(coverage)
   originalRect = Element.prototype.getBoundingClientRect
-  // Every strip is 1000px wide from x = 100; each row is 30px tall, in the order drawn.
+  // Every track is 1000px wide from x = 100; each row is 30px tall, in the order drawn.
   Element.prototype.getBoundingClientRect = function rect() {
-    if (this.classList?.contains('overview-strip')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 12, height: 12 }
-    if (this.classList?.contains('overview-layer')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 900, height: 900 }
+    if (this.classList?.contains('trail-track')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 28, height: 28 }
+    if (this.classList?.contains('overview-box-layer')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 900, height: 900 }
     if (this.dataset?.lanes !== undefined) {
       const i = [...document.querySelectorAll('[data-lanes]')].indexOf(this)
       return { left: 0, right: 1200, width: 1200, top: i * 30, bottom: i * 30 + 30, height: 30 }
@@ -124,7 +124,7 @@ afterEach(() => {
 const visit = async (address) => {
   window.history.replaceState(null, '', address)
   render(<HistoryTab hasPermission={() => true} showToast={vi.fn()} />)
-  await waitFor(() => expect(document.querySelector('.overview-plot, .empty-state, .callout')).toBeTruthy())
+  await waitFor(() => expect(document.querySelector('.overview-swimlanes, .empty-state, .callout')).toBeTruthy())
 }
 const lanes = () => [...document.querySelectorAll('.overview-lane')]
 const laneNamed = (name) => lanes().find(l => within(l).queryByText(name))
@@ -278,7 +278,7 @@ describe("History's Overview", () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     fireEvent.click(screen.getByRole('button', { name: /Turning/ }))
     expect(laneNamed('Lathe 3')).toBeUndefined()
-    expect(document.querySelector('.overview-summary .overview-strip').getAttribute('aria-label')).toMatch(/^Turning, 2 devices merged/)
+    expect(document.querySelector('.trail-section-closed .overview-track').getAttribute('aria-label')).toMatch(/^Turning, 2 devices merged/)
     expect(readOverviewGroups()).toEqual({ 'cell:c1': false })
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
     expect(lanes()).toHaveLength(0)
@@ -286,35 +286,43 @@ describe("History's Overview", () => {
     expect(lanes()).toHaveLength(8)
   })
 
-  it('charts one ticked device from the toolbar, and says why several cannot be', async () => {
+  it('charts one ticked device from the row above the lanes, and says why several cannot be', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     expect(new URLSearchParams(search()).get('device')).toBe(telemetryKey(LATHE))
-    const chart = within(document.querySelector('.filter-bar-actions')).getByRole('button', { name: /Chart/ })
+    const chart = within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ })
     expect(chart).not.toHaveAttribute('aria-disabled')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    const several = within(document.querySelector('.filter-bar-actions')).getByRole('button', { name: /Chart/ })
+    const several = within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ })
     expect(several).toHaveAttribute('aria-disabled', 'true')
     fireEvent.focus(several)
     await waitFor(() => expect(screen.getByText(CHART_SEVERAL_REASON)).toBeInTheDocument())
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    fireEvent.click(within(document.querySelector('.filter-bar-actions')).getByRole('button', { name: /Chart/ }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ }))
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
     expect(search()).toBe('?span=day&at=2026-11-02')
   })
 
   it('draws a box across lanes and time that says its size, charts one device and zooms the window', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
-    const strips = [...document.querySelectorAll('.overview-lane .overview-strip')]
+    const strips = [...document.querySelectorAll('.overview-lane .overview-track')]
     const rowY = (name) => [...document.querySelectorAll('[data-lanes]')].indexOf(laneNamed(name)) * 30 + 15
     // 10:00 to 14:00 of the day, across Milling's and Turning's three lanes.
     const x = (hour) => LEFT + (1000 * hour) / 24
     fireEvent.pointerDown(strips[0], mouse(x(10), rowY('Mill 2')))
     fireEvent.pointerMove(strips[0], mouse(x(14), rowY('Press 1')))
     expect(document.querySelector('.overview-box')).toBeTruthy()
+    // While it is drawn, the axis names it, as the Audit Trail's band does.
+    expect(document.querySelector('.trail-axis .trail-band-words')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
+    // ...and no block is read out over it.
+    expect(document.querySelector('.overview-readout')).toBeNull()
     fireEvent.pointerUp(strips[0], mouse(x(14), rowY('Press 1')))
     const bar = screen.getByRole('group', { name: 'Selection' })
     expect(within(bar).getByRole('status')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
+    // In the row above the lanes, in place of the status line: nothing under the box to be cut off.
+    expect(bar.closest('.history-header')).toBeTruthy()
+    expect(bar.closest('.trail-swimlanes')).toBeNull()
+    expect(document.querySelector('.history-meta')).toBeNull()
     expect(within(bar).getByRole('button', { name: /Chart/ })).toHaveAttribute('aria-disabled', 'true')
     // Escape clears it.
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -326,6 +334,7 @@ describe("History's Overview", () => {
     fireEvent.pointerUp(strips[0], mouse(x(12), rowY('Lathe 3')))
     const one = screen.getByRole('group', { name: 'Selection' })
     expect(within(one).getByRole('status')).toHaveTextContent('1 device · 10:00 – 12:00, 2 h')
+    expect(one.closest('.history-header')).toBeTruthy()
     const push = vi.spyOn(window.history, 'pushState')
     fireEvent.click(within(one).getByRole('button', { name: /Zoom/ }))
     expect(search()).toBe('?from=2026-11-02T10%3A00&to=2026-11-02T12%3A00')
@@ -340,15 +349,60 @@ describe("History's Overview", () => {
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
   })
 
-  it('a press outside the box clears it', async () => {
+  it('keeps a selection until Escape or Clear, and a press elsewhere keeps it', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
-    const strip = document.querySelector('.overview-lane .overview-strip')
-    fireEvent.pointerDown(strip, mouse(LEFT + 100, 15))
-    fireEvent.pointerMove(strip, mouse(LEFT + 300, 15))
-    fireEvent.pointerUp(strip, mouse(LEFT + 300, 15))
-    expect(screen.getByRole('group', { name: 'Selection' })).toBeInTheDocument()
+    const track = document.querySelector('.overview-lane .overview-track')
+    fireEvent.pointerDown(track, mouse(LEFT + 100, 15))
+    fireEvent.pointerMove(track, mouse(LEFT + 300, 15))
+    fireEvent.pointerUp(track, mouse(LEFT + 300, 15))
+    const bar = screen.getByRole('group', { name: 'Selection' })
     fireEvent.pointerDown(document.querySelector('.history-header'), mouse(5, 600))
+    expect(screen.getByRole('group', { name: 'Selection' })).toBe(bar)
+    fireEvent.click(within(bar).getByRole('button', { name: /Clear/ }))
     expect(screen.queryByRole('group', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(document.querySelector('.history-meta')).toBeInTheDocument()
+  })
+
+  it('lays each row out as the Audit Trail does: a label column, then its track', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    const grid = document.querySelector('.trail-swimlanes')
+    // The grid is what scrolls, as the Audit Trail's is; the row above it stays.
+    expect(grid.parentElement).toHaveClass('trail-scroll')
+    expect(document.querySelector('.history-header').closest('.trail-scroll')).toBeNull()
+    const rows = [...grid.querySelectorAll('.trail-lane, .trail-section')]
+    // The axis row first, its label an empty corner; then a section row a group, a lane a device.
+    expect(rows[0]).toHaveClass('trail-axis')
+    expect(rows[0].querySelector('.trail-lane-label')).toBeEmptyDOMElement()
+    for (const row of rows) {
+      expect([...row.children].map(c => c.className.split(' ')[0])).toEqual(['trail-lane-label', 'trail-track'])
+    }
+    const sections = [...grid.querySelectorAll('.trail-section')]
+    expect(sections.map(sec => sec.querySelector('.trail-lane-label .group-heading .group-heading-label').textContent))
+      .toEqual(['Hall B', 'Milling', 'Turning', 'Area-Wide', UNFILED_GROUP, 'Spare bay', 'Site-Wide', 'Simulated', 'Unassigned'])
+    // A cell's heading is a step in from its area's.
+    expect(sections[1]).toHaveClass('overview-subsection')
+    expect(sections[0]).not.toHaveClass('overview-subsection')
+    const lathe = laneNamed('Lathe 3')
+    const label = lathe.querySelector('.trail-lane-label')
+    expect(within(label).getByRole('checkbox', { name: 'Pick Lathe 3' })).toBeInTheDocument()
+    expect(label.querySelector('.badge-dot')).toBeTruthy()
+    expect(label.querySelector('.trail-lane-qualifier')).toHaveTextContent('2 metrics')
+    expect(lathe.querySelector('.trail-track .overview-run')).toBeTruthy()
+  })
+
+  it('reads out the block under the pointer in words, a count or none', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    const track = laneNamed('Lathe 3').querySelector('.trail-track')
+    // 10:00, the 61st of 144 ten-minute blocks.
+    fireEvent.pointerMove(track, mouse(LEFT + (1000 * 10) / 24 + 1, 15))
+    expect(track.querySelector('.overview-readout')).toHaveTextContent('10:00–10:10 · 6 readings')
+    // Press has none after 14:20, before now.
+    const press = laneNamed('Press 1').querySelector('.trail-track')
+    fireEvent.pointerMove(press, mouse(LEFT + (1000 * 14.5) / 24 + 1, 15))
+    expect(press.querySelector('.overview-readout')).toHaveTextContent('14:30–14:40 · No readings')
+    expect(track.querySelector('.overview-readout')).toBeNull()
+    fireEvent.pointerLeave(document.querySelector('.trail-swimlanes'))
+    expect(document.querySelector('.overview-readout')).toBeNull()
   })
 
   it("re-reads on the refresh timer, and the control's Zoom works here", async () => {
@@ -365,7 +419,7 @@ describe("History's Overview", () => {
     counted = { computed_from: new Date(2026, 10, 2, 6).toISOString(), computed_to: new Date(2026, 10, 2, 15).toISOString(), complete: false }
     await visit('/history/overview?span=day&at=2026-11-02')
     expect(document.querySelector('.history-meta')).toHaveTextContent('Coverage before 2 Nov is still being computed')
-    expect(document.querySelectorAll('.overview-layer .overview-uncounted')).toHaveLength(2)
+    expect(document.querySelectorAll('.trail-gridlines .overview-uncounted')).toHaveLength(2)
     expect(screen.getByText(COVERAGE_KEY.uncounted)).toBeInTheDocument()
   })
 
@@ -394,7 +448,7 @@ describe("History's Overview", () => {
     fleet = Array.from({ length: 1000 }, (_, i) => place(1000 + i, `Device ${i}`, inCell(`c${1 + (i % 2)}`)))
     await visit('/history/overview?span=day&at=2026-11-02')
     expect(lanes()).toHaveLength(0)
-    expect(document.querySelectorAll('.overview-summary')).toHaveLength(1)
+    expect(document.querySelectorAll('.trail-section-closed')).toHaveLength(1)
     const t0 = performance.now()
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }))
     const ms = performance.now() - t0

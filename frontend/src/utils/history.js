@@ -869,6 +869,24 @@ export function readingsStopWords(counts, starts, minutes, { start, end, now, co
   return `No readings since ${localDay(at) === localDay(new Date(now)) ? clockWords(at) : momentWords(stop, 1)}`
 }
 
+/**
+ * A block under the pointer in words, as the Audit Trail names a marker: its stretch, then how many
+ * readings arrived, "No readings", "Not counted yet" where the rollups have not reached it, or "No
+ * readings yet" after now: "10:05–10:10 · 412 readings". The day goes first on a window longer
+ * than one, and a block a day or longer is its day.
+ */
+export function blockReadoutWords(startMs, minutes, n, { spanMs = 0, counted = { from: -Infinity, to: Infinity }, now = Date.now() } = {}) {
+  const endMs = startMs + minutes * MINUTE
+  const stretch = minutes >= 1440
+    ? momentWords(startMs, 1440)
+    : `${spanMs > DAY ? momentWords(startMs, 1) : clockWords(new Date(startMs))}–${clockWords(new Date(endMs))}`
+  const what = n > 0 ? `${n.toLocaleString()} ${n === 1 ? 'reading' : 'readings'}`
+    : startMs >= now ? 'No readings yet'
+      : startMs < counted.from || endMs > counted.to ? 'Not counted yet'
+        : COVERAGE_KEY.none
+  return `${stretch} · ${what}`
+}
+
 /** A strip's text for a screen reader: how many of its blocks had readings, and where they stop. */
 export function coverageSummary(name, counts, stopWords) {
   const had = counts.filter(n => n > 0).length
