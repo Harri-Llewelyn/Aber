@@ -523,6 +523,11 @@ python supabase/migrations/test_audit_trail_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
+# Alert history is kept for 90 days (0244). 0002's block for the setting, read out of the file and
+# run twice as two boots: a fresh install seeds 90, 1.7's row at 7 moves to 90 once, a site at 30
+# keeps 30, and a 7 an Administrator chooses after the upgrade stays. The prune falls back to 90
+# days with the setting gone. Every test rolls back.
+python supabase/migrations/test_alert_history_is_kept_for_90_days.py
 python supabase/migrations/test_system_settings_rls.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
@@ -966,6 +971,13 @@ python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is
 # fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
 # machine identity's own in the security lane. Every test rolls back.
 python supabase/migrations/test_a_person_acknowledges_an_alert.py
+# History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
+# overlaps the window, not only one that started in it, and none that ended at its start or started
+# at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one
+# starts. Newest first, filtered by asset, bounded by its limit, each row the whole occurrence. An
+# Operator, a Shopfloor Manager and an Auditor read every alert but a machine identity's, which an
+# Administrator reads too. Every test rolls back.
+python supabase/migrations/test_history_lists_the_alerts_that_fired.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

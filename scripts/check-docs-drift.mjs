@@ -4752,8 +4752,8 @@ const OPERATOR_PAIRS = [
 
 // -------------------------------------------------------------------------------------------------
 // 15. The alert retention window is declared once and cited consistently. The number lives in
-// the seeded `alerts.retention_days` setting; the READMEs and the archived migration's header
-// quote it, including the header's counter-example predicate.
+// the seeded `alerts.retention_days` setting; supabase/README.md quotes it, including its
+// counter-example predicate.
 // -------------------------------------------------------------------------------------------------
 {
   // The seeded value is DML, so it folded into 0002 and is still executed on every boot. The
@@ -4780,12 +4780,9 @@ const OPERATOR_PAIRS = [
 
     // Where the number is quoted, and what it would mean for each to be stale. Substring matches,
     // not regexes: the strings are full of reserved characters, and an escaping slip fails open.
+    // Archived 0030's counter-example keeps 1.0's 7 days: the archive is the record of what each
+    // file did, so it is held to mention 0032 below and not to the number now seeded.
     const CITATIONS = [
-      {
-        file: MIGRATION,
-        needle: `interval '${days} days';  -- NO`,
-        what: 'the header counter-example showing the predicate that must NOT be used',
-      },
       {
         file: 'supabase/README.md',
         needle: `kept for ${days} days`,

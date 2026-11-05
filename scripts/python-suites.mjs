@@ -576,6 +576,13 @@ export const SUITES = {
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
   },
+  'supabase/migrations/test_alert_history_is_kept_for_90_days.py': {
+    lanes: ['db'],
+    why:
+      "0244 and 0002's block -- that a fresh install seeds 90 days, that a site still at 1.7's 7 " +
+      'moves to 90 once and a site at 30 keeps 30, each across two boots, that a 7 chosen after the ' +
+      'upgrade stays, and that the prune falls back to 90 days.',
+  },
   'supabase/migrations/test_cold_archive_destination.py': {
     lanes: ['db'],
     why:
@@ -1209,6 +1216,14 @@ export const SUITES = {
       'or acknowledged one, Other without a note and every other role are refused; who withdraws; ' +
       'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
       'audit rows, their lane, their class and who reads them.',
+  },
+  'supabase/migrations/test_history_lists_the_alerts_that_fired.py': {
+    lanes: ['db'],
+    why:
+      "0243 -- that alert_occurrences() lists each occurrence overlapping the window, at its edges " +
+      'too; that a firing occurrence a later one replaced ends where that one starts; newest first, ' +
+      'filtered by asset and bounded; each row the whole occurrence; and that the select policy ' +
+      "decides the rows, a machine identity's alert reaching an Administrator alone.",
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
