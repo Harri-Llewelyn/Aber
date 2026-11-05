@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { IconChevronDown, IconChevronUp } from './Icons'
 import { OverflowText } from './OverflowText'
+import { Tooltip } from './Tooltip'
 
 /**
  * The heading of a group of rows that opens and closes: a disclosure button with a chevron, an
@@ -16,6 +17,7 @@ import { OverflowText } from './OverflowText'
  *   without it.
  * @param {string} [detail] Words drawn after the name in place of a count, such as what a filter
  *   list has chosen ("Entity · 2 chosen"). Cut before the name is, and slides on hover or focus.
+ *   While it is cut, the button's tooltip carries it whole, since reduced motion stops the slide.
  * @param {node} [icon] Drawn before the name. Decorative: hidden from assistive technology.
  * @param {string} [controls] The id of the element holding the rows.
  * @param {string} [className] Extra classes on the button.
@@ -25,29 +27,36 @@ import { OverflowText } from './OverflowText'
  */
 export function GroupHeading({ open, onToggle, label, count, countLabel, detail, icon = null, controls, className = '' }) {
   const Chevron = open ? IconChevronUp : IconChevronDown
+  // Whether `detail` was cut when OverflowText last measured it, as the pointer or focus arrived.
+  const [cut, setCut] = useState(false)
   return (
-    <button
-      type="button"
-      className={`table-group-button group-heading${className ? ` ${className}` : ''}`}
-      aria-expanded={open}
-      aria-controls={controls}
-      onClick={onToggle}
-    >
-      <Chevron size={12} className="group-heading-chevron" aria-hidden="true" />
-      {icon && <span className="group-heading-icon" aria-hidden="true">{icon}</span>}
-      <span className="table-group-label group-heading-label">{label}</span>
-      {count !== undefined && count !== null && (
-        <span className="group-heading-count">
-          <span aria-hidden="true">· {count}</span>
-          <span className="sr-only">, {countLabel || count}</span>
-        </span>
-      )}
-      {detail && (
-        <span className="group-heading-count group-heading-detail">
-          <span className="group-heading-detail-shown" aria-hidden="true"><OverflowText>· {detail}</OverflowText></span>
-          <span className="sr-only">, {detail}</span>
-        </span>
-      )}
-    </button>
+    // Not a description: the sr-only words below already give a screen reader the whole value.
+    <Tooltip text={detail && cut ? detail : null} describe={false}>
+      <button
+        type="button"
+        className={`table-group-button group-heading${className ? ` ${className}` : ''}`}
+        aria-expanded={open}
+        aria-controls={controls}
+        onClick={onToggle}
+      >
+        <Chevron size={12} className="group-heading-chevron" aria-hidden="true" />
+        {icon && <span className="group-heading-icon" aria-hidden="true">{icon}</span>}
+        <span className="table-group-label group-heading-label">{label}</span>
+        {count !== undefined && count !== null && (
+          <span className="group-heading-count">
+            <span aria-hidden="true">· {count}</span>
+            <span className="sr-only">, {countLabel || count}</span>
+          </span>
+        )}
+        {detail && (
+          <span className="group-heading-count group-heading-detail">
+            <span className="group-heading-detail-shown" aria-hidden="true">
+              <OverflowText onMeasure={setCut}>· {detail}</OverflowText>
+            </span>
+            <span className="sr-only">, {detail}</span>
+          </span>
+        )}
+      </button>
+    </Tooltip>
   )
 }

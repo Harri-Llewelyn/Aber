@@ -9,6 +9,11 @@
  * and no rule reads what it could not parse, so a finding there would pass unseen. UNPARSED below
  * names the exceptions, with their reasons.
  *
+ * So does a tracked file Semgrep never read. What the scan leaves out is .semgrepignore's list,
+ * which replaces Semgrep's own (that one leaves out every test/ directory), and every other tracked
+ * file must be in the report's paths.scanned. The run passes --max-target-bytes 0, no size limit:
+ * past its default of 1 MB, Semgrep drops a file from the scan and reports nothing.
+ *
  *   node scripts/scan-source.mjs
  *
  * Interim until the repository is public, when CodeQL's default setup is free (#387). Needs Docker
@@ -16,35 +21,27 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const IMAGE = 'semgrep/semgrep:1.140.0'
+export const IGNORE_FILE = '.semgrepignore'
 
 // Semgrep's error types for a file, or a stretch of one, that no parser read.
 const PARSE_ERRORS = new Set(['Lexical error', 'Syntax error', 'Other syntax error', 'AST builder error', 'PartialParsing'])
 
-// Tracked files Semgrep parses only in part: how many lines its parser stops at, and why. Each is
-// valid shell that its bash parser does not read, or GitHub's ${{ }} expressions, which are not bash
-// until GitHub replaces them, in run steps the two curl rules read as bash. Rewriting a working
-// script for a scanner's sake is a change of its own. A further stretch in one of these files, or
-// any other tracked file that does not parse, fails the scan.
+// Tracked files Semgrep parses only in part: how many lines its parser stops at, why, and why the
+// lines stay as they are. Each stop is one character Semgrep's bash parser does not read, and it
+// reads the rest of the line. A further stop in one of these files, or any other tracked file that
+// does not parse, fails the scan. docs/static-analysis.md lists the forms the parser does read.
 const SH = "Semgrep's bash parser stops at"
+const RW = 'the read-write redirection 3<> that opens a /dev/tcp socket. A one-way < or > would connect too, '
+  + 'but offline-check.sh both writes and reads the socket, and each probe opens it the same way.'
 export const UNPARSED = {
-  '.github/workflows/ci.yml': { stretches: 2, reason: `${SH} the < in the vitest count step's \${ACTUAL:-<unparsed>}, and at the site-rehearsal upgrade's \${{ matrix.signing }}, a GitHub expression.` },
-  '.github/workflows/restore-rehearsal.yml': { stretches: 2, reason: `${SH} \${{ steps.backup.outputs.stamp }}, a GitHub expression, in the fetch and restore steps.` },
-  'deploy/helm/aber/files/gitea-scripts/gitea-init.sh': { stretches: 1, reason: `A copy of scripts/gitea-init.sh: ${SH} its one-line case with the pattern *:*.` },
-  'deploy/helm/aber/files/supabase-db-pgbackrest/platform-backup.sh': { stretches: 1, reason: `A copy of supabase/db/pgbackrest/platform-backup.sh: ${SH} the | in the pattern of \${slot#*|}.` },
-  'deploy/helm/aber/files/timescaledb-pgbackrest/historian-backup.sh': { stretches: 1, reason: `A copy of timescaledb/pgbackrest/historian-backup.sh: ${SH} the | in the pattern of \${slot#*|}.` },
-  'deploy/install.sh': { stretches: 5, reason: `${SH} four case patterns (two with a bracket expression, two in a one-line case), and from not_ready_reason() to the end of the file.` },
-  'forge/gateway-platform/roles/converge/files/aber-gateway-converge': { stretches: 1, reason: `${SH} the negated brace group in if ! { cp ...; }; then.` },
-  'scripts/gitea-init.sh': { stretches: 1, reason: `${SH} the one-line case with the pattern *:*.` },
-  'scripts/rehearse-restore.sh': { stretches: 13, reason: `${SH} each < or > in a usage message such as \${1:?usage: backup <dir>}, and at the read-write redirection 3<>.` },
-  'supabase/db/pgbackrest/platform-backup.sh': { stretches: 1, reason: `${SH} the | in the pattern of \${slot#*|}.` },
-  'supabase/functions/offline-check.sh': { stretches: 2, reason: `${SH} the read-write redirection 3<>.` },
-  'timescaledb/pgbackrest/historian-backup.sh': { stretches: 1, reason: `${SH} the | in the pattern of \${slot#*|}.` },
+  'scripts/rehearse-restore.sh': { stretches: 13, reason: `${SH} each < and > in a usage message such as \${1:?usage: backup <dir>}, written as the script's header and usage line write them, and at ${RW}` },
+  'supabase/functions/offline-check.sh': { stretches: 2, reason: `${SH} ${RW}` },
 }
 
 export const keyOf = (ruleId, path, text) =>
@@ -80,18 +77,68 @@ export function parseFailures (errors, tracked, excused = UNPARSED) {
   }
 }
 
+// Whether one name matches one segment of a pattern: `*` is any run of characters, `?` any one.
+const nameMatches = (glob, name) => {
+  if (!glob) return !name
+  if (glob[0] === '*') return nameMatches(glob.slice(1), name) || (!!name && nameMatches(glob, name.slice(1)))
+  return !!name && (glob[0] === '?' || glob[0] === name[0]) && nameMatches(glob.slice(1), name.slice(1))
+}
+
+/**
+ * An ignore file's patterns as a test of a path: true when the file leaves the path out. Only the
+ * part of gitignore's syntax that Semgrep and this test read the same way is accepted: `*` and `?`
+ * within a name, a `/` at the start or in the middle to match from the root, and a trailing `/`
+ * for a directory. Anything else throws, rather than be read differently from Semgrep.
+ */
+export function ignoreRules (text) {
+  const rules = text.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => {
+    if (/[\s!\\[\]]|\*\*|^:|\/\//.test(line)) throw new Error(`${IGNORE_FILE}: "${line}" uses syntax this check does not read`)
+    const dirOnly = line.endsWith('/')
+    const body = dirOnly ? line.slice(0, -1) : line
+    return { segments: body.replace(/^\//, '').split('/'), anchored: body.includes('/'), dirOnly }
+  })
+  // A pattern names the file itself, or a directory above it; a trailing / names only a directory.
+  const names = (parts, end, dirOnly) => !(dirOnly && end === parts.length)
+  return (path) => {
+    const parts = path.split('/')
+    return rules.some(({ segments, anchored, dirOnly }) => (anchored
+      ? segments.length <= parts.length && names(parts, segments.length, dirOnly)
+        && segments.every((glob, i) => nameMatches(glob, parts[i]))
+      : parts.some((name, i) => names(parts, i + 1, dirOnly) && nameMatches(segments[0], name))))
+  }
+}
+
+/**
+ * The tracked files the scan did not read as its ignore list says. `missing`: outside the list
+ * and not in the report's paths.scanned, which Semgrep does without an error (a size limit, an
+ * ignore list of its own). `ignoredButRead`: left out by the list as `ignored` reads it, yet read,
+ * so this test and Semgrep read the list differently. `tracked` holds only files on disk.
+ */
+export function unscanned (tracked, scanned, ignored) {
+  const read = new Set(scanned)
+  const files = [...tracked].sort()
+  return {
+    missing: files.filter((p) => !ignored(p) && !read.has(p)),
+    ignoredButRead: files.filter((p) => ignored(p) && read.has(p)),
+  }
+}
+
 function main () {
+  // Read here for the check after the run, and by Semgrep from /src for the run: no --exclude, so
+  // the file is the one list. Without it Semgrep would apply its own.
+  if (!existsSync(join(REPO, IGNORE_FILE))) {
+    console.error(`${IGNORE_FILE} is missing, and without it Semgrep leaves out every test/ directory.`)
+    process.exit(2)
+  }
+  const ignored = ignoreRules(readFileSync(join(REPO, IGNORE_FILE), 'utf8'))
+
   // The checkout, walked rather than listed through git: a worktree's .git names a host path the
   // container cannot resolve, and Semgrep then scans nothing and reports success. No time limit per
   // rule: check-docs-drift.mjs takes some taint rules past the default 5 s, and three rules timing
   // out on a file skip it for every rule.
   const r = spawnSync('docker', ['run', '--rm', '-v', `${REPO.replace(/\\/g, '/')}:/src:ro`, '-w', '/src', IMAGE,
     'semgrep', 'scan', '--config', 'p/default', '--config', 'p/security-audit', '--metrics', 'off',
-    '--no-git-ignore', '--json', '--quiet', '--timeout', '0',
-    '--exclude', 'node_modules', '--exclude', '.cache', '--exclude', '*.generated.ts',
-    '--exclude', 'coverage', '--exclude', 'dist',
-    // Go templates, which no YAML parser reads; the rendered chart is scanned by scan-config.mjs.
-    '--exclude', 'deploy/helm/aber/templates'],
+    '--no-git-ignore', '--json', '--quiet', '--timeout', '0', '--max-target-bytes', '0'],
   { encoding: 'utf8', maxBuffer: 1 << 28, env: { ...process.env, MSYS_NO_PATHCONV: '1' } })
   let report
   try { report = JSON.parse(r.stdout) } catch {
@@ -133,10 +180,26 @@ function main () {
   for (const e of report.errors.filter((e) => e.path && !PARSE_ERRORS.has(Array.isArray(e.type) ? e.type[0] : e.type))) {
     console.log(`  note: ${e.type} on ${e.path}${e.rule_id ? ` (${e.rule_id.split('.').pop()})` : ''}`)
   }
+
+  // Every tracked file on disk, against what Semgrep read. One deleted from the checkout and not
+  // yet from git is not there to read.
+  const { missing, ignoredButRead } = tracked
+    ? unscanned([...tracked].filter((p) => existsSync(join(REPO, p))), report.paths.scanned, ignored)
+    : { missing: null, ignoredButRead: [] }
+  if (!missing) console.log('  git could not list the tracked files, so nothing shows Semgrep read them all')
+  for (const p of missing ?? []) console.log(`  UNSCANNED ${p}`)
+  if (missing?.length) {
+    console.log(`        tracked and outside ${IGNORE_FILE}, yet Semgrep read none of these and said nothing:`
+      + ` find why, or add them to ${IGNORE_FILE} with the reason`)
+  }
+  for (const p of ignoredButRead) {
+    console.log(`  READ ANYWAY ${p}\n        ${IGNORE_FILE} leaves it out, yet Semgrep read it: this script reads the file differently`)
+  }
   const partial = parseFailures(report.errors, tracked, {}).failing.length
-  console.log(`\n${scanned} files, ${partial + untracked.length} not wholly parsed (${partial - failing.length} accepted), `
+  console.log(`\n${scanned} files, ${missing ? missing.length : 'unknown'} tracked not read, `
+    + `${partial + untracked.length} not wholly parsed (${partial - failing.length} accepted), `
     + `${findings.length} findings: ${findings.length - fresh.length} reviewed, ${fresh.length} new.`)
-  process.exit(fresh.length || failing.length ? 1 : 0)
+  process.exit(fresh.length || failing.length || !missing || missing.length || ignoredButRead.length ? 1 : 0)
 }
 
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)

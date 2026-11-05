@@ -8,12 +8,15 @@
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
+import { WEBHOOK_DIALOG_KEYS } from './utils/notifications'
 import { pageTabsOf } from './navigation'
 
 /** Settings a page's own destination dialog edits, with the page a search for one opens. */
 const EDITED_ON = new Map([
   ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
-  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }])
+  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }]),
+  // The webhook's dialog is on Settings itself, on the tab its toolbar is.
+  ...WEBHOOK_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }])
 ])
 
 /**
@@ -90,6 +93,7 @@ export const CARDS = [
   // Administrator only, as the tab is: buildTargets offers a card only while its tab is the viewer's.
   { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
+  { id: 'history-overview',     ...tabCard('history', 'overview'), keywords: ['coverage', 'gaps', 'where readings arrived', 'silent devices', 'lanes'] },
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },

@@ -10,7 +10,7 @@ export function expectCardHeading(title, descriptionPattern) {
   const header = document.querySelector('.card-heading')
   expect(header).toBeInTheDocument()
   expect(header).toHaveClass('card-header')
-  const heading = within(header).getByRole('heading', { name: new RegExp(`^${title}`) })
+  const heading = within(header).getByRole('heading', { name: (name) => name.startsWith(title) })
   expect(heading).toHaveClass('section-title')
   expect(heading.querySelector('svg')).toBeInTheDocument()
   expect(header.querySelector('.card-heading-description')).toHaveTextContent(descriptionPattern)

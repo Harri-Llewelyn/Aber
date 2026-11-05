@@ -330,7 +330,10 @@ slides back when they leave.
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
   control's tooltip must carry the whole text.
 - It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
-  drawer opening needs no listener.
+  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
+- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
+  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
+  heading's sr-only words already give a screen reader the whole value.
 - The whole text is always in the DOM, so a screen reader hears all of it.
 
 The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
@@ -504,6 +507,21 @@ Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gate
 actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
 height is not known, and above the actions it could push Edit Details off the drawer.
 
+- **Suppression windows are a tool, after the actions.** The device, gateway and cell drawers pass
+  `common/SuppressionWindows.jsx` as `children`, since its list has no fixed height. It lists the
+  current and upcoming windows with `context-panel-section-label`, as a gateway's Devices are, each
+  with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
+  it. A device's drawer passes its current cell, whose windows are listed marked From cell and
+  changed from the cell's drawer. A Shopfloor Manager or an Administrator (`maySuppress()`) gets
+  Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
+  (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
+  custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
+  The section reads again at its next window's start or end.
+- **The alert names no evaluator.** The banner above the fields (`ContextPanel`'s `alert`) says
+  Alert firing, Alert acknowledged or Alert suppressed, since when, with the counter's lines under
+  it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one
+  takes a dashed neutral outline and a crossed bell, since it colours nothing. The Devices page
+  hands the banner the device's alert from `alertIndex(..., { suppressed: true })`.
 - **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
   under its header and above the fields. It continues the header's band, takes the header's rule,
   and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
@@ -749,6 +767,26 @@ the field Backups' destination dialog uses for its key too. A stored key reads a
 shown, and replacing it asks first: `set_archive_credential()` overwrites it with no undo, and
 nothing can show either value again. A first key goes straight in. Its `useCredential()` hook
 writes the key when the dialog saves, before archiving is switched on, and names a 403 as a refusal.
+
+### Why Settings › Notifications has a panel of its own
+
+A settings row holds a string, a number, a boolean or JSON, and the webhook needs more:
+`NotificationsPanel` (`components/tabs/NotificationsPanel.jsx`) wraps the category's table, which
+keeps its header row, with a toolbar above it and the delivery log below it. The toolbar is an
+Administrator's, as every change on Settings is; anyone else is told whose it is and reads the log.
+
+- **`WebhookModal`** holds the address, a `CredentialField` as the destination dialogs' keys are, and
+  the allowed hosts, so `notifications.webhook_allowed_hosts` is left out of the table
+  (`WEBHOOK_DIALOG_KEYS`) and the search opens this tab for it. The hosts are saved before the
+  address, and an address whose host is not listed is said while it is typed.
+- **`SigningKeyModal`** shows the key once, as `ServiceTokenModal` shows a machine identity's token:
+  asked first, revealed with a copy button, gone on close. Rotating says the old key stops at once.
+- **Send a test** queues the message through `queue_test_notification()`, since the dispatcher is
+  never reachable from a browser, and reads its log row each second until it has left `pending`.
+- **The delivery log** polls every 30 seconds, as Backups does. Each outcome is a word in its badge,
+  and a long subject or error is cut and slides on hover (`OverflowText`).
+- **`notifications.webhook_min_severity`** is a choice in its row, from `SETTING_OPTIONS`
+  (`utils/notifications.js`), which mirror check 58 holds to the database's guard.
 
 ### Why a reload waits for the auth server
 
@@ -1118,7 +1156,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
-| History | `device`, then the device's id (`/history/device/<id>`; `/history` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
+| History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
@@ -1179,14 +1217,14 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1279,9 +1317,11 @@ yes-or-no choice stays a toggle button in the toolbar.
   toolbar's counted toggles are. Several may be on, none on is every class, and the address keeps
   them as `?class=lifecycle,read`. `AUDIT_TRAIL_CLASSES` lists them in the legend's order and mirror
   check 44 holds them, and `MARKERS`, to the function and its indexes. Read is a grey eye in
-  `--text-muted`, which holds 3:1 on the card (`themeContrast.test.js`). The legend sits at the
-  right-hand end of the row above the timeline, with Expand all and Collapse all at its start, over
-  the section headings they act on.
+  `--text-muted`. In a toggle each marker sits on a disc in `--bg-card` (`.trail-legend-disc`), as
+  it sits on the card on the track, so a pressed toggle's accent fill never meets it.
+  `themeContrast.test.js` holds every marker at 3:1 on the track and in its toggle, pressed or not,
+  in both themes. The legend sits at the right-hand end of the row above the timeline, with Expand
+  all and Collapse all at its start, over the section headings they act on.
 - **Checks.** Check 193 (`scripts/check-docs-drift.mjs`) refuses a select in a toolbar, but System ›
   Logs' Service and Level, each one value `service-logs` takes. Check 194 holds the Audit Trail
   help's group names to `constants.js`. Mirror check 42 (`scripts/check-mirror-drift.mjs`) holds
@@ -1476,6 +1516,76 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 - **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
+
+**Overview is History's first tab and its default** (`tabs/HistoryOverview.jsx`): where readings
+arrived over the window, a lane per device, before anything is charted. Its arithmetic is in
+`utils/history.js` too, and `__tests__/historyOverview.test.jsx` holds each rule.
+
+- **The layout is the Audit Trail's lane grid**, on its classes (`.trail-swimlanes`, `.trail-axis`,
+  `.trail-section`, `.trail-lane`, `.trail-lane-label`, `.trail-track`): a label column of
+  `--trail-label-width`, then a 28px track a row, under the trail's axis with its empty corner. A
+  group is a section row, its `GroupHeading` in the label column (a cell's a step in, pinned one
+  row below its area's) and, when closed, its merged strip in the track. The grid scrolls inside
+  the card (`.card-fill-scroll.trail-timeline`, then `.trail-scroll`), so the axis and the headings
+  pin and the row above the lanes stays. Overview's axis follows the Audit Trail's, not the Device
+  tab's charts: the tracks run from the label column to the card's edge, and no longer span the
+  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Overview's own rules (`.overview-*`) are
+  only what it adds; the Audit Trail is unchanged.
+- **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
+  its readings in each block as an array, and the stretch the historian's device rollups have
+  counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
+  its timer, and when a settled width changes the blocks. A window older than the 5-minute device
+  rollup reaches comes back in hours (`block_width`); the strips are laid on the width that came back
+  (`readWidth()`), and the status line names it.
+- **The blocks** (`coverageBlock()`): `COVERAGE_SMALL_SELECTION` (40) devices or fewer take the
+  finest of `COVERAGE_BLOCKS` at about one block per `COVERAGE_BLOCK_PX` (4px) of the strip. More
+  take the device rollups' own widths only, 5 minutes up to 26 hours and 1 hour up to
+  `COVERAGE_LARGE_MAX_HOURS` (a week), so nothing is summed on the historian. A longer window reads
+  the devices the search matches when they are 40 or fewer, and otherwise says why
+  (`TOO_LONG_FOR_MANY`). The status line names the block size.
+- **The groups** (`overviewGroups()`) place devices as the Site Map does, from the same helpers
+  (`inServiceDevices()`, `groupDevicesByCell()`, `areaWideInService()`, the location sources): each
+  area in service with its cells and its Area-Wide devices, the cells in no area, then Site-Wide,
+  Simulated and Unassigned. Archived devices are left off, as on the Site Map. Each heading is a
+  `GroupHeading` with "4 devices" as its `detail`; a closed group draws one strip of its devices'
+  counts merged and renders none of its lanes. Which are open is kept in this browser
+  (`OVERVIEW_GROUPS_KEY`, `{ key: open }`, in try/catch); on a first visit every group is open
+  unless there are more than `OVERVIEW_OPEN_LANES_MAX` (200) lanes.
+- **A lane's label** is its tick box, its status dot (`badge-dot` with `deviceDotStyle()`, and
+  "Offline" in words, as the trail's deleted flag is), its name (`OverflowText` in a link to its
+  charts) and its metric count as `.trail-lane-qualifier`. **Its track** holds its strip, runs of
+  one shade (`coverageSteps()`, `coverageRuns()`), four steps of `--coverage-1` to `--coverage-4`
+  against the strip's busiest block, each run one box, a block with none the track's own colour;
+  and at its right-hand end "No readings since 15:00" (`readingsStopWords()`). The steps
+  are one sequential blue ramp a theme, held by `themeContrast.test.js` to the ordered-ramp rule:
+  lightness moves one way and the step nearest the card clears 2:1. The future is the trail's
+  `.trail-shade-future`; a stretch the rollups have not counted yet (`uncountedStretches()`) is
+  `.overview-uncounted`, cross-hatched, and the status line says "Coverage before 3 Oct is still
+  being computed" (`uncountedWords()`).
+- **The readout**: the block under the pointer, on a lane's track or a closed group's, in words
+  (`blockReadoutWords()`): "10:05–10:10 · 412 readings", "No readings", "No readings yet" after
+  now, or "Not counted yet". A step under 3:1 is why: the count never depends on the colour. It is
+  the tooltip's bubble and arrow (`.tooltip-bubble`), portalled as the tooltip is, centred under the
+  block and kept to its track (`placeReadout()`), above it only where the scroll area has no room
+  below, as on the last lane: never over the strip it reads. A scroll closes it, and none is drawn
+  while a box is drawn or held.
+- **The selection box** is a drag across the tracks (`useBandDrag` over `.overview-swimlanes
+  .trail-track`, whose band carries the press's and the pointer's `clientY`; the rows under that
+  stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
+  inside the track near either end, with `boxWords()`). Once released it stays, and
+  `SelectionPopover` opens beside it, as on AMRC ACS's Datasets page: its words, **Chart** (the
+  Device tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON` as its
+  tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
+  `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
+  part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
+  (*Popover arrows*, `.overview-popover::before`). The popover itself takes focus as it opens, not
+  its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
+  box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
+  the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
+  Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and
+  the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
+- **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
+  Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 
 **`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
 It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
@@ -1954,6 +2064,19 @@ passes `{ record: false }`, as a Grafana alert does.
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
   acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
   outranks any acknowledged one.
+- **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
+  whether a suppression window covers each alert as it is read, with the window's reason and end.
+  `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
+  the pill's number, the tab title and the favicon, and `alertIndex()` leaves a suppressed one out,
+  so no pin, chip or row colours it. The list keeps it, after the acknowledged ones, with a muted
+  ring struck through, a crossed bell, "Suppressed until" its end, and the reason under it. **A
+  window's start and end write nothing**, so `usePlatformAlerts` reads again a second after the
+  nearest end of a window that covers an alert, or start of one still to come (`nextSuppressionChange()`),
+  and at least two seconds after a read, so a clock ahead of the server's asks again until the
+  answer changes. An alert whose window ends while it fires toasts as if it had just fired; a
+  suppressed alert toasts neither firing nor resolved. A drawer that schedules, changes or ends a
+  window calls `requestAlertsRefresh()`, so this tab reads at once; another tab learns of an early
+  end at its next reconcile. The windows table is not in the realtime publication.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a

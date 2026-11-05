@@ -78,6 +78,20 @@ describe('OverflowText', () => {
     expect(shift()).toBe('0px')
   })
 
+  it('tells onMeasure whether the line is cut each time it measures, as a tooltip needs to know', () => {
+    const onMeasure = vi.fn()
+    render(<button type="button"><OverflowText onMeasure={onMeasure}>A name far too long for its column</OverflowText></button>)
+    expect(onMeasure).not.toHaveBeenCalled()
+    measure(line(), 300, 120)
+    fireEvent.mouseEnter(screen.getByRole('button'))
+    expect(onMeasure).toHaveBeenLastCalledWith(true)
+    fireEvent.mouseLeave(screen.getByRole('button'))
+    // A wider column: the line fits now.
+    measure(line(), 300, 320)
+    fireEvent.focusIn(screen.getByRole('button'))
+    expect(onMeasure).toHaveBeenLastCalledWith(false)
+  })
+
   it('reacts to the pointer on itself where no control holds it', () => {
     render(<p><OverflowText>A name far too long for its column</OverflowText></p>)
     measure(line(), 300, 120)

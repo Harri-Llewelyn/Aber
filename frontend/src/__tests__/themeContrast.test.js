@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tokenBlocks, themeTokens, resolveColour, over, declaration } from '../test/themeColours'
+import { AUDIT_TRAIL_CLASSES } from '../constants'
 
 /**
  * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
@@ -132,6 +133,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger-text on card',           '--danger-text',  card,                                         AA_TEXT],
     ['--danger-text on base',           '--danger-text',  base,                                         AA_TEXT],
     ['--danger-text on --danger-tint',  '--danger-text',  on(paint('.badge-critical'), card),           AA_TEXT],
+    // An acknowledged alert pales: its text still reads, and its edge still marks it out as a shape.
+    ['--danger-text on an acknowledged badge', '--danger-text', on(paint('.badge-acknowledged'), card), AA_TEXT],
+    ['--danger-text on an acknowledged banner', '--danger-text', on(paint('.context-alert-critical.context-alert-acknowledged'), surface), AA_TEXT],
+    ['acknowledged edge on card',       '--danger-soft-border', card,                                   AA_LARGE],
     ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
@@ -288,6 +293,35 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     const offline = contrast(rgb(paint('.chip-offline', 'color'), t), on(paint('.chip-offline'), card))
     const online = contrast(rgb(paint('.chip-success', 'color'), t), on(paint('.chip-success'), card))
     expect(offline, `${themeName}: offline ${offline.toFixed(2)}:1, online ${online.toFixed(2)}:1`).toBeLessThan(online)
+  })
+
+  /**
+   * Each Audit Trail marker is a graphic, held at 3:1 (WCAG 1.4.11) in the colour its
+   * `.trail-node-*` rule gives it, against what is behind it. On the track: its card-coloured edge,
+   * and the lane at rest and hovered. In the key: the disc a toggle draws it on, over the toggle's
+   * fill at rest (.btn-ghost) and pressed (.btn-primary).
+   */
+  const markerGrounds = [
+    ['its edge on the track', on(paint('.trail-node-shape', 'stroke'), card)],
+    ['a lane',                card],
+    ['a hovered lane',        on(paint('.trail-lane:not(.trail-axis):hover'), card)],
+    ['a toggle at rest',      on(paint('.trail-legend-disc'), on(paint('.btn-ghost'), card))],
+    ['a pressed toggle',      on(paint('.trail-legend-disc'), on(paint('.btn-primary'), card))],
+  ]
+  it.each(AUDIT_TRAIL_CLASSES.flatMap(kind => markerGrounds.map(([where, ground]) => [kind, where, ground])))(
+    'the %s marker clears 3:1 on %s', (kind, where, ground) => {
+      const colour = paint(`.trail-node-${kind}`, 'color')
+      const ratio = contrast(rgb(colour, t), ground)
+      expect(
+        Number(ratio.toFixed(2)),
+        `the ${kind} marker on ${where} in ${themeName}: ${colour} measured ${ratio.toFixed(2)}:1, needs ${AA_LARGE}:1`
+      ).toBeGreaterThanOrEqual(AA_LARGE)
+    })
+
+  // Why the disc: on a pressed toggle's fill itself, the Operational marker is nearly the fill.
+  it('would lose the Operational marker on a pressed toggle without its disc', () => {
+    const ratio = contrast(rgb(paint('.trail-node-operational', 'color'), t), on(paint('.btn-primary'), card))
+    expect(ratio).toBeLessThan(AA_LARGE)
   })
 })
 
@@ -658,6 +692,32 @@ describe("a state chart's colour, at every hue its values can hash to", () => {
     }
     expect(worstLabel).toBeGreaterThanOrEqual(AA_TEXT)
     expect(worstEdge).toBeGreaterThanOrEqual(AA_LARGE)
+  })
+})
+
+describe("History's Overview shades, fewer readings to more", () => {
+  /*
+   * An ordered (sequential) ramp is read by its order, not by each step on its own: the rule the
+   * dataviz validator holds (`validate_palette.js --ordinal`) is that the steps move one way in
+   * lightness, and that the step nearest the surface clears 2:1 against it, not 3:1 for every step.
+   * A block's count is never in its colour alone: each has a readout in words.
+   */
+  const ORDINAL_FLOOR = 2.0
+  it.each(Object.entries(THEMES))('%s: each step stands further from the card than the last, the nearest at 2:1', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const steps = [1, 2, 3, 4].map(i => rgb(t[`--coverage-${i}`]))
+    const fromCard = steps.map(s => contrast(s, card))
+    expect(fromCard[0]).toBeGreaterThanOrEqual(ORDINAL_FLOOR)
+    for (let i = 1; i < steps.length; i++) {
+      expect(fromCard[i], `step ${i + 1} against the card`).toBeGreaterThan(fromCard[i - 1])
+    }
+    // Monotone in lightness: darker with the count on a light card, lighter on a dark one.
+    const light = luminance(card) > 0.5
+    const lums = steps.map(luminance)
+    for (let i = 1; i < lums.length; i++) {
+      if (light) expect(lums[i], `step ${i + 1}`).toBeLessThan(lums[i - 1])
+      else expect(lums[i], `step ${i + 1}`).toBeGreaterThan(lums[i - 1])
+    }
   })
 })
 

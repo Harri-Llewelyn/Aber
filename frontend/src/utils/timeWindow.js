@@ -299,6 +299,26 @@ export function windowWords(win, now = Date.now()) {
 }
 
 /**
+ * "3 Nov 09:00", with the year where it is not `thisYear` and the seconds with `seconds`: a moment
+ * as the Audit Trail's lane start times write it.
+ */
+const momentWords = (d, thisYear, seconds) =>
+  `${d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', ...(d.getFullYear() !== thisYear ? { year: 'numeric' } : {}) })} ${timeWords(d, seconds)}`
+
+/**
+ * A stored window's two ends in local time, "3 Nov 09:00 – 4 Nov 09:00", from the instants a
+ * record keeps as strings (a Logs read writes them in UTC), with the seconds where either end has
+ * them. Null unless both ends parse.
+ */
+export function windowEndsWords(from, to, now = Date.now()) {
+  const [start, end] = [from, to].map(v => new Date(typeof v === 'string' ? Date.parse(v) : NaN))
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+  const thisYear = new Date(now).getFullYear()
+  const seconds = !!(start.getSeconds() || end.getSeconds())
+  return `${momentWords(start, thisYear, seconds)} – ${momentWords(end, thisYear, seconds)}`
+}
+
+/**
  * The narrowest window a zoom shows. Under an hour the axis prints seconds (the Audit Trail's
  * tickFormatter), so a minute still labels its ticks apart.
  */

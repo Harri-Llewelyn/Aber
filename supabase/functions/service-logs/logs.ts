@@ -3,7 +3,8 @@
  * failed sign-ins, addresses and emails, and the store behind them has no access control of its
  * own, so this function is the one way a browser reads it.
  *
- *   GET                                  the services that wrote a line in the last 7 days
+ *   GET [?range=]                        the services that wrote a line in the last 7 days
+ *   GET ?from=&to=                       the services that wrote a line between the two instants
  *   GET ?service=&level=&filter=&range=&limit=
  *                                        that service's newest lines in the range back from now,
  *                                        newest first
@@ -301,18 +302,23 @@ export async function handler(req: Request): Promise<Response> {
     }
 
     const now = Date.now();
+    const [from, to] = read.range === null ? [read.from!, read.to!] : [now - RANGES[read.range], now];
+    // The services that wrote in a fixed window, or in the last 7 days for a rolling one, so the list
+    // does not shrink at 15 minutes. A read is refused over the same span, which its words name.
+    const [listFrom, listTo] = read.range === null ? [from, to] : [now - LONGEST_RANGE, now];
     let services: string[];
     try {
-      services = await listServices(loki, now - LONGEST_RANGE, now, UPSTREAM_TIMEOUT_MS);
+      services = await listServices(loki, listFrom, listTo, UPSTREAM_TIMEOUT_MS);
     } catch (err) {
       return storeFailure(req, err);
     }
     if (!read.service) return json(200, { observability: true, services, lines: [] });
     if (!services.includes(read.service)) {
-      return refuse(`No service called ${JSON.stringify(read.service)} wrote a line in the last 7 days.`);
+      const span = read.range === null
+        ? `between ${new Date(from).toISOString()} and ${new Date(to).toISOString()}`
+        : "in the last 7 days";
+      return refuse(`No service called ${JSON.stringify(read.service)} wrote a line ${span}.`);
     }
-
-    const [from, to] = read.range === null ? [read.from!, read.to!] : [now - RANGES[read.range], now];
     let stored: StoredLine[];
     try {
       stored = await readLines(loki, buildQuery(read), from, to, read.limit, UPSTREAM_TIMEOUT_MS);

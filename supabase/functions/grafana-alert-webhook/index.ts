@@ -313,6 +313,11 @@ export default async function handler(req: Request): Promise<Response> {
     for (const row of data ?? []) subjectId.set(key(kind, row.sparkplug_id), row.id);
   }
 
+  // Every row this post carries is confirmed by it, a repeat of a firing alert included: Aber's
+  // dispatcher reminds only while the stamp is fresh (0247). It changes no status, so it queues
+  // nothing.
+  const confirmedAt = new Date().toISOString();
+
   const toWrite = rows.map((r) => ({
     fingerprint: r.fingerprint,
     entity_type: r.entity_type,
@@ -328,6 +333,7 @@ export default async function handler(req: Request): Promise<Response> {
     rule_uid: r.rule_uid,
     labels: r.labels,
     values: r.values,
+    last_confirmed_at: confirmedAt,
   }));
 
   // Upsert on (fingerprint, starts_at), the occurrence key. A Grafana fingerprint is a hash of the

@@ -13,6 +13,7 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
+import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT } from './utils/notifications';
 import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
@@ -223,6 +224,18 @@ export const HISTORY_RESOLUTIONS = Object.freeze([
 
 /** The most rows one History read asks for: the telemetry routes' cap. */
 export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
+
+/**
+ * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so the
+ * 6,300-row LIMIT threshold above does not apply. At most COVERAGE_MAX_DEVICES a read. More than
+ * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
+ * and the page shows them at most COVERAGE_LARGE_MAX_HOURS at once; that many or fewer may take
+ * any block width.
+ */
+export const COVERAGE_MAX_DEVICES = 1000;
+export const COVERAGE_SMALL_SELECTION = 40;
+export const COVERAGE_LARGE_MAX_HOURS = 169;
+export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 
 /**
  * The lower time bound applied when a caller supplies none.
@@ -1338,6 +1351,29 @@ const apiMethods = {
   },
 
   /**
+   * History's Overview read (0245): one row per device of `assetIds`, how many readings it sent in
+   * each block of `blockMinutes` over [from, to), over every metric, as `counts` (oldest block first,
+   * 0 for none, block i starting at `first_block` plus i widths), and the stretch the rollup has
+   * counted (`computed_from` to `computed_to`). `assetIds` are device UUIDs or Sparkplug ids, as
+   * the telemetry routes take them. Throws on a refusal or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, first_block: string, block_width: string,
+   *   counts: number[], computed_from: string, computed_to: string, complete: boolean }>>}
+   */
+  readCoverage: async ({ from, to, blockMinutes, assetIds }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_coverage', {
+      from_ts: from,
+      to_ts: to,
+      block: `${blockMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey)
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read where readings arrived');
+    return data || [];
+  },
+
+  /**
    * Whether an S3 credential is in the vault (`0134`). Never what it is — nothing reads it back to
    * a browser, so this is the only question a page can ask about it.
    *
@@ -1669,7 +1705,8 @@ const apiMethods = {
 
   /**
    * A service's newest log lines, newest first, for System › Logs: `{ service, level, filter,
-   * range, limit }`, each optional. Without `service` the answer is the list of services alone.
+   * range, from, to, limit }`, each optional. Without `service` the answer is the list of services
+   * alone: those that wrote between `from` and `to`, or in the last 7 days for a `range`.
    * Administrator only, through service-logs, which builds the query from these and records each
    * read whose parameters differ from the caller's last in the Audit Trail.
    *
@@ -1814,6 +1851,57 @@ const apiMethods = {
   withdrawAlertAcknowledgement: async (alertId) => {
     const { data, error } = await supabase.rpc('withdraw_alert_acknowledgement', { p_alert_id: alertId });
     if (error) throw new Error(error.message || 'Could not withdraw the acknowledgement');
+    return data;
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // Suppression windows (0240), from the drawer of the device, gateway or cell a window covers.
+  // Each write is one Audit Trail row in that subject's lane. The database's refusals are
+  // sentences, shown as they come.
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * The windows on a subject that have not ended, soonest first. For a device, `cellId` adds the
+   * windows on the cell it is in now, which cover it too.
+   */
+  listSuppressionWindows: async (kind, id, { cellId = null } = {}) => {
+    if (!isUuid(id) || (cellId && !isUuid(cellId))) return [];
+    const column = kind === 'gateway' ? 'gateway_id' : kind === 'cell' ? 'cell_id' : 'device_id';
+    let query = supabase
+      .from('alert_suppression_windows')
+      .select('id, device_id, gateway_id, cell_id, starts_at, ends_at, reason, created_by, created_by_email, created_at')
+      .gt('ends_at', new Date().toISOString())
+      .order('starts_at', { ascending: true });
+    query = kind === 'device' && cellId
+      ? query.or(`device_id.eq.${id},cell_id.eq.${cellId}`)
+      : query.eq(column, id);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message || 'Could not read the suppression windows');
+    return data ?? [];
+  },
+
+  /** Schedule a window on a device, a gateway or a cell. A start of null is now. Returns the window. */
+  scheduleSuppressionWindow: async (kind, id, { startsAt = null, endsAt, reason }) => {
+    const { data, error } = await supabase.rpc('schedule_alert_suppression_window', {
+      p_subject_kind: kind, p_subject_id: id, p_starts_at: startsAt, p_ends_at: endsAt, p_reason: reason,
+    });
+    if (error) throw new Error(error.message || 'Could not schedule the window');
+    return data;
+  },
+
+  /** Change a window's start, end or reason; null keeps what it has. Returns the window. */
+  changeSuppressionWindow: async (windowId, { startsAt = null, endsAt = null, reason = null }) => {
+    const { data, error } = await supabase.rpc('change_alert_suppression_window', {
+      p_window_id: windowId, p_starts_at: startsAt, p_ends_at: endsAt, p_reason: reason,
+    });
+    if (error) throw new Error(error.message || 'Could not change the window');
+    return data;
+  },
+
+  /** End a window now, or cancel one that has not started. Returns the window as it ended. */
+  endSuppressionWindow: async (windowId) => {
+    const { data, error } = await supabase.rpc('end_alert_suppression_window', { p_window_id: windowId });
+    if (error) throw new Error(error.message || 'Could not end the window');
     return data;
   },
 
@@ -2008,6 +2096,81 @@ const apiMethods = {
     const { error } = await supabase.rpc('clear_backup_offsite_destination');
     if (error) throw new Error(error.message || 'Could not remove the off-site destination');
     return true;
+  },
+
+  /**
+   * The webhook as an Administrator sees it: whether its address is set, when its signing key was
+   * issued, and its allowed hosts. Anybody else is told `visible: false` and nothing more, as the
+   * status function and the Administrator-only hosts row answer them.
+   */
+  notificationWebhook: async () => {
+    const [status, hosts] = await Promise.all([
+      supabase.rpc('notification_webhook_status'),
+      supabase.from('system_settings').select('value').eq('key', ALLOWED_HOSTS_KEY).maybeSingle()
+    ]);
+    const error = status.error || hosts.error;
+    if (error) throw new Error(error.message || 'Could not read the webhook');
+    const s = status.data || {};
+    return {
+      visible: s.visible === true,
+      urlSet: s.url_set === true,
+      signingKeyIssuedAt: s.signing_key_issued_at || null,
+      allowedHosts: Array.isArray(hosts.data?.value) ? hosts.data.value : []
+    };
+  },
+
+  /** The webhook's address, into the vault. Write-only: nothing reads it back. A refusal carries `status: 403`. */
+  setNotificationWebhookUrl: async (url) => {
+    const { error } = await supabase.rpc('set_notification_webhook_url', { p_url: url });
+    if (error) {
+      throw Object.assign(new Error(error.code === '42501'
+        ? 'Only an Administrator can set the webhook’s address'
+        : (error.message || 'Could not save the webhook’s address')), error.code === '42501' ? { status: 403 } : {});
+    }
+    return true;
+  },
+
+  /** Stop the webhook: its address deleted, and what was waiting for it dropped. Returns how many. */
+  clearNotificationWebhookUrl: async () => {
+    const { data, error } = await supabase.rpc('clear_notification_webhook_url');
+    if (error) throw new Error(error.message || 'Could not remove the webhook');
+    return data ?? 0;
+  },
+
+  /** A new signing key, returned this once. Issuing again rotates it. */
+  issueNotificationSigningKey: async () => {
+    const { data, error } = await supabase.rpc('issue_notification_signing_key');
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can issue the signing key'
+        : (error.message || 'Could not issue the signing key'));
+    }
+    return data;
+  },
+
+  /** Queue an aber.test message, and return its delivery log row's id. */
+  sendTestNotification: async () => {
+    const { data, error } = await supabase.rpc('queue_test_notification');
+    if (error) throw new Error(error.message || 'Could not send a test');
+    return data;
+  },
+
+  /**
+   * The delivery log, newest first, each with the alert it is about. The alert is read through its
+   * own policy, so a row about one the reader may not see is not returned at all.
+   */
+  notificationDeliveries: async ({ limit = DELIVERY_LOG_LIMIT, id = null } = {}) => {
+    let query = supabase
+      .from('notification_deliveries')
+      .select('id,event,channel,state,attempts,next_attempt_at,last_attempt_at,finished_at,response_status,'
+        + 'last_error,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (id) query = query.eq('id', id);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message || 'Could not read the delivery log');
+    return data || [];
   },
 
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */

@@ -35,7 +35,8 @@ import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useClockTick } from '../../hooks/useClockTick'
 import { useBandDrag } from '../../hooks/useBandDrag'
 import {
-  ALL_TIME, TIME_PRESETS, bandWindow, bandWords, calendarTicks, clockWords, timeWindow, windowBounds
+  ALL_TIME, TIME_PRESETS, bandWindow, bandWords, calendarTicks, clockWords, timeWindow, windowBounds,
+  windowEndsWords
 } from '../../utils/timeWindow'
 import CopyableId from '../common/CopyableId'
 import { RouteLink } from '../common/RouteLink'
@@ -745,6 +746,20 @@ const shownAfter = (action, d) =>
       ? d.after.name
       : formatValue(d.after)
 
+/**
+ * The rows the drawer's table draws. A Logs read over a fixed window stores its two ends in UTC;
+ * they are one `window` row here, in local time, as the Logs tab chose them. The payload below and
+ * the CSV export keep the stored values.
+ */
+const shownRows = (action, diff) => {
+  if (action !== 'SERVICE_LOGS_READ') return diff
+  const ends = Object.fromEntries(diff.filter(d => d.field === 'from' || d.field === 'to').map(d => [d.field, d.after]))
+  const words = windowEndsWords(ends.from, ends.to)
+  if (!words) return diff
+  return [...diff.filter(d => d.field !== 'from' && d.field !== 'to'), { field: 'window', before: undefined, after: words }]
+    .sort((a, b) => (a.field < b.field ? -1 : a.field > b.field ? 1 : 0))
+}
+
 const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</span>
 
 /**
@@ -903,6 +918,7 @@ function EventDiff({ event, diff }) {
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
     || action === 'PERSON_ADDED' || action === 'PASSWORD_SET' || action === 'SESSIONS_ENDED'
     || action === 'MFA_RESET' || action === 'SERVICE_LOGS_READ' || Boolean(captureAct)
+  const rows = shownRows(action, diff)
 
   return (
     <div className="trail-diff">
@@ -927,7 +943,7 @@ function EventDiff({ event, diff }) {
                   : 'Changed properties'}
       </div>
 
-      {diff.length === 0 ? (
+      {rows.length === 0 ? (
         /* Either an UPDATE whose only changed column was on the noise denylist, or a row without
            snapshots. Neither is an error. */
         <div className="trail-diff-none">
@@ -957,7 +973,7 @@ function EventDiff({ event, diff }) {
             </tr>
           </thead>
           <tbody>
-            {diff.map(d => {
+            {rows.map(d => {
               const before = formatValue(d.before)
               const after  = shownAfter(action, d)
               return (
@@ -2190,7 +2206,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                       aria-pressed={on}
                       onClick={() => toggleClass(kind)}
                     >
-                      <TrailMarker kind={kind} />
+                      {/* On a disc in the card's colour, as the track has it behind the marker,
+                          so a pressed toggle's fill never meets the marker. */}
+                      <span className="trail-legend-disc"><TrailMarker kind={kind} /></span>
                       {n === null ? m.label : `${m.label} (${n})`}
                     </button>
                   </Tooltip>

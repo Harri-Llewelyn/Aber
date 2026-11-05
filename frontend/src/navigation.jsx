@@ -122,13 +122,15 @@ export const SETTINGS_TABS = [
   { id: 'approvals', label: 'Approvals', description: 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.' },
   { id: 'audit-trail', label: 'Audit Trail', description: 'How often the Audit Trail page reads the audit log again while it is open.' },
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
+  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
   { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
 ]
 
-/** History's views. Device is the only one, so it is the bare page: /history picks a device. */
+/** History's views. Overview is the first and the default, so it is the bare page as well as /history/overview. */
 export const HISTORY_TABS = [
+  { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
 ]
 

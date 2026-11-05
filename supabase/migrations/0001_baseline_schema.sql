@@ -5914,6 +5914,36 @@ ALTER FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_
 
 --
 
+-- platform_alert_suppressing_window(text, uuid, timestamp with time zone) :: FUNCTION
+-- 0240's, declared in place because platform_alerts_active calls it on every boot. The one place
+-- an alert's suppression is decided, so its signature stays as it is: the sender calls it too.
+-- A device is covered by its own windows and by its current cell's, read when called whatever
+-- p_at is; a gateway by its own. Of several windows, the one that ends last answers.
+CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone DEFAULT now()) RETURNS uuid
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT w.id
+    FROM public.alert_suppression_windows w
+   WHERE p_entity_id IS NOT NULL
+     AND w.starts_at <= p_at
+     AND w.ends_at > p_at
+     AND CASE p_entity_type
+           WHEN 'device' THEN w.device_id = p_entity_id
+                           OR w.cell_id = (SELECT dl.effective_cell_id FROM public.device_locations dl
+                                            WHERE dl.device_id = p_entity_id)
+           WHEN 'gateway' THEN w.gateway_id = p_entity_id
+           ELSE false
+         END
+   ORDER BY w.ends_at DESC, w.starts_at, w.id
+   LIMIT 1
+$$;
+
+
+ALTER FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) OWNER TO postgres;
+
+--
+
 -- platform_health_rows() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.platform_health_rows() RETURNS TABLE(condition text, sparkplug_id text, subject text, value numeric, detail text)
     LANGUAGE sql STABLE SECURITY DEFINER
@@ -12620,7 +12650,9 @@ ALTER TABLE public.permissions
 
 -- platform_alerts :: TABLE
 -- rule_uid, labels and values are 0220's, and the five acknowledgement columns 0231's, stated here
--- so that platform_alerts_active, below, can select them on every boot.
+-- so that platform_alerts_active, below, can select them on every boot. suppression_window_id is
+-- 0240's: the window that first covered the occurrence. last_confirmed_at is 0247's, stated with
+-- them; the view does not select it.
 CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     fingerprint text NOT NULL,
@@ -12642,6 +12674,8 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
     acknowledged_by_email text,
     acknowledgement_reason text,
     acknowledgement_note text,
+    suppression_window_id uuid,
+    last_confirmed_at timestamp with time zone,
     CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL))),
     CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text]))),
     CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL))),
@@ -12674,7 +12708,9 @@ ALTER TABLE public.platform_alerts
     ADD COLUMN IF NOT EXISTS acknowledged_by uuid,
     ADD COLUMN IF NOT EXISTS acknowledged_by_email text,
     ADD COLUMN IF NOT EXISTS acknowledgement_reason text,
-    ADD COLUMN IF NOT EXISTS acknowledgement_note text;
+    ADD COLUMN IF NOT EXISTS acknowledgement_note text,
+    ADD COLUMN IF NOT EXISTS suppression_window_id uuid,
+    ADD COLUMN IF NOT EXISTS last_confirmed_at timestamp with time zone;
 
 ALTER TABLE public.platform_alerts
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -12696,7 +12732,9 @@ ALTER TABLE public.platform_alerts
     ALTER COLUMN acknowledged_by DROP DEFAULT,
     ALTER COLUMN acknowledged_by_email DROP DEFAULT,
     ALTER COLUMN acknowledgement_reason DROP DEFAULT,
-    ALTER COLUMN acknowledgement_note DROP DEFAULT;
+    ALTER COLUMN acknowledgement_note DROP DEFAULT,
+    ALTER COLUMN suppression_window_id DROP DEFAULT,
+    ALTER COLUMN last_confirmed_at DROP DEFAULT;
 
 DO $c$ BEGIN
 
@@ -12800,12 +12838,44 @@ COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplu
 
 --
 
+-- alert_suppression_windows :: TABLE
+-- 0240's, stated here because platform_alerts_active, below, joins it on every boot: its columns,
+-- its row security, and who reads it. Every signed-in role reads every window; nobody writes one but
+-- 0240's functions, which also hold its constraints and its comments.
+CREATE TABLE IF NOT EXISTS public.alert_suppression_windows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid,
+    gateway_id uuid,
+    cell_id uuid,
+    starts_at timestamp with time zone NOT NULL,
+    ends_at timestamp with time zone NOT NULL,
+    reason text NOT NULL,
+    created_by uuid NOT NULL,
+    created_by_email text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_by uuid,
+    ended_by_email text
+);
+
+ALTER TABLE public.alert_suppression_windows OWNER TO postgres;
+ALTER TABLE public.alert_suppression_windows ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON TABLE public.alert_suppression_windows FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON TABLE public.alert_suppression_windows TO authenticated, service_role;
+
+SELECT public.replay_policy('public.alert_suppression_windows', 'alert_suppression_windows_select_authenticated', $ddl$
+CREATE POLICY alert_suppression_windows_select_authenticated ON public.alert_suppression_windows FOR SELECT TO authenticated USING (true);
+$ddl$);
+
+--
+
 -- platform_alerts_active :: VIEW
 -- rule_uid, labels and values are 0220's, and the acknowledgement columns 0231's: an acknowledged
--- alert is still firing, so it stays listed. CREATE OR REPLACE VIEW cannot drop, rename or retype a
--- column, so a database holding another column list drops the view here first; once the list
--- matches, a boot drops nothing. Nothing depends on the view. Its comment follows, and its grants
--- are restated in the ACL section.
+-- alert is still firing, so it stays listed. The suppression columns are 0240's: a suppressed alert
+-- is still firing too, and platform_alert_suppressing_window() decides it as the row is read.
+-- CREATE OR REPLACE VIEW cannot drop, rename or retype a column, so a database holding another
+-- column list drops the view here first; once the list matches, a boot drops nothing. Nothing
+-- depends on the view. Its comment follows, and its grants are restated in the ACL section.
 DO $shape$
 BEGIN
     IF to_regclass('public.platform_alerts_active') IS NOT NULL
@@ -12818,34 +12888,42 @@ BEGIN
                'starts_at timestamp with time zone', 'ends_at timestamp with time zone',
                'recorded_at timestamp with time zone', 'rule_uid text', 'labels jsonb', 'values jsonb',
                'acknowledged_at timestamp with time zone', 'acknowledged_by uuid', 'acknowledged_by_email text',
-               'acknowledgement_reason text', 'acknowledgement_note text'] THEN
+               'acknowledgement_reason text', 'acknowledgement_note text',
+               'suppressed boolean', 'suppressing_window_id uuid', 'suppression_reason text',
+               'suppressed_until timestamp with time zone'] THEN
         DROP VIEW public.platform_alerts_active;
     END IF;
 END
 $shape$;
 
+-- The predicate is a function in FROM, so it runs once per firing alert and the window's reason
+-- and end are joined by its answer.
 CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='true') AS
- SELECT id,
-    fingerprint,
-    entity_type,
-    entity_id,
-    sparkplug_id,
-    alert_name,
-    severity,
-    status,
-    summary,
-    starts_at,
-    ends_at,
-    recorded_at,
-    rule_uid,
-    labels,
-    "values",
-    acknowledged_at,
-    acknowledged_by,
-    acknowledged_by_email,
-    acknowledgement_reason,
-    acknowledgement_note
-   FROM ( SELECT DISTINCT ON (a.fingerprint) a.id,
+ SELECT newest.id,
+    newest.fingerprint,
+    newest.entity_type,
+    newest.entity_id,
+    newest.sparkplug_id,
+    newest.alert_name,
+    newest.severity,
+    newest.status,
+    newest.summary,
+    newest.starts_at,
+    newest.ends_at,
+    newest.recorded_at,
+    newest.rule_uid,
+    newest.labels,
+    newest."values",
+    newest.acknowledged_at,
+    newest.acknowledged_by,
+    newest.acknowledged_by_email,
+    newest.acknowledgement_reason,
+    newest.acknowledgement_note,
+    (s.window_id IS NOT NULL) AS suppressed,
+    s.window_id AS suppressing_window_id,
+    w.reason AS suppression_reason,
+    w.ends_at AS suppressed_until
+   FROM ((( SELECT DISTINCT ON (a.fingerprint) a.id,
             a.fingerprint,
             a.entity_type,
             a.entity_id,
@@ -12867,6 +12945,8 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
             a.acknowledgement_note
            FROM public.platform_alerts a
           ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest
+     LEFT JOIN LATERAL public.platform_alert_suppressing_window(newest.entity_type, newest.entity_id, now()) s(window_id) ON (true))
+     LEFT JOIN public.alert_suppression_windows w ON ((w.id = s.window_id)))
   WHERE (status = 'firing'::text);
 
 
@@ -12875,7 +12955,7 @@ ALTER VIEW public.platform_alerts_active OWNER TO postgres;
 --
 
 -- VIEW platform_alerts_active :: COMMENT
-COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert. An acknowledged alert is still listed, with who acknowledged it, when and why (0231).';
+COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert. An acknowledged alert is still listed, with who acknowledged it, when and why (0231). A suppressed alert is still listed, with the window that covers it now, its reason and its end, as platform_alert_suppressing_window() decides it when the row is read (0240).';
 
 --
 
@@ -14504,6 +14584,65 @@ ALTER TABLE timescale.telemetry_raw_window
     ALTER COLUMN raw_window DROP DEFAULT,
     ALTER COLUMN archive_armed DROP DEFAULT,
     ALTER COLUMN archive_reported_at DROP DEFAULT;
+
+--
+
+-- telemetry_device_5m :: FOREIGN TABLE
+-- The historian's rollups per device (timescaledb/aggregates.sql), read by telemetry_coverage()
+-- (0245) a device and a bucket a row. 10,000 rows a fetch: an Overview read brings hundreds of
+-- thousands across, and at the default 100 a fetch the round trips were half its time.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_5m (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_5m',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_5m OWNER TO postgres;
+
+--
+
+-- telemetry_device_1h :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_1h (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_1h',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_1h OWNER TO postgres;
+
+--
+
+-- telemetry_device_coverage :: FOREIGN TABLE
+-- What each device rollup holds, so History's Overview can tell a block not yet counted from one with no
+-- reading. Two rows, from the historian's catalogue.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_coverage (
+    relation text,
+    computed_from timestamp with time zone,
+    computed_to timestamp with time zone,
+    complete boolean
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_coverage'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_coverage OWNER TO postgres;
 
 --
 
@@ -18496,6 +18635,15 @@ GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 nume
 
 --
 
+-- FUNCTION platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) :: ACL
+-- Every reader of platform_alerts_active calls it, and so does the sender. anon by name, as after
+-- the sweep.
+REVOKE ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) TO service_role;
+GRANT ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) TO authenticated;
+
+--
+
 -- FUNCTION platform_health_rows() :: ACL
 REVOKE ALL ON FUNCTION public.platform_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.platform_health_rows() TO service_role;
@@ -19269,6 +19417,13 @@ GRANT SELECT ON TABLE timescale.telemetry_1h TO service_role;
 -- TABLE telemetry_1h :: ACL
 GRANT ALL ON TABLE public.telemetry_1h TO service_role;
 GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
+
+--
+
+-- TABLE telemetry_device_5m, telemetry_device_1h, telemetry_device_coverage :: ACL
+-- Read by telemetry_coverage() (0245) as its caller, as the rollups are read.
+GRANT SELECT ON TABLE timescale.telemetry_device_5m, timescale.telemetry_device_1h,
+    timescale.telemetry_device_coverage TO authenticated, service_role;
 
 --
 

@@ -1694,10 +1694,64 @@ supabaseMeta:
 The two are on or off together, and the render fails if only one is on. So does
 `ingress.routes.studio: true` with Studio off.
 
-- **Studio's sign-in stays registered.** A site that ran Studio keeps its OAuth client, though
-  nothing uses it with Studio off. Aber registers it again only while Studio is on.
+- **Studio's sign-in is removed.** On a site that ran Studio, the first boot with Studio off removes
+  its OAuth client. Each person's approval of it is revoked and its sessions end. The Audit Trail
+  records each, and db-init's log says so in a NOTICE. Turn Studio on again and Aber registers
+  it again, and each person approves it once more.
 - **The System page** shows Studio's row with no image recorded, as for any service the chart does
   not deploy.
+
+### From 1.8.0, the historian counts its older readings for History's Overview
+
+History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
+historian, which count each device's readings every 5 minutes and every hour. The upgrade creates
+them empty, and the historian fills them in the background. Nothing waits for it.
+
+- **The last 25 hours** are counted within a few minutes of the upgrade.
+- **Older history is counted in the background, every 2 minutes.** Each run counts six more hours
+  of the 5-minute rollup and a week more of the hourly one.
+  - **The hourly one reaches back as far as your hourly rollup** (5 years by default). At the storage
+    basis, 1,000 devices of 10 metrics, it fills in about 9 hours.
+  - **The 5-minute one reaches back as far as your 1-minute rollup** (180 days by default). At the
+    storage basis it fills in about a day.
+  - A smaller site takes less. A window older than the 5-minute one reaches is shown in hours.
+- **Until then, Overview hatches the older part of a window** and says so, for example
+  "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
+  and are complete at once.
+
+The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
+
+### From 1.8.0, alerts can be sent to a webhook
+
+Aber can now post each alert to a webhook: when it starts firing, as a reminder while it fires
+unacknowledged, and when it resolves. An Administrator sets it up on Settings › Notifications. Until
+then nothing is sent, and the upgrade changes nothing a site must act on.
+
+**The functions pod opens the connection to the webhook.** A site with `networkPolicy.enabled`
+must let it reach each webhook host. Without a rule every message fails, and the delivery log says
+the receiver could not be reached. Add the rule to `networkPolicy.extraEgress`, which the chart
+applies as one NetworkPolicy:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/component: supabase-functions
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.20/32 } }]
+        ports: [{ protocol: TCP, port: 443 }]
+```
+
+- **Already using `extraEgress` for the auth pod's mail relay?** Its `podSelector` picks the auth
+  pod alone. Widen it to the functions pod too, with
+  `matchExpressions: [{ key: app.kubernetes.io/component, operator: In, values: [supabase-auth, supabase-functions] }]`,
+  and add the webhook's rule beside the relay's.
+- **A receiver inside the cluster** needs the same rule, with a `namespaceSelector` and a
+  `podSelector` in place of the `ipBlock`.
+
+A site without NetworkPolicies has nothing to do.
 
 ## Backups
 

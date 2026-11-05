@@ -39,6 +39,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { RestoreEntityModal } from '../modals/RestoreEntityModal'
@@ -1271,7 +1272,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
           </div>
         )}
-      />
+      >
+        {/* A tool of unknown height, so after the actions: the gateway's own alerts, not its devices'. */}
+        {selected && (
+          <SuppressionWindows
+            kind="gateway"
+            subjectId={selected.gateway_id}
+            subjectName={selected.gateway_name}
+            userRole={userRole}
+            showToast={showToast}
+            open={!!selected}
+          />
+        )}
+      </ContextPanel>
 
       {shownCredentialForGw && (
         <ShowGatewayCredentialModal

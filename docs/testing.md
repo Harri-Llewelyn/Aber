@@ -333,6 +333,15 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # reads it from there.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
+# Aber's dispatcher, end to end (0247, 0248). A receiver pod of the ingestion image prints each
+# request it is sent; the webhook is pointed at it as the database owner, and what the stack held
+# is put back afterwards. A firing alert written with psql arrives signed with the Standard
+# Webhooks headers, an acknowledgement before the reminder stops it, an unacknowledged alert is
+# reminded, a resolve follows its firing message, and an address whose host is not allowed is
+# refused with nothing posted. Needs kubectl, notification-dispatch in the functions image and
+# NetworkPolicies off; skips without the keys.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
@@ -393,7 +402,8 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
 # repository's branches, never from its pull request head, tag or stash. And the half of
 # `scripts/scan-source.mjs` that needs no Docker: which of Semgrep's errors fail the scan, a tracked
-# file it could not parse, whole or in part, beyond its named exceptions. And the signing set
+# file it could not parse, whole or in part, beyond its named exceptions, and a tracked file outside
+# `.semgrepignore` that its report does not list as read. And the signing set
 # (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
 # `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
 # it keeps, and that a second run changes nothing.
@@ -568,6 +578,14 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
 # reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_each_series_carried_forward.py
+# History counts where readings arrived (0245). Local tables stand in for the historian's device
+# rollups and the coverage view. One row per device asked for, its counts an array,
+# oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
+# one summed from the widest rollup that divides it for 40 devices or fewer; nothing finer than 5
+# minutes; more than 40 take 5 minutes or 1 hour only. Each row carries what
+# the rollup has counted. Bad bounds, more than 1,000 devices and reads over 360,000 buckets are
+# refused before any read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_counts_where_readings_arrived.py
 # Reading a service's logs is recorded (0225). record_service_logs_read() writes one
 # SERVICE_LOGS_READ row in the service's lane of the security domain, naming the Administrator and
 # the read's service, level, filter and range. The database decides a row is due: one on the first
@@ -905,6 +923,13 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
+# psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
+# client an earlier boot registered is removed, its approvals revoked and its sessions ended, with
+# one APP_REMOVED and an APP_APPROVAL_REVOKED per approval, and the next boot records nothing. True
+# again restores it. True without the secret warns, naming the Studio login and the secret to set.
+# Unset is today's behaviour and never removes; any other value fails the boot. Every test rolls back.
+python supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and
@@ -988,6 +1013,27 @@ python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is
 # fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
 # machine identity's own in the security lane. Every test rolls back.
 python supabase/migrations/test_a_person_acknowledges_an_alert.py
+# An alert stays quiet during planned work (0240, 0241). A Shopfloor Manager and an Administrator
+# schedule, change and end a suppression window on a device, a gateway or a cell; an Operator, an
+# Auditor and a machine identity are refused, and nobody writes the table directly. A device window
+# covers the device, a gateway window the gateway's own alerts, and a cell window each device in the
+# cell when the alert is read, so a device moved out is no longer covered. Platform and machine
+# identity alerts are never covered. platform_alerts_active says suppressed before, during and after
+# a window, with every column it returned before. An occurrence records the window that first
+# covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
+# one audit row in the subject's lane. Every test rolls back.
+python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
+# Aber sends each alert to a webhook (0247-0249). The trigger queues a firing message as an
+# occurrence starts firing and a resolve as it resolves, and nothing on a repeat upsert or a
+# last_confirmed_at stamp, below the route, before the webhook has an address and a key, or for a
+# machine identity's alert. Every arm of platform_alert_send_decision(), with 0250's suppression
+# hold: held inside a window, sent once it ends, and nothing for an occurrence that resolved inside
+# it. Reminders past the
+# interval, and none unconfirmed, acknowledged, resolved or replaced; the three Notifications
+# settings, each one's rule and who reads and writes them; the address, the signing key (shown once,
+# rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each
+# recorded outcome. Every test rolls back.
+python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
@@ -1031,6 +1077,11 @@ python timescaledb/test_physical_backup.py
 python timescaledb/test_rollup_compression.py
 # A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
 python timescaledb/test_rollup_refresh.py
+# History's Overview counts from two device rollups: telemetry_device_5m from telemetry_1m and
+# telemetry_device_1h from telemetry_1h, materialised only, one of each policy, kept as long as the
+# series rollup of their width. One backfill job, a row a rollup; its window walks back a chunk at a
+# time and stops at the hour holding its source's oldest bucket. Changes nothing.
+python timescaledb/test_device_rollups.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

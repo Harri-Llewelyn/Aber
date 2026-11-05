@@ -10,7 +10,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **The time window** after the search box sets the stretch of time the timeline shows. **All time** is the default. [Moving through time](#moving-through-time) says how to use it.
 - **Zoom in** and **Zoom out**, after **Day | Week | Month | Year**, narrow or widen the window. You can also drag across the timeline. [Zooming in on a stretch](#zooming-in-on-a-stretch) says how.
 - **Filters** opens the filters used less often: the kind filter, the action filter, **Changed by** and **Show deleted entities**. Its number is how many of them are set, and its own **Clear** resets just those.
-- **Inside Filters, each list opens and closes.** Select a list's name to open it. The list that was open closes, so one is open at a time. A closed list still says what is ticked in it, such as **Action · 2 chosen**, or the name of the one value ticked. When Filters opens, the first list with something ticked is open, or else the first list.
+- **Inside Filters, each list opens and closes.** Select a list's name to open it. The list that was open closes, so one is open at a time. A closed list still says what is ticked in it, such as **Action · 2 chosen**, or the name of the one value ticked. A name too long for the heading is cut short. Point at the heading, or move to it, to see the whole name. When Filters opens, the first list with something ticked is open, or else the first list.
 - **Each of the three lists takes several values.** Tick every value you want: a row is listed if it matches any of them. Ticking nothing shows them all. The lists combine, so a row must pass each one that is set. Each list is grouped, and ticking a group's heading ticks the whole group. A long list has a search box.
 - **The kind and action lists show a count beside each value.** It is how many events that value has under your other filters: the search, the window, the other lists, the key's classes and **Show deleted entities**. A list's own ticks are left out of its own counts, so ticking one action does not empty the action list. A value that can occur but has no events shows 0.
 - **Each list offers only what can occur with your other choices.** Tick **Cells**, and the action list drops the backup actions, which never happen to a cell. Tick **Backup taken**, and the kind list drops every kind it cannot happen to. The classes you choose in the key narrow the action list the same way.
@@ -36,6 +36,7 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 - **User ID** names the person who made the change, and **Machine identity** names the machine. An Administrator can select the name to open that person or machine on the **Access Control** page. Select the ID beside the name to copy it.
 - **View in Devices**, at the foot of the drawer, opens the entity on its own page. It reads **View in Gateways**, **View in Cells**, **View in Areas** or **View in Schemas** for those kinds. A deleted entity has no page, so it has no such button.
 - **Raw audit payload** opens the entry exactly as it was recorded, for when the summary is not enough.
+- **A read of a service's logs** over a fixed window shows the window as one row, in your local time, such as "3 Nov 09:00 – 4 Nov 09:00". The raw payload keeps its two ends in UTC, as they were recorded.
 - **Show more** at the foot loads the next 200 events, older than those already loaded. Beside it is the number loaded out of the number that match, such as "200 of 242". **All N shown.** appears once every matching event is loaded. Under **All time** the page loads 200 events at first. Any other window loads every event in it by itself, up to 2,000, as [Moving through time](#moving-through-time) says.
 - The page **refreshes itself** every 60 seconds, unless an Administrator changed that on the Settings page. A refresh adds new events at the top, and keeps the pages you already loaded.
 
@@ -94,14 +95,16 @@ A few things to know:
 
 **An alert's acknowledgements have a lane of their own**, under **Alerts** in the plant's section. The lane is named after the alert and the device or gateway it is about. Each row says who acknowledged it or withdrew it, the reason and the note. An alert about a machine identity is the exception: its acknowledgements are in that identity's lane, which only an Administrator or an Auditor can read.
 
+**A suppression window's acts are in the lane of the device, gateway or cell it covers.** Each row says who scheduled, changed, ended or cancelled the window, when it starts and ends, and why. The action filter lists them under **Alerts**. Each is **Operational**, by the last rule below.
+
 **Aber decides each event's class, not the page.** The first rule that fits decides:
 
 1. **Read**: a service's logs read on the System page, a gateway's credential shown again, a capture's download link issued, and a device exported.
 2. **Operational**: an alert acknowledged from the alert counter, or its acknowledgement withdrawn.
-3. **Configuration**: every other change in the security lane, which is people, access, machine identities, apps, settings and backups. Also a schema rejection, a token minted or revoked, and a schema attached to or detached from a device.
+3. **Configuration**: every other change in the security lane, which is people, access, machine identities, apps, settings, backups and the webhook's signing key. Also a schema rejection, a token minted or revoked, and a schema attached to or detached from a device.
 4. **Created** for something made, and **Lifecycle** for something deleted. A recording or playback started counts as made, and a capture deleted as deleted.
 5. For any other change, what changed decides. Archived, quarantined or deprecated is **Lifecycle**. A schema, configuration, connection method or address that changed is **Configuration**. Anything else is **Operational**.
 
-**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
+**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups, the webhook's signing key and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 
 Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](../../deploy/k8s/README.md#trimming-the-audit-trail).

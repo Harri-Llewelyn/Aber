@@ -657,6 +657,15 @@ export const SUITES = {
       'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
       'carried past now, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_counts_where_readings_arrived.py': {
+    lanes: ['db'],
+    why:
+      "0245's telemetry_coverage(), over local tables standing in for the historian's device rollups: " +
+      'one row per device, its counts an array with a 0 for a block with none, read unsummed at the ' +
+      "rollups' own widths and summed from the widest that divides a wider block for 40 devices or " +
+      'fewer, what the rollup has counted on every row, bad bounds refused before any read, and it ' +
+      'reads as the caller.',
+  },
   'supabase/migrations/test_reading_a_service_s_logs_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1132,6 +1141,15 @@ export const SUITES = {
       'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
       "row naming who did it, while a boot's re-seed writes none.",
   },
+  'supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py': {
+    lanes: ['db'],
+    why:
+      "0002 -- that Studio's client block, run as db-init's psql runs it, says Studio is off in a " +
+      'NOTICE and never a WARNING; that it removes a client an earlier boot registered, approvals ' +
+      'and sessions with it, recorded once and not on the next boot, and restores it when Studio ' +
+      'is on again; that Studio on without its secret warns naming the login and the secret to ' +
+      'set; and that an unset value is today\'s behaviour and never removes.',
+  },
   'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1220,6 +1238,26 @@ export const SUITES = {
       'or acknowledged one, Other without a note and every other role are refused; who withdraws; ' +
       'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
       'audit rows, their lane, their class and who reads them.',
+  },
+  'supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py': {
+    lanes: ['db'],
+    why:
+      '0240 and 0241 -- that a Shopfloor Manager and an Administrator schedule, change and end a ' +
+      'suppression window and every other role is refused; the CHECKs; that a window covers its ' +
+      "device, its gateway's own alerts, or each device in its cell when the alert is read, and never " +
+      'a platform or machine identity alert; that platform_alerts_active says suppressed before, ' +
+      'during and after it and keeps its columns; that an occurrence records the window that first ' +
+      "covered it and nothing clears it; and the audit rows in the subject's lane.",
+  },
+  'supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py': {
+    lanes: ['db'],
+    why:
+      '0247 to 0250 -- that an alert is queued once as it starts firing and once as it resolves, ' +
+      'and never on a repeat upsert or a stamp; every arm of the send decision, and that a ' +
+      'suppressed alert is held until its window ends; that reminders ' +
+      'stop when the alert is acknowledged, resolved or no longer confirmed by its writer; the ' +
+      'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
+      'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
@@ -1396,6 +1434,16 @@ export const SUITES = {
       'lease does nothing and answers 200, and every test holds the lease so the report it reads ' +
       'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch.py': {
+    lanes: ['stack'],
+    why:
+      'Aber\'s dispatcher end to end (0247, 0248): a firing alert written with psql reaches a ' +
+      'receiver pod signed with the Standard Webhooks headers; an acknowledgement before the ' +
+      'reminder stops it, an unacknowledged alert is reminded, a resolve follows its firing ' +
+      'message, and an address whose host is not allowed is refused before anything is posted. ' +
+      'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
+      'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
@@ -1682,6 +1730,14 @@ export const SUITES = {
       'A replay written days late reaches the rollups: the window ingestion records is refreshed by ' +
       'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
       '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
+  },
+  'timescaledb/test_device_rollups.py': {
+    lanes: ['stack'],
+    why:
+      "History's Overview counts from two device rollups, 5 minutes from telemetry_1m and an hour " +
+      "from telemetry_1h, each materialised only, reconciled once, kept as long as its width's series " +
+      "rollup, and filled back a chunk a run to its own source's oldest bucket; fdw_reader reads what " +
+      'they hold.',
   },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],

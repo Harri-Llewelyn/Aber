@@ -836,6 +836,45 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/telemetry_coverage:
+    post:
+      tags: [Telemetry]
+      summary: Count where readings arrived, a device at a time, block by block
+      description: |
+        What History's Overview reads (`0245`). One row per device asked for: how many readings it
+        sent in each block of the window, over every metric, as `counts`, oldest block first and 0
+        for a block with none. Block i starts at `first_block` plus i times `block_width`. Read from
+        the historian's rollups per device, never raw telemetry.
+
+        **More than 40 devices take 5-minute or 1-hour blocks only**, the rollups' own widths, so
+        nothing is summed on the historian. Forty or fewer may take any whole number of 5 minutes.
+        The source follows each block's age: an hourly block comes from the hourly device rollup up
+        to its watermark and from the 5-minute one after it, and a block under an hour over a window
+        older than the 5-minute rollup reaches is read hourly, as `block_width` says.
+        `computed_from` to `computed_to` is what the rollup has counted: a block outside it is not
+        counted yet, which is not a block with no readings. `SECURITY INVOKER`, so it reads what the
+        caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, block, asset_ids]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                block: { type: string, example: '00:05:00', description: 'A PostgreSQL interval: a whole number of 5 minutes, at least one, with no months. More than 40 devices take `5 minutes` or `1 hour` only.' }
+                asset_ids: { type: array, items: { type: string }, maxItems: 1000, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id), at most 1,000.' }
+      responses:
+        '200':
+          description: One row per device, ordered by device.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCoverageRow' } }
+        '400': { description: 'Bounds out of order, a bad block, no devices, more than 1,000 devices, a summed block for more than 40, or more than 360,000 device-buckets to read, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   # --------------------------------------------------------------- Audit ----
   /rest/v1/audit_trail:
     get:
@@ -2065,7 +2104,238 @@ paths:
         '403': { description: 'Not the acknowledger, a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No alert with that id that you may read.' }
 
+  /rest/v1/rpc/schedule_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Schedule a suppression window on a device, a gateway or a cell
+      description: |
+        Keeps a subject's alerts quiet for a period, such as planned maintenance (`0240`). An alert
+        that fires inside the window is still recorded, marked suppressed: the dashboard does not
+        count it or colour anything for it, and it is not sent. It ends by itself at `p_ends_at`.
+
+        A device window covers the device's own alerts. A gateway window covers the gateway's own
+        alerts, not its devices'. A cell window covers every device in the cell at the moment an
+        alert is read, so a device moved out of the cell is no longer covered. Platform and
+        machine identity alerts are never covered.
+
+        A Shopfloor Manager or an Administrator may call it. A start in the past, or none, is now.
+        Writes one `SUPPRESSION_WINDOW_SCHEDULED` row in the Audit Trail, in the subject's own lane.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_subject_kind, p_subject_id, p_ends_at, p_reason]
+              properties:
+                p_subject_kind: { type: string, enum: [device, gateway, cell] }
+                p_subject_id: { type: string, format: uuid, description: 'The device''s, gateway''s or cell''s `id`.' }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Null, or a time already past, is now.' }
+                p_ends_at: { type: string, format: date-time, description: 'After the start, and after now.' }
+                p_reason: { type: string, minLength: 1, maxLength: 200, description: 'Trimmed. Every signed-in reader sees it beside the alert.' }
+      responses:
+        '200':
+          description: The window.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'A subject kind outside the three, no end, an end not after the start and now, or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such device, gateway or cell.' }
+
+  /rest/v1/rpc/change_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Change a suppression window's start, end or reason
+      description: |
+        A null argument keeps what the window has (`0240`). A window that has started keeps its
+        start, and one that has ended is kept as it was. Writes one `SUPPRESSION_WINDOW_CHANGED`
+        row in the Audit Trail, with the window before and after, or nothing when nothing changed.
+        A Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Only for a window that has not started. A time already past is now.' }
+                p_ends_at: { type: string, format: date-time, nullable: true, description: 'After the start, and after now.' }
+                p_reason: { type: string, nullable: true, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: The window, changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'An ended window, or a new start for a started one (`23514`); an end not after now and the start, or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
+  /rest/v1/rpc/end_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: End a suppression window now
+      description: |
+        A window that has started ends now, with who ended it, and its subject's alerts count again
+        (`0240`): one still firing is then sent, as if it had just fired. A window that has not
+        started is cancelled: it covered nothing, so it is deleted. Writes one
+        `SUPPRESSION_WINDOW_ENDED` or `SUPPRESSION_WINDOW_CANCELLED` row in the Audit Trail. A
+        Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The window as it ended, or as it was before it was cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'The window has already ended (`23514`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
   # ------------------------------------------------------------ Registry ----
+  /rest/v1/rpc/notification_webhook_status:
+    post:
+      tags: [Registry]
+      summary: Whether the webhook is set up
+      description: |
+        For an Administrator: whether the webhook's address is in the vault, and when its signing
+        key was issued (`0248`). Never either value. Anybody else is told `visible: false` and
+        nothing more.
+      responses:
+        '200':
+          description: The webhook's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visible: { type: boolean }
+                  url_set: { type: boolean, nullable: true }
+                  signing_key_issued_at: { type: string, format: date-time, nullable: true }
+
+  /rest/v1/rpc/set_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Set the webhook's address
+      description: |
+        Writes the address Aber posts each alert to into the vault, through
+        `set_foreign_credential()` (`0248`). A webhook URL is a bearer secret its receiver issued,
+        so nothing reads it back. Its host must also be on `notifications.webhook_allowed_hosts`,
+        which is checked as each message is sent. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_url]
+              properties:
+                p_url: { type: string, maxLength: 2048, description: 'An http or https URL with no user name in it. Trimmed.' }
+      responses:
+        '204': { description: 'Stored.' }
+        '400': { description: 'Not an http or https URL, or one naming a user (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/clear_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Remove the webhook
+      description: |
+        Deletes the webhook's address from the vault, which stops the webhook, and drops each
+        message still waiting for it (`0248`). The signing key is kept. Administrator only.
+      responses:
+        '200':
+          description: How many waiting messages were dropped.
+          content:
+            application/json:
+              schema: { type: integer }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/issue_notification_signing_key:
+    post:
+      tags: [Registry]
+      summary: Issue or rotate the webhook's signing key, shown once
+      description: |
+        Generates the key each webhook message is signed with, `whsec_` and 32 random bytes in
+        base64 as Standard Webhooks writes one, keeps it in the vault and returns it: the only time
+        it is shown (`0248`). Issuing again rotates it, and the old key stops signing at once.
+        Writes one `SIGNING_KEY_ISSUED` row in the Audit Trail, which never holds the key.
+        Administrator only.
+      responses:
+        '200':
+          description: The key.
+          content:
+            application/json:
+              schema: { type: string, example: whsec_<base64> }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/queue_test_notification:
+    post:
+      tags: [Registry]
+      summary: Send the webhook a test
+      description: |
+        Queues an `aber.test` message to the webhook and returns its id (`0248`). The row with that
+        id in `/rest/v1/notification_deliveries` says how it went once the dispatcher has sent it;
+        a test is tried once. Keeps the newest 20 finished tests. Administrator only.
+      responses:
+        '200':
+          description: The delivery log row's id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { description: 'Not an Administrator (`42501`).' }
+        '409': { description: 'The webhook has no address, or no signing key, yet (`55000`).' }
+
+  /rest/v1/notification_deliveries:
+    get:
+      tags: [Registry]
+      summary: Read the delivery log
+      description: |
+        One row per message to one channel: an alert occurrence starting to fire, resolving or
+        reminding, or a test (`0247`). It is the queue `notification-dispatch` drains and the log
+        the Settings page shows. Every signed-in role reads it; a row about an alert is read
+        through that alert's own policy, so a row about a machine identity's alert reaches an
+        Administrator alone. No role writes it.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [pending, sent, dropped, dead] }, description: 'e.g. `eq.dead`' }
+        - { name: event, in: query, schema: { type: string, enum: [firing, resolved, reminder, test] } }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching messages.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid, description: 'Also the CloudEvents id and the webhook-id header, the same on every retry.' }
+                    alert_id: { type: string, format: uuid, nullable: true, description: 'The occurrence; null for a test.' }
+                    event: { type: string, enum: [firing, resolved, reminder, test] }
+                    channel: { type: string, enum: [webhook] }
+                    state: { type: string, enum: [pending, sent, dropped, dead] }
+                    attempts: { type: integer, description: 'Posts made. A hold is not one.' }
+                    next_attempt_at: { type: string, format: date-time }
+                    last_attempt_at: { type: string, format: date-time, nullable: true }
+                    finished_at: { type: string, format: date-time, nullable: true }
+                    response_status: { type: integer, nullable: true }
+                    last_error: { type: string, nullable: true, maxLength: 500, description: 'In the dispatcher''s words; never the address.' }
+                    requested_by: { type: string, format: uuid, nullable: true, description: 'For a test, the Administrator who sent it.' }
+                    created_at: { type: string, format: date-time }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/asset_config:
     get:
       tags: [Registry]
@@ -3267,6 +3537,11 @@ paths:
         links each alert to its rule by `rule_uid`. An acknowledged alert is still firing, so it is
         still returned, with its acknowledgement (0231); the dashboard counts only the rows whose
         `acknowledged_at` is null.
+
+        A suppressed alert is still firing too, so it is returned with `suppressed` true and the
+        window that covers it now: its id, its reason and when it ends (0240). Whether a row is
+        suppressed is decided as it is read, so a window's start and end take effect with no write.
+        The dashboard counts and colours only the rows that are neither acknowledged nor suppressed.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -3276,6 +3551,30 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/alert_suppression_windows:
+    get:
+      tags: [Registry]
+      summary: Read the suppression windows
+      description: |
+        One row per window on a device, a gateway or a cell (0240): its start, its end, its reason,
+        who scheduled it and, if it was ended early, who ended it. Every signed-in role reads every
+        window, as the drawers list them. Nobody writes the table here: use
+        `/rest/v1/rpc/schedule_alert_suppression_window`, `/rest/v1/rpc/change_alert_suppression_window`
+        and `/rest/v1/rpc/end_alert_suppression_window`.
+      parameters:
+        - { name: device_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: gateway_id, in: query, schema: { type: string } }
+        - { name: cell_id, in: query, schema: { type: string } }
+        - { name: ends_at, in: query, schema: { type: string, format: date-time }, description: 'e.g. `gt.2026-11-05T09:00:00Z` for the current and upcoming windows.' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching windows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AlertSuppressionWindow' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/device_nameplate:
@@ -4538,8 +4837,10 @@ paths:
       summary: A service's newest log lines
       description: |
         The System page's Logs tab. Without `service`, the services that wrote a line to the log
-        store in the last 7 days; with one, that service's newest lines, newest first, in a
-        rolling window (`range`, back from now) or a fixed one (`from` and `to`).
+        store in the window: between `from` and `to`, or in the last 7 days for a rolling `range`,
+        however short, so the list does not shrink at 15 minutes. With one, that service's newest
+        lines, newest first, in a rolling window (`range`, back from now) or a fixed one (`from` and
+        `to`). A `service` must be in the same list.
 
         **Parameters, never a query.** The function builds the one query shape from these:
         `service`'s stream, then `filter` as a quoted line filter, then `level` read from each
@@ -4566,7 +4867,7 @@ paths:
         sign-ins, addresses and emails. A machine identity's token is refused (401). No
         service-role key.
       parameters:
-        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists. Without it, the answer is the list alone.' }
+        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists for the window. Without it, the answer is the list alone.' }
         - { name: level, in: query, schema: { type: string, enum: [any, error, warning, info, debug], default: any } }
         - { name: filter, in: query, schema: { type: string, maxLength: 200 }, description: 'Text a line must contain, matched exactly, case and all.' }
         - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s. Not with `from` and `to`.' }
@@ -4617,7 +4918,7 @@ paths:
                         used:      { type: integer }
                         why:       { type: string }
                   audit: { type: string, enum: [recorded, unchanged] }
-        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store has not listed in the last 7 days. Nothing was read or recorded.' }
+        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store does not list for the window, because it wrote nothing between `from` and `to`, or in the last 7 days for a `range`. `details` names the window, in UTC for a fixed one. Nothing was read or recorded.' }
         '401': { description: Missing or invalid Authorization header, or a token GoTrue does not take for a person. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }
@@ -5814,6 +6115,62 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
+  /functions/v1/notification-dispatch:
+    post:
+      tags: [Edge Functions]
+      summary: Send what the notification queue holds (Aber's dispatcher)
+      description: |
+        **Called by the database, not by a browser.** `request_notification_dispatch()` (migration
+        `0247`) reaches this through the gateway with `pg_net` as a message is queued, and
+        `sweep_notifications()` every minute from `pg_cron` while one is due.
+
+        One pass takes each due row of `notification_deliveries`, oldest first, asks
+        `platform_alert_send_decision()` whether it still applies, and posts it to the webhook: a
+        CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers
+        `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the base64
+        HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused, a
+        redirect is a failure and is not followed, and a receiver has 10 seconds to answer. A
+        failure is retried after 30 seconds, doubling to an hour, and is dead after the tenth
+        attempt.
+
+        Authorised by the dispatch secret in the `x-dispatch-secret` header, **not** by the
+        publishable key. The database generated it and alone sends it. Every message comes from the
+        queue, never from the request.
+
+        **One pass at a time**, under `notification_dispatch_lease`: a call that finds it held does
+        nothing and answers 200 with `already_dispatching: true`.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: x-dispatch-secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Ignored; a pass takes no parameters.
+      responses:
+        '200':
+          description: >-
+            The pass completed, with how many rows were `sent`, `dropped`, `held`, `failed` (to be
+            retried) and `dead`. Or, with the body `{"already_dispatching": true}` and nothing else,
+            another pass holds the lease and this call did nothing.
+        '401':
+          description: The secret is missing or wrong.
+        '405':
+          description: Not a POST.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '502':
+          description: >-
+            The caller, the lease or the queue could not be read, and the pass stopped there.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
+        '503':
+          description: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured.
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
@@ -6449,6 +6806,20 @@ components:
         n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
         is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
 
+    TelemetryCoverageRow:
+      type: object
+      description: |
+        One device's readings in each block from `/rest/v1/rpc/telemetry_coverage`, and what the
+        historian's device rollup has counted.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        first_block: { type: string, format: date-time, description: 'Start of the first block, on the epoch grid.' }
+        block_width: { type: string, example: '00:05:00', description: 'The block, a PostgreSQL interval: the one asked for, or an hour for a window older than the 5-minute rollup reaches.' }
+        counts: { type: array, items: { type: integer }, description: 'Readings in each block, oldest first; 0 for none.' }
+        computed_from: { type: string, description: 'The oldest moment the rollup has counted, or `-infinity`.' }
+        computed_to: { type: string, description: 'The newest moment the rollup has counted, or `infinity`.' }
+        complete: { type: boolean, description: 'The rollup has counted all the history it will.' }
+
     AssetConfigRow:
       type: object
       description: One DBIRTH birth-certificate parameter.
@@ -6471,7 +6842,8 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
+                 notification_channels]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6487,7 +6859,9 @@ components:
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
-                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN]
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
+                 SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
+                 SUPPRESSION_WINDOW_CANCELLED, SIGNING_KEY_ISSUED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6514,7 +6888,12 @@ components:
             from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
             written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
             `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
-            alert about its token.
+            alert about its token. The `SUPPRESSION_WINDOW_` actions (0240) are written by
+            `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and
+            `end_alert_suppression_window()`, in the lane of the device, gateway or cell the window
+            covers. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
+            signing key, in the webhook's `notification_channels` lane, written by
+            `issue_notification_signing_key()`; the key is never in the row.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -7303,6 +7682,50 @@ components:
           nullable: true
           enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other]
         acknowledgement_note: { type: string, nullable: true, maxLength: 200, description: 'Their own words, trimmed. Required with the reason `other`.' }
+        suppression_window_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            The suppression window that first covered this occurrence, for history (0240): stamped as
+            it starts in one, or when one opens while it fires, and never cleared. On
+            `platform_alerts` only; whether an alert is suppressed now is `suppressed`, below.
+        last_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the row's writer last said it still holds (0247): `grafana-alert-webhook` stamps
+            it on every post, Grafana's repeats included. A firing row confirmed more than 13 hours
+            ago is sent no reminder. Not returned by `platform_alerts_active`.
+        suppressed:
+          type: boolean
+          description: |
+            On `platform_alerts_active` only (0240): whether a suppression window covers the alert
+            now, decided as the row is read. A suppressed alert is not counted, colours nothing and
+            is not sent.
+        suppressing_window_id: { type: string, format: uuid, nullable: true, description: 'On `platform_alerts_active` only: the window that covers it now. Of several, the one that ends last.' }
+        suppression_reason: { type: string, nullable: true, description: 'On `platform_alerts_active` only: that window''s reason.' }
+        suppressed_until: { type: string, format: date-time, nullable: true, description: 'On `platform_alerts_active` only: when that window ends. The alert counts again then if it is still firing.' }
+
+    AlertSuppressionWindow:
+      type: object
+      description: |
+        A scheduled period on one device, gateway or cell during which its alerts are recorded but
+        marked suppressed (0240). Exactly one of `device_id`, `gateway_id` and `cell_id` is set.
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid, nullable: true }
+        gateway_id: { type: string, format: uuid, nullable: true, description: 'The gateway''s own alerts, not its devices''.' }
+        cell_id: { type: string, format: uuid, nullable: true, description: 'Every device in the cell when an alert is read.' }
+        starts_at: { type: string, format: date-time, description: 'Never before it was scheduled.' }
+        ends_at: { type: string, format: date-time, description: 'The first moment it no longer covers. Now, when it was ended early.' }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+        created_by: { type: string, format: uuid, description: 'The `auth.users` id of the person who scheduled it.' }
+        created_by_email: { type: string, nullable: true, description: 'Their email address as their token carried it.' }
+        created_at: { type: string, format: date-time }
+        ended_by: { type: string, format: uuid, nullable: true, description: 'Who ended it early, or null.' }
+        ended_by_email: { type: string, nullable: true }
 
     DeviceNameplate:
       type: object
