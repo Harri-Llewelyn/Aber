@@ -2745,7 +2745,8 @@ browser never reaches it: the `service-logs` function reads it for an Administra
   `0230`) and `limit`. Any other parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
   `| json aber_level="level" | aber_level=~"(?i)(?:…)"` for a level, with every caller value a
   quoted string, escaped as LogQL reads one (Go's `strconv.Unquote`). `service` must be a value
-  Loki lists for the label over the last 7 days.
+  Loki lists for the label over the window: between `from` and `to`, or the last 7 days for any
+  `range`, so the list does not shrink at 15 minutes. The refusal names the window it checked.
 - **A level is a JSON line's.** Alloy keeps two stream labels, `service` and `container`, and no
   level. Ingestion and playback write JSON (`logging_config.py`), so their lines carry `level`. A
   line in any other format has none and shows only under *Any level*; the tab says so. The level is
@@ -2812,8 +2813,9 @@ the range key.
   never both. The ends are in order and at most 169 hours apart: the 7 days a read covers, and the
   hour a calendar week gains when the clocks go back, so the control's Week is never refused.
   Anything else is `400` with the reason, before the store is asked. A rolling window is still
-  measured back from the function's own now, and the services listed are still those of the last 7
-  days, whatever the window.
+  measured back from the function's own now. The services listed, and the check on a read's
+  `service`, follow the window: a fixed one's own, and for every range the last 7 days. The tab
+  reads the list again when the window moves, and keeps a chosen service the new list lacks.
 - **The row records what was asked for.** `record_service_logs_read()` takes `p_from` and `p_to`
   after `p_range`, each `DEFAULT NULL`. A rolling read's `new_data` is `name`, `level`, `filter`
   and `range`, as before, so a poll of the last hour writes nothing, and the first poll after an

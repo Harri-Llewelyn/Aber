@@ -36,6 +36,14 @@ export function logWindowParams(win, now = Date.now()) {
   return { from: start ? start.toISOString() : '', to: end ? end.toISOString() : '' }
 }
 
+/**
+ * Which list of services a window's parameters read: a fixed window's own, between its ends, and
+ * for every rolling range the same one, the last 7 days, so the list does not shrink at 15 minutes.
+ */
+export function logListKey(params) {
+  return params.range ? 'last-7-days' : `${params.from}/${params.to}`
+}
+
 /** `any`, or a level a JSON line names in its `level` field. */
 export const LOG_LEVELS = [
   { value: 'any', label: 'Any level' },
