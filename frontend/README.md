@@ -1523,18 +1523,26 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   being computed" (`uncountedWords()`).
 - **The readout**: the block under the pointer, on a lane's track or a closed group's, in words
   (`blockReadoutWords()`): "10:05–10:10 · 412 readings", "No readings", "No readings yet" after
-  now, or "Not counted yet". A step under 3:1 is why: the count never depends on the colour. None
-  is drawn while a box is.
+  now, or "Not counted yet". A step under 3:1 is why: the count never depends on the colour. It is
+  the tooltip's bubble and arrow (`.tooltip-bubble`), portalled as the tooltip is, centred under the
+  block and kept to its track (`placeReadout()`), above it only where the scroll area has no room
+  below, as on the last lane: never over the strip it reads. A scroll closes it, and none is drawn
+  while a box is drawn or held.
 - **The selection box** is a drag across the tracks (`useBandDrag` over `.overview-swimlanes
   .trail-track`, whose band carries the press's and the pointer's `clientY`; the rows under that
   stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
-  inside the track near either end, with `boxWords()`). Once released it stays, and the row above
-  the lanes (`.history-header`) holds its words, **Chart** (the Device tab for one device at the
-  box's window, off for several with `CHART_SEVERAL_REASON`), **Zoom** (the window as a new history
-  entry) and **Clear**, in place of the status line. Nothing is drawn under the box, so the card's
-  edge cannot cut its actions off. Escape or Clear removes it; a press elsewhere keeps it. The tick
-  boxes (`?device=`, telemetry keys) are the other way, in the same row: **Chart** charts one at the
-  control's window. Export CSV is the Device tab's alone.
+  inside the track near either end, with `boxWords()`). Once released it stays, and
+  `SelectionPopover` opens beside it, as on AMRC ACS's Datasets page: its words, **Chart** (the
+  Device tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON` as its
+  tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
+  `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
+  part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
+  (*Popover arrows*, `.overview-popover::before`). Focus moves to its first action that is on, and
+  Tab stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
+  box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
+  the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
+  Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and
+  the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
   Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 
