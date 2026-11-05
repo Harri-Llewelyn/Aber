@@ -1278,9 +1278,11 @@ yes-or-no choice stays a toggle button in the toolbar.
   toolbar's counted toggles are. Several may be on, none on is every class, and the address keeps
   them as `?class=lifecycle,read`. `AUDIT_TRAIL_CLASSES` lists them in the legend's order and mirror
   check 44 holds them, and `MARKERS`, to the function and its indexes. Read is a grey eye in
-  `--text-muted`, which holds 3:1 on the card (`themeContrast.test.js`). The legend sits at the
-  right-hand end of the row above the timeline, with Expand all and Collapse all at its start, over
-  the section headings they act on.
+  `--text-muted`. In a toggle each marker sits on a disc in `--bg-card` (`.trail-legend-disc`), as
+  it sits on the card on the track, so a pressed toggle's accent fill never meets it.
+  `themeContrast.test.js` holds every marker at 3:1 on the track and in its toggle, pressed or not,
+  in both themes. The legend sits at the right-hand end of the row above the timeline, with Expand
+  all and Collapse all at its start, over the section headings they act on.
 - **Checks.** Check 193 (`scripts/check-docs-drift.mjs`) refuses a select in a toolbar, but System ›
   Logs' Service and Level, each one value `service-logs` takes. Check 194 holds the Audit Trail
   help's group names to `constants.js`. Mirror check 42 (`scripts/check-mirror-drift.mjs`) holds

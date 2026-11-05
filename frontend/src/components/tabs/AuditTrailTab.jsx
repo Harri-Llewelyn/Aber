@@ -2190,7 +2190,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                       aria-pressed={on}
                       onClick={() => toggleClass(kind)}
                     >
-                      <TrailMarker kind={kind} />
+                      {/* On a disc in the card's colour, as the track has it behind the marker,
+                          so a pressed toggle's fill never meets the marker. */}
+                      <span className="trail-legend-disc"><TrailMarker kind={kind} /></span>
                       {n === null ? m.label : `${m.label} (${n})`}
                     </button>
                   </Tooltip>
