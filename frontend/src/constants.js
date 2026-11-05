@@ -123,6 +123,12 @@ export const AUDIT_TRAIL_ACTIONS = {
   // alert's lane, or a machine identity's alert in the identity's.
   ALERT_ACKNOWLEDGED:              'Alert acknowledged',
   ALERT_ACKNOWLEDGEMENT_WITHDRAWN: 'Acknowledgement withdrawn',
+  // A suppression window scheduled, changed, ended early or cancelled before it started, from the
+  // drawer of the device, gateway or cell it covers (0240): in that subject's lane.
+  SUPPRESSION_WINDOW_SCHEDULED: 'Suppression window scheduled',
+  SUPPRESSION_WINDOW_CHANGED:   'Suppression window changed',
+  SUPPRESSION_WINDOW_ENDED:     'Suppression window ended',
+  SUPPRESSION_WINDOW_CANCELLED: 'Suppression window cancelled',
 };
 
 /**
@@ -202,7 +208,11 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     label: 'The plant and the model',
     actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
   },
-  { label: 'Alerts', actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN'] },
+  {
+    label: 'Alerts',
+    actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
+      'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED'],
+  },
   {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
@@ -306,6 +316,11 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   // Alerts, in the alert's lane, or a machine identity's alert in the identity's.
   ['ALERT_ACKNOWLEDGED', ['platform_alerts', 'service_principals'], ['operational']],
   ['ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ['platform_alerts', 'service_principals'], ['operational']],
+  // A suppression window's acts, in its subject's lane.
+  ['SUPPRESSION_WINDOW_SCHEDULED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CHANGED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_ENDED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CANCELLED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
 ];
 
 /**
