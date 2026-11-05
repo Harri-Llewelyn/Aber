@@ -3337,6 +3337,10 @@ end is found among the rows the caller may read, and every occurrence of a finge
 **Suppression is not read here.** A suppressed occurrence (#326 part 2) is in the table like any
 other, and its stamp reaches the dashboard in `occurrence` once that column exists.
 
+**Measured** on the test database, with 50,000 occurrences over 90 days (500 fingerprints of 100
+each, 500 of them replaced firing rows), as the owner: Last 24 hours 33-44 ms, a week 43 ms and 90
+days 53-55 ms, each the dashboard's 1,001 rows; one device over 90 days, 1.4 ms.
+
 The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the pinned `search_path`, the
 return type, the grants and the refusals. `test_history_lists_the_alerts_that_fired.py` holds the
 overlap rule at the window's edges, a replaced occurrence's end, the order, the filter, the limit,
