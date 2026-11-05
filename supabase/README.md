@@ -3511,20 +3511,21 @@ playback acts ask through `may_manage_captures()`, and every People act through
 **What it costs.** `test_role_checks_are_timed.py` times `has_role()` alone and `has_role() AND
 mfa_satisfied()`, a write policy's two calls, in the same run, so both see one load. It was run three
 times on a freshly migrated test database, as #1194's baseline was, on a laptop shared with seven
-other sessions: `has_role()` alone measured two to three times #1194's figures, so read the
-difference within each run. µs per call, the median of 5 × 10,000 calls, runs 1 / 2 / 3:
+other sessions. `has_role()` admitting measured 20.08 / 21.07 / 49.24, against #1194's 13.83-16.95
+and #1186's 21.68, so read the difference within each run. µs per call, the median of 5 × 10,000
+calls, runs 1 / 2 / 3:
 
 | µs per call | has_role() alone | has_role() + mfa_satisfied() |
 | :--- | :--- | :--- |
-| the switch off | 35.36 / 54.31 / 30.37 | 59.28 / 91.42 / 65.56 |
-| the switch on, an `aal2` Administrator | 37.81 / 42.36 / 33.10 | 106.37 / 81.41 / 138.30 |
+| the switch off | 21.94 / 30.64 / 55.93 | 41.57 / 53.01 / 106.31 |
+| the switch on, an `aal2` Administrator | 19.43 / 18.96 / 48.34 | 51.91 / 49.94 / 150.06 |
 
 With the switch off the predicate costs about one `has_role()`: the setting's lookup and the call.
-With it on, a covered `aal2` caller pays the setting, the role and the claims, two to three
-`has_role()`s. A policy pays it once per statement, as an initplan. `EXPLAIN ANALYZE` of an UPDATE
-over 10,000 areas, as an `aal2` Administrator with the switch on, shows the guard's initplan run
-once (`loops=1`) while `has_role()`, as before, is in the per-row filter; the median of 5 runs was
-1433 / 1887 / 860 ms, most of it the audit trigger's 10,000 rows.
+With it on, a covered `aal2` caller also pays the role and the claims, two to three `has_role()`s
+in all. A policy pays it once per statement, as an initplan. `EXPLAIN ANALYZE` of an UPDATE over
+10,000 areas, as an `aal2` Administrator with the switch on, shows the guard's initplan run once
+(`loops=1`) while `has_role()`, as before, is in the per-row filter. The median of 5 runs was
+707 / 665 / 1763 ms, most of it the audit trigger's 10,000 rows.
 
 The file's self-check asserts the two functions' language, volatility, that both run as their
 caller, and their pin; that `authenticated` and `service_role` may run them and `anon` may not;
