@@ -9,7 +9,11 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { HistoryTab } from '../components/tabs/HistoryTab'
+import { placeReadout, placeSelection } from '../components/tabs/HistoryOverview'
+import { ARROW_INSET } from '../components/common/Tooltip'
 import { api, COVERAGE_SMALL_SELECTION } from '../api'
 import { deviceHistoryUrl } from '../routes'
 import { groupDevicesByCell, SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED } from '../utils/cellResolution'
@@ -20,6 +24,8 @@ import {
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
   intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
 } from '../utils/history'
+
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
 const MACHINE_TZ = process.env.TZ
 process.env.TZ = 'Europe/London'
@@ -104,12 +110,21 @@ beforeEach(() => {
   api.get.mockImplementation(routeGet)
   api.readCoverage.mockImplementation(coverage)
   originalRect = Element.prototype.getBoundingClientRect
-  // Every track is 1000px wide from x = 100; each row is 30px tall, in the order drawn.
+  // Every track is 1000px wide from x = 100; each row is 30px tall, in the order drawn, and the
+  // scroll area ends with the last of them.
+  const rowAt = (el) => [...document.querySelectorAll('[data-lanes]')].indexOf(el)
   Element.prototype.getBoundingClientRect = function rect() {
-    if (this.classList?.contains('trail-track')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 28, height: 28 }
+    if (this.classList?.contains('trail-track')) {
+      const i = Math.max(0, rowAt(this.parentElement))
+      return { left: LEFT, right: LEFT + 1000, width: 1000, top: i * 30, bottom: i * 30 + 28, height: 28 }
+    }
+    if (this.classList?.contains('trail-scroll')) {
+      const n = document.querySelectorAll('[data-lanes]').length
+      return { left: 0, right: 1200, width: 1200, top: 0, bottom: n * 30, height: n * 30 }
+    }
     if (this.classList?.contains('overview-box-layer')) return { left: LEFT, right: LEFT + 1000, width: 1000, top: 0, bottom: 900, height: 900 }
     if (this.dataset?.lanes !== undefined) {
-      const i = [...document.querySelectorAll('[data-lanes]')].indexOf(this)
+      const i = rowAt(this)
       return { left: 0, right: 1200, width: 1200, top: i * 30, bottom: i * 30 + 30, height: 30 }
     }
     return originalRect.call(this)
@@ -128,6 +143,8 @@ const visit = async (address) => {
 }
 const lanes = () => [...document.querySelectorAll('.overview-lane')]
 const laneNamed = (name) => lanes().find(l => within(l).queryByText(name))
+const rowOf = (el) => [...document.querySelectorAll('[data-lanes]')].indexOf(el)
+const toolbarChart = () => within(document.querySelector('.filter-bar-actions')).getByRole('button', { name: /Chart/ })
 const mouse = (clientX, clientY, extra = {}) => ({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX, clientY, ...extra })
 const search = () => window.location.search
 
@@ -286,24 +303,24 @@ describe("History's Overview", () => {
     expect(lanes()).toHaveLength(8)
   })
 
-  it('charts one ticked device from the row above the lanes, and says why several cannot be', async () => {
+  it('charts one ticked device from the toolbar, and says why several cannot be', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     expect(new URLSearchParams(search()).get('device')).toBe(telemetryKey(LATHE))
-    const chart = within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ })
+    const chart = toolbarChart()
     expect(chart).not.toHaveAttribute('aria-disabled')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    const several = within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ })
+    const several = toolbarChart()
     expect(several).toHaveAttribute('aria-disabled', 'true')
     fireEvent.focus(several)
     await waitFor(() => expect(screen.getByText(CHART_SEVERAL_REASON)).toBeInTheDocument())
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    fireEvent.click(within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ }))
+    fireEvent.click(toolbarChart())
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
     expect(search()).toBe('?span=day&at=2026-11-02')
   })
 
-  it('draws a box across lanes and time that says its size, charts one device and zooms the window', async () => {
+  it('draws a box across lanes and time, named on the axis, with its actions in a popover beside it', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     const strips = [...document.querySelectorAll('.overview-lane .overview-track')]
     const rowY = (name) => [...document.querySelectorAll('[data-lanes]')].indexOf(laneNamed(name)) * 30 + 15
@@ -312,55 +329,85 @@ describe("History's Overview", () => {
     fireEvent.pointerDown(strips[0], mouse(x(10), rowY('Mill 2')))
     fireEvent.pointerMove(strips[0], mouse(x(14), rowY('Press 1')))
     expect(document.querySelector('.overview-box')).toBeTruthy()
-    // While it is drawn, the axis names it, as the Audit Trail's band does.
+    // While it is drawn, the axis names it, as the Audit Trail's band does, and nothing else opens.
     expect(document.querySelector('.trail-axis .trail-band-words')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
-    // ...and no block is read out over it.
     expect(document.querySelector('.overview-readout')).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
     fireEvent.pointerUp(strips[0], mouse(x(14), rowY('Press 1')))
-    const bar = screen.getByRole('group', { name: 'Selection' })
-    expect(within(bar).getByRole('status')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
-    // In the row above the lanes, in place of the status line: nothing under the box to be cut off.
-    expect(bar.closest('.history-header')).toBeTruthy()
-    expect(bar.closest('.trail-swimlanes')).toBeNull()
-    expect(document.querySelector('.history-meta')).toBeNull()
-    expect(within(bar).getByRole('button', { name: /Chart/ })).toHaveAttribute('aria-disabled', 'true')
-    // Escape clears it.
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByRole('group', { name: 'Selection' })).not.toBeInTheDocument()
 
-    // One lane: Chart opens its Device tab at the box's window.
+    const popover = screen.getByRole('dialog', { name: 'Selection' })
+    // In a portal, outside the card, so the card's edge cannot cut it off.
+    expect(popover.parentElement).toBe(document.body)
+    expect(popover.closest('.card')).toBeNull()
+    expect(within(popover).getByRole('status')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
+    // The row above the lanes keeps its status line, and no block is read out under the popover.
+    expect(document.querySelector('.history-header .history-meta')).toBeInTheDocument()
+    expect(document.querySelector('.overview-readout')).toBeNull()
+    const chart = within(popover).getByRole('button', { name: /Chart/ })
+    expect(chart).toHaveAttribute('aria-disabled', 'true')
+    // Focus goes to the first action that is not off: Zoom, Chart being off for three.
+    await waitFor(() => expect(within(popover).getByRole('button', { name: /Zoom/ })).toHaveFocus())
+    // Escape closes it and clears the box, and focus goes back to the box's first lane.
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(document.querySelector('.overview-box')).toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'Pick Mill 2' })).toHaveFocus()
+
+    // One lane: Chart is on and takes the focus; Zoom sets the window as a new history entry.
     fireEvent.pointerDown(strips[0], mouse(x(10), rowY('Lathe 3')))
     fireEvent.pointerMove(strips[0], mouse(x(12), rowY('Lathe 3')))
     fireEvent.pointerUp(strips[0], mouse(x(12), rowY('Lathe 3')))
-    const one = screen.getByRole('group', { name: 'Selection' })
+    const one = screen.getByRole('dialog', { name: 'Selection' })
     expect(within(one).getByRole('status')).toHaveTextContent('1 device · 10:00 – 12:00, 2 h')
-    expect(one.closest('.history-header')).toBeTruthy()
+    await waitFor(() => expect(within(one).getByRole('button', { name: /Chart/ })).toHaveFocus())
     const push = vi.spyOn(window.history, 'pushState')
     fireEvent.click(within(one).getByRole('button', { name: /Zoom/ }))
     expect(search()).toBe('?from=2026-11-02T10%3A00&to=2026-11-02T12%3A00')
     expect(push).toHaveBeenCalled()
     await waitFor(() => expect(api.readCoverage.mock.calls.at(-1)[0].from).toBe(new Date(2026, 10, 2, 10).toISOString()))
-    expect(screen.queryByRole('group', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
 
     fireEvent.pointerDown(strips[0], mouse(x(10), rowY('Lathe 3')))
     fireEvent.pointerMove(strips[0], mouse(x(11), rowY('Lathe 3')))
     fireEvent.pointerUp(strips[0], mouse(x(11), rowY('Lathe 3')))
-    fireEvent.click(within(screen.getByRole('group', { name: 'Selection' })).getByRole('button', { name: /Chart/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Selection' })).getByRole('button', { name: /Chart/ }))
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
   })
 
-  it('keeps a selection until Escape or Clear, and a press elsewhere keeps it', async () => {
+  it('closes the popover, and clears the box, on Clear, a press outside or a scroll; Tab stays inside it', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     const track = document.querySelector('.overview-lane .overview-track')
-    fireEvent.pointerDown(track, mouse(LEFT + 100, 15))
-    fireEvent.pointerMove(track, mouse(LEFT + 300, 15))
-    fireEvent.pointerUp(track, mouse(LEFT + 300, 15))
-    const bar = screen.getByRole('group', { name: 'Selection' })
-    fireEvent.pointerDown(document.querySelector('.history-header'), mouse(5, 600))
-    expect(screen.getByRole('group', { name: 'Selection' })).toBe(bar)
-    fireEvent.click(within(bar).getByRole('button', { name: /Clear/ }))
-    expect(screen.queryByRole('group', { name: 'Selection' })).not.toBeInTheDocument()
-    expect(document.querySelector('.history-meta')).toBeInTheDocument()
+    const draw = () => {
+      fireEvent.pointerDown(track, mouse(LEFT + 100, 15))
+      fireEvent.pointerMove(track, mouse(LEFT + 300, 15))
+      fireEvent.pointerUp(track, mouse(LEFT + 300, 15))
+      return screen.getByRole('dialog', { name: 'Selection' })
+    }
+    let popover = draw()
+    const [chart, , clear] = within(popover).getAllByRole('button')
+    await waitFor(() => expect(chart).toHaveFocus())
+    // Tab from the last action comes round to the first, and Shift+Tab from the first to the last.
+    clear.focus()
+    fireEvent.keyDown(clear, { key: 'Tab' })
+    expect(chart).toHaveFocus()
+    fireEvent.keyDown(chart, { key: 'Tab', shiftKey: true })
+    expect(clear).toHaveFocus()
+    // A press inside keeps it.
+    fireEvent.mouseDown(within(popover).getByRole('status'))
+    expect(screen.getByRole('dialog', { name: 'Selection' })).toBe(popover)
+    fireEvent.click(clear)
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(document.querySelector('.overview-box')).toBeNull()
+
+    draw()
+    fireEvent.mouseDown(document.querySelector('.history-header'))
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(document.querySelector('.overview-box')).toBeNull()
+
+    popover = draw()
+    fireEvent.scroll(document.querySelector('.trail-scroll'))
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(document.querySelector('.overview-box')).toBeNull()
   })
 
   it('lays each row out as the Audit Trail does: a label column, then its track', async () => {
@@ -390,19 +437,75 @@ describe("History's Overview", () => {
     expect(lathe.querySelector('.trail-track .overview-run')).toBeTruthy()
   })
 
-  it('reads out the block under the pointer in words, a count or none', async () => {
+  it('reads out the block under the pointer in words, below it, or above it on the last lane', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
-    const track = laneNamed('Lathe 3').querySelector('.trail-track')
+    const lathe = laneNamed('Lathe 3')
+    const track = lathe.querySelector('.trail-track')
+    const row = rowOf(lathe)
     // 10:00, the 61st of 144 ten-minute blocks.
-    fireEvent.pointerMove(track, mouse(LEFT + (1000 * 10) / 24 + 1, 15))
-    expect(track.querySelector('.overview-readout')).toHaveTextContent('10:00–10:10 · 6 readings')
+    fireEvent.pointerMove(track, mouse(LEFT + (1000 * 10) / 24 + 1, row * 30 + 15))
+    const readout = document.querySelector('.overview-readout')
+    expect(readout).toHaveTextContent('10:00–10:10 · 6 readings')
+    // The tooltip's bubble, portalled, under the track and centred on the block.
+    expect(readout).toHaveClass('tooltip-bubble')
+    expect(readout.parentElement).toBe(document.body)
+    expect(readout).not.toHaveClass('tooltip-bubble-above')
+    expect(readout.style.top).toBe(`${row * 30 + 28 + 8}px`)
+    expect(parseFloat(readout.style.left)).toBeCloseTo(LEFT + (1000 * 10) / 24 + 1000 / 288, 5)
     // Press has none after 14:20, before now.
     const press = laneNamed('Press 1').querySelector('.trail-track')
     fireEvent.pointerMove(press, mouse(LEFT + (1000 * 14.5) / 24 + 1, 15))
-    expect(press.querySelector('.overview-readout')).toHaveTextContent('14:30–14:40 · No readings')
-    expect(track.querySelector('.overview-readout')).toBeNull()
+    expect(document.querySelectorAll('.overview-readout')).toHaveLength(1)
+    expect(document.querySelector('.overview-readout')).toHaveTextContent('14:30–14:40 · No readings')
+    // The last lane has no room below inside the scroll area, so its readout opens above.
+    const last = lanes().at(-1)
+    fireEvent.pointerMove(last.querySelector('.trail-track'), mouse(LEFT + 500, rowOf(last) * 30 + 15))
+    const above = document.querySelector('.overview-readout')
+    expect(above).toHaveClass('tooltip-bubble-above')
+    expect(above.style.top).toBe(`${rowOf(last) * 30 - 8}px`)
+    // A scroll or the pointer leaving the lanes closes it.
+    fireEvent.scroll(document.querySelector('.trail-scroll'))
+    expect(document.querySelector('.overview-readout')).toBeNull()
+    fireEvent.pointerMove(track, mouse(LEFT + 500, row * 30 + 15))
     fireEvent.pointerLeave(document.querySelector('.trail-swimlanes'))
     expect(document.querySelector('.overview-readout')).toBeNull()
+  })
+
+  it('places the readout inside its track and the popover inside the window', () => {
+    const track = { left: 100, right: 1100, top: 0, bottom: 28 }
+    const area = { top: 0, bottom: 600 }
+    // Centred on the block...
+    expect(placeReadout({ left: 500, right: 510 }, track, area, { width: 160, height: 30 }))
+      .toEqual({ left: 425, top: 36, above: false, arrowX: 80 })
+    // ...kept inside the track at its start, the arrow still at the block...
+    expect(placeReadout({ left: 100, right: 104 }, track, area, { width: 160, height: 30 }))
+      .toEqual({ left: 100, top: 36, above: false, arrowX: ARROW_INSET })
+    // ...and above where the scroll area has no room below.
+    expect(placeReadout({ left: 500, right: 510 }, { ...track, top: 572, bottom: 600 }, area, { width: 160, height: 30 }).above).toBe(true)
+    // The popover below its box, above it near the window's foot, and over a box taller than the window.
+    const size = { width: 300, height: 80 }
+    expect(placeSelection({ left: 400, right: 600, top: 100, bottom: 200 }, size, 1440, 900))
+      .toEqual({ left: 350, top: 208, above: false, over: false, arrowX: 150 })
+    expect(placeSelection({ left: 400, right: 600, top: 700, bottom: 850 }, size, 1440, 900))
+      .toMatchObject({ top: 612, above: true, over: false })
+    expect(placeSelection({ left: 400, right: 600, top: 20, bottom: 880 }, size, 1440, 900))
+      .toMatchObject({ top: 812, over: true })
+    // Near the window's right side it moves in, its arrow still at the box.
+    expect(placeSelection({ left: 1380, right: 1430, top: 100, bottom: 200 }, size, 1440, 900))
+      .toMatchObject({ left: 1132, arrowX: 1405 - 1132 })
+  })
+
+  it("keeps the row above the lanes to Collapse all, the status line and the key, with the trail's room above and below", async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    const header = document.querySelector('.history-header')
+    expect([...header.children].map(c => c.className)).toEqual([
+      expect.stringContaining('btn'), 'history-meta', 'overview-key',
+    ])
+    expect(within(header).getAllByRole('button').map(b => b.textContent)).toEqual(['Collapse all'])
+    // One rule for Overview and the Device tab, with .trail-header's padding: the same above and below.
+    const padding = (selector) => APP_CSS.match(new RegExp(`\\n\\${selector} \\{[^}]*?padding: ([^;]+);`))?.[1]
+    expect(padding('.history-header')).toBe('10px var(--inset)')
+    expect(padding('.history-header')).toBe(padding('.trail-header'))
   })
 
   it("re-reads on the refresh timer, and the control's Zoom works here", async () => {

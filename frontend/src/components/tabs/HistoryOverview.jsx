@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { COVERAGE_SMALL_SELECTION, api } from '../../api'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
@@ -10,14 +11,16 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
-import { Tooltip } from '../common/Tooltip'
+import { ARROW_INSET, Tooltip, tooltipHost } from '../common/Tooltip'
 import { IconChartLine, IconCpu, IconX, IconZoomIn } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useBandDrag } from '../../hooks/useBandDrag'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceDotStyle, deviceLifecycleStatus, deviceStatusTitle } from '../../utils/deviceStatus'
-import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
+import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
 import {
   CHART_SEVERAL_REASON, COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
   ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockReadoutWords,
@@ -86,13 +89,81 @@ function Blocks({ counts, reading }) {
   })
 }
 
-/** The block under the pointer, in words: its stretch and how many readings arrived in it. */
+/** From the block or the box to the bubble's or the popover's edge: room for the arrow's point. */
+const GAP = 8
+/** From the window's sides. */
+const MARGIN = 8
+/** How near the popover's corner its arrow may sit (FiltersPopover's ARROW_INSET). */
+const POPOVER_ARROW_INSET = 16
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi))
+
+/**
+ * Where a block's readout goes, `width` by `height`: below the block's track, centred on the block
+ * and kept inside the track's width, or above it where the scroll area `area` has no room below,
+ * as on the last lane. `arrowX` is the block's centre from the bubble's left edge.
+ */
+export function placeReadout(block, track, area, { width, height }) {
+  const centre = clamp((block.left + block.right) / 2, track.left, track.right)
+  const left = Math.max(track.left, Math.min(centre - width / 2, track.right - width))
+  const above = track.bottom + GAP + height > area.bottom
+  return {
+    left,
+    top: above ? track.top - GAP - height : track.bottom + GAP,
+    above,
+    arrowX: clamp(centre - left, ARROW_INSET, Math.max(ARROW_INSET, width - ARROW_INSET)),
+  }
+}
+
+/**
+ * Where the selection's popover goes, `width` by `height`, beside the box's visible part `box` in a
+ * `vw` by `vh` window: below it, or above it where there is no room below, centred on it and kept
+ * inside the window. A box taller than the window has it over its foot (`over`, no arrow).
+ */
+export function placeSelection(box, { width, height }, vw, vh) {
+  const centre = clamp((box.left + box.right) / 2, MARGIN, vw - MARGIN)
+  const left = Math.max(MARGIN, Math.min(centre - width / 2, vw - width - MARGIN))
+  const arrowX = clamp(centre - left, POPOVER_ARROW_INSET, Math.max(POPOVER_ARROW_INSET, width - POPOVER_ARROW_INSET))
+  if (box.bottom + GAP + height <= vh - MARGIN) return { left, top: box.bottom + GAP, above: false, over: false, arrowX }
+  if (box.top - GAP - height >= MARGIN) return { left, top: box.top - GAP - height, above: true, over: false, arrowX }
+  return { left, top: Math.max(MARGIN, vh - height - MARGIN), above: false, over: true, arrowX }
+}
+
+/**
+ * The block under the pointer, in words: its stretch and how many readings arrived in it. The
+ * tooltip's bubble and arrow (`.tooltip-bubble`), portalled as the tooltip is, so no row or card
+ * clips it, and placed below the block (placeReadout()). The track's own words say the same to a
+ * screen reader, so this is for the pointer only.
+ */
 function Readout({ hover, counts, reading, now }) {
+  const ref = useRef(null)
+  const [pos, setPos] = useState(null)
   const startMs = reading.starts[hover.i] * 1000
   const words = blockReadoutWords(startMs, reading.minutes, counts[hover.i] ?? 0, {
     spanMs: reading.end - reading.start, counted: reading.counted, now,
   })
-  return <span className={edgeClass('overview-readout', hover.f)} style={{ left: at(hover.f) }}>{words}</span>
+  useLayoutEffect(() => {
+    const el = ref.current
+    const { track } = hover
+    if (!el || !track?.isConnected) return
+    const t = track.getBoundingClientRect()
+    const area = track.closest('.trail-scroll')?.getBoundingClientRect() ?? { bottom: window.innerHeight }
+    const span = reading.end - reading.start
+    const edge = (ms) => t.left + clamp((ms - reading.start) / span, 0, 1) * t.width
+    const block = { left: edge(startMs), right: edge(startMs + reading.minutes * 60000) }
+    setPos(placeReadout(block, t, area, { width: el.offsetWidth, height: el.offsetHeight }))
+  }, [hover, startMs, words, reading])
+  return createPortal(
+    <span
+      ref={ref}
+      className={`tooltip-bubble overview-readout${pos?.above ? ' tooltip-bubble-above' : ''}`}
+      aria-hidden="true"
+      style={pos ? { left: pos.left, top: pos.top, '--arrow-x': `${pos.arrowX}px` } : { left: 0, top: 0, visibility: 'hidden' }}
+    >
+      {words}
+    </span>,
+    tooltipHost(hover.track),
+  )
 }
 
 /**
@@ -193,27 +264,90 @@ function ChartButton({ keys, win, names }) {
   )
 }
 
+/** What in the popover takes the focus as it opens: its first action that is not off. */
+const FIRST_ACTION = 'button:not([disabled]):not([aria-disabled="true"])'
+
 /**
- * The selection's words and actions, in the row above the lanes in place of the status line: the
- * box's (Chart, Zoom and Clear) or the tick boxes' (Chart and Clear). Above the grid, so nothing of it
- * can fall below the card's edge, however many lanes there are.
+ * The selection's words and actions in a popover beside the box, as on the Datasets page of AMRC's
+ * ACS: Chart (the Device tab, for one device), Zoom and Clear. Portalled to <body> as the toolbar's
+ * popovers are, so the card cannot clip it, and fixed below the box's visible part, or above it
+ * (placeSelection()), its arrow at the box's centre. Focus moves to its first action that is not off,
+ * and Tab stays inside it. Escape, Clear, a press outside, a scroll and a resize close it, and the
+ * box with it (`onClose`).
  */
-function SelectionBar({ words, keys, win, names, onZoom, onClear }) {
-  return (
-    <div className="overview-selection" role="group" aria-label="Selection">
-      <span className="overview-selection-words" role="status">{words}</span>
-      <ChartButton keys={keys} win={win} names={names} />
-      {onZoom && (
+function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onClose }) {
+  const ref = useClickOutside(onClose)
+  const [pos, setPos] = useState(null)
+  useEscapeKey(onClose)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    const drawn = layerRef.current?.querySelector('.overview-box')
+    if (!el || !drawn) return
+    // The box's part the lanes' scroller shows, which is what the popover points at.
+    const r = drawn.getBoundingClientRect()
+    const area = drawn.closest('.trail-scroll')?.getBoundingClientRect()
+    const shown = area ? { left: r.left, right: r.right, top: Math.max(r.top, area.top), bottom: Math.min(r.bottom, area.bottom) } : r
+    setPos(placeSelection(shown, { width: el.offsetWidth, height: el.offsetHeight }, window.innerWidth, window.innerHeight))
+  }, [box, words, ref, layerRef])
+
+  // Once placed. Not scrolled to, which would close it.
+  const placed = pos !== null
+  useEffect(() => {
+    if (placed) ref.current?.querySelector(FIRST_ACTION)?.focus({ preventScroll: true })
+  }, [placed, ref])
+
+  const closer = useRef(onClose)
+  closer.current = onClose
+  useEffect(() => {
+    const dismiss = (e) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) closer.current() }
+    window.addEventListener('resize', dismiss)
+    window.addEventListener('scroll', dismiss, true)
+    return () => {
+      window.removeEventListener('resize', dismiss)
+      window.removeEventListener('scroll', dismiss, true)
+    }
+  }, [ref])
+
+  // Escape here before a tooltip inside takes it, and Tab round its actions.
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+      return
+    }
+    if (e.key !== 'Tab') return
+    const actions = [...ref.current.querySelectorAll('button:not([disabled])')]
+    if (actions.length === 0) return
+    const [first, last] = [actions[0], actions[actions.length - 1]]
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+  }
+
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Selection"
+      className={`overview-popover${pos?.above ? ' overview-popover-above' : ''}${pos?.over ? ' overview-popover-over' : ''}`}
+      onKeyDown={onKeyDown}
+      // Unplaced, transparent rather than hidden, as ToolbarPopover is, so the focus above lands.
+      style={pos ? { left: pos.left, top: pos.top, '--arrow-x': `${pos.arrowX}px` } : { left: 0, top: 0, opacity: 0, pointerEvents: 'none' }}
+    >
+      <p className="overview-popover-words" role="status">{words}</p>
+      <div className="overview-popover-actions">
+        <ChartButton keys={keys} win={win} names={names} />
         <Tooltip text="Show this stretch of the window, as a new step in your browser's history">
           <button type="button" className="btn btn-primary btn-sm" onClick={onZoom}>
             <IconZoomIn size={13} aria-hidden="true" /> Zoom
           </button>
         </Tooltip>
-      )}
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>
-        <IconX size={13} aria-hidden="true" /> Clear
-      </button>
-    </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+          <IconX size={13} aria-hidden="true" /> Clear
+        </button>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -229,11 +363,10 @@ function SelectionBar({ words, keys, win, names, onZoom, onClear }) {
  * visit all are, unless the page would draw more lanes than OVERVIEW_OPEN_LANES_MAX.
  *
  * A drag across the tracks draws a selection box: the devices whose rows it covers and the stretch
- * of the window it spans, named on the axis while it is drawn. On release the selection stays, and
- * the row above the lanes holds its words, Chart (the Device tab, for one device), Zoom (the page's
- * window, as a new history entry) and Clear. Escape clears it too. The box is a shortcut: each
- * lane's tick box picks devices (`?device=`), and the same row then offers Chart at the time
- * control's window, and the control zooms.
+ * of the window it spans, named on the axis while it is drawn. On release a popover beside it holds
+ * its words, Chart (the Device tab, for one device), Zoom (the page's window, as a new history entry)
+ * and Clear (SelectionPopover). The box is a shortcut: each lane's tick box picks devices
+ * (`?device=`), the toolbar then offers Chart at the time control's window, and the control zooms.
  */
 export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, every, setEvery }) {
   useClockTick(CLOCK_MS)
@@ -407,13 +540,15 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     const rows = drawn && extent ? rowsUnder(extent.y0, extent.y) : null
     setBox(rows ? { lo: Math.min(a, b), hi: Math.max(a, b), ...rows } : null)
   }, OVERVIEW_BAND)
-  // A selection stays until Escape or Clear; a press elsewhere, such as on its own actions, keeps it.
-  useEffect(() => {
-    if (!box) return undefined
-    const key = (e) => { if (e.key === 'Escape') setBox(null) }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [box])
+  /** The popover closes, and the box with it: focus goes back to the box's first lane, or its group's heading. */
+  const closeBox = () => {
+    const keysIn = new Set(box?.keys ?? [])
+    const row = [...(gridRef.current?.querySelectorAll('[data-lanes]') ?? [])]
+      .find(el => el.dataset.lanes.split(' ').some(k => keysIn.has(k)))
+    const target = row?.matches('.trail-section') ? row.querySelector('.group-heading') : row?.querySelector('.overview-pick')
+    setBox(null)
+    target?.focus({ preventScroll: true })
+  }
   // A new window leaves the box behind: it named the window the tracks drew.
   useEffect(() => { setBox(null) }, [windowKey])
 
@@ -422,12 +557,13 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     return rows ? { lo: Math.min(band.a, band.b), hi: Math.max(band.a, band.b), ...rows } : null
   })() : null
   const shownBox = dragged ?? (box && drawn ? box : null)
-  // While a box is drawn, the axis names it and no block is read out over it.
-  const pointed = dragged ? null : hover
+  // While a box is drawn the axis names it, and while one is held its popover does: no block is
+  // read out over either.
+  const pointed = dragged || box ? null : hover
   const boxWindow = shownBox ? bandWindow(atFraction(shownBox.lo), atFraction(shownBox.hi), drawn.ms) : null
   const boxBounds = boxWindow ? windowBounds(boxWindow) : null
   const boxText = shownBox ? boxWords(shownBox.keys.length, boxBounds.start.getTime(), boxBounds.end.getTime(), now) : null
-  const zoomToBox = () => { setWin(boxWindow, { replace: false }); setBox(null) }
+  const zoomToBox = () => { setWin(boxWindow, { replace: false }); closeBox() }
 
   // ---- The readout -------------------------------------------------------------------------------
   /** The block under the pointer: which track, which block and where, from the track's own box. */
@@ -440,7 +576,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     const t = reading.start + f * (reading.end - reading.start)
     const width = reading.minutes * 60000
     const i = Math.min(reading.starts.length - 1, Math.max(0, Math.floor((t - reading.starts[0] * 1000) / width)))
-    setHover(h => (h && h.id === track.dataset.hover && h.i === i ? h : { id: track.dataset.hover, i, f }))
+    setHover(h => (h && h.id === track.dataset.hover && h.i === i ? h : { id: track.dataset.hover, i, f, track }))
   }
 
   // ---- What the page draws -----------------------------------------------------------------------
@@ -526,13 +662,6 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
     )
   }
 
-  // The selection the row above the lanes names: the box once released, else the devices ticked.
-  const selection = box && !dragged && shownBox
-    ? { words: boxText, keys: shownBox.keys, win: boxWindow, onZoom: zoomToBox, onClear: () => setBox(null) }
-    : ticked.length > 0
-      ? { words: `${plural(ticked.length, 'device', 'devices')} picked · ${windowWords(win, now)}`, keys: ticked, win, onClear: () => setTicked(NONE) }
-      : null
-
   return (
     <>
       <div className="filter-bar">
@@ -545,6 +674,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
+          {/* The tick boxes' way to Chart, without a drag: on for exactly one device. */}
+          {ticked.length > 0 && <ChartButton keys={ticked} win={win} names={names} />}
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -570,7 +701,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         ) : (
           <>
             {/* The row above the lanes, as on the Device tab: Expand all or Collapse all first, then
-                what is shown or the selection and its actions, then the key at the row's end. */}
+                what is shown, then the key at the row's end. */}
             <div className="history-header">
               <ExpandAllToggle
                 anyOpen={allKeys.some(isOpen)}
@@ -579,22 +710,18 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                 noun="groups"
                 disabled={allKeys.length === 0}
               />
-              {selection ? (
-                <SelectionBar {...selection} names={names} />
-              ) : (
-                <p className="history-meta" role="status">
-                  {`${plural(reading.devices, 'device', 'devices')}, in ${blockWords(reading.minutes)}`}
-                  {uncountedNote && ` · ${uncountedNote}`}
-                  {reading.loading && ' · reading again…'}
-                </p>
-              )}
+              <p className="history-meta" role="status">
+                {`${plural(reading.devices, 'device', 'devices')}, in ${blockWords(reading.minutes)}`}
+                {uncountedNote && ` · ${uncountedNote}`}
+                {reading.loading && ' · reading again…'}
+              </p>
               <CoverageKey uncounted={uncounted.length > 0} />
             </div>
 
             {shown.length === 0 ? (
               <EmptyState icon={<IconCpu size={36} />} message={`No device matches "${search.trim()}".`} />
             ) : (
-              <div className="trail-scroll">
+              <div className="trail-scroll" onScroll={() => setHover(null)}>
                 {/* A press on a track and a drag draws the selection box (useBandDrag); the pointer
                     over a track reads out its block. */}
                 <div
@@ -642,6 +769,18 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                         />
                       )}
                     </div>
+                    {box && !dragged && shownBox && (
+                      <SelectionPopover
+                        box={box}
+                        layerRef={layerRef}
+                        words={boxText}
+                        keys={shownBox.keys}
+                        win={boxWindow}
+                        names={names}
+                        onZoom={zoomToBox}
+                        onClose={closeBox}
+                      />
+                    )}
                   </div>
                 </div>
               </div>

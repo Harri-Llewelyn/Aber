@@ -4371,16 +4371,18 @@ a.chip { text-decoration: none; }
 }
 
 /* ===== Popover arrows =====
-   The four panels that open from a button point at it: a square turned 45 degrees, centred on the
-   panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
-   of the panel, because the alert, notification and account panels clip or scroll their overflow;
-   the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
+   The four panels that open from a button point at it, and History Overview's selection popover at
+   its box: a square turned 45 degrees, centred on the panel's border on the side facing what it
+   points at. It is a pseudo-element of the panel's wrapper, not of the panel, because the alert,
+   notification and account panels clip or scroll their overflow; the Filters panel and the
+   selection popover clip nothing and carry their own. --bg-card is opaque in both themes, so the
    half inside the panel hides the panel's border there and the two bordered sides carry the
    outline on into the point. The rules below say where the centre goes and which way it turns. */
 .alert-pill-wrap:has(> .alert-pill-panel)::after,
 .notif-wrap:has(> .notif-panel)::after,
 .user-menu:has(> .user-popover)::after,
-.filters-popover::before {
+.filters-popover::before,
+.overview-popover::before {
   --arrow-size: 10px;
   content: '';
   position: absolute;
@@ -4425,6 +4427,20 @@ a.chip { text-decoration: none; }
   top: -0.5px;
   left: calc(var(--arrow-x, 50%) - 1px);
 }
+
+/* Up from History Overview's selection popover to its box, or down where it opens above the box;
+   none where a box taller than the window has it over its foot. --arrow-x is set as the Filters
+   panel's is. */
+.overview-popover::before {
+  top: -0.5px;
+  left: calc(var(--arrow-x, 50%) - 1px);
+}
+.overview-popover-above::before {
+  --arrow-turn: 225deg;
+  top: auto;
+  bottom: -0.5px;
+}
+.overview-popover-over::before { display: none; }
 
 /* The 3D model preview in the device drawer's model section: the drawer's width, and 16:9 so it
    grows with the drawer (about 290px tall at 1080p). One class on all three states (the
@@ -6097,26 +6113,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   white-space: nowrap;
   pointer-events: none;
 }
-/* The block under the pointer in words, with the band words' look and held inside the track near
-   either end as they are. */
-.overview-readout {
-  position: absolute;
-  top: 4px;
-  z-index: 2;
-  transform: translateX(-50%);
-  padding: 0 6px;
-  border: 1px solid var(--border-hover);
-  border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 18px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.overview-readout-start { transform: none; }
-.overview-readout-end   { transform: translateX(-100%); }
+/* The block under the pointer in words: the tooltip's bubble and arrow (.tooltip-bubble), on one
+   line, below the block or above it on the last lane. */
+.overview-readout { white-space: nowrap; }
 /* The selection box, over the tracks and under the labels, with the band's look on every edge. */
 .overview-box-layer {
   position: absolute;
@@ -6133,9 +6132,24 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border: 1px solid var(--accent);
   border-radius: 2px;
 }
-/* The selection's words and actions, in the row above the lanes where the status line is. */
-.overview-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.overview-selection-words { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* The selection's words and actions, in a popover beside the box: the Filters panel's frame,
+   portalled and fixed so the card cannot clip it, with its arrow (Popover arrows). */
+.overview-popover {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 10px var(--inset-tight);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-popover);
+}
+.overview-popover-words { margin: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.overview-popover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 /* The key, at the end of the row above the lanes, as the Audit Trail's legend is. */
 .overview-key {
   display: flex;
