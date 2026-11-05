@@ -20,7 +20,8 @@ import { tabLink, tabLinks } from '../test/tabBar'
 import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { helpTipText, tooltipOf } from '../test/tooltips'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn(), displayNamesFor: vi.fn(), listUserAccounts: vi.fn() }
 }))
 

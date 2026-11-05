@@ -4757,8 +4757,8 @@ const OPERATOR_PAIRS = [
 
 // -------------------------------------------------------------------------------------------------
 // 15. The alert retention window is declared once and cited consistently. The number lives in
-// the seeded `alerts.retention_days` setting; the READMEs and the archived migration's header
-// quote it, including the header's counter-example predicate.
+// the seeded `alerts.retention_days` setting; supabase/README.md quotes it, including its
+// counter-example predicate.
 // -------------------------------------------------------------------------------------------------
 {
   // The seeded value is DML, so it folded into 0002 and is still executed on every boot. The
@@ -4785,12 +4785,9 @@ const OPERATOR_PAIRS = [
 
     // Where the number is quoted, and what it would mean for each to be stale. Substring matches,
     // not regexes: the strings are full of reserved characters, and an escaping slip fails open.
+    // Archived 0030's counter-example keeps 1.0's 7 days: the archive is the record of what each
+    // file did, so it is held to mention 0032 below and not to the number now seeded.
     const CITATIONS = [
-      {
-        file: MIGRATION,
-        needle: `interval '${days} days';  -- NO`,
-        what: 'the header counter-example showing the predicate that must NOT be used',
-      },
       {
         file: 'supabase/README.md',
         needle: `kept for ${days} days`,
@@ -4828,6 +4825,32 @@ const OPERATOR_PAIRS = [
           `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
       );
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 240. History's Alerts tab is described as the code holds it. Its help names the most alerts it
+// lists (ALERT_HISTORY_LIMIT) and how long alerts are kept (0002's seed), and the upgrade guide's
+// 1.8.0 subsection names the same days, which the tab falls back to (ALERT_RETENTION_DAYS).
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP = 'help/pages/history.md';
+  const GUIDE = 'help/site/upgrading.md';
+  const limit = read('frontend/src/api.js').match(/^export const ALERT_HISTORY_LIMIT = (\d+);$/m)?.[1];
+  const days = read('supabase/migrations/0002_seed_data.sql').match(/seed_setting\(\s*'alerts\.retention_days',\s*to_jsonb\((\d+)\)/)?.[1];
+  const help = read(HELP);
+  const alerts = help.slice(help.indexOf('\n## Alerts\n'), help.indexOf('\n## ', help.indexOf('\n## Alerts\n') + 1));
+  const guide = read(GUIDE);
+  const problems240 = [];
+  if (!limit || !days) problems240.push('could not read ALERT_HISTORY_LIMIT in frontend/src/api.js or the seeded alerts.retention_days');
+  if (!help.includes('\n## Alerts\n')) problems240.push(`${HELP}: no "Alerts" section`);
+  if (limit && !alerts.includes(`at most ${Number(limit).toLocaleString('en-GB')} alerts`)) problems240.push(`${HELP}: the Alerts section does not say it lists at most ${Number(limit).toLocaleString('en-GB')} alerts`);
+  if (days && !alerts.includes(`**Alerts are kept for ${days} days.**`)) problems240.push(`${HELP}: the Alerts section does not say alerts are kept for ${days} days`);
+  if (days && !guide.includes(`\n### From 1.8.0, alert history is kept for ${days} days\n`)) problems240.push(`${GUIDE}: no "From 1.8.0, alert history is kept for ${days} days" subsection`);
+  if (problems240.length) {
+    fail("History's Alerts tab and its help disagree:\n" + problems240.map((p) => `      - ${p}`).join('\n'));
+  } else {
+    pass(`History's help says the Alerts tab lists at most ${Number(limit).toLocaleString('en-GB')} alerts, kept for ${days} days, as the upgrade guide does`);
   }
 }
 
@@ -4949,18 +4972,17 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 104. The alert counter's history link has a history to show.
+// 104. Grafana's Alerting > History has a history to show.
 //
-// The dashboard records no Grafana alert (frontend/README.md, Toasts and the notification history),
-// so the record of what fired and cleared is Grafana's Alerting > History, which the alert
-// counter's footer links to. That page answers only from Loki: on Grafana's default annotations
-// backend it shows an error. So grafana.ini sends state history to Loki, the chart gives Grafana
-// the Loki URL the logs datasource uses, and grafana/README.md says why.
+// The dashboard's record of what fired is History's Alerts tab, which the alert counter's footer
+// links to. Grafana keeps its own for its own pages, and Alerting > History answers only from Loki:
+// on Grafana's default annotations backend it shows an error. So grafana.ini sends state history
+// to Loki, the chart gives Grafana the Loki URL the logs datasource uses, and grafana/README.md
+// says why.
 // -------------------------------------------------------------------------------------------------
 {
   const INI = 'grafana/grafana.ini';
   const TEMPLATE = 'deploy/helm/aber/templates/obs/grafana.yaml';
-  const CONSTANTS = 'frontend/src/constants.js';
   const README = 'grafana/README.md';
   const ENV = 'GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL';
 
@@ -4978,16 +5000,15 @@ const OPERATOR_PAIRS = [
   const env = read(TEMPLATE).split('\n').findIndex(l => l.trim() === `- name: ${ENV}`);
   const value = env < 0 ? '' : read(TEMPLATE).split('\n')[env + 1].trim();
   if (value !== 'value: {{ include "aber.lokiUrl" . | quote }}') problems104.push(`${TEMPLATE}: ${ENV} is not set from aber.lokiUrl, the logs datasource's URL`);
-  if (!read(CONSTANTS).includes('export const GRAFANA_ALERT_HISTORY_URL = `${GRAFANA_URL}/alerting/history')) problems104.push(`${CONSTANTS}: GRAFANA_ALERT_HISTORY_URL no longer opens /alerting/history`);
   if (!read(README).includes('\n## Alert state history\n')) problems104.push(`${README}: no "Alert state history" section`);
 
   if (problems104.length) {
     fail(
-      'alert state history: the alert counter links to Grafana\'s Alerting > History, which needs:\n' +
+      'alert state history: Grafana\'s Alerting > History needs:\n' +
         problems104.map(p => `      - ${p}`).join('\n')
     );
   } else {
-    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so the alert counter\'s history link has a page to open');
+    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so its Alerting > History has a page to show');
   }
 }
 
@@ -5026,7 +5047,7 @@ const OPERATOR_PAIRS = [
     if (named(bullet)) problems214.push(`${HELP}: the **${words[key]}** bullet names what raised the alert`);
   }
   const pill = read(PILL);
-  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('Alert history in Grafana'));
+  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('className="alert-pill-history"'));
   if (!foot || /Evaluated by|silences/i.test(foot.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))) {
     problems214.push(`${PILL}: the counter's footer names an evaluator or says where silences live`);
   }

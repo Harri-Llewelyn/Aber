@@ -50,3 +50,5 @@ The alert stays in the list, after the others, with a tick. It says who acknowle
 Operators, Shopfloor Managers and Administrators can acknowledge an alert. If someone else acknowledged it first, the dialog says who and when. **Withdraw**, under an acknowledged alert, puts it back in the number. The person who acknowledged it can withdraw it, and so can a Shopfloor Manager or an Administrator. Each acknowledgement and withdrawal is recorded in the Audit Trail.
 
 A suppressed alert is listed last, with a crossed-out bell. It says until when, and the window's reason. It is not counted, it colours nothing, and nothing is sent about it. When its window ends, it counts again if it is still firing, and it shows as if it had just fired. See [Suppression windows](devices.md#suppression-windows).
+
+To see the alerts that fired and cleared, select **Alert history** at the foot of the list. It opens the **Alerts** tab of the History page on the last 24 hours, with who acknowledged each and why. See [Alerts](history.md#alerts).

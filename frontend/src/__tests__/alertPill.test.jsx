@@ -3,14 +3,14 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
-import { GRAFANA_ALERT_HISTORY_URL, GRAFANA_URL } from '../constants'
+import { GRAFANA_URL } from '../constants'
 import { getByTooltip, queryByTooltip, tooltipOf } from '../test/tooltips'
 
 /**
  * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
  * element absent when healthy is indistinguishable from one that is broken; a critical alert is not
  * averaged away by warnings; the count is spelled out rather than carried by colour; the healthy
- * state does not pulse and the firing states do; and its footer links to Grafana's alert history,
+ * state does not pulse and the firing states do; and its footer links to History's Alerts tab,
  * the record of what has fired and cleared.
  */
 
@@ -165,22 +165,24 @@ describe('AlertPill', () => {
       expect(screen.getByText(expected)).toBeInTheDocument()
     })
 
-    it('links its footer to Grafana\'s alert history, in a new tab, healthy or firing', () => {
-      expect(GRAFANA_ALERT_HISTORY_URL).toBe(`${GRAFANA_URL}/alerting/history?from=now-24h&to=now`)
+    it('links its footer to History\'s Alerts tab, in place, healthy or firing', () => {
       for (const alerts of [[], [alert()]]) {
+        window.history.pushState({}, '', '/devices')
         const { unmount } = render(<AlertPill alerts={alerts} />)
         fireEvent.click(pill())
         const foot = document.querySelector('.alert-pill-foot')
-        const link = within(foot).getByRole('link', { name: /^Alert history in Grafana/ })
-        expect(link).toHaveAttribute('href', GRAFANA_ALERT_HISTORY_URL)
-        expect(link).toHaveAttribute('target', '_blank')
-        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-        expect(link).toHaveAccessibleName(/opens Grafana in a new tab/)
-        // Following it leaves the dashboard, so the panel closes behind it.
+        const link = within(foot).getByRole('link', { name: 'Alert history' })
+        expect(link).toHaveAttribute('href', '/history/alerts')
+        expect(link).not.toHaveAttribute('target')
+        expect(foot.textContent).not.toMatch(/Grafana/)
+        expect(tooltipOf(link)).toMatch(/last 24 hours/)
+        // A page of the dashboard: a plain click goes there in place, and the panel closes.
         fireEvent.click(link)
+        expect(window.location.pathname).toBe('/history/alerts')
         expect(screen.queryByRole('dialog', { name: 'Firing alerts' })).toBeNull()
         unmount()
       }
+      window.history.pushState({}, '', '/')
     })
 
     it('closes again on a second click and on the close control', () => {

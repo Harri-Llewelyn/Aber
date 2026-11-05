@@ -11,7 +11,8 @@ import {
 } from '../utils/people'
 import { findTabLink, queryTabLink, tabLinks } from '../test/tabBar'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listPeople: vi.fn(),
     setPersonRole: vi.fn(),

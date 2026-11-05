@@ -7544,16 +7544,34 @@ SELECT public.seed_setting(
     'DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx'
 );
 
+-- 1.8.0 keeps alert history for 90 days, not 7. A site still at 7 moves to 90 once, at the upgrade,
+-- and any other value is kept. The guard is the description: every release from 1.0.0 to 1.7.x
+-- wrote the text below, and the seed_setting() call after it writes 1.8's. So only the first boot
+-- of 1.8 matches, and a 7 chosen after the upgrade stays. updated_by cannot tell: a migration's
+-- write leaves it NULL too. 0244 checks it. supabase/README.md, "Alert history is kept for 90
+-- days (0244)".
+UPDATE public.system_settings
+   SET value = to_jsonb(90)
+ WHERE key = 'alerts.retention_days'
+   AND value = to_jsonb(7)
+   AND description =
+    'How long a resolved or superseded alert occurrence is kept before the nightly prune removes '
+    'it. The telemetry that triggered the alert is retained separately under the historian''s own '
+    'policy, so shortening this destroys no measurement -- only the record that a threshold was '
+    'crossed. A currently firing alert is never removed however old it is.';
+
 SELECT public.seed_setting(
     'alerts.retention_days',
-    to_jsonb(7),
+    to_jsonb(90),
     'number',
     'Retention',
     'Alert history kept for (days)',
     'How long a resolved or superseded alert occurrence is kept before the nightly prune removes '
-    'it. The telemetry that triggered the alert is retained separately under the historian''s own '
-    'policy, so shortening this destroys no measurement -- only the record that a threshold was '
-    'crossed. A currently firing alert is never removed however old it is.',
+    'it, 90 days unless changed here. History''s Alerts tab lists what is kept. The telemetry that '
+    'triggered an alert is retained separately under the historian''s own policy, so shortening '
+    'this destroys no measurement -- only the record that a threshold was crossed. Who '
+    'acknowledged an alert stays in the Audit Trail. A currently firing alert is never removed '
+    'however old it is.',
     'the p_retain default in prune_platform_alerts()'
 );
 

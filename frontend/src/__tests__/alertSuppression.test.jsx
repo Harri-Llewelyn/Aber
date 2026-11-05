@@ -232,6 +232,14 @@ describe('the drawer\'s banner', () => {
     expect(el).not.toHaveTextContent(/Raised by/)
   })
 
+  it('links Alert history, the Alerts tab filtered to this subject, as blue text', () => {
+    const a = alert()
+    const el = banner(a)
+    const link = within(el).getByRole('link', { name: 'Alert history' })
+    expect(link.getAttribute('href')).toBe(`/history/alerts?asset=${a.sparkplug_id}`)
+    expect(link).toHaveClass('context-alert-link')
+  })
+
   it('says who acknowledged it and why, as the counter does', () => {
     const el = banner(acknowledged({ acknowledgement_note: 'Coolant pump swapped' }))
     expect(el).toHaveClass('context-alert-acknowledged')

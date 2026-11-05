@@ -3421,6 +3421,88 @@ The file's self-check asserts the lane, the Operational class of each act on eac
 rows, that `0232`'s rows are still there, and who may run it.
 `test-harness/fixtures/audit-event-classes.json` holds two of the acts' classes.
 
+### History lists the alerts that fired (0243)
+
+The alert counter shows what is firing now, and until this the record of what fired and cleared was
+Grafana's Alerting > History. Grafana never sees an alert that Aber's own evaluator raises
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and leaves the default install by 2.0.
+So History has an Alerts tab, and its charts shade the periods an alert was firing. Both read
+**`alert_occurrences(p_from, p_to, p_sparkplug_ids, p_limit)`**, over `platform_alerts` from every
+writer.
+
+- **An occurrence is listed when it overlaps the window** `[p_from, p_to)`, not only when it
+  started in it: one that started before and ended inside, one still firing, and one that spans the
+  window. One that ended exactly at `p_from`, or started exactly at `p_to`, is outside.
+- **Each row is the whole occurrence**, the `platform_alerts` row type, in a column named
+  `occurrence`, which PostgREST returns as an object. A column a later migration adds to the table
+  reaches the dashboard with no change here. Beside it are two columns:
+  - **`ended_at`**: `ends_at`, or, for a firing occurrence that a later occurrence of the same
+    fingerprint replaced, that one's start. NULL while it is still firing.
+  - **`replaced`**: true for such an occurrence.
+- **Why an occurrence can be replaced.** Grafana, and Aber's own evaluator, open a new occurrence when
+  an alert fires again with no resolve in between, after a restart or a missed notification. Each
+  row is resolved only by its own writer, so nothing ever resolves the older one.
+  `platform_alerts_active` already reads it as superseded. Read alone, it would be listed as firing
+  in every window after it, for as long as retention keeps it. PostgREST cannot ask for the next
+  occurrence of a fingerprint, which is why this is a function and not a read of the table. The
+  lookup runs only for a firing row with no end, on `uq_platform_alerts_event`.
+- **Newest first**, by `starts_at`. `p_sparkplug_ids` keeps the occurrences about those devices and
+  gateways, by the immutable id every device and gateway alert carries (`platform_alerts_asset_has_wire_id`);
+  NULL keeps every one, and an empty list none. `p_limit` is 1 to 5,000. The dashboard asks for
+  1,001 and shows 1,000, so it can say when more fired.
+- **Refused with `22023`**, which PostgREST answers 400: a missing bound, bounds out of order, and a
+  limit outside 1 to 5,000.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`. So `platform_alerts_select_authenticated` decides the rows, and
+an alert about a machine identity's token reaches an Administrator alone (`0204`). A replaced row's
+end is found among the rows the caller may read, and every occurrence of a fingerprint has the same
+`entity_type`, so no role learns of a row it may not read.
+
+**Suppression is not read here.** A suppressed occurrence (#326 part 2) is in the table like any
+other, and its stamp reaches the dashboard in `occurrence` once that column exists.
+
+**Measured** on the test database, with 50,000 occurrences over 90 days (500 fingerprints of 100
+each, 500 of them replaced firing rows), as the owner: Last 24 hours 33-44 ms, a week 43 ms and 90
+days 53-55 ms, each the dashboard's 1,001 rows; one device over 90 days, 1.4 ms.
+
+The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the pinned `search_path`, the
+return type, the grants and the refusals. `test_history_lists_the_alerts_that_fired.py` holds the
+overlap rule at the window's edges, a replaced occurrence's end, the order, the filter, the limit,
+the whole row, and the rows each role reads.
+
+### Alert history is kept for 90 days (0244)
+
+`alerts.retention_days` kept a resolved alert for 7 days, when nothing read an old one. History's
+Alerts tab lists them, so the default is now **90 days**: a quarter of alerts to look back over.
+The table grows by alert occurrences, not by readings, so the cost is small.
+
+- **A fresh install is seeded with 90.** `0002` declares it through `seed_setting()`, which inserts
+  on a first boot and afterwards refreshes only the metadata, so a new default alone reaches new
+  installs only.
+- **A site still at 7 moves to 90 at the upgrade to 1.8.0, once.** Any other value is kept.
+  - db-init replays every file on every boot, so the move needs a guard that matches on the first
+    boot of 1.8 and on no later one. Otherwise a 7 that a person chooses after the upgrade would
+    be moved back to 90 on the next boot.
+  - `updated_by IS NULL` is no such guard. `system_settings_stamp()` sets it to `auth.uid()` on
+    every write, which is NULL during a migration, a metadata refresh included.
+  - The guard is the description. Just before its `seed_setting()` call, `0002` sets 90 where the
+    value is 7 and the description is still the text every release from 1.0.0 to 1.7.x wrote.
+    The call then writes 1.8's description, which names the 90-day default. From then on no boot
+    matches.
+  - The move is recorded in the Audit Trail, as any change to a setting is, with no person named.
+- **`prune_platform_alerts()` falls back to 90 days**, not 7, where the setting cannot be read.
+
+**Each is declared where it is stated, as `0227` and `0235` declared theirs.** `0001` declares the
+prune's fallback in place, and `0002` the setting. `0244` holds no copy.
+
+The file's self-check asserts that the setting no longer carries 1.7's description and names 90
+days, and that the prune falls back to 90 days. It does not check the value, which a person may
+have chosen. Neither assertion counts rows, and both hold on every later boot.
+`test_alert_history_is_kept_for_90_days.py` runs `0002`'s block twice for each case: a fresh
+install, 1.7's row at 7, a site at 30, and a 7 an Administrator chooses after the upgrade. It also
+runs the prune with the setting gone.
+
 ### History counts where readings arrived (0245)
 
 History's Overview draws one lane per device, a strip of blocks across the window, darker where more
@@ -6681,8 +6763,11 @@ a title or `rulename` label the webhook would read as an error.
 
 ### Alert retention (archived migration 0030)
 
-**Alert occurrences are kept for 7 days and then deleted.** Not archived — nothing reads a historical
-alert. The dashboard reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
+**Alert occurrences are kept for 90 days and then deleted** (7 until 1.8.0:
+[Alert history is kept for 90 days](#alert-history-is-kept-for-90-days-0244)). Not archived: History's
+Alerts tab reads them over that window and no longer
+([History lists the alerts that fired](#history-lists-the-alerts-that-fired-0243)). The alert
+counter reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
 `status = 'firing'`; no Grafana dashboard queries the table; and the Realtime subscription wants
 change *events*, not persistence. The telemetry that breached the threshold is retained
 independently in the historian, so the alert row is derived data whose evidence outlives it.
@@ -6697,7 +6782,7 @@ updates status and summary but not age. An alert firing continuously for longer 
 therefore has one row, older than the cutoff — and
 
 ```sql
-DELETE FROM public.platform_alerts WHERE recorded_at < now() - interval '7 days';  -- WRONG
+DELETE FROM public.platform_alerts WHERE recorded_at < now() - interval '90 days';  -- WRONG
 ```
 
 deletes the current state of a live alert. The pill disappears, the device stops being painted red,

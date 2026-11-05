@@ -4,7 +4,7 @@ import { alertPage, deviceUrl, gatewayUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink, IconCheck, IconBellOff } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { REALTIME_ENABLED, GRAFANA_ALERT_HISTORY_URL, grafanaAlertUrl } from '../../constants'
+import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
 import { Tooltip } from './Tooltip'
 import { api } from '../../api'
@@ -14,6 +14,7 @@ import {
 } from '../../utils/alertAcknowledgement'
 import { countedAlerts, isSuppressed } from '../../utils/alertSuppression'
 import { AcknowledgeAlertModal, WithdrawAcknowledgementModal } from '../modals/AcknowledgeAlertModal'
+import { ALERTS_PATH, acknowledgerName } from '../../utils/alertHistory'
 
 /**
  * The top bar's alert counter, and the list behind it.
@@ -37,7 +38,8 @@ import { AcknowledgeAlertModal, WithdrawAcknowledgementModal } from '../modals/A
  * no asset and opens the rule in Grafana Alerting.
  *
  * This is the only place in the dashboard that counts alerts: their toasts are not recorded in the
- * bell's history. What fired and cleared is in Grafana's alert history, which the footer links to.
+ * bell's history. What fired and cleared, from every writer, is History's Alerts tab, which the
+ * footer links to.
  *
  * @param {Array} alerts Rows from `platform_alerts_active`; see hooks/usePlatformAlerts.
  *
@@ -247,21 +249,16 @@ export function AlertPill({
             {' '}{realtime
               ? `Delivered live, reconciled every ${RECONCILE_MS / 1000}s.`
               : `Polled every ${POLL_INTERVAL_MS / 1000}s (Realtime disabled).`}
-            {/* The record of what has fired and cleared is Grafana's, so the list links to it
-                rather than keeping a second one. */}
-            <Tooltip text="Every alert that fired or resolved in the last 24 hours">
-              <a
-                className="alert-pill-history"
-                href={GRAFANA_ALERT_HISTORY_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setOpen(false)}
-              >
-                Alert history in Grafana
-                <span className="sr-only"> (opens Grafana in a new tab)</span>
-                <IconExternalLink size={10} aria-hidden="true" />
-              </a>
-            </Tooltip>
+            {/* The record of what fired and cleared is History's Alerts tab, a page of the
+                dashboard, so it opens in place, on the last 24 hours. */}
+            <RouteLink
+              className="alert-pill-history"
+              to={ALERTS_PATH}
+              onClick={() => setOpen(false)}
+              title="Every alert that fired in the last 24 hours, with who acknowledged it"
+            >
+              Alert history
+            </RouteLink>
           </div>
         </div>
       )}
@@ -315,7 +312,7 @@ function AcknowledgementLine({ alert, canAcknowledge, canWithdraw, onAcknowledge
       </div>
     )
   }
-  const who = alert.acknowledged_by_email || 'someone'
+  const who = acknowledgerName(alert)
   return (
     <div className="alert-pill-ack">
       <div className="alert-pill-ack-words">

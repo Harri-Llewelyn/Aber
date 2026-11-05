@@ -1622,6 +1622,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
 | `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |
+| `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
 
 - **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
 - **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
@@ -1633,6 +1634,63 @@ flag steps between false and true, and a state is a strip of its runs in text.
   carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).
 - A browser that cannot draw on a canvas gets the summary and a line saying the chart could not be
   drawn.
+
+### History's Alerts tab
+
+**History's Alerts tab lists the alert occurrences that fired over the window** (`tabs/HistoryAlerts.jsx`,
+`/history/alerts`), from every writer, as the viewer may read them. Its arithmetic is
+`utils/alertHistory.js`, and `__tests__/alertHistory.test.js` and `historyAlerts.test.jsx` hold it.
+
+- **The read** is `api.readAlertOccurrences()`, the RPC `alert_occurrences()` (`0243`): the
+  occurrences that overlap the window, not only those that started in it, newest first, at most
+  `ALERT_HISTORY_LIMIT` (1,000). It asks for one more, and the status line says when more fired.
+  Each row is `{ occurrence, ended_at, replaced }`, which `occurrenceRow()` flattens: the whole
+  `platform_alerts` row, when it ended, and whether a later occurrence of the same alert replaced
+  it. `firing` is a firing occurrence nothing replaced. `overlapsWindow()` states the overlap rule
+  in the browser, for the tests and the shading.
+- **The window** is the page's: the same `TimeWindowControl`, ranges, spans, zoom and fallback as
+  the Device tab, read by `HistoryTab` and passed in. The refresh timer is the page's too.
+- **The toolbar**: the search first (the alert's name, summary, subject, acknowledger and note, in
+  the browser), the window, then **Asset**, a `FilterDropdown` of every device and gateway by
+  name, valued by Sparkplug id (`assetOptions()`, `?asset=`), which goes into the read. Clear
+  filters resets the window and the assets. Area and cell filters are not built.
+- **The address** is `alertsAddress(win, { assets })`: `/history/alerts` with the window's keys and
+  `asset`, and `search` and `sort` as the toolbar and the table write them.
+- **The columns**, each sortable (`ALERT_SORT`) and newest first until one is chosen: Alert (name
+  and summary, `AlertCell`), Severity (a badge with its word), Subject (`alertSubject()`: a device
+  or gateway linked through `onSelectDevice` and `onSelectGateway`, as the alert counter's row is;
+  Platform-wide or Machine identity in words, linked where `alertPage()` names a page), Started,
+  Ended (`EndedCell`: Firing, or "(fired again)" with why for a replaced one), Duration
+  (`lengthText()`, "so far" while firing) and Acknowledged (who, the reason, when and the note). A
+  mark about the occurrence itself goes in `AlertCell`, after the name. `SuppressedMark` is one:
+  the alert counter's crossed bell and "Suppressed", where the row's `suppression_window_id`
+  (`0240`) names the window that first covered it. That stamp says neither whether a window covers
+  it now nor until when, so the mark has no "until".
+- **The acknowledger is named by the email their token carried** (`acknowledgerName()`), here and
+  in the alert counter. `display_names_for()` answers only for the people a caller can already
+  see, so a name would show to some readers and not others.
+- **The empty states** say which: nothing fired, nothing on the assets chosen, nothing matches the
+  search, or, for a role that is not an Administrator, nothing the viewer may see, since a machine
+  identity's alerts reach an Administrator alone. `retentionWords()` adds that alerts are kept for
+  `alerts.retention_days` (`useSetting`, falling back to `ALERT_RETENTION_DAYS`, 90) when the window
+  starts before that.
+
+**The Device tab shades the periods an alert on the device was firing** (`hooks/useAlertBands.js`,
+`common/alertBands.js`). With each read the charts make, the hook reads the device's alerts over
+the same window and builds `alertBands()`: each occurrence clipped to the window, a still-firing
+one running to the read's moment, where the lines stop. `alertBandsPlugin()` passes them to every
+number and flag chart through `plugins`.
+
+- **Inside the plot area only**, from `bbox`, so a band lines up with the text strips' gutters.
+  Under the series, a translucent fill of `--danger`. Over them, a solid `--danger` edge where the
+  occurrence's own start or end falls inside the window, and its name in `--danger-text` inside the
+  band's foot where it fits. Several alerts each draw their own, so an overlap is deeper.
+- **Never colour alone**: the edges and names, a readout and a key. While the pointer is on a
+  chart (not on the charts its cursor is synced to), `.chart-alert-readout` at the plot's foot
+  names each alert firing at that moment (`bandText()`). The row above the charts keys the shading
+  in words with a link to the Alerts tab for the device and window (`AlertKey`).
+- **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
+  method read as no alerts. A state strip is not drawn by uPlot and is not shaded.
 
 ---
 
@@ -2043,10 +2101,9 @@ passes `{ record: false }`, as a Grafana alert does.
   for a firing and a resolved alert. The toast shows, with the Alert group's icon and colour and a
   link to the rule, but nothing is recorded, so the bell's badge never counts what the alert
   counter already counts. `readStoredHistory` drops any Alert entry a tab stored before this. The
-  counter shows what is firing now. Grafana's alert history (Alerting > History,
-  `GRAFANA_ALERT_HISTORY_URL`, linked from the counter's footer) is the record of what fired and
-  cleared, including an alert that came and went while nobody was looking. That page needs
-  Grafana's alert state history in Loki (`grafana/README.md`).
+  counter shows what is firing now. History's Alerts tab, linked from the counter's footer
+  (**Alert history**), is the record of what fired and cleared, including an alert that came and
+  went while nobody was looking, from every writer ([History's Alerts tab](#historys-alerts-tab)).
 - **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
   the `role="alert"` region. The summary is in the alert counter's list.
@@ -2062,7 +2119,10 @@ passes `{ record: false }`, as a Grafana alert does.
   is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
   acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
-  outranks any acknowledged one.
+  outranks any acknowledged one. The acknowledger is named by the email their token carried
+  (`acknowledgerName()`, `utils/alertHistory.js`), the same on every surface: no display name is
+  readable by every role, since `display_names_for()` answers only the people a caller can already
+  see.
 - **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
   whether a suppression window covers each alert as it is read, with the window's reason and end.
   `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of

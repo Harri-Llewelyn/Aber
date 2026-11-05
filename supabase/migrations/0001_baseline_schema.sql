@@ -6523,9 +6523,10 @@ BEGIN
 
         -- `make_interval(days => numeric)` does not exist -- the days argument is an integer and
         -- the overload resolution fails rather than rounding. Seconds takes a double, which is
-        -- why 0030 used this form and why it is kept.
+        -- why 0030 used this form and why it is kept. The fallback is the seeded default, 90
+        -- days (0244).
         v_retain := COALESCE(make_interval(secs => v_days::double precision * 86400.0),
-                             interval '7 days');
+                             interval '90 days');
     ELSE
         v_retain := p_retain;
     END IF;

@@ -3941,14 +3941,17 @@ a.chip { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent);
+  /* A link reads as blue text with no resting underline, as every link does. */
+  color: var(--accent-text);
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
   flex-shrink: 0;
 }
 
-.context-alert-link:hover { color: var(--text-primary); }
+/* The banner's two links, kept together at the foot's right. */
+.context-alert-links { display: inline-flex; align-items: center; gap: 12px; }
+
+.context-alert-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Acknowledged, the banner pales: its severity's colour, softer at the edge and in the fill, as
@@ -4222,7 +4225,7 @@ a.chip { text-decoration: none; }
   color: var(--text-muted);
 }
 
-/* Grafana's alert history, on a line of its own under the feed's note: a link, so the accent. */
+/* History's Alerts tab, on a line of its own under the feed's note: a link, so the accent. */
 .alert-pill-history {
   display: flex;
   align-items: center;
@@ -6014,6 +6017,23 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   font-size: 12px;
   color: var(--text-muted);
 }
+/* The key to the alert shading, after the status line: the band's swatch, as alertBands.js paints
+   it from --danger, then its words and a link to the alerts on the Alerts tab. */
+.history-alert-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.history-alert-swatch {
+  flex-shrink: 0;
+  width: 12px;
+  height: 10px;
+  border-left: 2px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
 /* The charts stack down the card, which scrolls; each fits the card's width, never wider. */
 .history-charts {
   display: flex;
@@ -6113,6 +6133,27 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
 }
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* Which alerts were firing at the pointer, at the plot's foot (alertBands.js): opaque over the
+   shading, one line an alert, held inside the plot near either end as the now marker is. */
+.chart-alert-readout {
+  position: absolute;
+  bottom: 18px;
+  z-index: 2;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 2px 6px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+}
+.chart-alert-readout[data-edge="start"] { transform: none; }
+.chart-alert-readout[data-edge="end"]   { transform: translateX(-100%); }
+.chart-alert-readout[hidden] { display: none; }
 /* A drag across a chart or a strip zooms to the band it shades (.chart-band, with the trail's look),
    so a drag selects no text. */
 .history-charts .u-over,
@@ -6136,6 +6177,16 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-device-place { font-size: 11px; color: var(--text-muted); }
 .history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
 .history-picker-badge { margin-left: 8px; }
+/* The Alerts tab's table. A name, a summary, a subject or a note is one line, cut and sliding on
+   hover (OverflowText), so a cell never pushes the row wider than the card. */
+.alert-history-table td { vertical-align: top; }
+.alert-history-name,
+.alert-history-ack { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 22rem; }
+.alert-history-title { font-weight: 500; color: var(--text-primary); }
+.alert-history-subject { display: inline-flex; min-width: 0; max-width: 14rem; }
+.alert-history-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.alert-history-ack-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-primary); }
+.alert-history-ack-who svg { flex-shrink: 0; color: var(--success-text); }
 /* What the device page shows under its toolbar; its width sets the text charts' buckets. */
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the

@@ -75,4 +75,4 @@ severity, the reminder interval and the log.
 
 **Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings. They are kept in the deployment's own secret store. The S3 secret keys are set in the destination dialogs on the Cold Storage and Backups pages. Broker credentials are issued on Access Control. The webhook's address is set in its dialog on the Notifications tab, and its signing key is shown once. Keeping secrets apart means a routine settings change never looks like a credential change in the Audit Trail.
 
-Alert thresholds are not here either. Grafana owns them, along with silences and alert state history. Aber links to Grafana rather than copying them, so there is only one place a threshold can be wrong.
+Alert thresholds are not here either. Grafana owns them, along with silences. Aber links to Grafana rather than copying them, so there is only one place a threshold can be wrong. The alerts that fired are listed on the History page's **Alerts** tab. How long they are kept is a setting here: **Alert history kept for (days)**, on the **Retention** tab, 90 days unless you change it.

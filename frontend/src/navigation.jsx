@@ -131,6 +131,7 @@ export const SETTINGS_TABS = [
 export const HISTORY_TABS = [
   { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 
 /** The ids are the page's anchors: the search bar opens one by id. */

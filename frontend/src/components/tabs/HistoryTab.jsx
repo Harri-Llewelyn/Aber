@@ -19,10 +19,12 @@ import {
   historyPath, pickedAddress,
 } from '../../utils/history'
 import { HistoryDevice } from './HistoryDevice'
+import { HistoryAlerts } from './HistoryAlerts'
+import { ALERTS_PATH, ALERTS_TAB } from '../../utils/alertHistory'
 import { HistoryOverview } from './HistoryOverview'
 
 /** Each tab's own address, where a tab click starts it afresh. */
-const TAB_PATHS = { overview: OVERVIEW_PATH, device: deviceHistoryPath('') }
+const TAB_PATHS = { overview: OVERVIEW_PATH, device: deviceHistoryPath(''), [ALERTS_TAB]: ALERTS_PATH }
 
 /** A read the page can go on without: its rows, or [] when it failed. */
 const tolerated = (load) => load.then(rows => rows || [], () => [])
@@ -84,10 +86,16 @@ function DevicePicker({ devices, search, win }) {
  * telemetry views let the viewer read; the Device tab's Export CSV needs `telemetry:read`. The
  * address names the tab, the device and the window: `/history` and `/history/overview` are the
  * Overview, `/history/device` picks a device, and `/history/device/<id>?range=24h` charts one.
+ * The Alerts tab (`/history/alerts`) lists the alerts that fired over the same window; a row's
+ * subject opens through `onSelectDevice` and `onSelectGateway`, and `userRole` lets its empty state
+ * say what the viewer may not see.
  */
-export function HistoryTab({ hasPermission, showToast }) {
+export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice, onSelectGateway }) {
   const url = useUrl()
-  const { tab, deviceId } = historyPath(pathSegments(url))
+  const segments = pathSegments(url)
+  const { tab: pathTab, deviceId } = historyPath(segments)
+  // The Alerts tab, `/history/alerts` (HistoryAlerts.jsx); historyPath() knows the other two.
+  const tab = segments[1] === ALERTS_TAB ? ALERTS_TAB : pathTab
   const [win, setWin] = useTimeWindow({ ranges: HISTORY_RANGES, fallback: DEFAULT_HISTORY_WINDOW, spans: HISTORY_SPANS })
   const [search, setSearch] = useUrlState('search', '')
   const [loaded, setLoaded] = useState(null)
@@ -144,6 +152,17 @@ export function HistoryTab({ hasPermission, showToast }) {
               setWin={setWin}
               every={every}
               setEvery={setEvery}
+            />
+          ) : tab === ALERTS_TAB ? (
+            <HistoryAlerts
+              devices={loaded.devices}
+              win={win}
+              setWin={setWin}
+              every={every}
+              setEvery={setEvery}
+              userRole={userRole}
+              onSelectDevice={onSelectDevice}
+              onSelectGateway={onSelectGateway}
             />
           ) : deviceId ? (
             device ? (

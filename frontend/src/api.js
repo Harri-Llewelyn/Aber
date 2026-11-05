@@ -226,6 +226,13 @@ export const HISTORY_RESOLUTIONS = Object.freeze([
 export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 
 /**
+ * The most alert occurrences History's Alerts tab lists for one window. It asks
+ * alert_occurrences() (0243) for one more, to say when more fired; the function's own bound is
+ * 5,000.
+ */
+export const ALERT_HISTORY_LIMIT = 1000;
+
+/**
  * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so the
  * 6,300-row LIMIT threshold above does not apply. At most COVERAGE_MAX_DEVICES a read. More than
  * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
@@ -1852,6 +1859,26 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('withdraw_alert_acknowledgement', { p_alert_id: alertId });
     if (error) throw new Error(error.message || 'Could not withdraw the acknowledgement');
     return data;
+  },
+
+  /**
+   * History's alerts (0243): the occurrences that overlap [from, to), newest first, as the caller
+   * may read them. `sparkplugIds` keeps those devices and gateways; null keeps every one. Each row
+   * is `{ occurrence, ended_at, replaced }`: the whole platform_alerts row, then when it ended
+   * (null while firing), and whether a later occurrence replaced it. Asks for one more than
+   * ALERT_HISTORY_LIMIT, so the page can say when there are more.
+   */
+  readAlertOccurrences: async ({ from, to, sparkplugIds = null }, { signal } = {}) => {
+    let call = supabase.rpc('alert_occurrences', {
+      p_from: from,
+      p_to: to,
+      p_sparkplug_ids: sparkplugIds,
+      p_limit: ALERT_HISTORY_LIMIT + 1,
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the alerts');
+    return data || [];
   },
 
   // -------------------------------------------------------------------------------------------

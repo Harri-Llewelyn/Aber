@@ -2203,6 +2203,51 @@ paths:
         '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No such window.' }
 
+  /rest/v1/rpc/alert_occurrences:
+    post:
+      tags: [Registry]
+      summary: Read the alerts that fired over a window
+      description: |
+        What History's Alerts tab and its chart shading read (`0243`). Every `platform_alerts`
+        occurrence that overlaps `[p_from, p_to)`, newest first: one that started before the window
+        and ended in it, or is still firing, is returned as well as one that started in it. One that
+        ended at `p_from` or started at `p_to` is not.
+
+        Each row is the whole occurrence, in `occurrence`, with two columns beside it. `ended_at` is
+        `ends_at`, or, for a firing occurrence that a later occurrence of the same fingerprint
+        replaced, that one's start; null while it is still firing. `replaced` is true for such an
+        occurrence: nothing resolves the older row, so read alone it would show as firing.
+
+        `SECURITY INVOKER`, so the table's select policy decides the rows: a `service_identity`
+        alert is returned to an Administrator alone (`0204`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_from, p_to]
+              properties:
+                p_from: { type: string, format: date-time }
+                p_to: { type: string, format: date-time, description: 'After `p_from`.' }
+                p_sparkplug_ids: { type: array, nullable: true, items: { type: string }, example: [dev220000000000400080000], description: 'Keep the alerts about these devices and gateways. Null keeps every one; an empty list keeps none.' }
+                p_limit: { type: integer, minimum: 1, maximum: 5000, default: 1000 }
+      responses:
+        '200':
+          description: The occurrences, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    occurrence: { $ref: '#/components/schemas/DeviceAlert' }
+                    ended_at: { type: string, format: date-time, nullable: true }
+                    replaced: { type: boolean }
+        '400': { description: 'A bound missing, bounds out of order, or a limit outside 1 to 5,000 (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/rpc/notification_webhook_status:
     post:

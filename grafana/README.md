@@ -276,8 +276,8 @@ that never fired.
 `[unified_alerting.state_history]` sets `backend = loki`. The chart points `loki_remote_url` at the
 Loki the logs datasource reads (`aber.lokiUrl`: the chart's own, or `grafana.lokiUrl`), through
 `GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL`. Alerting > History (`/alerting/history`) reads
-it. The dashboard's alert counter links there from its footer, because the dashboard keeps no record
-of alerts that fired and cleared (`frontend/README.md`, *Toasts and the notification history*).
+it. It holds Grafana's rules only. The dashboard's own record, of every writer's alerts, is History's
+Alerts tab, which the alert counter's footer links to (`frontend/README.md`, *History's Alerts tab*).
 
 **Why not the default.** Grafana 13.2.3 writes the history as annotations unless told otherwise.
 The annotations backend answers a query for one rule only ("ruleUID is required to query

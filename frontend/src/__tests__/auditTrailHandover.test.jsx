@@ -13,7 +13,8 @@ import { tooltipOf } from '../test/tooltips';
  * These cover the handover itself: the filters narrow to that device, and the page stays a normal
  * page afterwards.
  */
-vi.mock('../api', () => ({ api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn() } }));
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()), api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn() } }));
 
 const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
 

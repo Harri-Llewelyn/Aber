@@ -94,6 +94,7 @@ export const CARDS = [
   { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
   { id: 'history-overview',     ...tabCard('history', 'overview'), keywords: ['coverage', 'gaps', 'where readings arrived', 'silent devices', 'lanes'] },
+  { id: 'history-alerts',       ...tabCard('history', 'alerts'), keywords: ['alert history', 'past alerts', 'fired', 'resolved alerts', 'acknowledged alerts', 'acknowledgements'] },
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },

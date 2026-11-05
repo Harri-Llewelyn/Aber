@@ -533,6 +533,11 @@ python supabase/migrations/test_audit_trail_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
+# Alert history is kept for 90 days (0244). 0002's block for the setting, read out of the file and
+# run twice as two boots: a fresh install seeds 90, 1.7's row at 7 moves to 90 once, a site at 30
+# keeps 30, and a 7 an Administrator chooses after the upgrade stays. The prune falls back to 90
+# days with the setting gone. Every test rolls back.
+python supabase/migrations/test_alert_history_is_kept_for_90_days.py
 python supabase/migrations/test_system_settings_rls.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
@@ -1001,6 +1006,13 @@ python supabase/migrations/test_a_person_acknowledges_an_alert.py
 # covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
 # one audit row in the subject's lane. Every test rolls back.
 python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
+# History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
+# overlaps the window, not only one that started in it, and none that ended at its start or started
+# at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one
+# starts. Newest first, filtered by asset, bounded by its limit, each row the whole occurrence. An
+# Operator, a Shopfloor Manager and an Auditor read every alert but a machine identity's, which an
+# Administrator reads too. Every test rolls back.
+python supabase/migrations/test_history_lists_the_alerts_that_fired.py
 # Aber sends each alert to a webhook (0247-0249). The trigger queues a firing message as an
 # occurrence starts firing and a resolve as it resolves, and nothing on a repeat upsert or a
 # last_confirmed_at stamp, below the route, before the webhook has an address and a key, or for a
