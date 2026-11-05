@@ -443,8 +443,8 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const satisfied = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_satisfied()', '$$;', 'mfa_satisfied() in the applied chain');
   const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.require_mfa()', '$$;', 'require_mfa() in the applied chain');
   const ending = lastDefinition('CREATE OR REPLACE FUNCTION public.end_covered_door_sessions(', '$$;', 'end_covered_door_sessions() in the applied chain');
-  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_grant_ends_door_sessions()', '$;', 'mfa_grant_ends_door_sessions() in the applied chain');
-  const switched = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_switch_ends_door_sessions()', '$;', 'mfa_switch_ends_door_sessions() in the applied chain');
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_grant_ends_door_sessions()', '$$;', 'mfa_grant_ends_door_sessions() in the applied chain');
+  const switched = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_switch_ends_door_sessions()', '$$;', 'mfa_switch_ends_door_sessions() in the applied chain');
   const ids = lastDefinition('CREATE OR REPLACE FUNCTION public.stack_app_ids()', '$$;', 'stack_app_ids() in the applied chain');
   const ts = read('supabase/functions/_shared/secondFactor.ts');
   const gate = read('supabase/functions/consent-gate/gate.ts');
