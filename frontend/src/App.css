@@ -6896,6 +6896,40 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   }
 }
 
+/* Settings › Notifications: under the category's table, the delivery log, a table of its own with
+   its own header row. Time, Event, Outcome and Attempts are fixed, so the rows line up; the alert
+   and the error take the rest, cut with an ellipsis and slid on hover (OverflowText). */
+.notification-admin-note { min-height: 0; }
+
+.notification-log {
+  padding: 16px var(--inset) 20px;
+  border-top: 1px solid var(--border);
+}
+
+.notification-log-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.notification-log-lead,
+.notification-log-empty {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.notification-log-table { table-layout: fixed; width: 100%; }
+.notification-col-time { width: 170px; }
+.notification-col-event { width: 96px; }
+.notification-col-outcome { width: 104px; }
+.notification-col-attempts { width: 80px; }
+
+.notification-log-cut { display: block; min-width: 0; max-width: 100%; }
+.notification-log-none { color: var(--text-dim); }
+
 /* ===== Profile ============================================================================== */
 
 /* The Profile page reuses the Settings table above. A value that is a fact, not a field: the email

@@ -323,6 +323,15 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # reads it from there.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
+# Aber's dispatcher, end to end (0247, 0248). A receiver pod of the ingestion image prints each
+# request it is sent; the webhook is pointed at it as the database owner, and what the stack held
+# is put back afterwards. A firing alert written with psql arrives signed with the Standard
+# Webhooks headers, an acknowledgement before the reminder stops it, an unacknowledged alert is
+# reminded, a resolve follows its firing message, and an address whose host is not allowed is
+# refused with nothing posted. Needs kubectl, notification-dispatch in the functions image and
+# NetworkPolicies off; skips without the keys.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
@@ -1004,6 +1013,17 @@ python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # Operator, a Shopfloor Manager and an Auditor read every alert but a machine identity's, which an
 # Administrator reads too. Every test rolls back.
 python supabase/migrations/test_history_lists_the_alerts_that_fired.py
+# Aber sends each alert to a webhook (0247-0249). The trigger queues a firing message as an
+# occurrence starts firing and a resolve as it resolves, and nothing on a repeat upsert or a
+# last_confirmed_at stamp, below the route, before the webhook has an address and a key, or for a
+# machine identity's alert. Every arm of platform_alert_send_decision(), with 0250's suppression
+# hold: held inside a window, sent once it ends, and nothing for an occurrence that resolved inside
+# it. Reminders past the
+# interval, and none unconfirmed, acknowledged, resolved or replaced; the three Notifications
+# settings, each one's rule and who reads and writes them; the address, the signing key (shown once,
+# rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each
+# recorded outcome. Every test rolls back.
+python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

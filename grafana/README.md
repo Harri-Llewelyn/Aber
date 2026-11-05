@@ -237,10 +237,15 @@ that. Resolved notifications are the entire mechanism by which the dashboard's t
 the Topbar pill decrements; Grafana defaults them on, and the file says so because switching them
 off would leave every alert latched on in the UI forever with the rule showing Normal.
 
-**One route.** There is exactly one consumer, the dashboard, so a tree with per-severity branches
-would branch on a distinction nothing downstream acts on differently. `severity` still travels as
-a label and lands in `platform_alerts.severity`, where the UI colours on it; routing is not the
-place to encode it. The file replaces the default policy tree for org 1, which is what makes it
+**One route.** Grafana has exactly one consumer, `grafana-alert-webhook`, which records each alert
+in `platform_alerts`. Aber's dispatcher fans out from that table, to the dashboard and to the
+webhook a site configures on Settings › Notifications ([`supabase/README.md`](../supabase/README.md),
+*An alert is queued for each channel that carries it (0247)*). It routes by severity, reminds while
+an alert fires unacknowledged, and stops when someone acknowledges it: Grafana knows none of that.
+So a tree with per-severity branches here would branch on a distinction nothing downstream of
+Grafana acts on. **Grafana sends nothing itself, and has no SMTP.** `severity` still travels as a
+label and lands in `platform_alerts.severity`, where the UI colours on it and the dispatcher's
+routes read it; Grafana's routing is not the place to encode it. The file replaces the default policy tree for org 1, which is what makes it
 deterministic: Grafana ships a root route pointing at an email contact point with no SMTP
 configured, and leaving it in place means every alert also generates a delivery failure in
 Grafana's log.
@@ -254,7 +259,10 @@ a second device joining the same excursion; short, because the dashboard is a li
 view and a device entering alarm is precisely the thing not to sit on. `repeat_interval: 12h` is
 re-notification for something still firing and unchanged, long on purpose: the dashboard holds
 state, `platform_alerts` keeps the occurrence open and the pill keeps counting it, so a repeat
-delivers nothing new and only rewrites the same row. The mechanism exists to recover from a lost
+delivers nothing new and only rewrites the same row. That rewrite stamps `last_confirmed_at`, and
+Aber's dispatcher stops reminding about an alert 13 hours after its last stamp, this interval plus
+an hour, so a resolve Grafana never sent does not remind for ever. Change the interval here and
+`platform_alert_confirmation_window()` with it: mirror check 57 holds the two together. The mechanism exists to recover from a lost
 notification, and twelve hours is the interval at which that recovery is worth having without
 noise; a short repeat would rewrite every open alert's row continuously and make the realtime feed
 chatter. `group_by` is not set, so Grafana groups by every label, which is right for a

@@ -2,7 +2,8 @@
 # org 1 so the stock email contact point with no SMTP stops failing on every notification.
 # group_wait 5s batches one rule's instances into one webhook; group_interval 10s so a device joining
 # an excursion is not sat on; repeat_interval 12h because the dashboard holds state and a repeat only
-# rewrites the same row. group_by is unset on purpose. Reasoning: grafana/README.md.
+# rewrites the same row, stamping it confirmed for Aber's reminders (mirror check 57 holds the 12h).
+# group_by is unset on purpose. Reasoning: grafana/README.md.
 apiVersion: 1
 
 policies:

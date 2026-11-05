@@ -483,6 +483,11 @@ const TOASTED_BY = [
     by: { file: 'components/tabs/ColdStorageTab.jsx', piece: 'const onSaved = () => {' },
     why: 'one save writes a setting for each key changed, and the page toasts once for them all',
   },
+  {
+    file: 'components/tabs/NotificationsPanel.jsx', piece: 'api.patchSetting(ALLOWED_HOSTS_KEY',
+    by: { file: 'components/tabs/NotificationsPanel.jsx', piece: 'const onWebhookSaved = async () => {' },
+    why: 'the webhook dialog saves the hosts and then the address, and the panel toasts once for both',
+  },
 ]
 
 /** Audited calls with no success toast, by file and a piece of the call, each with its reason. */

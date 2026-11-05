@@ -11,10 +11,13 @@ import { navigate, pageUrl, useUrlState, useUrlTab, pathSlug } from '../../hooks
 import { SETTINGS_TABS } from '../../navigation'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
+import { NOTIFICATIONS_CATEGORY, SETTING_OPTIONS, WEBHOOK_DIALOG_KEYS } from '../../utils/notifications'
 import { Tooltip } from '../common/Tooltip'
+import { NotificationsPanel } from './NotificationsPanel'
 
-// Settings another page's destination dialog edits, so each value has one editor.
-const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
+// Settings a destination dialog edits, so each value has one editor: another page's, or the
+// webhook's on the Notifications tab.
+const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS, ...WEBHOOK_DIALOG_KEYS])
 
 /**
  * Each category's tab tooltip, by the category's name, from navigation.jsx's list of categories. The
@@ -194,6 +197,17 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             readOnly
             disabled
           />
+        ) : SETTING_OPTIONS[setting.key] ? (
+          /* A closed set, which the database's guard holds too: a choice rather than a text field. */
+          <select
+            id={`setting-${setting.key}`}
+            className="form-control"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            disabled={readOnly}
+          >
+            {SETTING_OPTIONS[setting.key].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         ) : setting.value_type === 'boolean' ? (
           <select
             id={`setting-${setting.key}`}
@@ -298,6 +312,24 @@ export function SettingsTab({ showToast, readOnly = false }) {
     : (groups.find(g => pathSlug(g.category) === categoryId) || groups[0])?.category
   const activeGroup = groups.find(g => g.category === activeCategory)
 
+  const settingsTable = activeGroup && (
+    <table className="settings-table">
+      <thead>
+        <tr>
+          <th scope="col" className="setting-col-name">Setting</th>
+          <th scope="col">Description</th>
+          <th scope="col" className="setting-col-value">Value</th>
+          <th scope="col" className="setting-col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {activeGroup.settings.map(s => (
+          <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} readOnly={readOnly} />
+        ))}
+      </tbody>
+    </table>
+  )
+
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
@@ -338,25 +370,15 @@ export function SettingsTab({ showToast, readOnly = false }) {
               tabs={groups.map(group => ({ id: group.category, label: group.category, description: CATEGORY_DESCRIPTIONS[group.category] }))}
             />
 
-            {activeGroup && (
-              <div className="table-wrap settings-wrap" key={activeGroup.category}>
-                <table className="settings-table">
-                  <thead>
-                    <tr>
-                      <th scope="col" className="setting-col-name">Setting</th>
-                      <th scope="col">Description</th>
-                      <th scope="col" className="setting-col-value">Value</th>
-                      <th scope="col" className="setting-col-actions">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeGroup.settings.map(s => (
-                      <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} readOnly={readOnly} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {/* The Notifications category has a panel of its own around its table: the webhook, its
+                signing key, a test and the delivery log, none of which a settings row holds. */}
+            {activeGroup && (activeGroup.category === NOTIFICATIONS_CATEGORY ? (
+              <NotificationsPanel key={activeGroup.category} showToast={showToast} readOnly={readOnly}>
+                {settingsTable}
+              </NotificationsPanel>
+            ) : (
+              <div className="table-wrap settings-wrap" key={activeGroup.category}>{settingsTable}</div>
+            ))}
           </>)}
         </div>
       </div>

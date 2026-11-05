@@ -1737,6 +1737,38 @@ them empty, and the historian fills them in the background. Nothing waits for it
 
 The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
 
+### From 1.8.0, alerts can be sent to a webhook
+
+Aber can now post each alert to a webhook: when it starts firing, as a reminder while it fires
+unacknowledged, and when it resolves. An Administrator sets it up on Settings › Notifications. Until
+then nothing is sent, and the upgrade changes nothing a site must act on.
+
+**The functions pod opens the connection to the webhook.** A site with `networkPolicy.enabled`
+must let it reach each webhook host. Without a rule every message fails, and the delivery log says
+the receiver could not be reached. Add the rule to `networkPolicy.extraEgress`, which the chart
+applies as one NetworkPolicy:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/component: supabase-functions
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.20/32 } }]
+        ports: [{ protocol: TCP, port: 443 }]
+```
+
+- **Already using `extraEgress` for the auth pod's mail relay?** Its `podSelector` picks the auth
+  pod alone. Widen it to the functions pod too, with
+  `matchExpressions: [{ key: app.kubernetes.io/component, operator: In, values: [supabase-auth, supabase-functions] }]`,
+  and add the webhook's rule beside the relay's.
+- **A receiver inside the cluster** needs the same rule, with a `namespaceSelector` and a
+  `podSelector` in place of the `ipBlock`.
+
+A site without NetworkPolicies has nothing to do.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write

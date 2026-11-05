@@ -1171,10 +1171,11 @@ function edgeFunctionNames() {
     'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts there, the lane of an alert\'s acknowledgement, which an Operator, a Shopfloor Manager or an Administrator makes',
     'public.audit_event_class': '0232 answers operational for ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane\'s rule, so a machine identity\'s alert acknowledged in that identity\'s lane is the same class as any other; it rebuilds the class indexes while a row they could hold wrongly exists (check 199)',
-    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write. 0241 lists the four SUPPRESSION_WINDOW_ actions on devices, gateways and cells, the subjects\' lanes 0240\'s window writers write',
+    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write. 0241 lists the four SUPPRESSION_WINDOW_ actions on devices, gateways and cells, the subjects\' lanes 0240\'s window writers write. 0249 lists SIGNING_KEY_ISSUED on notification_channels, the webhook\'s lane, and carries 0241\'s rows, since the last declaration stands',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
+    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -2480,6 +2481,10 @@ const OPERATOR_PAIRS = [
       'one row saying which forge-sweep pass may run (0156). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
       'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
+    notification_dispatch_lease:
+      'one row saying which notification-dispatch pass may run (0247), as forge_sweep_lease does for ' +
+      'the forge. RLS on with no policy and nothing granted to an API role: it moves through three ' +
+      'RPCs that notification-dispatch calls as service_role',
     schema_bootstrap:
       'one row recording whether db-init reached the end of the migration chain on this boot ' +
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
@@ -5752,6 +5757,7 @@ const OPERATOR_PAIRS = [
   const ALLOWED = {
     'public.set_foreign_credential': 'the one writer every foreign credential shares',
     'public.keep_gateway_credential': 'keeps a copy of a broker password the platform issued, which is not a foreign credential',
+    'public.issue_notification_signing_key': 'generates the webhook\'s signing key, which Aber issues and shows once, so it is not a foreign credential (0248)',
   };
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const last = new Map();

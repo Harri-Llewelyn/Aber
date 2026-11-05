@@ -768,6 +768,26 @@ shown, and replacing it asks first: `set_archive_credential()` overwrites it wit
 nothing can show either value again. A first key goes straight in. Its `useCredential()` hook
 writes the key when the dialog saves, before archiving is switched on, and names a 403 as a refusal.
 
+### Why Settings › Notifications has a panel of its own
+
+A settings row holds a string, a number, a boolean or JSON, and the webhook needs more:
+`NotificationsPanel` (`components/tabs/NotificationsPanel.jsx`) wraps the category's table, which
+keeps its header row, with a toolbar above it and the delivery log below it. The toolbar is an
+Administrator's, as every change on Settings is; anyone else is told whose it is and reads the log.
+
+- **`WebhookModal`** holds the address, a `CredentialField` as the destination dialogs' keys are, and
+  the allowed hosts, so `notifications.webhook_allowed_hosts` is left out of the table
+  (`WEBHOOK_DIALOG_KEYS`) and the search opens this tab for it. The hosts are saved before the
+  address, and an address whose host is not listed is said while it is typed.
+- **`SigningKeyModal`** shows the key once, as `ServiceTokenModal` shows a machine identity's token:
+  asked first, revealed with a copy button, gone on close. Rotating says the old key stops at once.
+- **Send a test** queues the message through `queue_test_notification()`, since the dispatcher is
+  never reachable from a browser, and reads its log row each second until it has left `pending`.
+- **The delivery log** polls every 30 seconds, as Backups does. Each outcome is a word in its badge,
+  and a long subject or error is cut and slides on hover (`OverflowText`).
+- **`notifications.webhook_min_severity`** is a choice in its row, from `SETTING_OPTIONS`
+  (`utils/notifications.js`), which mirror check 58 holds to the database's guard.
+
 ### Why a reload waits for the auth server
 
 A session can end on the server while the browser still holds its tokens: a Sign Out in another

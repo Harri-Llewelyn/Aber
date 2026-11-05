@@ -13,6 +13,7 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
+import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT } from './utils/notifications';
 import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
@@ -2122,6 +2123,81 @@ const apiMethods = {
     const { error } = await supabase.rpc('clear_backup_offsite_destination');
     if (error) throw new Error(error.message || 'Could not remove the off-site destination');
     return true;
+  },
+
+  /**
+   * The webhook as an Administrator sees it: whether its address is set, when its signing key was
+   * issued, and its allowed hosts. Anybody else is told `visible: false` and nothing more, as the
+   * status function and the Administrator-only hosts row answer them.
+   */
+  notificationWebhook: async () => {
+    const [status, hosts] = await Promise.all([
+      supabase.rpc('notification_webhook_status'),
+      supabase.from('system_settings').select('value').eq('key', ALLOWED_HOSTS_KEY).maybeSingle()
+    ]);
+    const error = status.error || hosts.error;
+    if (error) throw new Error(error.message || 'Could not read the webhook');
+    const s = status.data || {};
+    return {
+      visible: s.visible === true,
+      urlSet: s.url_set === true,
+      signingKeyIssuedAt: s.signing_key_issued_at || null,
+      allowedHosts: Array.isArray(hosts.data?.value) ? hosts.data.value : []
+    };
+  },
+
+  /** The webhook's address, into the vault. Write-only: nothing reads it back. A refusal carries `status: 403`. */
+  setNotificationWebhookUrl: async (url) => {
+    const { error } = await supabase.rpc('set_notification_webhook_url', { p_url: url });
+    if (error) {
+      throw Object.assign(new Error(error.code === '42501'
+        ? 'Only an Administrator can set the webhook’s address'
+        : (error.message || 'Could not save the webhook’s address')), error.code === '42501' ? { status: 403 } : {});
+    }
+    return true;
+  },
+
+  /** Stop the webhook: its address deleted, and what was waiting for it dropped. Returns how many. */
+  clearNotificationWebhookUrl: async () => {
+    const { data, error } = await supabase.rpc('clear_notification_webhook_url');
+    if (error) throw new Error(error.message || 'Could not remove the webhook');
+    return data ?? 0;
+  },
+
+  /** A new signing key, returned this once. Issuing again rotates it. */
+  issueNotificationSigningKey: async () => {
+    const { data, error } = await supabase.rpc('issue_notification_signing_key');
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can issue the signing key'
+        : (error.message || 'Could not issue the signing key'));
+    }
+    return data;
+  },
+
+  /** Queue an aber.test message, and return its delivery log row's id. */
+  sendTestNotification: async () => {
+    const { data, error } = await supabase.rpc('queue_test_notification');
+    if (error) throw new Error(error.message || 'Could not send a test');
+    return data;
+  },
+
+  /**
+   * The delivery log, newest first, each with the alert it is about. The alert is read through its
+   * own policy, so a row about one the reader may not see is not returned at all.
+   */
+  notificationDeliveries: async ({ limit = DELIVERY_LOG_LIMIT, id = null } = {}) => {
+    let query = supabase
+      .from('notification_deliveries')
+      .select('id,event,channel,state,attempts,next_attempt_at,last_attempt_at,finished_at,response_status,'
+        + 'last_error,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+    if (id) query = query.eq('id', id);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message || 'Could not read the delivery log');
+    return data || [];
   },
 
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */
