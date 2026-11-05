@@ -32,25 +32,16 @@ export const IGNORE_FILE = '.semgrepignore'
 // Semgrep's error types for a file, or a stretch of one, that no parser read.
 const PARSE_ERRORS = new Set(['Lexical error', 'Syntax error', 'Other syntax error', 'AST builder error', 'PartialParsing'])
 
-// Tracked files Semgrep parses only in part: how many lines its parser stops at, and why. Each is
-// valid shell that its bash parser does not read, or GitHub's ${{ }} expressions, which are not bash
-// until GitHub replaces them, in run steps the two curl rules read as bash. Rewriting a working
-// script for a scanner's sake is a change of its own. A further stretch in one of these files, or
-// any other tracked file that does not parse, fails the scan.
+// Tracked files Semgrep parses only in part: how many lines its parser stops at, why, and why the
+// lines stay as they are. Each stop is one character Semgrep's bash parser does not read, and it
+// reads the rest of the line. A further stop in one of these files, or any other tracked file that
+// does not parse, fails the scan. docs/static-analysis.md lists the forms the parser does read.
 const SH = "Semgrep's bash parser stops at"
+const RW = 'the read-write redirection 3<> that opens a /dev/tcp socket. A one-way < or > would connect too, '
+  + 'but offline-check.sh both writes and reads the socket, and each probe opens it the same way.'
 export const UNPARSED = {
-  '.github/workflows/ci.yml': { stretches: 2, reason: `${SH} the < in the vitest count step's \${ACTUAL:-<unparsed>}, and at the site-rehearsal upgrade's \${{ matrix.signing }}, a GitHub expression.` },
-  '.github/workflows/restore-rehearsal.yml': { stretches: 2, reason: `${SH} \${{ steps.backup.outputs.stamp }}, a GitHub expression, in the fetch and restore steps.` },
-  'deploy/helm/aber/files/gitea-scripts/gitea-init.sh': { stretches: 1, reason: `A copy of scripts/gitea-init.sh: ${SH} its one-line case with the pattern *:*.` },
-  'deploy/helm/aber/files/supabase-db-pgbackrest/platform-backup.sh': { stretches: 1, reason: `A copy of supabase/db/pgbackrest/platform-backup.sh: ${SH} the | in the pattern of \${slot#*|}.` },
-  'deploy/helm/aber/files/timescaledb-pgbackrest/historian-backup.sh': { stretches: 1, reason: `A copy of timescaledb/pgbackrest/historian-backup.sh: ${SH} the | in the pattern of \${slot#*|}.` },
-  'deploy/install.sh': { stretches: 5, reason: `${SH} four case patterns (two with a bracket expression, two in a one-line case), and from not_ready_reason() to the end of the file.` },
-  'forge/gateway-platform/roles/converge/files/aber-gateway-converge': { stretches: 1, reason: `${SH} the negated brace group in if ! { cp ...; }; then.` },
-  'scripts/gitea-init.sh': { stretches: 1, reason: `${SH} the one-line case with the pattern *:*.` },
-  'scripts/rehearse-restore.sh': { stretches: 13, reason: `${SH} each < or > in a usage message such as \${1:?usage: backup <dir>}, and at the read-write redirection 3<>.` },
-  'supabase/db/pgbackrest/platform-backup.sh': { stretches: 1, reason: `${SH} the | in the pattern of \${slot#*|}.` },
-  'supabase/functions/offline-check.sh': { stretches: 2, reason: `${SH} the read-write redirection 3<>.` },
-  'timescaledb/pgbackrest/historian-backup.sh': { stretches: 1, reason: `${SH} the | in the pattern of \${slot#*|}.` },
+  'scripts/rehearse-restore.sh': { stretches: 13, reason: `${SH} each < and > in a usage message such as \${1:?usage: backup <dir>}, written as the script's header and usage line write them, and at ${RW}` },
+  'supabase/functions/offline-check.sh': { stretches: 2, reason: `${SH} ${RW}` },
 }
 
 export const keyOf = (ruleId, path, text) =>

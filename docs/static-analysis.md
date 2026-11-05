@@ -102,6 +102,21 @@ script that Semgrep's bash parser does not fully read, is named in
 [`scripts/scan-source.mjs`](../scripts/scan-source.mjs) with its reason and the number of places
 the parser stops. One more place fails the scan.
 
+Semgrep's bash parser stops at these forms of valid shell. Each has a form it reads, with the same
+behaviour:
+
+- A `case` on one line: put each pattern on a line of its own.
+- `\"` or `\\` inside a bracket expression, as in `*[[:space:]\"\\]*`: give each its own
+  pattern, `*[[:space:]]* | *\"* | *\\*`.
+- A bare `|` in a pattern, as in `${slot#*|}`: escape it, `${slot#*\|}`.
+- `(` or `<` in the text of `${v:-text}`, `${v:+text}` or `${v:?text}`, as in `${v:-(none)}`: set
+  the value on a line of its own, or use `[` and `]`.
+- A one-line here-document inside a function, when the line starts with an expansion: split the
+  value with `${v%% *}` and `${v#* }` instead.
+- `if ! { ...; }`: use a subshell, `if ! ( ... )`, when the group sets no variables.
+- `${{ }}` in a workflow's `run:` step, which the workflow rules read as bash: pass it through the
+  step's `env:` instead.
+
 A tracked file that Semgrep did not read fails `scan:source` too, by path. Semgrep leaves a file
 out without an error in two cases: the file is over its size limit, or its own ignore list names it.
 So the scan sets no size limit, and [`.semgrepignore`](../.semgrepignore) replaces Semgrep's list,
