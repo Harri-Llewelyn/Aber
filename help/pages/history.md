@@ -155,6 +155,7 @@ Each row says:
 A few things to know:
 
 - **An alert that fired again without first resolving** ends where the next one started. Its **Ended** says **(fired again)**. Point at it to see why.
+- **Suppressed**, with a crossed-out bell under an alert's name, means a [suppression window](devices.md#suppression-windows) covered it while it fired. For that time it was not counted, and nothing was sent.
 - **The list shows at most 1,000 alerts.** When more fired, the line above the list says so. Choose a shorter window or fewer assets.
 - **Alerts are kept for 90 days.** An Administrator can change that on the **Settings** page: **Alert history kept for (days)**, on the **Retention** tab. A window older than that lists none, and the page says so. Who acknowledged an alert stays in the Audit Trail after the alert is gone.
 - **Only an Administrator sees an alert about a machine identity's token.** For anyone else, an empty list says **No alert you may see fired in this window**.

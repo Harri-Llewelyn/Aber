@@ -12,7 +12,7 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
-import { IconAlertTriangle, IconCheck } from '../common/Icons'
+import { IconAlertTriangle, IconBellOff, IconCheck } from '../common/Icons'
 import { usePolling } from '../../hooks/usePolling'
 import { useSetting } from '../../hooks/useSettings'
 import { useSortableRows } from '../../hooks/useTableSort'
@@ -43,8 +43,25 @@ function AlertCell({ row }) {
   return (
     <div className="alert-history-name">
       <OverflowText className="alert-history-title">{row.alert_name}</OverflowText>
+      {row.suppression_window_id && <SuppressedMark />}
       {row.summary && <OverflowText className="cell-meta">{row.summary}</OverflowText>}
     </div>
+  )
+}
+
+/**
+ * A suppression window covered the occurrence: the alert counter's crossed bell and word. The row's
+ * stamp names the window that first covered it, not whether one covers it now or until when, so
+ * no "until".
+ */
+function SuppressedMark() {
+  return (
+    <Tooltip text="A suppression window covered this alert while it fired. For that time it was not counted, and nothing was sent.">
+      <span className="alert-pill-ack-words cell-meta" tabIndex={0}>
+        <IconBellOff size={12} className="alert-pill-suppression-mark" aria-hidden="true" />
+        <span>Suppressed</span>
+      </span>
+    </Tooltip>
   )
 }
 

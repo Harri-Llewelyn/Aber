@@ -1572,7 +1572,10 @@ flag steps between false and true, and a state is a strip of its runs in text.
   Platform-wide or Machine identity in words, linked where `alertPage()` names a page), Started,
   Ended (`EndedCell`: Firing, or "(fired again)" with why for a replaced one), Duration
   (`lengthText()`, "so far" while firing) and Acknowledged (who, the reason, when and the note). A
-  mark about the occurrence itself, such as a suppression, goes in `AlertCell`, after the name.
+  mark about the occurrence itself goes in `AlertCell`, after the name. `SuppressedMark` is one:
+  the alert counter's crossed bell and "Suppressed", where the row's `suppression_window_id`
+  (`0240`) names the window that first covered it. That stamp says neither whether a window covers
+  it now nor until when, so the mark has no "until".
 - **The acknowledger is named by the email their token carried** (`acknowledgerName()`), here and
   in the alert counter. `display_names_for()` answers only for the people a caller can already
   see, so a name would show to some readers and not others.

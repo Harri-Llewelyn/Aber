@@ -145,6 +145,24 @@ describe('the Alerts tab', () => {
     expect(tooltipOf(within(replaced).getByText(/fired again/).parentElement)).toMatch(/No resolve arrived for this occurrence/)
   })
 
+  it('marks an occurrence a suppression window covered, after its name, with no "until"', async () => {
+    const WINDOW = '5a000000-0000-4000-8000-000000000005'
+    api.readAlertOccurrences.mockResolvedValue([
+      occurrence('quiet-firing', { alert_name: 'Coolant Low', starts_at: '2026-11-02T11:30:00Z', suppression_window_id: WINDOW }),
+      occurrence('quiet-past', { suppression_window_id: WINDOW }, { ended_at: '2026-11-02T10:40:00Z' }),
+      ...ROWS.slice(2),
+    ])
+    await visit('/history/alerts')
+    const [firing, past, gateway] = await bodyRows()
+    const alertCell = (row) => within(row).getAllByRole('cell')[0]
+    expect(alertCell(firing).textContent).toBe('Coolant LowSuppressedLoad over 110 %')
+    expect(alertCell(past).textContent).toBe('Spindle OverloadSuppressedLoad over 110 %')
+    expect(alertCell(gateway).textContent).not.toMatch(/Suppressed/)
+    const mark = within(past).getByText('Suppressed').parentElement
+    expect(mark.querySelector('svg.alert-pill-suppression-mark')).not.toBeNull()
+    expect(tooltipOf(mark)).toMatch(/^A suppression window covered this alert while it fired/)
+  })
+
   it('opens a device or a gateway through the drawer helpers, at its own address', async () => {
     const onSelectDevice = vi.fn()
     const onSelectGateway = vi.fn()
