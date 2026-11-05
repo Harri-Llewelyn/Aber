@@ -14463,7 +14463,7 @@ ALTER FOREIGN TABLE timescale.telemetry_device_1h OWNER TO postgres;
 --
 
 -- telemetry_device_coverage :: FOREIGN TABLE
--- What each device rollup holds, so the Overview can tell a block not yet counted from one with no
+-- What each device rollup holds, so History's Overview can tell a block not yet counted from one with no
 -- reading. Two rows, from the historian's catalogue.
 CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_coverage (
     relation text,

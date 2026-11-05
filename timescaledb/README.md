@@ -325,6 +325,35 @@ If a window was not recorded, `help/site/remote-gateways.md` ("Late data after a
 refresh to run by hand, and Grafana's *Late Replay Missing From the Rollups* fires. The restore
 rehearsal asserts the job is registered and scheduled after a restore; a dump carries it.
 
+**History's Overview counts each device's readings, from two rollups of their own.**
+`telemetry_device_5m` is `sum(n_rows)` by device and 5-minute bucket, from `telemetry_1m`, and
+`telemetry_device_1h` is the same by the hour, from it. The Overview draws a lane per device of
+where readings arrived, and reading the series rollups for that grouped ten rows a device a bucket
+on every read: 5 to 16 s for 1,000 devices over a day. These hold one.
+
+- **Materialised only** (`timescaledb.materialized_only = true`). A real-time read unions the raw
+  tail, and with no metric named it walks the `(asset_id, metric_name, time)` index for every device:
+  1.2 to 2.5 s measured for a tail with no rows in it. So the newest few minutes are not counted
+  until the policy runs, and History's Overview hatches them as such.
+- **Their policies follow the series rollups':** refreshed every 5 minutes over the last 25 hours,
+  compressed after `rollup_compress_after` (segmented by `asset_id`), and kept as long as the series
+  rollup of their width (`rollup_5m_retain`, `rollup_1h_retain`), never less than `telemetry_1m`
+  they count. `refresh_requested_rollups()` refreshes them too, after the series rollups.
+- **They are created `WITH NO DATA`, and no boot fills them.** The policies count the last 25 hours.
+  `backfill_device_rollups()`, a job every 2 minutes, counts six hours older each run, both rollups,
+  and commits; it stops at `telemetry_1m`'s oldest bucket, since a refresh over a range its source
+  has dropped would empty it. `device_rollup_backfill` holds how far it has reached, whether it is
+  done, and its last chunk's time. One chunk at the storage basis (6 hours of 1,000 devices of 10
+  metrics, 3.6 million `telemetry_1m` rows) took 9.4 s on a private historian, so 180 days of
+  `telemetry_1m` take about a day to count, at about one run in thirteen busy.
+- **The job is `add_job`, as `refresh_requested_rollups()` is**: a Timescale License feature, like
+  the continuous aggregates and their policies. #1173 counts the two rollups and this job.
+- **`telemetry_device_coverage` says what they hold**: for each, from the backfill's reach (the
+  policies' 25 hours before its first chunk, or where retention drops buckets if that is later) to
+  its watermark, and whether the backfill is done. A `SECURITY DEFINER` function reads the
+  catalogue, so the view costs no scan over postgres_fdw. `fdw_reader` may read the rollups and the
+  view, and execute the function behind it.
+
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady
 machine, and a gap means "unchanged", not "unknown". LOCF cannot live in the continuous aggregate

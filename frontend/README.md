@@ -1117,7 +1117,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
-| History | `device`, then the device's id (`/history/device/<id>`; `/history` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
+| History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
@@ -1178,7 +1178,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1475,6 +1475,46 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 - **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
+
+**Overview is History's first tab and its default** (`tabs/HistoryOverview.jsx`): where readings
+arrived over the window, a lane per device, before anything is charted. Its arithmetic is in
+`utils/history.js` too, and `__tests__/historyOverview.test.jsx` holds each rule.
+
+- **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
+  its readings in each block as an array, and the stretch the historian's device rollups have
+  counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
+  its timer, and when a settled width changes the blocks.
+- **The blocks** (`coverageBlock()`): `COVERAGE_SMALL_SELECTION` (40) devices or fewer take the
+  finest of `COVERAGE_BLOCKS` at about one block per `COVERAGE_BLOCK_PX` (4px) of the strip. More
+  take the device rollups' own widths only, 5 minutes up to 26 hours and 1 hour up to
+  `COVERAGE_LARGE_MAX_HOURS` (a week), so nothing is summed on the historian. A longer window reads
+  the devices the search matches when they are 40 or fewer, and otherwise says why
+  (`TOO_LONG_FOR_MANY`). The status line names the block size.
+- **The groups** (`overviewGroups()`) place devices as the Site Map does, from the same helpers
+  (`inServiceDevices()`, `groupDevicesByCell()`, `areaWideInService()`, the location sources): each
+  area in service with its cells and its Area-Wide devices, the cells in no area, then Site-Wide,
+  Simulated and Unassigned. Archived devices are left off, as on the Site Map. Each heading is a
+  `GroupHeading` with "4 devices" as its `detail`; a closed group draws one strip of its devices'
+  counts merged and renders none of its lanes. Which are open is kept in this browser
+  (`OVERVIEW_GROUPS_KEY`, `{ key: open }`, in try/catch); on a first visit every group is open
+  unless there are more than `OVERVIEW_OPEN_LANES_MAX` (200) lanes.
+- **A lane** is its tick box, its name (a link to its charts), its status dot (`badge-dot` with
+  `deviceDotStyle()`, and "Offline" in words), its metric count, "No readings since 15:00"
+  (`readingsStopWords()`), and its strip: runs of one shade (`coverageSteps()`, `coverageRuns()`),
+  four steps of `--coverage-1` to `--coverage-4` against the strip's busiest block, each run one box.
+  The strip spans the charts' plot area (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`), so a time sits where it
+  does on the Device tab. The future is `.chart-future`; a stretch the rollups have not counted yet
+  (`uncountedStretches()`) is `.overview-uncounted`, cross-hatched, and the status line says
+  "Coverage before 3 Oct is still being computed" (`uncountedWords()`).
+- **The selection box** is a drag across the strips (`useBandDrag` over `.overview-strip`, whose band
+  carries the press's and the pointer's `clientY`; the rows under that stretch are the box's
+  devices). Its bar says its size (`boxWords()`, with `bandWords()`) and offers **Chart**, the Device
+  tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON`, and **Zoom**,
+  which sets the window as a new history entry. Escape or a press outside clears it. The tick boxes
+  (`?device=`, telemetry keys) are the other way: the toolbar's **Chart** charts one at the control's
+  window. Export CSV is the Device tab's alone.
+- **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
+  Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 
 **`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
 It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket

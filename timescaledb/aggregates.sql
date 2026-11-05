@@ -100,7 +100,7 @@ ALTER MATERIALIZED VIEW telemetry_1h SET (timescaledb.materialized_only = false)
 -- walk the raw tail's index for every device it names. WITH NO DATA: the policies below and
 -- backfill_device_rollups() fill them in the background, never a boot.
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_device_5m
-WITH (timescaledb.continuous, timescaledb.materialized_only = true) AS
+WITH (timescaledb.continuous) AS
 SELECT time_bucket(INTERVAL '5 minutes', bucket) AS bucket,
        asset_id,
        sum(n_rows) AS n_rows
@@ -109,7 +109,7 @@ SELECT time_bucket(INTERVAL '5 minutes', bucket) AS bucket,
 WITH NO DATA;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_device_1h
-WITH (timescaledb.continuous, timescaledb.materialized_only = true) AS
+WITH (timescaledb.continuous) AS
 SELECT time_bucket(INTERVAL '1 hour', bucket) AS bucket,
        asset_id,
        sum(n_rows) AS n_rows
@@ -418,7 +418,7 @@ BEGIN
   RAISE NOTICE 'device rollups (job %): every % one more chunk of history is counted', v_job, schedule;
 END $$;
 
--- What the device rollups hold, for the Overview to tell a block not yet counted from one with no
+-- What the device rollups hold, for History's Overview to tell a block not yet counted from one with no
 -- reading. Each rollup is counted from the backfill's reach (the policies' 25 hours before its first
 -- chunk), or from where its retention drops buckets if that is later, up to its watermark. Read from
 -- the catalogue as the owner: no scan, so it is cheap over postgres_fdw.

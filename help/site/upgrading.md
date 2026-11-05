@@ -1699,6 +1699,22 @@ The two are on or off together, and the render fails if only one is on. So does
 - **The System page** shows Studio's row with no image recorded, as for any service the chart does
   not deploy.
 
+### From 1.8.0, the historian counts its older readings for History's Overview
+
+History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
+historian, which count each device's readings every 5 minutes and every hour. The upgrade creates
+them empty, and the historian fills them in the background. Nothing waits for it.
+
+- **The last 25 hours** are counted within a few minutes of the upgrade.
+- **Older history is counted six hours at a time,** every 2 minutes, back to the oldest 1-minute
+  rollup (180 days by default). At the storage basis, 1,000 devices of 10 metrics, that takes
+  about a day. A smaller site takes less.
+- **Until then, Overview hatches the older part of a window** and says so, for example
+  "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
+  and are complete at once.
+
+The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write

@@ -3296,6 +3296,63 @@ a row a role gates, the read the Realtime gap keeps, and an empty or null `clien
 `test_each_app_s_token_reaches_only_its_own_routes.py`, in the stack lane, holds the same through
 the gateway with a real token for each of the four apps.
 
+### History counts where readings arrived (0245)
+
+History's Overview draws one lane per device, a strip of blocks across the window, darker where more
+readings arrived. **`telemetry_coverage(from_ts, to_ts, block, asset_ids)`** is its read. The series
+rollups could not serve it at the documented fleet: 1,000 devices of 10 metrics are 2.87 million
+rows of `telemetry_5m` for one day, and the historian took 5 to 16 s to group them (the #319
+measurement). So the historian keeps a rollup per device, and the function reads that.
+
+- **The device rollups** (`timescaledb/aggregates.sql`): `telemetry_device_5m`, `sum(n_rows)` by
+  device and 5-minute bucket from `telemetry_1m`, and `telemetry_device_1h` from it. Ten times fewer
+  rows than a series rollup at ten metrics. Materialised only: a real-time read walks the raw tail's
+  `(asset_id, metric_name, time)` index for every device it names, since it names no metric.
+  `timescaledb/README.md` has their policies and the backfill.
+- **One row per device asked for**, in `asset_id` order: `counts integer[]`, oldest block first,
+  `0` for a block with none; `first_block` and `block_width`, so block i starts at
+  `first_block + i * block_width`; and `computed_from`, `computed_to` and `complete`, what the
+  rollup has counted (the historian's `telemetry_device_coverage`, from its catalogue). A block
+  outside that stretch is not counted yet, which is not a block with no readings. A device with no
+  readings has a row of zeros.
+- **Blocks lie on the epoch grid**, as the rollups' buckets do, from the one holding `from_ts`, and
+  are stepped in seconds.
+- **More than 40 devices read only the device rollups' own widths**, 5 minutes and 1 hour, and
+  nothing is summed on the historian. The historian sends each device's buckets and counts as two
+  arrays (`array_agg ... ORDER BY bucket`, which postgres_fdw ships), so a row a device crosses, and
+  a device with every block filled takes its counts as they came. **Forty or fewer may take any
+  whole number of minutes**, summed from the widest rollup that divides it, or from `telemetry_1m`
+  over the device's metrics under 5 minutes. Forty is where a year of 1-day blocks still answers in
+  about half a second.
+- **At most 1,000 devices and 360,000 device-buckets read**, refused before anything is read, as are
+  bounds out of order and a bad block (`22023`). 360,000 is 1,000 devices over 26 hours of 5-minute
+  buckets, or 40 over a year of hourly ones. The dashboard reads 1,000 devices a call, and shows a
+  larger selection 7 days at most (`COVERAGE_*` in `frontend/src/api.js`).
+- **The foreign tables fetch 10,000 rows at a time** (`fetch_size`, declared in `0001`). At the
+  default 100, the round trips were half the read's time once the historian's share was small.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` (0233) is. The device rollups' foreign
+tables are granted SELECT to the same two roles.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression, 1,000
+devices of 10 metrics at the storage basis's density), warm, as `authenticated`:
+
+| Read | Blocks | Warm median |
+| :--- | ---: | ---: |
+| 1,000 devices, Last 24 hours | 289 × 5 minutes | 1.1 s |
+| 1,000 devices, a week | 169 × 1 hour | 0.3 s |
+| 20 devices, Last 24 hours | 289 × 5 minutes | 26 ms |
+| 20 devices, a week | 169 × 1 hour | 18 ms |
+| 20 devices, a week, summed | 337 × 30 minutes | 39 ms |
+| 40 devices, a year, summed (synthetic) | 367 × 1 day | 320 ms |
+| 1,000 devices, 30 days (synthetic) | 721 × 1 hour | 3.9 s, so the page stops at 7 days |
+
+`test_history_counts_where_readings_arrived.py` holds every rule above with local tables standing in
+for the foreign ones. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the
+pinned `search_path`, the grants, the foreign tables' `fetch_size`, and that the refusals come before
+any read, so it holds on a stack with no historian.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
