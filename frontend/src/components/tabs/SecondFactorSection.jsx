@@ -17,7 +17,8 @@ const MFA_URL = tabUrl('profile', 'mfa')
  * Profile's MFA tab: the authenticator apps the signed-in person has added (GoTrue's verified TOTP
  * factors, read through auth-js), with Add Authenticator and a Remove on
  * each row. Every role may add one. Once one is added, signing in asks for its code after the
- * password (components/auth/SecondFactorChallenge.jsx). Nothing on the site requires one.
+ * password (components/auth/SecondFactorChallenge.jsx). While Settings requires MFA (0251), an
+ * Administrator or Shopfloor Manager needs one to change the platform; every other role never does.
  *
  * `isPerson` is false for a machine identity, which signs in with a token and has none.
  */
