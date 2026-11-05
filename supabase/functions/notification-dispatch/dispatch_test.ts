@@ -175,8 +175,8 @@ Deno.test("an address whose host is not allowed is refused before anything is po
   const h = harness({ hosts: ["other.example.net"] });
   assert.equal(await deliver(due(), h.deps), "failed");
   assert.equal(h.posts.length, 0, "nothing posted");
+  // The whole sentence, so the error names neither the address nor its host.
   assert.equal(h.recorded[0].error, "The webhook's host is not on its allowed hosts, so the message was refused.");
-  assert.ok(!String(h.recorded[0].error).includes("hooks.example.net"), "the error does not name the address");
 });
 
 Deno.test("the allow-list matches a host exactly: no suffix, no prefix, any case", () => {
