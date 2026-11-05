@@ -3,15 +3,24 @@
  * one chosen, its address, a chart's buckets and series, and the words a chart says. Pure, so each
  * rule is unit-tested; frontend/README.md, "History and its chart".
  */
-import { HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
+import {
+  COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_MAX_ROWS,
+  HISTORY_RESOLUTIONS,
+} from '../api'
 import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { datatypeLabel } from './sparkplugDatatype'
 import { modelledConstraints } from './payloadConformance'
-import { deviceIdentifiers } from './sparkplugId'
-import { SPAN_IDS, TIME_PRESETS, clockWords, rollingWindow, windowToQuery } from './timeWindow'
+import { deviceIdentifiers, deviceIds } from './sparkplugId'
+import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
+import { areaWideInService, inServiceDevices } from './inService'
+import {
+  SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
+} from './timeWindow'
 
 const MINUTE = 60 * 1000
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
 
 /** The rolling ranges and spans History offers: all of them, and no All time. */
 export const HISTORY_RANGES = TIME_PRESETS
@@ -180,17 +189,23 @@ export function inReads(list, size) {
 }
 
 // ------------------------------------------------------------------------------------------------
-// The address: /history for the device picker, /history/device/<id> for one device's charts.
+// The address: /history and /history/overview for Overview, /history/device for the device
+// picker, /history/device/<id> for one device's charts.
 // ------------------------------------------------------------------------------------------------
 
+/** The tab History opens on: the bare page path, and any path it does not know. */
+export const DEFAULT_HISTORY_TAB = 'overview'
+
 /**
- * The tab and device a path's segments name. Device is the only tab, so any other path is its
- * picker; `/history/device/<id>` names a device by its UUID or Sparkplug id.
+ * The tab and device a path's segments name. `/history/device` is the picker and
+ * `/history/device/<id>` names a device by its UUID or Sparkplug id; every other path is the
+ * Overview, so a link to the bare page lands on it.
  */
 export function historyPath(segments) {
   const [, tab, id] = segments
+  if (tab !== 'device') return { tab: DEFAULT_HISTORY_TAB, deviceId: '' }
   let deviceId = ''
-  if (tab === 'device' && id) {
+  if (id) {
     try { deviceId = decodeURIComponent(id) } catch { deviceId = '' }
   }
   return { tab: 'device', deviceId }
@@ -198,7 +213,22 @@ export function historyPath(segments) {
 
 /** The path of one device's charts, the picker's when `deviceId` is empty. */
 export const deviceHistoryPath = (deviceId) =>
-  (deviceId ? `/history/device/${encodeURIComponent(deviceId)}` : '/history')
+  (deviceId ? `/history/device/${encodeURIComponent(deviceId)}` : '/history/device')
+
+/** The Overview's own path. */
+export const OVERVIEW_PATH = '/history/overview'
+
+/**
+ * The Overview's address at window `win`, with the devices ticked (`device`, their telemetry keys)
+ * when there are any.
+ */
+export function overviewAddress(win, { devices = [] } = {}) {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
+  if (devices.length) query.set('device', encodeList(devices))
+  const q = query.toString().replace(/%2C/gi, ',')
+  return `${OVERVIEW_PATH}${q ? `?${q}` : ''}`
+}
 
 /**
  * The address of a device's charts, or the picker's, keeping the window shown now, and the metrics
@@ -568,4 +598,290 @@ export function chartPalette(read = (name) => getComputedStyle(document.document
     range: token('--warning'),
     font: `11px ${token('--font-mono') || 'monospace'}`,
   }
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Overview: where readings arrived, a lane per device in the Site Map's groups
+// ------------------------------------------------------------------------------------------------
+
+/** About how many pixels one coverage block takes: the read asks for one block per this many. */
+export const COVERAGE_BLOCK_PX = 4
+
+/**
+ * The block widths a small selection may take, in minutes, finest first. From 5 minutes each is a
+ * whole number of the 5-minute device rollup's buckets, and from an hour of the hourly one's, so
+ * telemetry_coverage() sums the widest rollup that divides it; under 5 minutes, telemetry_1m.
+ */
+export const COVERAGE_BLOCKS = Object.freeze([1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080])
+
+/** The longest window that still takes 5-minute blocks for a large selection: a day, a day crossing a clock change. */
+export const LARGE_FIVE_MINUTE_HOURS = 26
+
+/** Why a large selection does not show a window longer than COVERAGE_LARGE_MAX_HOURS. */
+export const TOO_LONG_FOR_MANY = `With more than ${COVERAGE_SMALL_SELECTION} devices, Overview shows 7 days at most. `
+  + `Search for a cell, or for up to ${COVERAGE_SMALL_SELECTION} devices, to see a longer window.`
+
+/**
+ * The block width a read of `devices` devices takes over [start, end), in minutes, for a strip
+ * `widthPx` wide; null when the window is too long for that many (TOO_LONG_FOR_MANY).
+ *
+ * - Up to COVERAGE_SMALL_SELECTION devices: the finest of COVERAGE_BLOCKS whose blocks number at
+ *   most one per COVERAGE_BLOCK_PX of the strip; the widest when none does.
+ * - More: the device rollups' own widths, never summed on the historian. 5 minutes up to
+ *   LARGE_FIVE_MINUTE_HOURS, then 1 hour up to COVERAGE_LARGE_MAX_HOURS, which the strip may draw
+ *   narrower than COVERAGE_BLOCK_PX.
+ */
+export function coverageBlock(startMs, endMs, widthPx, devices = 1, { blocks = COVERAGE_BLOCKS, px = COVERAGE_BLOCK_PX } = {}) {
+  if (devices > COVERAGE_SMALL_SELECTION) {
+    const hours = (endMs - startMs) / HOUR
+    if (hours <= LARGE_FIVE_MINUTE_HOURS) return COVERAGE_ROLLUP_MINUTES[0]
+    return hours <= COVERAGE_LARGE_MAX_HOURS ? COVERAGE_ROLLUP_MINUTES[1] : null
+  }
+  const most = Math.max(1, Math.floor(widthPx / px))
+  return blocks.find(m => bucketCount(startMs, endMs, m) <= most) ?? blocks[blocks.length - 1]
+}
+
+/** The devices one coverage read carries: the function's bound. */
+export const COVERAGE_PER_READ = COVERAGE_MAX_DEVICES
+
+/** A coverage bound as milliseconds: an instant, or -Infinity and Infinity for PostgreSQL's infinities. */
+export function coverageTime(value) {
+  if (value === '-infinity') return -Infinity
+  if (value === 'infinity') return Infinity
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/**
+ * The coverage read's rows as the page draws them: a Map of each key in `keys` to its counts, all
+ * 0 where no row came back, and what the rollup has counted, `{ from, to, complete }` in ms (the
+ * narrowest across the parts read).
+ */
+export function coverageCounts(rows, keys, length) {
+  const counts = new Map(keys.map(k => [k, new Array(length).fill(0)]))
+  let from = -Infinity
+  let to = Infinity
+  let complete = true
+  for (const r of rows) {
+    if (counts.has(r.asset_id) && Array.isArray(r.counts)) counts.set(r.asset_id, r.counts.slice(0, length).concat(new Array(Math.max(0, length - r.counts.length)).fill(0)))
+    const f = coverageTime(r.computed_from)
+    const t = coverageTime(r.computed_to)
+    if (f !== null) from = Math.max(from, f)
+    if (t !== null) to = Math.min(to, t)
+    if (r.complete === false) complete = false
+  }
+  return { counts, counted: { from, to, complete } }
+}
+
+/**
+ * The stretches of [start, end) the rollup has not counted, as fractions: before `counted.from`,
+ * and from `counted.to` up to now (a stretch after now is the future, hatched as such). Each
+ * `{ lo, hi }`; none when the whole window is counted.
+ */
+export function uncountedStretches(counted, { start, end, now }) {
+  const span = end - start
+  const f = (ms) => Math.min(1, Math.max(0, (ms - start) / span))
+  const out = []
+  if (counted.from > start) out.push({ lo: 0, hi: f(counted.from) })
+  const reach = Math.min(end, now)
+  if (counted.to < reach) out.push({ lo: f(Math.max(counted.to, start)), hi: f(reach) })
+  return out.filter(s => s.hi > s.lo)
+}
+
+/**
+ * The note above the lanes when part of the window is older than the rollup has counted: "Coverage
+ * before 3 Oct is still being computed" while the backfill runs, "Coverage is kept from 3 Oct" once it
+ * has reached the oldest readings counted. Null when the window starts inside what is counted.
+ */
+export function uncountedWords(counted, startMs) {
+  if (!(counted.from > startMs)) return null
+  const day = new Date(counted.from).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return counted.complete ? `Coverage is kept from ${day}` : `Coverage before ${day} is still being computed`
+}
+
+/** A block width in words: "5-minute blocks", "1-hour blocks", "2-day blocks". */
+export function blockWords(minutes) {
+  if (minutes % 10080 === 0) return `${minutes / 10080}-week blocks`
+  if (minutes % 1440 === 0) return `${minutes / 1440}-day blocks`
+  if (minutes % 60 === 0) return `${minutes / 60}-hour blocks`
+  return `${minutes}-minute blocks`
+}
+
+/** The groups that are lanes of their own on the Site Map, in its order, keyed by location source. */
+const OVERVIEW_LANES = [
+  { key: SOURCE_SITE_WIDE, label: 'Site-Wide' },
+  { key: SOURCE_SIMULATED, label: 'Simulated' },
+  { key: SOURCE_UNASSIGNED, label: 'Unassigned' },
+]
+
+/** The group of cells filed in no area, named as the Site Map's tray is. */
+export const UNFILED_GROUP = 'Unfiled — in no area yet'
+
+/** An area's group of the devices that serve the whole area. */
+export const AREA_WIDE_GROUP = 'Area-Wide'
+
+const nameOf = (row, own) => String(row[own] ?? row.name ?? '')
+const inNameOrder = (own) => (a, b) => nameOf(a, own).localeCompare(nameOf(b, own))
+
+/**
+ * The Overview's groups, each device where the Site Map places it: every area in service, in name
+ * order, holding a group for each of its cells in service and one for its Area-Wide devices; the
+ * cells in no area under UNFILED_GROUP; then Site-Wide, Simulated and Unassigned. Only devices in
+ * service are placed (inServiceDevices()), and a group with none is left out. Each is
+ * `{ key, label, devices, groups? }`, an area's `devices` being all its groups', in name order.
+ */
+export function overviewGroups(devices, cells = [], areas = []) {
+  const live = inServiceDevices(devices).slice().sort(inNameOrder('asset_name'))
+  const byCell = groupDevicesByCell(live)
+  const liveCells = cells.filter(c => !c.is_archived).slice().sort(inNameOrder('cell_name'))
+  const cellGroup = (c) => {
+    const id = c.cell_id ?? c.id
+    return { key: `cell:${id}`, label: nameOf(c, 'cell_name'), devices: byCell.get(id) || [] }
+  }
+  const filled = (groups) => groups.filter(g => g.devices.length > 0)
+  const parent = (key, label, groups) => ({ key, label, devices: groups.flatMap(g => g.devices), groups })
+
+  const out = []
+  for (const area of areas.filter(a => !a.is_archived).slice().sort(inNameOrder('area_name'))) {
+    const id = area.area_id ?? area.id
+    const groups = filled([
+      ...liveCells.filter(c => c.area_id === id).map(cellGroup),
+      { key: `area-wide:${id}`, label: AREA_WIDE_GROUP, devices: areaWideInService(id, live, []).devices },
+    ])
+    if (groups.length) out.push(parent(`area:${id}`, nameOf(area, 'area_name'), groups))
+  }
+  const unfiled = filled(liveCells.filter(c => !c.area_id).map(cellGroup))
+  if (unfiled.length) out.push(parent('unfiled', UNFILED_GROUP, unfiled))
+  for (const lane of OVERVIEW_LANES) {
+    const laneDevices = live.filter(d => d.location_source === lane.key)
+    if (laneDevices.length) out.push({ key: lane.key, label: lane.label, devices: laneDevices })
+  }
+  return out
+}
+
+/** Every group's key, each area's groups after it. */
+export const groupKeys = (groups) => groups.flatMap(g => [g.key, ...(g.groups || []).map(s => s.key)])
+
+/** The most lanes Overview opens on a first visit. Past it, every group starts closed. */
+export const OVERVIEW_OPEN_LANES_MAX = 200
+
+/**
+ * Which groups this browser's viewer opened or closed on Overview, `{ key: open }`. Not in the
+ * address: a shared link opens as a first visit does.
+ */
+export const OVERVIEW_GROUPS_KEY = 'aber_history_overview_groups'
+
+/** The viewer's choices, or none where storage is refused or holds something else. */
+export function readOverviewGroups() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(OVERVIEW_GROUPS_KEY) || '{}')
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {}
+    return Object.fromEntries(Object.entries(stored).filter(([, open]) => typeof open === 'boolean'))
+  } catch {
+    return {}
+  }
+}
+
+export function writeOverviewGroups(choices) {
+  try {
+    if (Object.keys(choices).length) window.localStorage.setItem(OVERVIEW_GROUPS_KEY, JSON.stringify(choices))
+    else window.localStorage.removeItem(OVERVIEW_GROUPS_KEY)
+  } catch {
+    // Refused storage: the groups open as on a first visit.
+  }
+}
+
+/**
+ * Whether a group is open: as its viewer last left it, else open while the page would draw at most
+ * OVERVIEW_OPEN_LANES_MAX lanes (`lanes`, one a device) with every group open.
+ */
+export const groupIsOpen = (key, choices, lanes) =>
+  (typeof choices[key] === 'boolean' ? choices[key] : lanes <= OVERVIEW_OPEN_LANES_MAX)
+
+/** A device's telemetry key, which the coverage read names it by: its issued Sparkplug id. */
+export const telemetryKey = (device) => deviceIds(device).issued
+
+/** Several strips' counts as one: their sum in each block. */
+export function mergeCounts(lists, length) {
+  const out = new Array(length).fill(0)
+  for (const counts of lists) counts?.forEach((n, i) => { out[i] += n })
+  return out
+}
+
+/** How many shades a strip steps through, lightest to darkest; a block with none takes no shade. */
+export const COVERAGE_STEPS = 4
+
+/** Each block's shade: 0 for none, else 1 to `steps` by its count against the strip's busiest block. */
+export function coverageSteps(counts, steps = COVERAGE_STEPS) {
+  const most = counts.reduce((m, n) => Math.max(m, n), 0)
+  return counts.map(n => (n > 0 ? Math.max(1, Math.ceil((n / most) * steps)) : 0))
+}
+
+/** A strip's shades as runs of one shade, `[{ from, to, step }]` by block index, `to` exclusive; none for 0. */
+export function coverageRuns(steps) {
+  const runs = []
+  steps.forEach((step, i) => {
+    const run = runs[runs.length - 1]
+    if (run && run.step === step && run.to === i) run.to = i + 1
+    else if (step > 0) runs.push({ from: i, to: i + 1, step })
+  })
+  return runs
+}
+
+/** The key's words: each end of the shades, a block with none, and a block the rollups have not counted yet. */
+export const COVERAGE_KEY = Object.freeze({
+  fewer: 'Fewer readings', more: 'More readings', none: 'No readings', uncounted: 'Not counted yet',
+})
+
+/**
+ * Where a strip's readings stop inside the window: "No readings since 15:00" once a whole block has
+ * passed with none after the last that had some, the moment that block's start, with its date when
+ * it is not today. "No readings in this window" when none came and all of it so far is counted.
+ * Only what the rollup has counted (`counted`, coverageCounts()) is read: a block after it is not
+ * counted yet, never empty. Null otherwise.
+ */
+export function readingsStopWords(counts, starts, minutes, { start, end, now, counted = { from: -Infinity, to: Infinity } }) {
+  const width = minutes * MINUTE
+  const reach = Math.min(end, now, counted.to)
+  if (!(reach > start)) return null
+  let last = counts.length - 1
+  while (last >= 0 && !(counts[last] > 0)) last--
+  if (last < 0) return counted.from > start ? null : 'No readings in this window'
+  const stop = starts[last] * 1000 + width
+  if (stop + width > reach) return null
+  const at = new Date(stop)
+  return `No readings since ${localDay(at) === localDay(new Date(now)) ? clockWords(at) : momentWords(stop, 1)}`
+}
+
+/** A strip's text for a screen reader: how many of its blocks had readings, and where they stop. */
+export function coverageSummary(name, counts, stopWords) {
+  const had = counts.filter(n => n > 0).length
+  return `${name}: readings in ${had} of ${counts.length} blocks.${stopWords ? ` ${stopWords}.` : ''}`
+}
+
+/** A selection box's size in words: "3 devices · 10:05 – 14:20, 4 h 15 min" (bandWords()). */
+export const boxWords = (count, start, end, now = Date.now()) =>
+  `${count} ${count === 1 ? 'device' : 'devices'} · ${bandWords(start, end, now)}`
+
+/** Why Chart is off with several devices picked. */
+export const CHART_SEVERAL_REASON = 'Pick one device to chart it. Charting several comes with the Metric tab.'
+
+/**
+ * The Overview's time axis: a calendar window's own ticks (calendarTicks()), else five evenly
+ * spaced, labelled with the clock (to the second under an hour) inside a day, the date and clock up
+ * to three days, and the date beyond, as the Audit Trail's axis is. Each `{ f, label }`, `f` a
+ * fraction of [start, end].
+ */
+export function axisTicks(win, startMs, endMs) {
+  const span = endMs - startMs
+  if (!(span > 0)) return []
+  if (win?.kind === 'calendar') {
+    return calendarTicks(win.span, new Date(startMs), new Date(endMs))
+      .map(({ at, label }) => ({ f: (at.getTime() - startMs) / span, label }))
+      .filter(t => t.f >= 0 && t.f <= 1)
+  }
+  const label = (d) => (span < HOUR
+    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : span <= DAY ? clockWords(d) : momentWords(d.getTime(), span <= 3 * DAY ? 1 : 1440))
+  return [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, label: label(new Date(startMs + span * f)) }))
 }

@@ -661,6 +661,21 @@ describe("a state chart's colour, at every hue its values can hash to", () => {
   })
 })
 
+describe("History's Overview shades, fewer readings to more", () => {
+  it.each(Object.entries(THEMES))('%s: the lightest clears 3:1 on the card and on a strip, and each step stands further from them', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const strip = rgb(t['--bg-base'])
+    const steps = [1, 2, 3, 4].map(i => rgb(t[`--coverage-${i}`]))
+    expect(contrast(steps[0], card)).toBeGreaterThanOrEqual(AA_LARGE)
+    expect(contrast(steps[0], strip)).toBeGreaterThanOrEqual(AA_LARGE)
+    for (let i = 1; i < steps.length; i++) {
+      expect(contrast(steps[i], card), `step ${i + 1}`).toBeGreaterThan(contrast(steps[i - 1], card))
+      // Each step a visible stride from the one before, not a near twin.
+      expect(contrast(steps[i], steps[i - 1]), `step ${i + 1} against step ${i}`).toBeGreaterThanOrEqual(1.4)
+    }
+  })
+})
+
 describe('theme token hygiene', () => {
   it('defines the same token names in both themes', () => {
     // A token present in one theme and missing in the other resolves to nothing at runtime,

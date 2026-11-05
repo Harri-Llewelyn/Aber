@@ -97,6 +97,12 @@
   --chart-state-c:      0.065;
   --chart-state-edge-l: 0.70;
   --chart-state-edge-c: 0.115;
+  /* History's Overview: a block's shade, fewer readings to more, brighter on the dark card. The
+     lightest clears 3:1 on the card (3.25:1), so a block with readings is never lost as none. */
+  --coverage-1: #21768e;
+  --coverage-2: #1596b6;
+  --coverage-3: #22c3e6;
+  --coverage-4: #9eeeff;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
@@ -200,6 +206,12 @@
   --chart-state-c:      0.045;
   --chart-state-edge-l: 0.60;
   --chart-state-edge-c: 0.10;
+  /* Overview's shades, darker on the white card; the lightest clears 3:1 on it (3.67:1) and on a
+     strip's --bg-base (3.3:1). */
+  --coverage-1: #4a8bbd;
+  --coverage-2: #2a6ea8;
+  --coverage-3: #185490;
+  --coverage-4: #0b355e;
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
@@ -6036,6 +6048,141 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-bucket-pick { justify-content: space-between; min-width: 0; }
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
 .history-bucket-choices .btn { justify-content: flex-start; }
+
+/* ===== History: Overview ===== */
+/* The lanes and their groups, full width as the Device tab's groups are. Every strip, the axis and
+   the layer over them span the charts' plot area: the card's inset, then PLOT_LEFT_PX and
+   PLOT_RIGHT_PX (TimeSeriesChart.jsx), so a time sits where it does on the Device tab's charts. */
+.overview-plot {
+  --overview-left: calc(var(--inset) + 56px);
+  --overview-right: calc(var(--inset) + 28px);
+  position: relative;
+  min-width: 0;
+  padding: 4px 0 var(--inset);
+}
+.overview-axis { position: relative; height: 24px; margin: 0 var(--overview-right) 0 var(--overview-left); }
+.overview-axis-tick {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.overview-axis-tick-start { transform: none; }
+.overview-axis-tick-end   { transform: translateX(-100%); }
+/* The axis names the hatched part after now; its words start clear of the Now marker on its line. */
+.overview-axis .chart-future { padding-left: 64px; }
+.overview-group { min-width: 0; }
+.overview-group-body[hidden] { display: none; }
+/* A cell's heading under its area's, indented a step. */
+.overview-subgroup-head > .group-heading { padding-left: calc(var(--inset) + 18px); }
+.overview-row { min-width: 0; }
+.overview-lane { padding: 6px 0 4px; }
+.overview-summary { padding: 6px 0; }
+.overview-lane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 var(--inset);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.overview-pick { flex-shrink: 0; margin: 0; }
+.overview-lane-name { min-width: 0; font-weight: 600; color: var(--accent-text); text-decoration: none; }
+.overview-lane-name:hover,
+.overview-lane-name:focus-visible { text-decoration: underline; }
+.overview-lane-meta { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
+.overview-lane-offline { color: var(--text-primary); }
+.overview-lane-stop { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+/* A strip: a run of blocks of one shade is a box across its stretch; a block with none is the ground. */
+.overview-strip {
+  position: relative;
+  height: 12px;
+  margin: 4px var(--overview-right) 0 var(--overview-left);
+  border-radius: 2px;
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: crosshair;
+  user-select: none;
+}
+.overview-run { position: absolute; top: 0; bottom: 0; }
+.overview-step-1 { background: var(--coverage-1); }
+.overview-step-2 { background: var(--coverage-2); }
+.overview-step-3 { background: var(--coverage-3); }
+.overview-step-4 { background: var(--coverage-4); }
+/* Over the strips, below the axis: the hatch after now and the selection box, leaving the pointer to
+   the strips beneath. */
+.overview-layer {
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  left: var(--overview-left);
+  right: var(--overview-right);
+  pointer-events: none;
+}
+/* The selection box, with the band's look (.chart-band) on every edge. */
+.overview-box {
+  position: absolute;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+/* Its size in words and its actions, under its bottom edge, held inside the strips near the end. */
+.overview-box-bar {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-popover);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.overview-box-words { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* The key, at the end of the row above the lanes, as the Audit Trail's legend is. */
+.overview-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.overview-key-item { display: inline-flex; align-items: center; gap: 6px; }
+.overview-key-shades { display: inline-flex; gap: 2px; }
+.overview-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.overview-swatch[class*='overview-step-'] { box-shadow: none; }
+/* A stretch the device rollups have not counted yet: dotted crosswise, so it is told from the
+   future's single hatch (.chart-future) and from a block with no readings. */
+.overview-uncounted {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px);
+}
+.overview-swatch-uncounted {
+  background:
+    repeating-linear-gradient(45deg, var(--text-dim) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, var(--text-dim) 0 1px, transparent 1px 4px), var(--bg-base);
+}
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --

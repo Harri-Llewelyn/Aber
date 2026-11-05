@@ -118,7 +118,7 @@ afterEach(() => {
 
 describe('the device picker', () => {
   it('lists every device but a quarantined one, each a link to its charts at the window shown', async () => {
-    await visit('/history?range=7d')
+    await visit('/history/device?range=7d')
     const table = screen.getByRole('table', { name: /choose a device/i })
     const links = within(table).getAllByRole('link')
     expect(links.map(l => l.textContent)).toEqual(['Lathe 3', 'Mill 2', 'Press 1', 'Robot 5'])
@@ -129,14 +129,14 @@ describe('the device picker', () => {
   })
 
   it('narrows to what the search box names, and says when nothing matches', async () => {
-    await visit('/history?search=press')
+    await visit('/history/device?search=press')
     expect(within(screen.getByRole('table')).getAllByRole('link').map(l => l.textContent)).toEqual(['Press 1'])
     fireEvent.change(screen.getByRole('searchbox', { name: /find a device/i }), { target: { value: 'nothing like it' } })
     expect(await screen.findByText('No device matches "nothing like it".')).toBeInTheDocument()
   })
 
   it('opens a device from its link, keeping the window', async () => {
-    await visit('/history?span=week&at=2026-11-02')
+    await visit('/history/device?span=week&at=2026-11-02')
     fireEvent.click(screen.getByRole('link', { name: 'Lathe 3' }))
     expect(window.location.pathname).toBe(`/history/device/${LATHE}`)
     expect(window.location.search).toBe('?span=week&at=2026-11-02')
@@ -242,7 +242,7 @@ describe("a device's charts", () => {
   it('says when no device answers to the address', async () => {
     await visit('/history/device/no-such-device')
     expect(screen.getByText(/No device answers to this address/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Choose another device' })).toHaveAttribute('href', '/history')
+    expect(screen.getByRole('link', { name: 'Choose another device' })).toHaveAttribute('href', '/history/device')
   })
 
   it('refuses a window too long for one series even in day buckets, and reads nothing', async () => {
