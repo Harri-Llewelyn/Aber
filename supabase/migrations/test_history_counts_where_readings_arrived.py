@@ -25,7 +25,6 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.errors
-from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -64,10 +63,14 @@ class CoverageBase(unittest.TestCase):
         if not self.cur.fetchone()[0]:
             self.skipTest("0245 is not applied to this database")
         # The historian's relations as local tables, shaped and granted as the foreign ones are.
-        for rollup in ("telemetry_device_5m", "telemetry_device_1h"):
-            self.cur.execute(sql.SQL("DROP FOREIGN TABLE timescale.{0} CASCADE;"
-                                     "CREATE TABLE timescale.{0} (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
-                                     "GRANT SELECT ON timescale.{0} TO authenticated, service_role;").format(sql.Identifier(rollup)))
+        self.cur.execute(
+            "DROP FOREIGN TABLE timescale.telemetry_device_5m CASCADE;"
+            "CREATE TABLE timescale.telemetry_device_5m (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
+            "GRANT SELECT ON timescale.telemetry_device_5m TO authenticated, service_role;"
+            "DROP FOREIGN TABLE timescale.telemetry_device_1h CASCADE;"
+            "CREATE TABLE timescale.telemetry_device_1h (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
+            "GRANT SELECT ON timescale.telemetry_device_1h TO authenticated, service_role;"
+        )
         self.cur.execute(
             "DROP FOREIGN TABLE timescale.telemetry_device_coverage CASCADE;"
             "CREATE TABLE timescale.telemetry_device_coverage (relation text, computed_from timestamptz,"
@@ -91,8 +94,16 @@ class CoverageBase(unittest.TestCase):
 
     # ---- fixtures ----------------------------------------------------------------------------
     def count(self, rollup, at, n, asset=DEVICE):
-        self.cur.execute(sql.SQL("INSERT INTO timescale.{} (bucket, asset_id, n_rows) VALUES (%s, %s, %s);")
-                         .format(sql.Identifier(rollup)), (at, asset, n))
+        """One bucket of `rollup`, telemetry_device_5m or telemetry_device_1h, holding `n` readings.
+        Literal SQL for each: the source scan flags a statement built from a name."""
+        if rollup == "telemetry_device_5m":
+            self.cur.execute("INSERT INTO timescale.telemetry_device_5m (bucket, asset_id, n_rows) VALUES (%s, %s, %s);",
+                             (at, asset, n))
+        elif rollup == "telemetry_device_1h":
+            self.cur.execute("INSERT INTO timescale.telemetry_device_1h (bucket, asset_id, n_rows) VALUES (%s, %s, %s);",
+                             (at, asset, n))
+        else:
+            raise ValueError(rollup)
 
     def call(self, sql, args=(), role="authenticated"):
         """Run `sql` as PostgREST would for an Operator's token (or as `role`). A refusal rolls back
