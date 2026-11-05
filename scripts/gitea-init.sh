@@ -52,7 +52,9 @@ SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
 # retry mends, so it fails at once.
 kube() {
   host="${KUBERNETES_SERVICE_HOST:-kubernetes.default.svc}"
-  case "$host" in *:*) host="[$host]" ;; esac
+  case "$host" in
+    *:*) host="[$host]" ;;
+  esac
   url="https://$host:${KUBERNETES_SERVICE_PORT:-443}$2"
   for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
     set +e

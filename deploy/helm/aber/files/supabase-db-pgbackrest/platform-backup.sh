@@ -138,7 +138,7 @@ while :; do
     [ -n "$type" ] || type=diff
     # Up to a few minutes late is this loop's step; beyond that the slot was missed.
     if [ $(( $(date -u +%s) - at )) -gt 300 ]; then
-      log "missed the ${slot#*|} UTC backup; taking it now ($type)"
+      log "missed the ${slot#*\|} UTC backup; taking it now ($type)"
     fi
     backup "$type" || true
     announced=''

@@ -184,7 +184,7 @@ install_trust() {
     # Atomically, and on the same filesystem: Node-RED reads this path at every start, and a
     # half-written file there is an appliance that cannot connect.
     mkdir -p "$CERTS"
-    if ! { cp "$bundle" "$CA_FILE.tmp" && chmod 0644 "$CA_FILE.tmp" && mv "$CA_FILE.tmp" "$CA_FILE"; }; then
+    if ! (cp "$bundle" "$CA_FILE.tmp" && chmod 0644 "$CA_FILE.tmp" && mv "$CA_FILE.tmp" "$CA_FILE"); then
       rm -f "$CA_FILE.tmp"
       TRUST_RECORD=$(trust_record failed "$spki" "$not_after" false "could not write $CA_FILE")
       log "could not write $CA_FILE; the root this appliance holds is unchanged"

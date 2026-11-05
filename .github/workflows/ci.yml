@@ -178,7 +178,7 @@ jobs:
           # the moment the claim became `1,600+`; a bound only ever becomes conservative.
           ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
           CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' docs/testing.md | grep -oE '[0-9,]+' | tr -d ',')
-          echo "vitest reports ${ACTUAL:-<unparsed>}; docs/testing.md claims at least ${CLAIMED:-<absent>}"
+          echo "vitest reports ${ACTUAL:-[unparsed]}; docs/testing.md claims at least ${CLAIMED:-[absent]}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.
           if [ -z "$ACTUAL" ]; then
             echo "::error::could not read the test count out of vitest's output; this check needs fixing, not docs/testing.md"
@@ -2275,9 +2275,11 @@ jobs:
       # With NetworkPolicies on, as the install rehearsal has them, when the last release is 1.1.0 or
       # later; the enforcement probes run after the upgrade.
       - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
+        env:
+          FROM_SIGNING: ${{ matrix.signing }}
         run: >-
           node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
-          --from-signing=${{ matrix.signing }}
+          --from-signing="$FROM_SIGNING"
 
       - name: Diagnostics On Failure
         if: failure()
