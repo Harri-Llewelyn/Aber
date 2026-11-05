@@ -190,7 +190,9 @@ export default async function handler(req: Request): Promise<Response> {
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return json({ error: "Forbidden: Insufficient privileges" }, 403);
     }
-    const mfa = await secondFactorRefusal(serviceRoleClient(supabaseUrl, supabaseServiceRoleKey), userRole, authHeader);
+    // Read as the caller, as every role may read the switch: the service key stays unused until the
+    // caller has passed every refusal.
+    const mfa = await secondFactorRefusal(supabaseUser, userRole, authHeader);
     if (mfa) return json(mfa.body, mfa.status);
 
     const body = await req.json().catch(() => ({}));
