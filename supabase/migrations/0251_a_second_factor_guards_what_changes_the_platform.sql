@@ -106,53 +106,64 @@ COMMENT ON FUNCTION public.end_covered_door_sessions(p_user_id uuid, p_reason te
   'Deletes the app sessions (auth.sessions with an oauth_client_id, Grafana''s excepted) of one '
   'person, or of everyone when p_user_id is NULL, who holds Administrator or Shopfloor_Manager, and '
   'returns how many ended. One SESSIONS_ENDED row per person whose sessions ended: their email, the '
-  'count, the apps and p_reason. Called only by mfa_ends_door_sessions() (0251).';
+  'count, the apps and p_reason. Called only by the two triggers below (0251).';
 
--- The switch turning on ends everyone covered; a covered role gained while it is on ends that
--- person's. A promotion within the covered roles changes nothing: their sessions were already won
--- under the switch.
-CREATE OR REPLACE FUNCTION public.mfa_ends_door_sessions() RETURNS trigger
+-- The switch turning on ends everyone covered.
+CREATE OR REPLACE FUNCTION public.mfa_switch_ends_door_sessions() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+  IF NEW.key = 'security.require_mfa_for_managers' AND NEW.value = 'true'::jsonb
+     AND (TG_OP = 'INSERT' OR OLD.value IS DISTINCT FROM NEW.value) THEN
+    PERFORM public.end_covered_door_sessions(NULL, 'MFA was turned on in Settings');
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+ALTER FUNCTION public.mfa_switch_ends_door_sessions() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.mfa_switch_ends_door_sessions() FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.mfa_switch_ends_door_sessions() IS
+  'Trigger on system_settings: when security.require_mfa_for_managers turns on, every '
+  'Administrator''s and Shopfloor Manager''s app sessions end, Grafana''s excepted (0251).';
+
+-- A covered role gained while the switch is on ends that person's. A promotion within the covered
+-- roles changes nothing: those sessions were already won under the switch.
+CREATE OR REPLACE FUNCTION public.mfa_grant_ends_door_sessions() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
 DECLARE
   v_covered CONSTANT text[] := ARRAY['Administrator', 'Shopfloor_Manager'];
 BEGIN
-  IF TG_TABLE_NAME = 'system_settings' THEN
-    IF NEW.key = 'security.require_mfa_for_managers' AND NEW.value = 'true'::jsonb
-       AND (TG_OP = 'INSERT' OR OLD.value IS DISTINCT FROM NEW.value) THEN
-      PERFORM public.end_covered_door_sessions(NULL, 'MFA was turned on in Settings');
-    END IF;
-    RETURN NULL;
-  END IF;
-
   IF NOT coalesce((SELECT s.value = 'true'::jsonb FROM public.system_settings s
                     WHERE s.key = 'security.require_mfa_for_managers'), false) THEN
     RETURN NULL;
   END IF;
-  IF (SELECT r.name FROM public.roles r WHERE r.id = NEW.role_id) = ANY (v_covered)
+  IF (SELECT ro.name FROM public.roles ro WHERE ro.id = NEW.role_id) = ANY (v_covered)
      AND (TG_OP = 'INSERT'
-          OR coalesce((SELECT r.name FROM public.roles r WHERE r.id = OLD.role_id) <> ALL (v_covered), true)) THEN
+          OR coalesce((SELECT ro.name FROM public.roles ro WHERE ro.id = OLD.role_id) <> ALL (v_covered), true)) THEN
     PERFORM public.end_covered_door_sessions(NEW.user_id, 'Given a role that needs MFA');
   END IF;
   RETURN NULL;
 END
 $$;
 
-ALTER FUNCTION public.mfa_ends_door_sessions() OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.mfa_ends_door_sessions() FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION public.mfa_grant_ends_door_sessions() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.mfa_grant_ends_door_sessions() FROM PUBLIC, anon, authenticated, service_role;
 
-COMMENT ON FUNCTION public.mfa_ends_door_sessions() IS
-  'Trigger on system_settings and user_roles. While security.require_mfa_for_managers is on, a '
-  'person given Administrator or Shopfloor_Manager from another role or none has their app '
-  'sessions ended; when the setting turns on, everyone who holds one does. Grafana''s are kept '
-  '(0251).';
+COMMENT ON FUNCTION public.mfa_grant_ends_door_sessions() IS
+  'Trigger on user_roles: while security.require_mfa_for_managers is on, a person given '
+  'Administrator or Shopfloor_Manager from another role or none has their app sessions ended, '
+  'Grafana''s excepted (0251).';
 
-SELECT public.replay_trigger('public.system_settings', 'mfa_ends_door_sessions_trg', $ddl$
-CREATE TRIGGER mfa_ends_door_sessions_trg AFTER INSERT OR UPDATE OF value ON public.system_settings FOR EACH ROW WHEN ((new.key = 'security.require_mfa_for_managers'::text)) EXECUTE FUNCTION public.mfa_ends_door_sessions();
+SELECT public.replay_trigger('public.system_settings', 'mfa_switch_ends_door_sessions_trg', $ddl$
+CREATE TRIGGER mfa_switch_ends_door_sessions_trg AFTER INSERT OR UPDATE OF value ON public.system_settings FOR EACH ROW WHEN ((new.key = 'security.require_mfa_for_managers'::text)) EXECUTE FUNCTION public.mfa_switch_ends_door_sessions();
 $ddl$);
-SELECT public.replay_trigger('public.user_roles', 'mfa_ends_door_sessions_trg', $ddl$
-CREATE TRIGGER mfa_ends_door_sessions_trg AFTER INSERT OR UPDATE OF role_id ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.mfa_ends_door_sessions();
+SELECT public.replay_trigger('public.user_roles', 'mfa_grant_ends_door_sessions_trg', $ddl$
+CREATE TRIGGER mfa_grant_ends_door_sessions_trg AFTER INSERT OR UPDATE OF role_id ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.mfa_grant_ends_door_sessions();
 $ddl$);
 
 -- -------------------------------------------------------------------------------------------------
@@ -167,9 +178,9 @@ BEGIN
   -- write policy is evaluated as its caller, so authenticated must; anon reaches none of them.
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
                   WHERE p.oid = 'public.mfa_satisfied()'::regprocedure AND l.lanname = 'sql'
-                    AND p.provolatile = 's' AND p.prosecdef
+                    AND p.provolatile = 's' AND NOT p.prosecdef
                     AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public']) THEN
-    RAISE EXCEPTION '0251: mfa_satisfied() is not STABLE SECURITY DEFINER SQL with search_path public';
+    RAISE EXCEPTION '0251: mfa_satisfied() is not STABLE SQL, as its caller, with search_path public';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
                   WHERE p.oid = 'public.require_mfa()'::regprocedure AND l.lanname = 'plpgsql'
@@ -188,10 +199,11 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- This file's three functions: SECURITY DEFINER and pinned; the reader the gate's alone.
+  -- This file's four functions: SECURITY DEFINER and pinned; the reader the gate's alone.
   FOREACH v_fn IN ARRAY ARRAY['public.oauth_authorization_client(text)'::regprocedure,
                               'public.end_covered_door_sessions(uuid, text)'::regprocedure,
-                              'public.mfa_ends_door_sessions()'::regprocedure] LOOP
+                              'public.mfa_switch_ends_door_sessions()'::regprocedure,
+                              'public.mfa_grant_ends_door_sessions()'::regprocedure] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = v_fn AND prosecdef
                     AND proconfig IS NOT DISTINCT FROM ARRAY['search_path=public']) THEN
       RAISE EXCEPTION '0251: % is not SECURITY DEFINER with search_path public', v_fn;
@@ -206,8 +218,8 @@ BEGIN
       RAISE EXCEPTION '0251: service_role''s EXECUTE on % is not as declared; only the gate''s reader is granted', v_fn;
     END IF;
   END LOOP;
-  IF public.live_trigger_statement('public.system_settings', 'mfa_ends_door_sessions_trg') IS NULL
-     OR public.live_trigger_statement('public.user_roles', 'mfa_ends_door_sessions_trg') IS NULL THEN
+  IF public.live_trigger_statement('public.system_settings', 'mfa_switch_ends_door_sessions_trg') IS NULL
+     OR public.live_trigger_statement('public.user_roles', 'mfa_grant_ends_door_sessions_trg') IS NULL THEN
     RAISE EXCEPTION '0251: system_settings and user_roles lack the trigger that ends door sessions';
   END IF;
 

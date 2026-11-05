@@ -443,22 +443,32 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const satisfied = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_satisfied()', '$$;', 'mfa_satisfied() in the applied chain');
   const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.require_mfa()', '$$;', 'require_mfa() in the applied chain');
   const ending = lastDefinition('CREATE OR REPLACE FUNCTION public.end_covered_door_sessions(', '$$;', 'end_covered_door_sessions() in the applied chain');
-  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_ends_door_sessions()', '$$;', 'mfa_ends_door_sessions() in the applied chain');
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_grant_ends_door_sessions()', '$;', 'mfa_grant_ends_door_sessions() in the applied chain');
+  const switched = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_switch_ends_door_sessions()', '$;', 'mfa_switch_ends_door_sessions() in the applied chain');
   const ids = lastDefinition('CREATE OR REPLACE FUNCTION public.stack_app_ids()', '$$;', 'stack_app_ids() in the applied chain');
   const ts = read('supabase/functions/_shared/secondFactor.ts');
   const gate = read('supabase/functions/consent-gate/gate.ts');
   const web = read('frontend/src/utils/secondFactor.js');
   const seed = read(`${MIGRATION_DIR}/0002_seed_data.sql`);
   const list = (src) => (src ? [...src.matchAll(/["']([A-Za-z_/]+)["']/g)].map((m) => m[1]).sort().join(', ') : null);
-  const tsConst = (name) => need(ts, new RegExp(`export const ${name} = ([^;]+);`), `${name} in _shared/secondFactor.ts`)?.[1];
-  if (satisfied && guard && ending && trigger && ids) {
+  // A literal search, not a regex built from the name.
+  const tsConst = (name) => {
+    const head = `export const ${name} = `;
+    const at = ts.indexOf(head);
+    if (at < 0) {
+      problems.push(`could not find ${name} in _shared/secondFactor.ts — the file's shape changed, so this check is no longer checking anything`);
+      return null;
+    }
+    return ts.slice(at + head.length, ts.indexOf(';', at));
+  };
+  if (satisfied && guard && ending && trigger && switched && ids) {
     const setting = tsConst('MFA_SETTING')?.replace(/"/g, '');
-    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['mfa_ends_door_sessions()', trigger.body]]) {
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['mfa_switch_ends_door_sessions()', switched.body], ['mfa_grant_ends_door_sessions()', trigger.body]]) {
       if (!body.includes(`'${setting}'`)) problems.push(`mfaPredicate: ${where} does not read ${setting}, the setting _shared/secondFactor.ts reads`);
     }
     if (!seed.includes(`'${setting}',\n    to_jsonb(false),\n    'boolean'`)) problems.push(`mfaPredicate: 0002 does not declare ${setting} as a boolean, off`);
     const roles = list(tsConst('COVERED_ROLES'));
-    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['end_covered_door_sessions()', ending.body], ['mfa_ends_door_sessions()', trigger.body]]) {
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['end_covered_door_sessions()', ending.body], ['mfa_grant_ends_door_sessions()', trigger.body]]) {
       compare('mfaPredicate', `the covered roles in ${where} and _shared/secondFactor.ts`, roles, list((body.match(/ARRAY\[([^\]]*)\]/) || [])[1]));
     }
     const federated = list(tsConst('FEDERATED_METHODS'));

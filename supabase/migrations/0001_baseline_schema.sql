@@ -5780,9 +5780,10 @@ ALTER FUNCTION public.may_manage_captures() OWNER TO postgres;
 
 -- mfa_satisfied() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.mfa_satisfied() RETURNS boolean
-    LANGUAGE sql STABLE SECURITY DEFINER
+    LANGUAGE sql STABLE
     SET search_path TO 'public'
-    AS $$
+    AS $
+  -- As the caller, whom RLS lets read the setting (not sensitive) and their own user_roles row.
   -- Whether the MFA switch admits the caller: it is off, the caller holds no covered role (a
   -- machine identity holds none), the session gave its code (aal2), or another identity provider
   -- signed it in. The switch is read first, so a site that never turns it on pays one lookup.

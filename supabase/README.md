@@ -3308,7 +3308,7 @@ Every other role, and every machine identity, is never asked, and no read is eve
 database setting, not a Helm value, because a policy reads it at query time and it applies to the
 next request.
 
-- **One predicate, `mfa_satisfied()`** (`0001`, `STABLE SECURITY DEFINER`, `search_path` pinned):
+- **One predicate, `mfa_satisfied()`** (`0001`, `STABLE`, as the caller, `search_path` pinned):
   true while the switch is off, for a caller who holds neither role, for an `aal2` session and for
   a federated one. The switch is read first, so a site that never turns it on pays one index
   lookup. `require_mfa()` is its guard: true, or `42501` (PostgREST's 403) with the sentence *MFA
@@ -3358,7 +3358,8 @@ next request.
   from another or none while it is on. A promotion within the covered roles ends nothing: those
   sessions were won under the switch. One `SESSIONS_ENDED` row per person, in their lane, names the
   apps and the reason, with the Administrator who acted in `changed_by`. No new action, so no
-  Audit Trail arm.
+  Audit Trail arm. The triggers are two functions, one per table:
+  `mfa_switch_ends_door_sessions()` and `mfa_grant_ends_door_sessions()`.
 
 **Every `has_role()` policy**, final forms: 56 in the migrations (as on `45b87e43`) and 13 in
 `storage-policies.sql`. A, M, Au and O are Administrator, Shopfloor_Manager, Auditor and Operator.
@@ -3525,11 +3526,12 @@ over 10,000 areas, as an `aal2` Administrator with the switch on, shows the guar
 once (`loops=1`) while `has_role()`, as before, is in the per-row filter; the median of 5 runs was
 1433 / 1887 / 860 ms, most of it the audit trigger's 10,000 rows.
 
-The file's self-check asserts the two functions' language, volatility, `SECURITY DEFINER` and pin,
-that `authenticated` and `service_role` may run them and `anon` may not; that this file's three
-functions are `SECURITY DEFINER` and pinned, the gate's reader `service_role`'s alone; that both
-triggers are in place; that a caller with no role is admitted whatever the switch says; that the
-owner may read GoTrue's authorizations and end its sessions; and that `0002` declared the row.
+The file's self-check asserts the two functions' language, volatility, that both run as their
+caller, and their pin; that `authenticated` and `service_role` may run them and `anon` may not;
+that this file's four functions are `SECURITY DEFINER` and pinned, the gate's reader
+`service_role`'s alone; that both triggers are in place; that a caller with no role is admitted
+whatever the switch says; that the owner may read GoTrue's authorizations and end its sessions;
+and that `0002` declared the row.
 `test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py` holds every gated policy and
 function at `aal1` and `aal2`, the switch on and off, a federated `amr`, an Operator and a machine
 identity, the exemption list against the live catalog with a planted policy and function caught,
