@@ -39,7 +39,7 @@ You don't need to drag. Tick the box at the start of a lane to pick that device,
 
 The block size depends on how many devices Overview shows:
 
-- **40 devices or fewer** get about one block for every 4 pixels of the strip, at any window up to a year.
+- **40 devices or fewer** get about one block for every 4 pixels of the strip, at any window up to a year. A block is never shorter than 5 minutes, so a short window has few blocks.
 - **More than 40** get 5-minute blocks up to a day and 1-hour blocks up to 7 days. A longer window is not shown, and the page says why. To see one, type a cell's name in the search box, or narrow the list to 40 devices or fewer.
 
 ## Choosing a device and a window

@@ -204,7 +204,8 @@ describe('the blocks a selection takes', () => {
     expect(coverageBlock(day, day + 7 * 24 * h, 1550, 20)).toBe(30)
     expect(coverageBlock(day, day + 30 * 24 * h, 1550, 20)).toBe(120)
     expect(coverageBlock(day, day + 366 * 24 * h, 1550, 20)).toBe(1440)
-    expect(coverageBlock(day, day + h, 1550, 1)).toBe(1)
+    // Nothing finer than the 5-minute rollup, however wide the strip.
+    expect(coverageBlock(day, day + h, 1550, 1)).toBe(5)
   })
   it('lays the rows on the devices asked for, and keeps the narrowest counted stretch', () => {
     const { counts, counted: c } = coverageCounts([

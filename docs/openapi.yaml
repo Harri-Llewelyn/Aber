@@ -847,7 +847,7 @@ paths:
         the historian's rollups per device, never raw telemetry.
 
         **More than 40 devices take 5-minute or 1-hour blocks only**, the rollups' own widths, so
-        nothing is summed on the historian. Forty or fewer may take any whole number of minutes.
+        nothing is summed on the historian. Forty or fewer may take any whole number of 5 minutes.
         `computed_from` to `computed_to` is what the rollup has counted: a block outside it is not
         counted yet, which is not a block with no readings. `SECURITY INVOKER`, so it reads what the
         caller may read through the telemetry views.
@@ -860,7 +860,7 @@ paths:
               properties:
                 from_ts: { type: string, format: date-time }
                 to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
-                block: { type: string, example: '00:05:00', description: 'A PostgreSQL interval: a whole number of minutes, at least one, with no months. More than 40 devices take `5 minutes` or `1 hour` only.' }
+                block: { type: string, example: '00:05:00', description: 'A PostgreSQL interval: a whole number of 5 minutes, at least one, with no months. More than 40 devices take `5 minutes` or `1 hour` only.' }
                 asset_ids: { type: array, items: { type: string }, maxItems: 1000, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id), at most 1,000.' }
       responses:
         '200':

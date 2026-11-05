@@ -3321,8 +3321,9 @@ measurement). So the historian keeps a rollup per device, and the function reads
   nothing is summed on the historian. The historian sends each device's buckets and counts as two
   arrays (`array_agg ... ORDER BY bucket`, which postgres_fdw ships), so a row a device crosses, and
   a device with every block filled takes its counts as they came. **Forty or fewer may take any
-  whole number of minutes**, summed from the widest rollup that divides it, or from `telemetry_1m`
-  over the device's metrics under 5 minutes. Forty is where a year of 1-day blocks still answers in
+  whole number of 5 minutes**, summed from the widest rollup that divides it. Nothing is finer: only
+  `telemetry_1m` could answer under 5 minutes, and its real-time tail walks raw telemetry's index for
+  every device named. Forty is where a year of 1-day blocks still answers in
   about half a second.
 - **At most 1,000 devices and 360,000 device-buckets read**, refused before anything is read, as are
   bounds out of order and a bad block (`22023`). 360,000 is 1,000 devices over 26 hours of 5-minute

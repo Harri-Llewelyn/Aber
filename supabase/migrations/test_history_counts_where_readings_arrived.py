@@ -8,14 +8,15 @@ Requires a migrated Supabase database (54322 by default; `npm run test:db` start
 What is held here. telemetry_coverage() returns one row per device asked for: its readings in each
 block of the window as an array, oldest first, 0 for a block with none, with the first block's start
 and the width. A block the per-device rollup's own width (5 minutes, 1 hour) is read as it is; a
-wider one, for 40 devices or fewer, is summed from the widest rollup that divides it, and one under
-5 minutes from telemetry_1m over every metric. More than 40 devices take the rollups' own widths only.
+wider one, a whole number of 5 minutes, for 40 devices or fewer, is summed from the widest rollup
+that divides it. More than 40 devices take the rollups' own widths only, and nothing is finer than
+5 minutes.
 Each row carries what the rollup has counted (computed_from to computed_to), so a block not counted
 yet is told from one with no reading. Bounds are refused before any read. Whoever reads the
 telemetry views may call it, and anon may not.
 
-The db lane has no historian, so local tables stand in for the foreign rollups and the coverage
-view, inside the transaction. EVERY TEST ROLLS BACK.
+The db lane has no historian, so local tables stand in for the foreign device rollups and the
+coverage view, inside the transaction. EVERY TEST ROLLS BACK.
 """
 import json
 import os
@@ -67,12 +68,6 @@ class CoverageBase(unittest.TestCase):
                              f"CREATE TABLE timescale.{rollup} (bucket timestamptz NOT NULL, asset_id text NOT NULL, n_rows numeric);"
                              f"GRANT SELECT ON timescale.{rollup} TO authenticated, service_role;")
         self.cur.execute(
-            "DROP FOREIGN TABLE timescale.telemetry_1m CASCADE;"
-            "CREATE TABLE timescale.telemetry_1m (bucket timestamptz NOT NULL, asset_id text NOT NULL,"
-            " metric_name text NOT NULL, sum_double double precision, n_double bigint, min_double double precision,"
-            " max_double double precision, last_double double precision, last_string text, last_bool boolean,"
-            " n_rows bigint);"
-            "GRANT SELECT ON timescale.telemetry_1m TO authenticated, service_role;"
             "DROP FOREIGN TABLE timescale.telemetry_device_coverage CASCADE;"
             "CREATE TABLE timescale.telemetry_device_coverage (relation text, computed_from timestamptz,"
             " computed_to timestamptz, complete boolean);"
@@ -96,10 +91,6 @@ class CoverageBase(unittest.TestCase):
     # ---- fixtures ----------------------------------------------------------------------------
     def count(self, rollup, at, n, asset=DEVICE):
         self.cur.execute(f"INSERT INTO timescale.{rollup} (bucket, asset_id, n_rows) VALUES (%s, %s, %s);", (at, asset, n))
-
-    def minute(self, at, n, metric="Spindle/LOAD", asset=DEVICE):
-        self.cur.execute("INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, n_rows)"
-                         " VALUES (%s, %s, %s, %s);", (at, asset, metric, n))
 
     def call(self, sql, args=(), role="authenticated"):
         """Run `sql` as PostgREST would for an Operator's token (or as `role`). A refusal rolls back
@@ -178,15 +169,6 @@ class Summed(CoverageBase):
         # Two hours read the hourly rollup, never the 5-minute one.
         self.assertEqual(self.read(T0, T0 + timedelta(hours=4), block="2 hours")[DEVICE]["counts"], [500, 7])
 
-    def test_a_block_under_5_minutes_sums_the_device_s_metrics_from_telemetry_1m(self):
-        self.minute(T0, 3, metric="A/ONE")
-        self.minute(T0, 4, metric="B/TWO")
-        self.minute(T0 + minutes(1), 1, metric="A/ONE")
-        self.minute(T0 + minutes(3), 6, metric="A/ONE")
-        rows = self.call("SELECT counts FROM public.telemetry_coverage(%s, %s, '2 minutes', %s);",
-                         (T0, T0 + minutes(4), [DEVICE]))
-        self.assertEqual(rows, [([8, 6],)])
-
     def test_more_than_40_devices_read_only_the_rollups_own_widths(self):
         many = [f"dev{n:021x}" for n in range(1, 42)]
         with self.assertRaises(psycopg2.errors.InvalidParameterValue):
@@ -205,13 +187,6 @@ class NotCountedYet(CoverageBase):
         self.assertEqual((hour["computed_from"], hour["computed_to"], hour["complete"]),
                          (T0 + timedelta(hours=1), T0 + timedelta(hours=2), True))
 
-    def test_a_block_under_5_minutes_is_counted_throughout(self):
-        # telemetry_1m is read in real time, so nothing in it waits to be counted.
-        rows = self.call("SELECT computed_from = '-infinity' AND computed_to = 'infinity' AND complete"
-                         " FROM public.telemetry_coverage(%s, %s, '1 minute', %s);", (T0, T0 + minutes(2), [DEVICE]))
-        self.assertEqual(rows, [(True,)])
-
-
 class Refusals(CoverageBase):
     def test_bad_bounds_are_refused_before_any_read(self):
         many = [f"dev{n:021x}" for n in range(1, 1002)]
@@ -220,6 +195,8 @@ class Refusals(CoverageBase):
             "an empty window": (T0, T0, "5 minutes", [DEVICE]),
             "a block under a minute": (T0, T0 + minutes(5), "30 seconds", [DEVICE]),
             "a block of seconds": (T0, T0 + minutes(5), "90 seconds", [DEVICE]),
+            "a block under 5 minutes": (T0, T0 + minutes(5), "2 minutes", [DEVICE]),
+            "a block not whole 5 minutes": (T0, T0 + minutes(30), "7 minutes", [DEVICE]),
             "a block of months": (T0, T0 + timedelta(days=400), "1 month", [DEVICE]),
             "no devices": (T0, T0 + minutes(5), "5 minutes", None),
             "more than 1,000 devices": (T0, T0 + minutes(5), "5 minutes", many),
@@ -228,7 +205,7 @@ class Refusals(CoverageBase):
         }
         # The caller may read no rollup, so a refusal that came after a read would raise otherwise.
         self.cur.execute("REVOKE SELECT ON timescale.telemetry_device_5m, timescale.telemetry_device_1h,"
-                         " timescale.telemetry_1m, timescale.telemetry_device_coverage FROM authenticated;")
+                         " timescale.telemetry_device_coverage FROM authenticated;")
         for name, args in cases.items():
             with self.subTest(case=name):
                 with self.assertRaises(psycopg2.errors.InvalidParameterValue):

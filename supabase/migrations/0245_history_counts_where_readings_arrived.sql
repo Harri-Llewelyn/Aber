@@ -10,8 +10,9 @@
 --     aggregates.sql) over postgres_fdw: one row a device a bucket, never raw telemetry.
 --   * More than 40 devices read only those rollups' own widths, 5 minutes and 1 hour, unsummed:
 --     nothing is grouped on the historian but each device's arrays. Up to 40 may take any whole
---     number of minutes, summed from the widest rollup that divides it; under 5 minutes that is
---     telemetry_1m, summed over the device's metrics.
+--     number of 5 minutes, summed from the widest rollup that divides it. Nothing finer: under 5
+--     minutes only telemetry_1m could answer, whose real-time tail walks raw telemetry's index
+--     for every device named.
 --   * At most 1,000 devices, and 360,000 device-buckets read, refused before anything is read.
 --   * It runs as the caller, as the telemetry views do.
 --
@@ -67,8 +68,8 @@ BEGIN
     END IF;
     v_secs := extract(epoch FROM block);
     IF block IS NULL OR extract(year FROM block) <> 0 OR extract(month FROM block) <> 0
-       OR v_secs < 60 OR v_secs % 60 <> 0 THEN
-        RAISE EXCEPTION 'telemetry_coverage: block must be a whole number of minutes, at least one, and no months; got %',
+       OR v_secs < 300 OR v_secs % 300 <> 0 THEN
+        RAISE EXCEPTION 'telemetry_coverage: block must be a whole number of 5 minutes, at least one, and no months; got %',
               block USING ERRCODE = '22023';
     END IF;
     IF asset_ids IS NULL THEN
@@ -85,10 +86,8 @@ BEGIN
     -- In seconds, so a day is 24 hours in any session time zone, as date_bin() counts it.
     IF v_secs % 3600 = 0 THEN
         v_source := 'telemetry_device_1h'; v_src_secs := 3600;
-    ELSIF v_secs % 300 = 0 THEN
-        v_source := 'telemetry_device_5m'; v_src_secs := 300;
     ELSE
-        v_source := 'telemetry_1m'; v_src_secs := 60;
+        v_source := 'telemetry_device_5m'; v_src_secs := 300;
     END IF;
     IF cardinality(v_ids) > c_small AND v_secs NOT IN (300, 3600) THEN
         RAISE EXCEPTION 'telemetry_coverage: % devices read 5-minute or 1-hour blocks only, not %; more than % are never summed on the historian',
@@ -102,19 +101,15 @@ BEGIN
               cardinality(v_ids), c_max_buckets USING ERRCODE = '22023';
     END IF;
 
-    -- What the device rollup holds; telemetry_1m is read in real time, so it holds everything.
-    IF v_source = 'telemetry_1m' THEN
-        v_cfrom := '-infinity'; v_cto := 'infinity'; v_done := true;
-    ELSE
-        SELECT c.computed_from, c.computed_to, c.complete INTO v_cfrom, v_cto, v_done
-          FROM timescale.telemetry_device_coverage c WHERE c.relation = v_source;
-    END IF;
+    -- What the device rollup has counted, from the historian's catalogue.
+    SELECT c.computed_from, c.computed_to, c.complete INTO v_cfrom, v_cto, v_done
+      FROM timescale.telemetry_device_coverage c WHERE c.relation = v_source;
 
     -- A block the rollup's own width is one of its rows: the historian sends each device's buckets
     -- and counts as two arrays, so a row a device crosses, and a device with every block filled
     -- takes its counts as they came. A wider block, for a small selection, is summed on the
     -- historian and laid on a grid of every device and block here.
-    IF v_secs = v_src_secs AND v_source <> 'telemetry_1m' THEN
+    IF v_secs = v_src_secs THEN
         RETURN QUERY EXECUTE format($q$
           WITH obs AS MATERIALIZED (
             SELECT o.asset_id AS aid, array_agg(o.bucket ORDER BY o.bucket) AS bs, array_agg(o.n_rows ORDER BY o.bucket) AS ns
@@ -217,7 +212,7 @@ BEGIN
     BEGIN
       CASE v_bad
         WHEN 'window' THEN PERFORM public.telemetry_coverage(now(), now() - interval '1 hour', interval '5 minutes', '{a}');
-        WHEN 'block' THEN PERFORM public.telemetry_coverage(now() - interval '1 hour', now(), interval '30 seconds', '{a}');
+        WHEN 'block' THEN PERFORM public.telemetry_coverage(now() - interval '1 hour', now(), interval '2 minutes', '{a}');
         WHEN 'devices' THEN PERFORM public.telemetry_coverage(now() - interval '1 hour', now(), interval '5 minutes', NULL);
         WHEN 'width' THEN PERFORM public.telemetry_coverage(now() - interval '1 hour', now(), interval '10 minutes', v_many);
         ELSE PERFORM public.telemetry_coverage(now() - interval '2000 days', now(), interval '1 hour', v_many);

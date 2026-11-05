@@ -558,10 +558,10 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_each_series_carried_forward.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
-# rollups, telemetry_1m and the coverage view. One row per device asked for, its counts an array,
+# rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
-# one summed from the widest rollup that divides it for 40 devices or fewer, under 5 minutes from
-# telemetry_1m over every metric; more than 40 take 5 minutes or 1 hour only. Each row carries what
+# one summed from the widest rollup that divides it for 40 devices or fewer; nothing finer than 5
+# minutes; more than 40 take 5 minutes or 1 hour only. Each row carries what
 # the rollup has counted. Bad bounds, more than 1,000 devices and reads over 360,000 buckets are
 # refused before any read; anon may not call it, and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_counts_where_readings_arrived.py

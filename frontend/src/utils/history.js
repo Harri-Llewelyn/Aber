@@ -610,9 +610,10 @@ export const COVERAGE_BLOCK_PX = 4
 /**
  * The block widths a small selection may take, in minutes, finest first. From 5 minutes each is a
  * whole number of the 5-minute device rollup's buckets, and from an hour of the hourly one's, so
- * telemetry_coverage() sums the widest rollup that divides it; under 5 minutes, telemetry_1m.
+ * telemetry_coverage() sums the widest rollup that divides it. Nothing is finer than the 5-minute
+ * rollup: under it, only telemetry_1m could answer, whose real-time tail walks raw telemetry.
  */
-export const COVERAGE_BLOCKS = Object.freeze([1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080])
+export const COVERAGE_BLOCKS = Object.freeze([5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080])
 
 /** The longest window that still takes 5-minute blocks for a large selection: a day, a day crossing a clock change. */
 export const LARGE_FIVE_MINUTE_HOURS = 26
