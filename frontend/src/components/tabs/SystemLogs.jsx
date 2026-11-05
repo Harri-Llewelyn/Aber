@@ -14,7 +14,7 @@ import { RefreshButton } from '../common/RefreshButton'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import {
   DEFAULT_LOG_WINDOW, LOG_FILTER_MAX, LOG_LEVELS, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY, LOG_SPANS,
-  defaultLogService, formatLogTime, logWindowParams
+  defaultLogService, formatLogTime, logListKey, logWindowParams
 } from '../../utils/serviceLogs'
 import { sameWindow } from '../../utils/timeWindow'
 
@@ -108,7 +108,13 @@ function shownNote(answer) {
  */
 export function SystemLogs({ showToast }) {
   const [services, setServices] = useState(null)
-  const [service, setService] = useUrlState('service', '', { allowed: services ? (v => services.includes(v)) : null })
+  // The list and the window it was read for, so a read knows whether the window has moved.
+  const listed = useRef({ key: null, services: null })
+  // Free text: a service the window's list leaves out is kept and said so, never switched.
+  const [service, setService] = useUrlState('service', '')
+  // The service shown while none is chosen: the default, picked from the first list that has one and
+  // then held, for the same reason.
+  const held = useRef('')
   const [level, setLevel] = useUrlState('level', 'any', { allowed: LEVEL_VALUES })
   const [win, setWin] = useTimeWindow({ ranges: LOG_RANGES, fallback: DEFAULT_LOG_WINDOW, spans: LOG_SPANS })
   const [search, setSearch] = useUrlState('search', '')
@@ -123,16 +129,33 @@ export function SystemLogs({ showToast }) {
     return () => clearTimeout(timer)
   }, [search])
 
-  // Lines are read only once the list has arrived, so the address cannot name a service the store
-  // does not list: the first read asks for the list alone, which records nothing.
-  const shown = services ? service || defaultLogService(services) : ''
+  // Lines are read only for a service the window's list holds, since the function refuses any other.
+  // The list follows the window, so a new window, or a chosen service it lacks, first reads the list
+  // alone, which records nothing.
+  const shown = services ? service || held.current || defaultLogService(services) : ''
   const read = useCallback(async (signal) => {
     setReading(true)
     try {
+      const windowParams = logWindowParams(win)
+      const key = logListKey(windowParams)
+      let list = listed.current.key === key ? listed.current.services : null
+      const wanted = service || held.current
+      if (!list || (wanted && !list.includes(wanted))) {
+        const body = await api.readServiceLogs(windowParams, { signal })
+        list = body.services || []
+        listed.current = { key, services: list }
+        setServices(list)
+        setError(null)
+        if (body.observability === false) { setAnswer(body); return }
+      }
+      if (!service && !held.current) held.current = defaultLogService(list)
+      const name = service || held.current
+      if (!name || !list.includes(name)) return
       const body = await api.readServiceLogs(
-        shown ? { service: shown, level, filter, ...logWindowParams(win), limit: LOG_LINES_MAX } : {},
+        { service: name, level, filter, ...windowParams, limit: LOG_LINES_MAX },
         { signal }
       )
+      listed.current = { key, services: body.services || [] }
       setServices(body.services || [])
       setAnswer(body)
       setError(null)
@@ -143,7 +166,7 @@ export function SystemLogs({ showToast }) {
     } finally {
       setReading(false)
     }
-  }, [shown, level, filter, win])
+  }, [service, level, filter, win])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -155,12 +178,16 @@ export function SystemLogs({ showToast }) {
   usePolling(read, every * 1000, every > 0)
 
   const filterCount = [service, search, level !== 'any', !sameWindow(win, DEFAULT_LOG_WINDOW)].filter(Boolean).length
-  const clear = () => { setService(''); setSearch(''); setLevel('any'); setWin(DEFAULT_LOG_WINDOW) }
+  const clear = () => { held.current = ''; setService(''); setSearch(''); setLevel('any'); setWin(DEFAULT_LOG_WINDOW) }
 
-  const current = answer && answer.observability !== false && answer.service === shown ? answer : null
+  // The chosen service, when the window's list leaves it out: no read is made for it.
+  const unlisted = Boolean(services && shown && !services.includes(shown))
+  const current = !unlisted && answer && answer.observability !== false && answer.service === shown ? answer : null
   const note = current ? shownNote(current) : null
   const filtered = Boolean(filter) || level !== 'any'
   const during = win.kind === 'rolling' ? `the ${win.label.toLowerCase()}` : 'this time window'
+  // What the list covers: a rolling window's is the last 7 days, whatever its length.
+  const listDuring = win.kind === 'rolling' ? 'the last 7 days' : 'this time window'
 
   return (
     <>
@@ -177,8 +204,9 @@ export function SystemLogs({ showToast }) {
           value={shown}
           onChange={e => setService(e.target.value)}
           aria-label="Service"
-          disabled={!services?.length}
+          disabled={!services?.length && !unlisted}
         >
+          {unlisted && <option value={shown}>{`${shown} (no lines in ${listDuring})`}</option>}
           {(services || []).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <select
@@ -218,8 +246,13 @@ export function SystemLogs({ showToast }) {
           icon={<IconFileText size={36} />}
           message="Observability is off on this deployment, so there are no logs to read here."
         />
-      ) : services && services.length === 0 ? (
-        <EmptyState icon={<IconFileText size={36} />} message="No service has written a line in the last 7 days." />
+      ) : services && !shown ? (
+        <EmptyState
+          icon={<IconFileText size={36} />}
+          message={win.kind === 'rolling' ? 'No service has written a line in the last 7 days.' : 'No service wrote a line in this time window.'}
+        />
+      ) : unlisted ? (
+        <EmptyState icon={<IconFileText size={36} />} message={`No lines from ${shown} in ${listDuring}.`} />
       ) : !current ? (
         !error && <LoadingState label="log lines" />
       ) : current.lines.length === 0 ? (

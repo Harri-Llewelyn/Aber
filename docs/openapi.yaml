@@ -4538,8 +4538,10 @@ paths:
       summary: A service's newest log lines
       description: |
         The System page's Logs tab. Without `service`, the services that wrote a line to the log
-        store in the last 7 days; with one, that service's newest lines, newest first, in a
-        rolling window (`range`, back from now) or a fixed one (`from` and `to`).
+        store in the window: between `from` and `to`, or in the last 7 days for a rolling `range`,
+        however short, so the list does not shrink at 15 minutes. With one, that service's newest
+        lines, newest first, in a rolling window (`range`, back from now) or a fixed one (`from` and
+        `to`). A `service` must be in the same list.
 
         **Parameters, never a query.** The function builds the one query shape from these:
         `service`'s stream, then `filter` as a quoted line filter, then `level` read from each
@@ -4566,7 +4568,7 @@ paths:
         sign-ins, addresses and emails. A machine identity's token is refused (401). No
         service-role key.
       parameters:
-        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists. Without it, the answer is the list alone.' }
+        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists for the window. Without it, the answer is the list alone.' }
         - { name: level, in: query, schema: { type: string, enum: [any, error, warning, info, debug], default: any } }
         - { name: filter, in: query, schema: { type: string, maxLength: 200 }, description: 'Text a line must contain, matched exactly, case and all.' }
         - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s. Not with `from` and `to`.' }
@@ -4617,7 +4619,7 @@ paths:
                         used:      { type: integer }
                         why:       { type: string }
                   audit: { type: string, enum: [recorded, unchanged] }
-        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store has not listed in the last 7 days. Nothing was read or recorded.' }
+        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store does not list for the window, because it wrote nothing between `from` and `to`, or in the last 7 days for a `range`. `details` names the window, in UTC for a fixed one. Nothing was read or recorded.' }
         '401': { description: Missing or invalid Authorization header, or a token GoTrue does not take for a person. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }

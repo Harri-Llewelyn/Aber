@@ -1669,7 +1669,8 @@ const apiMethods = {
 
   /**
    * A service's newest log lines, newest first, for System › Logs: `{ service, level, filter,
-   * range, limit }`, each optional. Without `service` the answer is the list of services alone.
+   * range, from, to, limit }`, each optional. Without `service` the answer is the list of services
+   * alone: those that wrote between `from` and `to`, or in the last 7 days for a `range`.
    * Administrator only, through service-logs, which builds the query from these and records each
    * read whose parameters differ from the caller's last in the Audit Trail.
    *
