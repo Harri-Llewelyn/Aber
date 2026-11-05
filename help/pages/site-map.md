@@ -24,7 +24,7 @@ Open it to see whether the plant is up. When something is wrong, every lane, pin
 - **Needs attention** (amber): a device here is quarantined, waiting to be approved. It outranks Online.
 - **Nothing live** (grey): no device here is online, and none is waiting to be approved.
 - **Alert firing** (a red pin with a pulsing ring; an amber or red badge in the panel): an alert is firing against a device here, and nobody has acknowledged it. The badge is red when the alert is critical and amber otherwise. The map shows the alert and judges nothing itself.
-- **Alert acknowledged** (a red pin with a tick and no pulse; a hollow red badge with a tick in the panel): an alert against a device here has been acknowledged, and is still firing. A device chip says **ACKNOWLEDGED**. If another alert here is not acknowledged, the place shows **Alert firing** instead.
+- **Alert acknowledged** (a pale red pin with a tick and no pulse; a pale red badge with a tick in the panel): an alert against a device here has been acknowledged, and is still firing. A device chip says **ACKNOWLEDGED**. If another alert here is not acknowledged, the place shows **Alert firing** instead.
 
 A suppressed alert colours nothing. A suppression window keeps a device's alerts quiet during planned work, so the place shows the state it would have without them. Windows are set in the panel of a device, gateway or cell: see [Suppression windows](devices.md#suppression-windows).
 
