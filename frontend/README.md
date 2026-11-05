@@ -888,8 +888,8 @@ Value, Actions), header row and all, so the two read alike.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
-  error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
-  inspector (`modals/TelemetryModal.jsx`) by subscribing it.**
+  error — it silently emits nothing, which is the worse failure. **Do not "fix" History's charts
+  (`tabs/HistoryDevice.jsx`) by subscribing them**: they read again on Refresh and on its timer.
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in the
   gap and the client is not told. The 60 s poll is also the only path carrying the exponential
   backoff, and the only one that reports a refresh's outcome (see **When the dashboard stops
@@ -1117,6 +1117,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
+| History | `device`, then the device's id (`/history/device/<id>`; `/history` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
@@ -1177,6 +1178,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Its one tab, Device, lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1214,8 +1216,9 @@ the source and fails on an outlined button written into one.
 **Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
 Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
 right half sets how often it happens by itself: Off, then the page's intervals. A page that
-refreshes both by hand and on a timer uses it, not a button and a select apart. System › Logs is
-the first.
+refreshes both by hand and on a timer uses it, not a button and a select apart: System › Logs and
+History. `everyDisabledReason`, a sentence, turns the interval half off and is its tooltip, while
+the Refresh half still reads; History passes one while its window has ended.
 
 **Every list filter takes several values, through one shared part**, `common/FilterChecklist.jsx`,
 as Home Assistant's entity filters do. A filter that picks from a list is never a `<select>`; a
@@ -1373,19 +1376,21 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
   an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
   off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
-  are. The Audit Trail passes `zoom`; System › Logs does not.
+  are. The Audit Trail and History pass `zoom`; System › Logs does not.
 - **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
   setter then adds a history entry (`navigate()` without `replace`). Everything else calls
   `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
   argument on.
 - **A drag across the Audit Trail zooms too.** A mouse or pen press on the axis or an empty part of a
-  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`). It is drawn on the
-  axis, on each section heading and in the gridlines layer, as the hatched parts are. The axis words
+  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`) through
+  `hooks/useBandDrag.js`. It is drawn on the axis, on each section heading and in the gridlines
+  layer, as the hatched parts are. The axis words
   it with `bandWords` ("10:05 – 10:40, 35 min"), and a release sets `bandWindow(start, end,
   axisMs)`: to the minute on an axis of an hour or more, to the second under one, and never under
   the floor. A press on a marker or a badge starts no band, so it still opens; nor does touch, so a
   finger scrolls the page. Escape drops a band, and keeps the key from the drawer. Both functions
-  take times, not pixels, so another timeline's drag can use them.
+  take times, not pixels, so another timeline's drag can use them: History's does, through the same
+  `useBandDrag`, which takes the track to press, what to skip and the track's end padding.
 - **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
   language setting can pass its own. No date library.
 - **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
@@ -1400,6 +1405,124 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   Show more goes on from there a page at a time. A page that fails, or adds nothing, stops the loop,
   and a page asked for under an older filter is dropped when it lands. All time loads one page and
   keeps Show more.
+
+### History and its chart
+
+**History charts a device's readings over a window** (`tabs/HistoryTab.jsx`, `tabs/HistoryDevice.jsx`).
+Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each rule.
+
+- **The window** is the shared `TimeWindowControl` with every rolling range (`TIME_PRESETS`) and
+  every span, and no All time. It falls back to Last 24 hours (`DEFAULT_HISTORY_WINDOW`).
+- **The read** is `api.readCarriedTelemetry()`, the RPC `telemetry_carried()` (`0233`): one row per
+  metric per bucket, a bucket with no reading carried forward and marked `is_carried`.
+- **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
+  (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
+  the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
+  the one holding the window's start, on the epoch grid the rollups use. When no resolution fits
+  every metric, the coarsest reads them in parts. The page says which it shows ("3 of 10 metrics,
+  in 1-minute buckets").
+- **Buckets** (`HISTORY_BUCKETS`, `?bucket=`) is Auto, `pickResolution()`'s pick, or one size, in
+  a `ToolbarPopover` as the time window is. `resolutionFor()` reads a coarser size with every
+  metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
+  with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
+  status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
+- **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
+  its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
+  numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
+  `TEXT_BUCKET_MIN_PX` (3px) across the chart and whose rows fit the cap, since one-minute buckets
+  over a day run a strip's words together. The width is a chart box's, measured at each read; a
+  change of width settles for 300 ms and reads the text again only when it changes their pick.
+  Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
+  count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
+  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included. A
+  coarser bucket keeps only its last value, so a state held inside one is not drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
+- **The metrics** are those the device's last birth declared and those its schemas model
+  (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
+  (`validRanges()`), and its unit the catalog's. **Metrics** in the toolbar is a `FilterDropdown`
+  over them (`?metric=`, `useUrlList`); nothing chosen charts every one. A name the device does not
+  have is dropped from the address, so a device switched to keeps the names it shares.
+- **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
+  the buckets. The device is the page's subject, not a filter, and stays.
+- **The charts are grouped by catalog datatype** (`metricGroups()`), each group named as the
+  Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
+  integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
+  does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
+  `ExpandAllToggle` does every group from the start of the row above the charts (`history-header`), as the Audit Trail has it over its sections. A closed
+  group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
+  are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
+  written in try/catch), not in the address. The Metrics dropdown's options carry the same
+  `group`, so its checklist draws them under the same headings.
+- **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
+  since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
+  it outlasts a change of device. `usePolling` runs it only while the window reaches now
+  (`holdsNow()`); for a window that has ended the interval half is off with the reason. A read in
+  flight keeps the charts on screen, and only the newest read lands.
+- **Export CSV** (`filter-bar-actions`, after Clear filters and before Refresh, as the Audit
+  Trail places its own) opens `TelemetryExportModal` with what the page shows: the device, the
+  metrics chosen and the window, resolved to ISO bounds as it opens and named in its first line
+  (`exportWords()`). The dialog has no range of its own. It pages `/api/v1/telemetry` per metric
+  up to `TELEMETRY_EXPORT_MAX_ROWS` (50,000) across them, raw by default and never a rollup in
+  its place: it labels each resolution with its horizon and warns, with the finest that covers
+  it, when the window starts before the one chosen. The file's first line names the resolution.
+  An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
+  History replaced.
+- **Zoom** is the time control's `zoom` and a drag across any chart (`useBandDrag` over each
+  `.u-over` and state strip, which are the window's width). The page holds the band and every chart
+  shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
+  `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
+  metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
+  the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.
+- **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
+  `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
+  (`routes.js`). Choosing a device adds a history entry.
+
+**`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
+It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
+is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
+flag steps between false and true, and a state is a strip of its runs in text.
+
+- **The head** reads the bucket under the pointer, and otherwise the latest reading
+  (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
+  value and the bucket's start, since a bucket is not a reading's timestamp.
+- **A state** is `stateRuns()`, clipped to the window and to now. Each value's colour comes from
+  its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
+  not land a degree apart) to a hue, which the box carries as `--state-hue` through React's style,
+  the CSSOM, so the CSP is unchanged. App.css draws it as `oklch()` of the theme's
+  `--chart-state-l` and `--chart-state-c` and that hue, with a stronger edge. The same value is the
+  same colour on every chart, device, refresh and session, and a value never seen before has one.
+  At those tokens every hue is inside sRGB, the label clears 7.4:1 (dark) and 13:1 (light) on its
+  box, and the edge 3:1 on the card; `themeContrast.test.js` walks all 360 hues. A hash is not a
+  meaning: two values can land near each other (about one pair in twelve within 15°), and IDLE is
+  not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
+  allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
+  is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). The data
+  read is the same as a number's: a state held only inside one bucket is not shown.
+
+| Prop | What it is |
+| :--- | :--- |
+| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
+| `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
+| `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried`, `states` and `last`, one entry a bucket |
+| `start`, `end` | The window in milliseconds. The time axis is exactly the window |
+| `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
+| `minutes` | The bucket's width: a state strip's runs, and the times the head says |
+| `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
+| `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
+| `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
+| `height` | The plot's height in pixels, 140 by default |
+
+- **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
+- **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
+  `<html data-theme>` changes, so a theme switch redraws it.
+- **uPlot's own drag selection is off** (`cursor.drag` x and y false, `select` hidden): a chart
+  never rescales itself, and the page's window is the only zoom. A drag zooms that window (`band`).
+- **Under the Content-Security-Policy**, uPlot sets styles through the DOM (`element.style`), which
+  `style-src` allows, and its stylesheet is imported through the bundle. The chart's first comment
+  carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).
+- A browser that cannot draw on a canvas gets the summary and a line saying the chart could not be
+  drawn.
 
 ---
 

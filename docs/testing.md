@@ -548,6 +548,15 @@ python supabase/migrations/test_release_check.py
 # role writes them, anon reads nothing; the gateway count is online of enrolled, and stands when the
 # historian is out. Every test rolls back.
 python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
+# History reads each series carried forward (0233). Local tables stand in for the historian's
+# rollups and raw telemetry. A quiet bucket carries the last value, flagged is_carried; a bucket with
+# readings has their weighted average, minimum, maximum and last value, from the widest rollup whose
+# width divides it. Each series is seeded from the rollups before the window, from telemetry_1h
+# when it is older than its own rollup keeps, and never from raw, so a series silent longer than raw
+# retention still seeds. Nothing is carried past now; a series with nothing to carry has no row;
+# bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
+# reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_reads_each_series_carried_forward.py
 # Reading a service's logs is recorded (0225). record_service_logs_read() writes one
 # SERVICE_LOGS_READ row in the service's lane of the security domain, naming the Administrator and
 # the read's service, level, filter and range. The database decides a row is due: one on the first

@@ -563,5 +563,4 @@ describe('CellsTab filters', () => {
   })
 })
 
-// The fleet-wide metric filter has no equivalent in the per-device telemetry modal; see
-// telemetryModal.test.jsx.
+// A device's metric filter is History's (historyPage.test.jsx), not a fleet-wide one.

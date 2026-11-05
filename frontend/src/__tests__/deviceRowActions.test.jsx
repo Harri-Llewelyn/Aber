@@ -75,10 +75,9 @@ describe('device row actions', () => {
     await show([device()])
 
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
-    // Telemetry is not a row control at all now: it is a panel ACTION opening a modal, reached by
-    // selecting the device rather than by navigating to a separate page and re-finding it.
+    // Readings are not a row control: the panel's View History opens the device's charts.
     expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
-    expect(openPanel().getByText('View Telemetry')).toBeInTheDocument()
+    expect(openPanel().getByText('View History')).toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
@@ -91,9 +90,11 @@ describe('device row actions', () => {
     const labels = panelLabels()
     for (const expected of [/Audit Trail/i, /Configuration Parameters/i,
       /Export…/, /Archive Device/i,
-      /Digital Nameplate/i, /View Telemetry/i, /Edit Details/i]) {
+      /Digital Nameplate/i, /View History/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
     }
+    // History shows each metric's latest reading and exports them, so the panel has no View Telemetry.
+    expect(labels).not.toMatch(/View Telemetry/i)
     // Attached Links opens the editor that lists and attaches links.
     expect(labels).toMatch(/Attached Links/i)
   })

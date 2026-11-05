@@ -3158,6 +3158,74 @@ three of `0228`'s rules answer as before. `test-harness/fixtures/audit-event-cla
 two lanes' answers, and `test_a_person_acknowledges_an_alert.py` reads both kinds back through the
 Operational class.
 
+### History reads each series carried forward (0233)
+
+The History page charts a device's readings over a window, and a rollup read directly shows steady
+running as a hole: under report-by-exception a machine that changes nothing sends nothing, so a
+bucket with no rows means *unchanged*, not *unknown*. The historian's `telemetry_gapfill()` carries
+values forward, but the dashboard reaches the historian only through `postgres_fdw`, which cannot
+call a historian function. **`telemetry_carried(from_ts, to_ts, bucket, asset_ids, metric_names)`**
+is the platform side's carried read. Derived metrics
+([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) are to call it for their inputs
+rather than carry values a second time, so its contract stays plain:
+
+- **A series is one asset and one metric**, every pair of the two lists. `asset_ids` are telemetry
+  keys (`devices.sparkplug_id`), as the views take them. Both lists are required: a series silent
+  all window is found by its name, never by a scan.
+- **One row per series per bucket**, ordered by asset, metric and bucket: `bucket_ts`, `asset_id`,
+  `metric_name`, `avg_double`, `min_double`, `max_double`, `last_double`, `last_string`, `last_bool`,
+  `n_rows` and `is_carried`. A bucket with readings has their weighted average, minimum, maximum and
+  last values, and `n_rows` counts them. A quiet bucket has `n_rows` 0, `is_carried` true, and the
+  last value before it as its average, minimum, maximum and last. `telemetry_gapfill()` returns the
+  last value alone; a chart of a bucket with readings needs its range.
+- **Buckets lie on the epoch grid**, as the rollups' do, so a window opening inside a bucket starts
+  at that bucket's start. A bucket is a whole number of minutes, at least one, and has no months.
+  It is stepped in seconds, so a day is 24 hours in any session time zone, as `date_bin()` counts it.
+- **The source is the widest rollup whose width divides the bucket**: `telemetry_1h` for whole
+  hours, `telemetry_5m` for whole five minutes, else `telemetry_1m`. A wider bucket, such as a day,
+  is combined from it on the historian: the sums, counts, minima and maxima compose exactly, so the
+  answer is the one a 1-minute read would give, from up to sixty times fewer rows, and as far back as
+  that rollup is kept (`telemetry_1h` five years, `telemetry_1m` 180 days).
+- **Each series is seeded from the rollups, never from raw**, which the historian drops after 14
+  days by default (`timescaledb.retention.retainFor`): a series silent for longer would otherwise
+  seed empty. One query takes the newest values of every series in the 288 source buckets before
+  the window (a day of 5-minute buckets). Each series it misses is then read on its own, with
+  `ORDER BY bucket DESC LIMIT 1`, and from `telemetry_1h` when its own rollup has nothing.
+- **Nothing is carried past now**, and a series with no value at or before a bucket has no row
+  for it, so an unknown is never drawn as a value. A window may still end after now: a Day ends at
+  midnight.
+- **At most 50,000 rows** (buckets times series), refused with the count before anything is read,
+  as are bounds out of order and a bad bucket (`22023`, which PostgREST answers 400). The
+  dashboard's own cap is `TELEMETRY_MAX_ROWS`, 5,000 a read (`frontend/src/api.js`).
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, and is granted by name
+to `authenticated` and `service_role` and to nobody else: the same as the telemetry views, which
+the same roles read through the `timescale` foreign tables and the `FOR PUBLIC` user mapping
+(`fdw_reader`). It returns nothing a signed-in person cannot already read.
+
+**How it keeps the historian's work on the historian.** `postgres_fdw` ships a `WHERE`, a
+`GROUP BY` and its aggregates (`date_bin()`, `array_agg(... ORDER BY ...) FILTER`, `sum`, `min`,
+`max`) when their inputs are constants or parameters, so the bounds and lists are plpgsql
+parameters and each window read is one remote aggregate. Three things it does not ship, each found
+while measuring: `now()` (evaluated here, so a bound written with it would pull every row across),
+a lateral join (planned once per outer row: a seed written as one ran 2,535 remote queries for one
+chart, 10 s), and a `LIMIT` on a parameterised scan (the per-series seed is therefore its
+own statement, not a join). The 6,338-row `LIMIT` threshold in `api.js` governs a `LIMIT` on a
+view; none of these reads carries one, and a `LIMIT` a client puts on the RPC trims the result
+after the work is done, which is why the function bounds itself.
+
+**Measured** for #324's spike, on a private historian (TimescaleDB 2.31, the chart's retention and
+compression, 20 devices of 15 metrics over 10 days, 3.06 million `telemetry_1m` rows), warm, median
+of five, as `authenticated`: one device over 7 days at 1-hour buckets (2,535 rows), 74 ms; 20
+devices of one metric over 24 hours at 1-hour buckets (500 rows), 45 ms; one device over 24 hours
+at 5-minute buckets (4,335 rows), 115 to 280 ms. The same 7-day read from `telemetry_1m` took
+525 ms.
+
+`test_history_reads_each_series_carried_forward.py` holds every rule above with local tables
+standing in for the rollups and raw telemetry. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
 ### An app's token reaches only its own routes (0235)
 
 GoTrue's OAuth server signs a person in to an app: Grafana, Node-RED, and the Studio and forge

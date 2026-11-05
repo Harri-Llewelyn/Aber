@@ -647,6 +647,15 @@ export const SUITES = {
       'and liveness sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the ' +
       'figures and no role writes them; the gateway count stands when the historian is out.',
   },
+  'supabase/migrations/test_history_reads_each_series_carried_forward.py': {
+    lanes: ['db'],
+    why:
+      "0233's telemetry_carried(), over local tables standing in for the historian's rollups: a " +
+      'quiet bucket carries the last value and says so, a bucket with readings has their average, ' +
+      'minimum and maximum from the widest rollup that divides it, each series is seeded from the ' +
+      'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
+      'carried past now, bad bounds are refused before any read, and it reads as the caller.',
+  },
   'supabase/migrations/test_reading_a_service_s_logs_is_recorded.py': {
     lanes: ['db'],
     why:

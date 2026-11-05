@@ -62,9 +62,8 @@ const device = {
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, gateways: [gateway], gateway_count: 1 }
 
 const routeGet = (overrides = {}) => (path) => {
-  // The sub-routes go first: `/api/v1/devices/dev-1/telemetry/latest` starts with
-  // `/api/v1/devices`, so the collection route would answer it with a device object as though it
-  // were a telemetry row.
+  // The sub-routes go first: `/api/v1/devices/dev-1/config` starts with `/api/v1/devices`, so the
+  // collection route would answer it with a device object as though it were its config.
   if (path.includes('/telemetry')) return Promise.resolve(overrides.telemetry ?? [])
   if (path.includes('/config')) return Promise.resolve(overrides.config ?? [])
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(overrides.cells ?? [cell])
@@ -650,7 +649,7 @@ describe('Tables shed what the panel now carries', () => {
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })
 
-  it('opens the telemetry inspector as a modal, not inside the narrow panel', async () => {
+  it('keeps readings out of the narrow panel: View History opens the device on the History page', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -662,14 +661,12 @@ describe('Tables shed what the panel now carries', () => {
     fireEvent.click(list().getByText('Simulated_CNC_01'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    // Neither the documents list nor the telemetry table renders inside a 360px column any more:
-    // documents open in their editor from Attached Links, telemetry in a modal from here.
+    // Neither the documents list nor a telemetry table renders inside a 360px column: documents
+    // open in their editor from Attached Links, and readings on the History page.
     expect(within(panel()).queryByText('Attached Document Links')).toBeNull()
     expect(within(panel()).queryByRole('table')).toBeNull()
-
-    fireEvent.click(within(panel()).getByText('View Telemetry'))
-    await waitFor(() => expect(document.querySelector('.modal-wide')).toBeTruthy())
-    expect(within(document.querySelector('.modal-wide')).getByText(/Telemetry — Simulated_CNC_01/)).toBeTruthy()
+    expect(within(panel()).queryByText('View Telemetry')).toBeNull()
+    expect(within(panel()).getByRole('link', { name: /View History/ }).getAttribute('href')).toMatch(/^\/history\/device\//)
   })
 
   it('answers WHICH devices a gateway carries, which the row can only count', async () => {

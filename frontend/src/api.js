@@ -210,6 +210,21 @@ export const TELEMETRY_RESOLUTION_RELATIONS = Object.freeze({
 });
 
 /**
+ * The bucket widths History charts at, finest first, and the words the page names each by: the
+ * rollups', then a day, which telemetry_carried() (0233) combines from the hourly rollup so that a
+ * year of one series fits under the row cap. The row cap picks one per read (utils/history.js).
+ */
+export const HISTORY_RESOLUTIONS = Object.freeze([
+  { id: '1m', minutes: TELEMETRY_RESOLUTIONS['1m'].bucketMinutes, words: '1-minute buckets' },
+  { id: '5m', minutes: TELEMETRY_RESOLUTIONS['5m'].bucketMinutes, words: '5-minute buckets' },
+  { id: '1h', minutes: TELEMETRY_RESOLUTIONS['1h'].bucketMinutes, words: '1-hour buckets' },
+  { id: '1d', minutes: 1440, words: '1-day buckets' },
+]);
+
+/** The most rows one History read asks for: the telemetry routes' cap. */
+export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
+
+/**
  * The lower time bound applied when a caller supplies none.
  *
  * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
@@ -1296,6 +1311,30 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('directory_devices_reporting');
     if (error) throw new Error(error.message || 'Could not count the devices reporting');
     return data;
+  },
+
+  /**
+   * History's read (0233): every series of `assetIds` times `metricNames` over [from, to), one row
+   * per bucket of `bucketMinutes`, a quiet bucket carried forward and marked `is_carried`.
+   * `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws on a
+   * refusal (a bound the function will not read) or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ bucket_ts: string, asset_id: string, metric_name: string,
+   *   avg_double: ?number, min_double: ?number, max_double: ?number, last_double: ?number,
+   *   last_string: ?string, last_bool: ?boolean, n_rows: number, is_carried: boolean }>>}
+   */
+  readCarriedTelemetry: async ({ from, to, bucketMinutes, assetIds, metricNames }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_carried', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings');
+    return data || [];
   },
 
   /**
@@ -2597,20 +2636,6 @@ const apiMethods = {
         .select('device_id, area_id, cell_id, enterprise, uns_path, skip_reason');
       if (error) throw error;
       return data || [];
-    }
-
-    /**
-     * Latest value per metric for one device, for the Devices page's telemetry drawer.
-     *
-     * Checked before the /config route and the collection route, which would otherwise match
-     * first. Scoped to a single asset so the bounded page is spent on this device; the default
-     * window is 24h because a machine that reports hourly should not appear to have no data.
-     */
-    if (path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/)) {
-      const match = path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/);
-      const url = new URL(path, window.location.origin);
-      const minutes = Number.parseInt(url.searchParams.get('minutes') || '1440', 10);
-      return queryLatestTelemetry({ assetId: match[1], minutes });
     }
 
     /**

@@ -94,18 +94,12 @@ describe('queryTelemetry always bounds time', () => {
     expect(timeBounds()).toHaveLength(1);
   });
 
-  // The /latest routes read `telemetry_latest`, where the DISTINCT ON has already happened
-  // remotely. They still carry a lower bound as a staleness filter, so a machine that last reported
+  // The /latest route reads `telemetry_latest`, where the DISTINCT ON has already happened
+  // remotely. It still carries a lower bound as a staleness filter, so a machine that last reported
   // months ago does not present that reading as current.
   it('bounds the fleet-wide latest query', async () => {
     await api.get('/api/v1/telemetry/latest');
     expect(timeBounds()).toHaveLength(1);
-  });
-
-  it('bounds the device-scoped latest query', async () => {
-    await api.get(`/api/v1/devices/${key}/telemetry/latest`);
-    expect(timeBounds()).toHaveLength(1);
-    expect(calls.eq).toContainEqual(['asset_id', key]);
   });
 
   it('bounds a query carrying only an upper bound', async () => {

@@ -29,7 +29,6 @@ const TABLES = {
     sortable: 0,
     fixed: ['A form: each device in the capture, in the capture\'s order, mapped onto a target device.']
   },
-  'components/modals/TelemetryModal.jsx': { sortable: 1 },
   'components/tabs/AccessControlTab.jsx': { sortable: 4 },
   'components/tabs/AppsSection.jsx': { sortable: 1 },
   'components/tabs/ApprovalsTab.jsx': {
@@ -55,6 +54,7 @@ const TABLES = {
   'components/tabs/ColdStorageTab.jsx': { sortable: 1 },
   'components/tabs/DevicesTab.jsx': { sortable: 2 },
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
+  'components/tabs/HistoryTab.jsx': { sortable: 1 },
   'components/tabs/MetricsTab.jsx': { sortable: 3 },
   'components/tabs/PeopleSection.jsx': { sortable: 1 },
   'components/tabs/ProfileTab.jsx': {

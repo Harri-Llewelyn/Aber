@@ -8,7 +8,8 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
-import { AuditTrailTab, BAND_DRAG_PX } from '../components/tabs/AuditTrailTab'
+import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
+import { BAND_DRAG_PX } from '../hooks/useBandDrag'
 import { api } from '../api'
 
 const MACHINE_TZ = process.env.TZ

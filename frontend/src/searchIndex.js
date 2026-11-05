@@ -22,6 +22,9 @@ const EDITED_ON = new Map([
  */
 export const PAGE_KEYWORDS = {
   'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'status'],
+  // What somebody types wanting a reading over time rather than now.
+  'history':        ['chart', 'charts', 'graph', 'trend', 'trends', 'plot', 'over time', 'time series',
+                     'readings', 'telemetry history', 'past readings', 'carried forward'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',

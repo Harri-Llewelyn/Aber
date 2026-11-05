@@ -33,6 +33,7 @@ import {
 import { useSetting } from '../../hooks/useSettings'
 import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useClockTick } from '../../hooks/useClockTick'
+import { useBandDrag } from '../../hooks/useBandDrag'
 import {
   ALL_TIME, TIME_PRESETS, bandWindow, bandWords, calendarTicks, clockWords, timeWindow, windowBounds
 } from '../../utils/timeWindow'
@@ -348,78 +349,11 @@ export function clusterEvents(events, xOf, trackWidth) {
   return groups.map(item)
 }
 
-/** How far a press must move, in pixels, to be a drag: a shorter one is a click. */
-export const BAND_DRAG_PX = 4
-
 /**
- * A band dragged across the timeline's tracks, by mouse or pen. A press on the axis or an empty
- * part of a track starts one; a press on a marker or a badge, or by touch, starts none, so the
- * marker still opens and a finger still scrolls the page. `band` is `{ a, b }`, fractions of the
- * track from the press to the pointer, while one is drawn. A release at least BAND_DRAG_PX from the
- * press calls `onBand(a, b)`; Escape drops the band, and keeps the key from the drawer under it.
- * Positions are measured against the pressed track's 14px end padding, as offsetForFraction places.
+ * The timeline's band drag (hooks/useBandDrag.js): a press on the axis or an empty part of a track,
+ * never on a marker or a badge, so the marker still opens. Measured inside each track's 14px ends.
  */
-function useBandDrag(onBand) {
-  const [band, setBand] = useState(null)
-  const latest = useRef(onBand)
-  latest.current = onBand
-  const stopRef = useRef(null)
-  useEffect(() => () => stopRef.current?.(), [])
-
-  const onPointerDown = useCallback((e) => {
-    if (e.pointerType === 'touch' || e.button !== 0) return
-    const track = e.target.closest?.('.trail-track')
-    if (!track || e.target.closest('.trail-node, .trail-cluster')) return
-    stopRef.current?.()
-    const fractionAt = (x) => {
-      const r = track.getBoundingClientRect()
-      const inner = r.width - 28
-      return inner > 0 ? Math.min(1, Math.max(0, (x - r.left - 14) / inner)) : 0
-    }
-    const { pointerId, clientX: x0 } = e
-    const a = fractionAt(x0)
-    const far = (x) => Math.abs(x - x0) >= BAND_DRAG_PX
-    let drawn = false
-
-    const move = (ev) => {
-      if (ev.pointerId !== pointerId) return
-      // No button held: the release was missed (outside the window), so the press is over.
-      if (ev.buttons === 0) { stop(); return }
-      if (!drawn && !far(ev.clientX)) return
-      drawn = true
-      setBand({ a, b: fractionAt(ev.clientX) })
-    }
-    const up = (ev) => {
-      if (ev.pointerId !== pointerId) return
-      const set = drawn && far(ev.clientX)
-      stop()
-      if (set) latest.current(a, fractionAt(ev.clientX))
-    }
-    const key = (ev) => {
-      if (ev.key !== 'Escape') return
-      if (drawn) { ev.preventDefault(); ev.stopPropagation() }
-      stop()
-    }
-    function stop() {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', stop)
-      window.removeEventListener('keydown', key, true)
-      stopRef.current = null
-      setBand(null)
-    }
-    // The track keeps the pointer, so the release reaches it even outside the browser window.
-    try { track.setPointerCapture?.(pointerId) } catch { /* a pointer the browser no longer has */ }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', stop)
-    // Captured at the window, so it is heard before the drawer's Escape on the document.
-    window.addEventListener('keydown', key, true)
-    stopRef.current = stop
-  }, [])
-
-  return { band, onPointerDown }
-}
+const TRAIL_BAND = { track: '.trail-track', skip: '.trail-node, .trail-cluster', inset: 14 }
 
 /**
  * The hover text on a cluster badge: a breakdown by classification in legend order, then whether
@@ -1821,7 +1755,7 @@ export function AuditTrailTab({ userRole, showToast }) {
   const atFraction = (f) => domain.min + domain.span * f
   const { band, onPointerDown: startBand } = useBandDrag((a, b) => {
     if (domain) setTimeWin(bandWindow(atFraction(a), atFraction(b), domain.span), { replace: false })
-  })
+  }, TRAIL_BAND)
   /** The band as drawn: its ends as fractions, and the window a release sets, in words. */
   const shownBand = band && domain ? (() => {
     const lo = Math.min(band.a, band.b)

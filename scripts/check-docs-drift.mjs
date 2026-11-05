@@ -8944,12 +8944,13 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 211. How narrow a zoom goes, and how far a press moves to be a drag, are stated as the code holds
 // them. Zoom in stops at ZOOM_FLOOR_MS (utils/timeWindow.js), and a press is a drag from
-// BAND_DRAG_PX (AuditTrailTab.jsx). The Audit Trail's help, frontend/README.md and Zoom in's own
-// tooltip give them; a floor stated wrong reads as a broken button.
+// BAND_DRAG_PX (hooks/useBandDrag.js, which the Audit Trail and History share). Both pages' help,
+// frontend/README.md and Zoom in's own tooltip give them; a floor stated wrong reads as a broken
+// button.
 // -------------------------------------------------------------------------------------------------
 {
   const UTIL = 'frontend/src/utils/timeWindow.js';
-  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const TAB = 'frontend/src/hooks/useBandDrag.js';
   const CONTROL = 'frontend/src/components/common/TimeWindowControl.jsx';
   const UNITS = { SECOND: ['second', 1], MINUTE: ['minute', 60], HOUR: ['hour', 3600] };
   const floor = read(UTIL).match(/^export const ZOOM_FLOOR_MS = (?:(\d+) \* )?(SECOND|MINUTE|HOUR)$/m);
@@ -8960,10 +8961,12 @@ const OPERATOR_PAIRS = [
   } else {
     const n = Number(floor[1] ?? 1);
     const words = n === 1 ? `one ${UNITS[floor[2]][0]}` : `${n} ${UNITS[floor[2]][0]}s`;
-    const help = read('help/pages/audit-trail.md');
-    for (const phrase of [`stops at a window of ${words}`, `shorter than ${words} opens as ${words}`,
-      `A drag must move at least ${px} pixels`]) {
-      if (!help.includes(phrase)) problems211.push(`help/pages/audit-trail.md does not say "${phrase}"`);
+    for (const page of ['help/pages/audit-trail.md', 'help/pages/history.md']) {
+      const help = read(page);
+      for (const phrase of [`stops at a window of ${words}`, `shorter than ${words} opens as ${words}`,
+        `A drag must move at least ${px} pixels`]) {
+        if (!help.includes(phrase)) problems211.push(`${page} does not say "${phrase}"`);
+      }
     }
     const readme = read('frontend/README.md').replace(/\s+/g, ' ');
     for (const phrase of [`\`ZOOM_FLOOR_MS\` (${words})`, `\`BAND_DRAG_PX\` (${px}px)`]) {
@@ -8974,10 +8977,10 @@ const OPERATOR_PAIRS = [
     }
   }
   if (problems211.length) {
-    fail('how far the Audit Trail zooms is stated otherwise than the code holds it:\n' +
+    fail('how far the Audit Trail and History zoom is stated otherwise than the code holds it:\n' +
       problems211.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass(`the help, frontend/README.md and Zoom in's tooltip state the zoom floor and the ${px}px drag as the code holds them`);
+    pass(`both pages' help, frontend/README.md and Zoom in's tooltip state the zoom floor and the ${px}px drag as the code holds them`);
   }
 }
 
@@ -9015,6 +9018,253 @@ const OPERATOR_PAIRS = [
       problems197.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`frontend/README.md's GroupHeading example passes ${passed.length} of its props and names ${key}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 218. History's help names its bucket sizes and its row cap as api.js holds them. The page says
+// which resolution it shows in HISTORY_RESOLUTIONS' words, and the row cap (TELEMETRY_MAX_ROWS)
+// decides which; a help page naming another size, or another cap, explains a page nobody sees.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const help = read('help/pages/history.md');
+  const block = api.match(/export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+  const words = [...block.matchAll(/words: '([^']+)'/g)].map((m) => m[1]);
+  const cap = Number(api.match(/^const TELEMETRY_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems218 = [];
+  if (!words.length) problems218.push('could not read the words of HISTORY_RESOLUTIONS out of frontend/src/api.js');
+  if (!/export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;/.test(api)) {
+    problems218.push('frontend/src/api.js no longer sets HISTORY_MAX_ROWS to TELEMETRY_MAX_ROWS');
+  }
+  if (!Number.isFinite(cap)) problems218.push('could not read TELEMETRY_MAX_ROWS out of frontend/src/api.js');
+  const listed = [...help.matchAll(/^- \*\*(\d+-(?:minute|hour|day) buckets)\*\*$/gm)].map((m) => m[1]);
+  if (words.length && listed.join(', ') !== words.join(', ')) {
+    problems218.push(`help/pages/history.md lists ${listed.join(', ') || 'no bucket sizes'}; api.js has ${words.join(', ')}`);
+  }
+  if (Number.isFinite(cap) && !help.includes(`at most ${cap.toLocaleString('en-GB')} points`)) {
+    problems218.push(`help/pages/history.md does not say "at most ${cap.toLocaleString('en-GB')} points"`);
+  }
+  if (problems218.length) {
+    fail('History\'s help states its bucket sizes or row cap otherwise than api.js holds them:\n' +
+      problems218.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names its ${words.length} bucket sizes and its ${cap.toLocaleString('en-GB')}-point cap as api.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 219. frontend/README.md's table of TimeSeriesChart's props is the props the component takes, every
+// one and no other. The chart is the one every History tab reuses, so the table is its contract.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/TimeSeriesChart.jsx';
+  const props = (read(COMPONENT).match(/export function TimeSeriesChart\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean).sort();
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('**`common/TimeSeriesChart.jsx` is the one time-series chart**');
+  const table = from < 0 ? '' : readme.slice(from, readme.indexOf('\n\n', readme.indexOf('| Prop |', from)));
+  const named = [...table.matchAll(/^\| ((?:`\w+`(?:, )?)+) \|/gm)]
+    .flatMap((m) => [...m[1].matchAll(/`(\w+)`/g)].map((n) => n[1])).sort();
+  const problems219 = [];
+  if (!props.length) problems219.push(`could not read TimeSeriesChart's props out of ${COMPONENT}`);
+  if (!named.length) problems219.push('frontend/README.md has no table of TimeSeriesChart\'s props under "History and its chart"');
+  for (const p of props.filter((p) => !named.includes(p))) problems219.push(`the README's table leaves out ${p}`);
+  for (const p of named.filter((p) => !props.includes(p))) problems219.push(`the README's table names ${p}, which TimeSeriesChart does not take`);
+  if (problems219.length) {
+    fail('frontend/README.md describes TimeSeriesChart otherwise than the code has it:\n' +
+      problems219.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's table names TimeSeriesChart's ${props.length} props, every one`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 220. The uPlot the dashboard pins is the one whose notice it carries. The build drops uPlot's own
+// header, so TimeSeriesChart.jsx's legal comment carries its MIT notice and names its version, and
+// NOTICE.md names the same. A version bump that leaves either behind says the bundle carries a
+// release it does not.
+// -------------------------------------------------------------------------------------------------
+{
+  const pinned = JSON.parse(read('frontend/package.json')).dependencies?.uplot;
+  const notice = read('frontend/src/components/common/TimeSeriesChart.jsx').match(/^\/\*![\s\S]*?\*\//)?.[0] ?? '';
+  const named = notice.match(/uPlot (\d+\.\d+\.\d+)/)?.[1];
+  const listed = read('NOTICE.md').match(/\[uPlot\]\([^)]*\) (\d+\.\d+\.\d+)/)?.[1];
+  const problems220 = [];
+  if (!/^\d+\.\d+\.\d+$/.test(pinned ?? '')) problems220.push(`frontend/package.json pins uplot as ${pinned ?? 'nothing'}, not an exact version`);
+  if (!notice.includes('Permission is hereby granted, free of charge')) {
+    problems220.push('TimeSeriesChart.jsx no longer opens with uPlot\'s MIT notice as a /*! comment');
+  }
+  if (named !== pinned) problems220.push(`TimeSeriesChart.jsx's notice names uPlot ${named ?? 'no version'}; package.json pins ${pinned}`);
+  if (listed !== pinned) problems220.push(`NOTICE.md names uPlot ${listed ?? 'no version'}; package.json pins ${pinned}`);
+  if (problems220.length) {
+    fail('uPlot\'s notice and the version the dashboard pins disagree:\n' + problems220.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the bundle carries the notice of uPlot ${pinned}, the version package.json pins, and NOTICE.md names it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 221. History's help says the window it opens on, and which spans it offers, as utils/history.js
+// has them. The page opens on DEFAULT_HISTORY_WINDOW and offers every span and no All time.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const presets = read('frontend/src/utils/timeWindow.js');
+  const help = read('help/pages/history.md');
+  const range = util.match(/export const DEFAULT_HISTORY_WINDOW = rollingWindow\('(\w+)', HISTORY_RANGES\)/)?.[1];
+  const labels = Object.fromEntries([...presets.matchAll(/value: '(\w+)', +label: '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const label = range && labels[range];
+  const problems221 = [];
+  if (!label) problems221.push('could not read DEFAULT_HISTORY_WINDOW\'s range and its label');
+  else if (!help.includes(`It opens on **${label}**.`)) problems221.push(`help/pages/history.md does not say "It opens on **${label}**."`);
+  if (!/export const HISTORY_SPANS = SPAN_IDS$/m.test(util)) {
+    problems221.push('utils/history.js no longer offers every span (HISTORY_SPANS = SPAN_IDS); the help names all four');
+  } else if (!help.includes('Choose **Day**, **Week**, **Month** or **Year**')) {
+    problems221.push('help/pages/history.md does not name the four spans');
+  }
+  if (!help.includes('There is no **All time**')) problems221.push('help/pages/history.md does not say there is no All time');
+  if (problems221.length) {
+    fail('History\'s help states its window otherwise than utils/history.js has it:\n' +
+      problems221.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help says it opens on ${label}, with every span and no All time`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 222. History's help names the refresh timer's choices as utils/history.js holds them
+// (HISTORY_REFRESH_EVERY), in order, and says it starts at the first. A help page offering another
+// interval sends a reader looking for a choice the list does not have.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const help = read('help/pages/history.md');
+  const block = util.match(/export const HISTORY_REFRESH_EVERY = \[([\s\S]*?)\]/)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const problems222 = [];
+  if (labels.length < 2) problems222.push('could not read the labels of HISTORY_REFRESH_EVERY out of frontend/src/utils/history.js');
+  else {
+    const said = `${labels.slice(0, -1).map((l) => `**${l}**`).join(', ')} or **${labels[labels.length - 1]}**`;
+    if (!help.includes(said)) problems222.push(`help/pages/history.md does not offer ${said}`);
+    if (!help.includes(`It starts at **${labels[0]}**.`)) problems222.push(`help/pages/history.md does not say "It starts at **${labels[0]}**."`);
+  }
+  if (problems222.length) {
+    fail('History\'s help states its refresh choices otherwise than utils/history.js holds them:\n' +
+      problems222.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help offers the refresh timer's ${labels.length} choices, ${labels.join(', ')}, as utils/history.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 223. History's help says how many states a state chart's key names, and the README the same, as
+// utils/history.js caps it (STATE_KEY_MAX). A free-text metric has many values, and the cap is what
+// keeps its key readable; a page promising another number misleads whoever counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const help = read('help/pages/history.md');
+  const readme = read('frontend/README.md');
+  const cap = Number(util.match(/^export const STATE_KEY_MAX = (\d+)$/m)?.[1]);
+  const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems223 = [];
+  if (!Number.isInteger(cap)) problems223.push('could not read STATE_KEY_MAX out of frontend/src/utils/history.js');
+  else {
+    const said = `The key names the ${WORDS[cap] ?? cap} states with the most time`;
+    if (!help.includes(said)) problems223.push(`help/pages/history.md does not say "${said}"`);
+    if (!readme.includes(`\`STATE_KEY_MAX\` (${cap})`)) problems223.push(`frontend/README.md does not name \`STATE_KEY_MAX\` (${cap})`);
+  }
+  if (problems223.length) {
+    fail('History\'s docs state a state key\'s cap otherwise than utils/history.js holds it:\n' +
+      problems223.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the README say a state chart's key names ${cap} values, as STATE_KEY_MAX holds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 224. History's help names the readings export's resolutions and its row cap as the code holds
+// them: EXPORT_RESOLUTIONS' labels (utils/telemetryExport.js), raw first, and TELEMETRY_EXPORT_MAX_ROWS
+// (api.js). The dialog shows those labels and stops at that cap; help naming another sends a reader
+// looking for a choice that is not there, or trusting a file to hold rows it cannot.
+// -------------------------------------------------------------------------------------------------
+{
+  const help = read('help/pages/history.md');
+  const block = read('frontend/src/utils/telemetryExport.js').match(/export const EXPORT_RESOLUTIONS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const cap = Number(read('frontend/src/api.js').match(/^export const TELEMETRY_EXPORT_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems224 = [];
+  if (labels.length < 2) problems224.push('could not read the labels of EXPORT_RESOLUTIONS out of frontend/src/utils/telemetryExport.js');
+  else {
+    const [raw, ...summaries] = labels;
+    const first = `- **${raw}**, the one the dialog starts on,`;
+    const rest = `${summaries.slice(0, -1).map((l) => `**${l}**`).join(', ')} and **${summaries[summaries.length - 1]}** are summaries`;
+    if (!help.includes(first)) problems224.push(`help/pages/history.md does not say "${first}"`);
+    if (!help.includes(rest)) problems224.push(`help/pages/history.md does not say "${rest}"`);
+  }
+  if (!Number.isFinite(cap)) problems224.push('could not read TELEMETRY_EXPORT_MAX_ROWS out of frontend/src/api.js');
+  else if (!help.includes(`at most ${cap.toLocaleString('en-GB')} rows`)) {
+    problems224.push(`help/pages/history.md does not say "at most ${cap.toLocaleString('en-GB')} rows"`);
+  }
+  if (problems224.length) {
+    fail('History\'s help states the readings export otherwise than the code holds it:\n' +
+      problems224.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names the export's ${labels.length} resolutions, ${labels[0]} first, and its ${cap.toLocaleString('en-GB')}-row cap as the code holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 225. History's help and frontend/README.md say how wide a text chart's bucket is held under Auto,
+// as utils/history.js holds it (TEXT_BUCKET_MIN_PX). The width is why a text chart can read in
+// larger buckets than the numbers beside it; a page naming another explains a size nobody sees.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const px = Number(util.match(/^export const TEXT_BUCKET_MIN_PX = (\d+)$/m)?.[1]);
+  const problems225 = [];
+  if (!Number.isInteger(px)) problems225.push('could not read TEXT_BUCKET_MIN_PX out of frontend/src/utils/history.js');
+  else {
+    if (!read('help/pages/history.md').includes(`whose buckets are each at least ${px} pixels wide`)) {
+      problems225.push(`help/pages/history.md does not say "whose buckets are each at least ${px} pixels wide"`);
+    }
+    if (!read('frontend/README.md').includes(`\`TEXT_BUCKET_MIN_PX\` (${px}px)`)) {
+      problems225.push(`frontend/README.md does not give \`TEXT_BUCKET_MIN_PX\` (${px}px)`);
+    }
+  }
+  if (problems225.length) {
+    fail('History\'s docs state a text chart\'s bucket width otherwise than utils/history.js holds it:\n' +
+      problems225.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the README hold a text chart's bucket to ${px}px under Auto, as TEXT_BUCKET_MIN_PX does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 226. History's help names its chart groups' order as utils/history.js holds it (GROUP_ORDER),
+// each type by the name the Metrics page gives it (SPARKPLUG_TYPES, constants.js). A help page in
+// another order sends a reader looking for a group where it is not.
+// -------------------------------------------------------------------------------------------------
+{
+  const order = (read('frontend/src/utils/history.js').match(/^const GROUP_ORDER = \[([\d, ]+)\]$/m)?.[1] ?? '')
+    .split(',').map((c) => Number(c.trim())).filter(Number.isFinite);
+  const block = read('frontend/src/constants.js').match(/export const SPARKPLUG_TYPES = \{([\s\S]*?)\};/)?.[1] ?? '';
+  const types = Object.fromEntries([...block.matchAll(/(\d+): '(\w+)'/g)].map((m) => [Number(m[1]), m[2]]));
+  const SHAPE = [10, 9, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14];
+  const problems226 = [];
+  if (order.join(',') !== SHAPE.join(',')) {
+    problems226.push(`utils/history.js's GROUP_ORDER is [${order.join(', ')}]; the help states [${SHAPE.join(', ')}], so change both`);
+  } else {
+    const n = (code) => types[code];
+    const said = `**${n(10)}**, **${n(9)}**, the whole numbers (**${n(1)}** to **${n(8)}**), **${n(11)}**, **${n(12)}** and **${n(14)}**, then any other type`;
+    if (!read('help/pages/history.md').includes(said)) problems226.push(`help/pages/history.md does not say "${said}"`);
+  }
+  if (problems226.length) {
+    fail('History\'s help orders its chart groups otherwise than utils/history.js does:\n' +
+      problems226.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help orders its chart groups as GROUP_ORDER does, ${order.map((c) => types[c]).join(', ')}, then Other`);
   }
 }
 

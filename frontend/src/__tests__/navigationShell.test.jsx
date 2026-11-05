@@ -106,10 +106,10 @@ describe('Merged navigation shell', () => {
     // reads as the rail being clipped at the top.
     expect(dividers).toHaveLength(groups.length - 1)
 
-    // The Site Map leads and is in a group of its own: it is the landing page, and a group of one
-    // would be a heading that names nothing.
+    // The Site Map leads its group, the landing page, with History directly below it; the group
+    // carries no heading, which would name nothing.
     expect(groups[0].querySelector('.sidebar-group-label')).toBeNull()
-    expect(groups[0].querySelectorAll('.sidebar-item')).toHaveLength(1)
+    expect([...groups[0].querySelectorAll('.sidebar-item')].map(a => a.getAttribute('href'))).toEqual(['/site-map', '/history'])
   })
 
   it('names every item twice over, because the collapsed rail is the resting state', async () => {

@@ -76,6 +76,16 @@ The database that keeps every reading over time. Aber's is [TimescaleDB](#timesc
 A summary of readings over a fixed period: a minute, five minutes or an hour. Rollups are kept far
 longer than the raw readings, which are kept for 14 days by default.
 
+### Bucket
+
+A stretch of time a chart groups readings into, such as five minutes. The History page draws each
+bucket's average, lowest and highest reading, made from the rollups.
+
+### Carried forward
+
+A device sends a reading only when its value changes, so a stretch with no reading means the value
+stayed the same. A chart carries the last reading forward across that stretch, and draws it dashed.
+
 ### Cold archive
 
 An optional copy of old raw readings in S3-compatible storage, made before they are removed from

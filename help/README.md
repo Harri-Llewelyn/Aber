@@ -32,6 +32,7 @@ Everything here is written for someone new to Aber. Pages for people who change 
 The help for each page of the dashboard, in the order the sidebar lists them.
 
 - [Site Map](pages/site-map.md): the front page, with each area drawn as its plan.
+- [History](pages/history.md): a device's readings over a period you choose, charted.
 - [Approvals](pages/approvals.md): changes that wait for someone to approve them.
 - [Areas](pages/areas.md): the parts of your site, such as a hall or a yard.
 - [Cells](pages/cells.md): the lines and bays where gateways and devices are put.

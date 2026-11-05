@@ -91,6 +91,12 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
+  /* A state chart's box: an OKLCH lightness and chroma, the hue the value's own (stateHue()). Every
+     hue stays inside sRGB at these, the label clears 7.4:1 on the box and the edge 5.9:1 on the card. */
+  --chart-state-l:      0.40;
+  --chart-state-c:      0.065;
+  --chart-state-edge-l: 0.70;
+  --chart-state-edge-c: 0.115;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
@@ -189,6 +195,11 @@
   --cluster:      #7e22ce;
   --cluster-bg:   rgba(147, 51, 234, 0.12);
   --cluster-text: #6b21a8;
+  /* The light card's box: the label clears 13:1 on it at every hue, and the edge 3.7:1 on the card. */
+  --chart-state-l:      0.90;
+  --chart-state-c:      0.045;
+  --chart-state-edge-l: 0.60;
+  --chart-state-edge-c: 0.10;
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
@@ -1294,12 +1305,16 @@ a.tab-strip-tab { text-decoration: none; }
 
 /* The toolbar's right-hand group: Clear filters first, then secondary buttons such as Export, then
    the page's main button last. The margin is on the group rather than its first child, so the end
-   stays stable when a control is conditional. */
+   stays stable when a control is conditional. On a narrow screen the group wraps, from the right,
+   rather than pushing the page sideways. */
 .filter-bar-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 /* The three widths of a filter control, selects and search alike. The doubled selector beats
@@ -2063,7 +2078,10 @@ td.row-actions, th.row-actions {
   border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent);
 }
 .refresh-split-now:hover:not(:disabled),
-.refresh-split-every:hover { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+.refresh-split-every:hover:not(:has(select:disabled)) { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+/* Off with a reason: dimmed, and the pointer passes to the half, whose tooltip says why. */
+.refresh-split-every:has(select:disabled) { opacity: 0.6; }
+.refresh-split-every select:disabled { cursor: default; pointer-events: none; }
 .refresh-split-every select {
   appearance: none;
   border: 0;
@@ -5786,7 +5804,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The band, drawn where the hatched parts are: on the axis, on each section heading and in the
    layer behind the rows. A translucent accent with an edge each side, so it reads on both themes
    and over a hatch. */
-.trail-band {
+.trail-band,
+.chart-band {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -5799,7 +5818,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* What a release sets, "10:05 – 10:40, 35 min", on the axis, which stays in view. Opaque over the
    ticks, centred on the band and held inside the track near either end, as the now marker is; an
    outline rather than the now marker's fill, so the two are not read as one. */
-.trail-band-words {
+.trail-band-words,
+.chart-band-words {
   position: absolute;
   top: 3px;
   z-index: 2;
@@ -5816,8 +5836,206 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   white-space: nowrap;
   pointer-events: none;
 }
-.trail-band-words-start { transform: none; }
-.trail-band-words-end   { transform: translateX(-100%); }
+.trail-band-words-start,
+.chart-band-words-start { transform: none; }
+.trail-band-words-end,
+.chart-band-words-end   { transform: translateX(-100%); }
+
+/* ===== History: the charts ===== */
+/* A chart's now marker and hatched future, as the Audit Trail's axis draws them (.trail-now,
+   .trail-shade-future): placed over uPlot's plot area (.u-over), which is the window's width, and
+   leaving the pointer to the chart beneath. */
+.chart-now {
+  position: absolute;
+  top: 2px;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-now-start { transform: none; }
+.chart-now-end   { transform: translateX(-100%); }
+.chart-future {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 8px;
+  border-left: 1px solid var(--accent);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg,
+    color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
+}
+
+/* The row above the charts: Expand all or Collapse all at its start, as .trail-header has it, then
+   the line saying what is shown. */
+.history-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px var(--inset) 0;
+}
+.history-meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The charts stack down the card, which scrolls; each fits the card's width, never wider. */
+.history-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+  padding: 12px var(--inset) var(--inset);
+  min-width: 0;
+}
+/* A closed group's charts take no space: display: flex above would otherwise outrank [hidden]. */
+.history-charts[hidden] { display: none; }
+.history-chart { margin: 0; min-width: 0; }
+.history-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.history-chart-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.history-chart-range { font-size: 12px; color: var(--warning-text); }
+.history-chart-hover { min-width: 0; margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.chart-frame { position: relative; min-width: 0; }
+.chart-box { position: relative; width: 100%; min-width: 0; overflow: hidden; }
+.chart-box .uplot { width: 100%; font-family: var(--font-mono); }
+.chart-box-empty {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A state metric: each run of one value is a box across its stretch of the window, named in text,
+   filled with its value's colour: the hue the element carries (`--state-hue`, its text's hash) at
+   the theme's lightness and chroma, the edge a lighter or darker step, the text in the text colour.
+   A carried stretch inside it is hatched instead of filled, as a number chart dashes one. */
+.chart-state,
+.chart-state-key-value {
+  --tone: oklch(var(--chart-state-edge-l) var(--chart-state-edge-c) var(--state-hue));
+  --tone-fill: oklch(var(--chart-state-l) var(--chart-state-c) var(--state-hue));
+}
+.chart-state-key-plain { --tone: var(--text-dim); }
+.chart-box-states { height: 34px; }
+.chart-states { position: absolute; inset: 4px 0; }
+.chart-state {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid var(--tone);
+  border-radius: var(--radius-xs);
+  background: var(--tone-fill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.chart-state > .overflow-text { position: relative; }
+.chart-state-carried {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--tone) 55%, transparent) 0 1px, transparent 1px 6px), var(--bg-card);
+}
+/* The key under a state chart: a swatch, the value and its share, wrapping, never wider than the card. */
+.chart-state-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  min-width: 0;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chart-state-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.chart-state-key-name { max-width: 16rem; font-family: var(--font-mono); color: var(--text-primary); }
+.chart-state-share { font-variant-numeric: tabular-nums; }
+.chart-state-swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--tone);
+  border-radius: 2px;
+  background: var(--tone);
+}
+.chart-state-swatch-carried {
+  background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
+}
+.chart-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* A drag across a chart or a strip zooms to the band it shades (.chart-band, with the trail's look),
+   so a drag selects no text. */
+.history-charts .u-over,
+.chart-box-states { cursor: crosshair; user-select: none; }
+
+/* History's toolbar device and its list, in the time window's popover frame. */
+.history-device-pick { justify-content: flex-start; min-width: 0; }
+.history-device-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.history-device-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--accent-text);
+  text-decoration: none;
+}
+.history-device-option:hover,
+.history-device-option:focus-visible { background: var(--bg-glass); text-decoration: underline; }
+.history-device-option.is-current { color: var(--text-primary); font-weight: 600; }
+.history-device-place { font-size: 11px; color: var(--text-muted); }
+.history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
+.history-picker-badge { margin-left: 8px; }
+/* What the device page shows under its toolbar; its width sets the text charts' buckets. */
+.history-body { min-width: 0; }
+/* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
+   Vocabulary page's sections are drawn. */
+.history-groups { display: flex; flex-direction: column; min-width: 0; padding-top: 12px; }
+.history-group { min-width: 0; }
+.history-group-head {
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+}
+.history-group-head:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+.history-group-head > .group-heading { padding: 8px var(--inset); }
+/* The export dialog's first line: the device, the metrics and the window it exports. */
+.telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a
+   column in the popover. */
+.history-bucket-pick { justify-content: space-between; min-width: 0; }
+.history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
+.history-bucket-choices .btn { justify-content: flex-start; }
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
