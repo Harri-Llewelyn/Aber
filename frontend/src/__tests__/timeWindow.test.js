@@ -247,6 +247,10 @@ describe('a stored window\'s ends in words', () => {
     expect(windowEndsWords('2025-12-31T12:00:00.000Z', '2026-01-01T12:00:00.000Z', NOW)).toBe('31 Dec 2025 12:00 – 1 Jan 12:00')
   })
 
+  it('names the seconds on both ends where either has them, as a window zoomed to the second does', () => {
+    expect(windowEndsWords('2026-11-02T10:05:30.000Z', '2026-11-02T10:06:00.000Z', NOW)).toBe('2 Nov 10:05:30 – 2 Nov 10:06:00')
+  })
+
   it('has no words unless both ends are instants', () => {
     expect(windowEndsWords('2026-11-03T09:00:00.000Z', undefined, NOW)).toBeNull()
     expect(windowEndsWords(null, '2026-11-03T09:00:00.000Z', NOW)).toBeNull()
