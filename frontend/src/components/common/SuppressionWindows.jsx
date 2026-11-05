@@ -87,8 +87,8 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
   return (
     <section className="suppression-windows" aria-label="Suppression windows">
       <div className="context-panel-section-label">Suppression windows ({listed.length})</div>
-      {error && <div className="context-field-empty suppression-windows-error">Could not read the windows: {error}</div>}
-      {!error && listed.length === 0 && <div className="context-field-empty suppression-windows-empty">No windows scheduled</div>}
+      {error && <div className="context-field-empty">Could not read the windows: {error}</div>}
+      {!error && listed.length === 0 && <div className="context-field-empty">No windows scheduled</div>}
       {listed.length > 0 && (
         <ul className="suppression-window-list">
           {listed.map(w => {
@@ -123,7 +123,7 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
         </ul>
       )}
       {canWrite && (
-        <button type="button" className="btn btn-ghost btn-sm suppression-windows-schedule" tabIndex={tab} onClick={() => setScheduling(true)}>
+        <button type="button" className="btn btn-ghost btn-sm" tabIndex={tab} onClick={() => setScheduling(true)}>
           <IconPlus size={12} /> Schedule window…
         </button>
       )}

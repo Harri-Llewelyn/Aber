@@ -290,7 +290,7 @@ export function AlertPill({
  */
 function SuppressionLine({ alert }) {
   return (
-    <div className="alert-pill-ack alert-pill-suppression">
+    <div className="alert-pill-ack">
       <div className="alert-pill-ack-words">
         <IconBellOff size={12} className="alert-pill-suppression-mark" aria-hidden="true" />
         <span>Suppressed until {formatDateTime(alert.suppressed_until)}</span>
