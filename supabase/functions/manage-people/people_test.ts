@@ -12,9 +12,13 @@ const assert = {
 };
 
 const BASE = "http://gateway.test";
-const CALLER_TOKEN = "caller-session-token";
 const SERVICE_KEY = "service-role-jwt";
 const ADMIN_ID = "aaaaaaaa-0000-4000-8000-000000000001";
+const encode = (value: unknown) =>
+  btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+/** A session token's shape, as GoTrue accepted it: aal2 unless a test makes one at aal1. */
+const sessionToken = (aal: string) => [encode({ alg: "ES256" }), encode({ sub: ADMIN_ID, aal }), "signature"].join(".");
+const CALLER_TOKEN = sessionToken("aal2");
 const TARGET_ID = "bbbbbbbb-0000-4000-8000-000000000002";
 const NEW_ID = "cccccccc-0000-4000-8000-000000000003";
 const PASSWORD_SHAPE = /^[2-9a-hjkmnp-z]{6}(-[2-9a-hjkmnp-z]{6}){3}$/;
@@ -163,6 +167,22 @@ Deno.test("a caller who is not an Administrator reaches no admin call", async ()
     assert.equal(response.status, 403, role);
     assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"], role);
   }
+});
+
+Deno.test("with MFA required, an Administrator who has not given a code reaches no admin call", async () => {
+  env(false);
+  const on = { "GET /rest/v1/system_settings": { status: 200, body: [{ value: true }] } };
+  const s = stack(on);
+  const { response, body } = await run(post({ action: "reset-mfa", user_id: TARGET_ID }, sessionToken("aal1")), s);
+  assert.equal(response.status, 403);
+  assert.equal(body.code, "mfa_required");
+  assert.ok(String(body.details).includes("Profile › MFA"), "the answer says where to add one");
+  assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles", "GET /rest/v1/system_settings"]);
+
+  // The switch off, the same session goes on to the act.
+  const off = stack({ "GET /rest/v1/system_settings": { status: 200, body: [{ value: false }] } });
+  const passed = await run(post({ action: "remove", user_id: TARGET_ID }, sessionToken("aal1")), off);
+  assert.ok(off.paths().includes("POST /rest/v1/rpc/remove_person_access"), `went on (${passed.response.status})`);
 });
 
 Deno.test("a token GoTrue rejects is refused", async () => {

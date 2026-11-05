@@ -14,8 +14,12 @@ const assert = {
 const BASE = "http://gateway.test";
 const CREDENTIAL = "http://credential.test:9010";
 const CREDENTIAL_TOKEN = "credential-service-bearer-token-0001";
-const CALLER_TOKEN = "caller-session-token";
 const ADMIN_ID = "aaaaaaaa-0000-4000-8000-000000000001";
+const encode = (value: unknown) =>
+  btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+/** A session token's shape, as GoTrue accepted it: aal2 unless a test makes one at aal1. */
+const sessionToken = (aal: string) => [encode({ alg: "ES256" }), encode({ sub: ADMIN_ID, aal }), "signature"].join(".");
+const CALLER_TOKEN = sessionToken("aal2");
 const USERNAME = "sub0a1b2c3d4e5f60718293a";
 // Made up, and low in entropy so a secret scan does not read it as a credential.
 const PASSWORD = "not-a-secret-not-a-secret";
@@ -294,4 +298,14 @@ Deno.test("the scheme and the limits are the credential service's", () => {
   assert.equal(purposeProblem("name", "é".repeat(80)), null);
   assert.ok(purposeProblem("name", "é".repeat(81)));
   assert.equal(purposeProblem("description", "  fine  "), null);
+});
+
+Deno.test("with MFA required, an Administrator who has not given a code asks the credential service nothing", async () => {
+  env();
+  const s = stack({ "GET /rest/v1/system_settings": { status: 200, body: [{ value: true }] } });
+  const { response, body } = await run(post({ action: "create", ...PURPOSE }, sessionToken("aal1")), s);
+  assert.equal(response.status, 403);
+  assert.equal(body.code, "mfa_required");
+  assert.ok(String(body.details).includes("Profile › MFA"), "the answer says where to add one");
+  assert.equal(s.toCredentialService(), []);
 });
