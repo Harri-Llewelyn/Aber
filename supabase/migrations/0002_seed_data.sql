@@ -7885,6 +7885,61 @@ END;
 $$;
 
 -- -------------------------------------------------------------------------------------------
+-- Notifications  (3 rows)
+-- -------------------------------------------------------------------------------------------
+-- What Aber's dispatcher sends (0247, 0248). A channel's route is its own keys, named
+-- notifications.<channel>_*, so a second channel adds keys and changes none of these. Each is
+-- checked by notification_setting_guard(), and the Notifications tab of the Settings page edits
+-- them. The webhook's address and signing key are in the vault, never here.
+SELECT public.seed_setting(
+    'notifications.webhook_min_severity',
+    to_jsonb('warning'::text),
+    'string',
+    'Notifications',
+    'Lowest severity the webhook sends',
+    'An alert at this severity or above is posted to the webhook when it starts firing, as a '
+    'reminder while it fires unacknowledged, and when it resolves: info, warning or critical. '
+    'An alert about a machine identity''s token is never posted.',
+    'warning, in notification_severity_carried()'
+);
+
+SELECT public.seed_setting(
+    'notifications.webhook_allowed_hosts',
+    '[]'::jsonb,
+    'json',
+    'Notifications',
+    'Hosts the webhook may post to',
+    'The host names the webhook''s address may name, as a list such as ["hooks.example.net"]. An '
+    'address whose host is not listed is refused when a message is sent, and the delivery log '
+    'says so. Empty refuses every address.',
+    NULL
+);
+
+SELECT public.seed_setting(
+    'notifications.reminder_hours',
+    to_jsonb(12),
+    'number',
+    'Notifications',
+    'Remind every (hours)',
+    'How often an alert that is still firing, and that nobody has acknowledged, is sent again. '
+    'Twelve hours is Grafana''s own repeat interval. An alert its writer has stopped confirming is '
+    'not reminded.',
+    '12, in queue_platform_alert_reminders()'
+);
+
+-- Administrator-only, as a destination is: the hosts say where alerts go.
+UPDATE public.system_settings
+   SET sensitive = true
+ WHERE key = 'notifications.webhook_allowed_hosts'
+   AND NOT sensitive;
+
+-- A week at most: a reminder less often than that is not a reminder.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 168
+ WHERE key = 'notifications.reminder_hours'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 168);
+
+-- -------------------------------------------------------------------------------------------
 -- The forge-sweep lease  (1 row)
 -- -------------------------------------------------------------------------------------------
 -- The one row claim_forge_sweep(), renew_forge_sweep() and release_forge_sweep() move.

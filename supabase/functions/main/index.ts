@@ -173,6 +173,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GRAFANA_ALERT_WEBHOOK_SECRET",
   ],
 
+  // Aber's dispatcher (0247): drains the notification queue and posts each message to the webhook.
+  // Asked for by the database through pg_net with the dispatch secret it generated, which the
+  // function checks through an RPC, so no secret of its own is forwarded. The service-role key is
+  // for the queue's RPCs; the dashboard's address is each message's source and link.
+  "notification-dispatch": ["SUPABASE_SERVICE_ROLE_KEY", "FRONTEND_PUBLIC_URL"],
+
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
 

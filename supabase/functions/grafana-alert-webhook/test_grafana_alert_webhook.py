@@ -761,6 +761,15 @@ class TestRuleUidLabelsAndValues(unittest.TestCase):
         src = INDEX_TS.read_text(encoding="utf-8")
         self.assertIn('onConflict: "fingerprint,starts_at"', src)
 
+    def test_every_post_stamps_its_rows_confirmed(self):
+        # The dispatcher's reminders stop once a firing row is no longer confirmed (0247), so every
+        # row of every post carries the stamp, one time for the whole post, and the upsert writes it.
+        src = INDEX_TS.read_text(encoding="utf-8")
+        self.assertIn("const confirmedAt = new Date().toISOString();", src)
+        self.assertIn("last_confirmed_at: confirmedAt,", src)
+        body = src[src.index("const toWrite = rows.map("):src.index(".upsert(toWrite")]
+        self.assertIn("last_confirmed_at: confirmedAt", body, "the stamp is not in the rows the upsert writes")
+
     def test_the_typescript_reads_and_writes_them_as_this_mirror_does(self):
         src = INDEX_TS.read_text(encoding="utf-8")
         self.assertIn(f"const RULE_UID = /{RULE_UID.pattern}/;", src)

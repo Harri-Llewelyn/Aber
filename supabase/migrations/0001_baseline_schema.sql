@@ -12536,7 +12536,8 @@ ALTER TABLE public.permissions
 
 -- platform_alerts :: TABLE
 -- rule_uid, labels and values are 0220's, and the five acknowledgement columns 0231's, stated here
--- so that platform_alerts_active, below, can select them on every boot.
+-- so that platform_alerts_active, below, can select them on every boot. last_confirmed_at is
+-- 0247's, stated with them; the view does not select it.
 CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     fingerprint text NOT NULL,
@@ -12558,6 +12559,7 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
     acknowledged_by_email text,
     acknowledgement_reason text,
     acknowledgement_note text,
+    last_confirmed_at timestamp with time zone,
     CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL))),
     CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text]))),
     CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL))),
@@ -12590,7 +12592,8 @@ ALTER TABLE public.platform_alerts
     ADD COLUMN IF NOT EXISTS acknowledged_by uuid,
     ADD COLUMN IF NOT EXISTS acknowledged_by_email text,
     ADD COLUMN IF NOT EXISTS acknowledgement_reason text,
-    ADD COLUMN IF NOT EXISTS acknowledgement_note text;
+    ADD COLUMN IF NOT EXISTS acknowledgement_note text,
+    ADD COLUMN IF NOT EXISTS last_confirmed_at timestamp with time zone;
 
 ALTER TABLE public.platform_alerts
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -12612,7 +12615,8 @@ ALTER TABLE public.platform_alerts
     ALTER COLUMN acknowledged_by DROP DEFAULT,
     ALTER COLUMN acknowledged_by_email DROP DEFAULT,
     ALTER COLUMN acknowledgement_reason DROP DEFAULT,
-    ALTER COLUMN acknowledgement_note DROP DEFAULT;
+    ALTER COLUMN acknowledgement_note DROP DEFAULT,
+    ALTER COLUMN last_confirmed_at DROP DEFAULT;
 
 DO $c$ BEGIN
 
