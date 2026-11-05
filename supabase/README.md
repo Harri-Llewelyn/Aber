@@ -3378,10 +3378,11 @@ the audit row belongs in the subject's lane, which the generic audit trigger can
   and name, the times, the reason and who scheduled and ended it. `0241` files them.
 
 **Sending holds, it does not drop.** The dispatcher
-([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function. Its
-suppression arm calls `platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the
-occurrence `a` it would send, and **holds** the send while that answers a window: nothing is sent,
-and the occurrence is not marked sent. When the window ends, or is ended early, and the alert is
+([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function,
+`platform_alert_send_decision()`. Its suppression arm, in place since `0250`, calls
+`platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the occurrence `a` it
+would send, and **holds** the send while that answers a window: nothing is sent, and the occurrence
+is not marked sent. When the window ends, or is ended early, and the alert is
 still firing, the next pass finds the function answering NULL and sends it, as if it had just fired.
 Otherwise a machine that comes back from maintenance broken never alerts. An occurrence that
 resolves inside the window is never sent: there is nothing left to say. The dispatcher reads the
@@ -3490,6 +3491,262 @@ devices of 10 metrics at the storage basis's density), warm, as `authenticated`:
 for the foreign ones, the stitch at the watermark among them. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the
 pinned `search_path`, the grants, the foreign tables' `fetch_size`, and that the refusals come before
 any read, so it holds on a stack with no historian.
+
+### An alert is queued for each channel that carries it (0247)
+
+An alert reached the dashboard and nowhere else: nobody who was not looking at the dashboard or
+Grafana learned that anything had happened. The platform database is the system of record for alerts
+and their acknowledgements, so it decides what is sent, and Grafana sends nothing itself
+([`grafana/README.md`](../grafana/README.md), *One route*). From 1.8 `platform_alerts` has two
+writers: `grafana-alert-webhook` for the platform's rules, and Aber's own evaluator for machine
+conditions (#322). So the dispatcher starts from the table's rows, not from the webhook, and a writer
+added later is sent without changing.
+
+**`notification_deliveries` is the queue and the delivery log.** One row is one message to one
+channel: the occurrence (`alert_id`, NULL for a test), the `event` (`firing`, `resolved`, `reminder`
+or `test`), the `channel` (`webhook` today), `attempts`, `next_attempt_at`, the `state` and the
+`last_error`. A row is `pending` until it leaves the queue: `sent` (the receiver answered 2xx),
+`dropped` (the send decision said it no longer applies) or `dead` (every attempt failed). The
+partial unique index `notification_deliveries_once_per_occurrence` allows one firing and one resolve
+per occurrence and channel. A row goes with its occurrence when `prune_platform_alerts()` removes it
+(`ON DELETE CASCADE`), and the newest 20 finished tests are kept.
+
+**`trg_platform_alerts_queue_notifications` queues on a status change and nothing else.** It runs
+`AFTER INSERT OR UPDATE OF status`. The webhook upserts the same row on every Grafana repeat, naming
+`status` each time, so the trigger compares `OLD.status` with `NEW.status` and queues only when an
+occurrence starts firing or resolves. The `last_confirmed_at` stamp is not a status change, so it
+queues nothing either.
+
+- **A firing message** is queued for each channel that carries the alert: one that is configured
+  (`notification_channel_is_configured()`: the webhook needs its address and its signing key),
+  whose route admits its severity (`notification_severity_carried()`), and that may carry it. The
+  webhook carries only what every signed-in role may read, so it is never queued a
+  `service_identity` alert.
+- **A resolve** is queued for each channel that was queued the firing message, whatever its route
+  says now. A route raised in between must not leave a receiver holding an alert that never ends.
+- **An occurrence that arrives resolved** was never announced, and queues nothing.
+
+A queued row asks for a pass: `trg_notification_deliveries_request_dispatch` calls
+`request_notification_dispatch_once()`, which asks once a transaction however many rows it queued.
+
+**`platform_alert_send_decision(alert_id, event, channel)` decides each message just before it is
+sent**, so whatever changed since the row was queued counts. It answers `send`, `hold` or `drop`:
+
+| Event | When | Answer |
+| :--- | :--- | :--- |
+| Any | The occurrence is gone (pruned) | drop |
+| Any | The channel is the webhook and the alert is about a machine identity | drop |
+| `resolved` | Its channel's firing message was sent | send |
+| `resolved` | That message is still pending | hold |
+| `resolved` | That message was dropped or died, or there is none | drop |
+| `firing`, `reminder` | The occurrence resolved, or a newer occurrence of its fingerprint replaced it | drop |
+| `firing`, `reminder` | It is acknowledged | drop |
+| `reminder` | Its writer has not confirmed it within its window | drop |
+| `firing`, `reminder` | A suppression window covers the alert now (`0250`) | hold |
+| `firing`, `reminder` | Otherwise | send |
+
+So a firing message whose alert resolved before it went out is dropped, and its resolve with it. An
+acknowledgement drops the firing message and every reminder, and a resolve still goes if its firing
+message went. **A held row stays `pending`** with its next attempt pushed a minute out, and is not an
+attempt. It is decided again when it comes due, and sent once the hold lifts. Suppression windows
+(#326) are the second reason to hold. `0247` leaves the arm a marked place (`SUPPRESSION ARM`, after
+acknowledgement and before `send`), and `0250` fills it: a firing message or a reminder held while a
+window covers its alert is sent when the window ends, as if the alert had just fired.
+
+**A reminder every `notifications.reminder_hours`** (default 12, the repeat interval Grafana uses)
+while an alert fires unacknowledged. `queue_platform_alert_reminders()` queues one when the newest
+of the channel's sent firing message and its last reminder, whatever became of that reminder, is that
+many hours old. So a reminder that died is not queued again every minute. It queues only for the
+newest occurrence, still firing, unacknowledged, carried by the channel's route, with no reminder
+already waiting, and confirmed by its writer.
+
+**Confirmed means stamped recently by the row's writer.** `platform_alerts.last_confirmed_at` is new
+(stated in `0001`, and not in `platform_alerts_active`). `grafana-alert-webhook` stamps it on every
+row of every post, a repeat of a firing alert included. `platform_alert_confirmation_window()` says
+how long a stamp holds, by the writer the fingerprint names: Grafana's `repeat_interval`, 12 hours
+(`grafana/provisioning/alerting/policies.yaml`; mirror check 57), plus a margin of one hour. The
+margin covers a repeat that waits for its group's next flush or for the webhook to answer again.
+A row whose resolve never arrived is therefore reminded for at most 13 hours after Grafana stopped
+repeating it, where before it would have been reminded for ever: `prune_platform_alerts()` keeps the
+newest occurrence of a fingerprint however old it is. A fingerprint starting `condition:` is the
+evaluator's (#322), which will stamp on every run. Its arm answers no window, so no reminder, until
+the evaluator states its run interval there. A row never stamped is not reminded.
+
+**The dispatcher is `notification-dispatch`, asked for as `sweep_forge()` asks for `forge-sweep`.**
+`request_notification_dispatch()` reads the functions' address, the publishable key and the dispatch
+secret from the vault, and posts through `pg_net`, which sends on commit. It returns false, and asks
+nothing, while any of the three is missing. `pg_cron` runs `sweep_notifications()` every minute as
+the backstop: it queues the reminders that are due, and asks for a pass only while a row is due, so
+a quiet queue costs one query a minute. A request `pg_net` lost, a backoff that has come due and a
+hold to look at again are all picked up by the next minute's sweep.
+
+**One pass at a time**, under `notification_dispatch_lease`, a copy of the forge sweep's
+([One pass at a time](#one-pass-at-a-time-0156)). A pass claims the
+lease for 60 seconds and renews it before each post, so a pass that outlived it sends nothing more;
+`notification_deliveries_due()` and `record_notification_delivery()` refuse a caller that does not
+hold a live lease (`55P03`). A claim refused while a pass runs marks the lease `requested`, and the
+release asks for one more pass. So does a pass that stops at its 40-second budget with rows still
+due, through `release_notification_dispatch(holder, p_again)`.
+
+**The retry policy is the dispatcher's.** A failed post is retried after 30 seconds, doubling each
+time to at most an hour: 30 s, 1, 2, 4, 8, 16 and 32 minutes, then an hour twice. A message is dead
+after its tenth failed attempt, about three hours after the first. A test is tried once, because the
+Administrator who sent it is waiting for the answer. `record_notification_delivery()` stores what the
+pass decided, and only a pending row changes, so a row finished another way stays as it is.
+
+**The dispatch secret is generated by the database.** It is the one thing that tells the database's
+call apart from any other caller: the gateway's key check proves only that a caller holds a key every
+browser has. `0247` generates it on the first boot, 32 random bytes, and keeps it in the vault as
+`notification_dispatch_secret`. A value the vault can no longer decrypt is replaced. The chart passes
+no value, unlike `forge_sweep_secret`: nothing outside the database needs to know it, and the function
+checks it through `notification_dispatch_secret_matches()`, as the service role, comparing digests.
+Nothing a caller sends chooses what is sent, since every message comes from the queue.
+
+**Visibility.** The dispatcher runs as the service role, past RLS, so the database applies each
+row's visibility itself. No `service_identity` alert is ever sent to the webhook: the trigger does not
+queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Every
+signed-in role reads the delivery log, as the Settings page shows it to every role. Its select policy
+calls `notification_delivery_is_readable(alert_id)`, a `SECURITY INVOKER` lookup of the alert under
+the reader's own policy on `platform_alerts`, so a row about an alert a role may not read is not
+listed either. No API role writes the queue or reads the lease.
+
+The file's self-check asserts the column and that the view does not return it, RLS and the grants on
+both tables, both triggers' shapes, the service role's grants and every function's pin, the vault's
+secret and that the comparison admits nothing else, the sweep's schedule, both windows, and that a
+decision about an occurrence that is gone is `drop`. `test_aber_sends_each_alert_to_a_webhook.py`
+holds the trigger, every arm of the decision, the reminders, the lease, the secret and each outcome.
+`notification-dispatch/dispatch_test.ts` holds the envelope, the signature against a known vector,
+the allow-list, a redirect not followed, the backoff to a dead letter and a hold that sends later.
+
+### The webhook is signed and kept to its allowed hosts (0248)
+
+The one channel `0247` sends to today is a generic outbound webhook: any URL whose host an
+Administrator has allowed. No product is named. A site that wants a chat channel points the webhook
+at it, or at a receiver on its own network. Email is the second channel (#325 part 2); it adds its own
+keys and changes none of these.
+
+**The address is a foreign credential.** A webhook URL is a bearer secret its receiver issued, so
+`set_notification_webhook_url()` writes it through `set_foreign_credential()` and
+`notification_webhook_url_is_set()` probes it through `foreign_credential_is_set()`
+([Secrets live in Supabase Vault](#runtime-configuration-system_settings)). It is an http or https URL
+of at most 2,048 characters with no user name in it (`22023`); a credential belongs in the path or
+the query, where the receiver issued it. The Settings page enters it with `CredentialField`.
+`clear_notification_webhook_url()` removes it, which stops the webhook, and drops what was waiting
+for it. Each is the Administrator's alone (`42501`).
+
+**Three closed settings, in the Notifications category**, each checked by
+`notification_setting_guard()` beside the table's own type and bound CHECKs (`23514`):
+
+| Key | Holds | Who reads it |
+| :--- | :--- | :--- |
+| `notifications.webhook_min_severity` | `info`, `warning` (seeded) or `critical`: the lowest severity the webhook carries | Every role |
+| `notifications.webhook_allowed_hosts` | Up to 20 distinct lower-case host names, IPv4 addresses or bracketed IPv6 addresses. A host, not a URL | An Administrator alone (`sensitive`), as a destination is |
+| `notifications.reminder_hours` | A whole number of hours, 1 to 168 (seeded 12) | Every role |
+
+Only an Administrator writes them, by `system_settings_update_admin`, and the audit trigger records
+each change as for any setting. A channel's route is its own keys, named
+`notifications.<channel>_*`, so email adds `notifications.email_min_severity` and the roles it tells
+beside these without a migration of the webhook's.
+
+**The signing key is Aber's.** `issue_notification_signing_key()` generates 32 random bytes and
+returns them as Standard Webhooks writes a key, `whsec_` and base64, so a receiver's verifier takes
+it as it is. It keeps the key in the vault as `notification_webhook_signing_key`, replaced rather
+than updated, so the row's `created_at` is when it was issued, and returns it: the one time it is
+shown. Issuing again rotates it, and the old key stops signing at once, so a receiver must be given
+the new one straight after. Each issue writes one `SIGNING_KEY_ISSUED` row in the webhook's lane,
+`notification_channels`, naming who issued it and when the key it replaced was issued; the key is
+never in it. `0249` files it. The codebase classes the first showing of a credential with its issue,
+as `TOKEN_MINTED` does for a machine identity's token, and keeps `CREDENTIAL_SHOWN` for showing a
+kept copy again, so there is no second row. `notification_webhook_status()` tells an Administrator
+whether the address is set and when the key was issued; anybody else is told `visible: false`.
+
+**The message is a CloudEvents 1.0 event in structured JSON mode**, the envelope #306 settled and will
+extend. It is posted as `application/cloudevents+json`:
+
+- `specversion` `1.0`; `id` the queue row's, the same on every retry, so a receiver can drop a
+  repeat; `source` the dashboard's address (`FRONTEND_PUBLIC_URL`), or `urn:aber` without one;
+  `datacontenttype` `application/json`.
+- `type` is `aber.alert.firing`, `aber.alert.resolved`, `aber.alert.reminder` or `aber.test`.
+- `time` is when it happened: the occurrence's start for a firing message, its end for a resolve, and
+  when the row was queued for a reminder or a test.
+- `data` holds the occurrence's id (`alert_id`), its `name`, `severity`, `subject` (`type`, `id`,
+  `sparkplug_id` and `name`), `starts_at`, `ends_at`, `summary`, `labels` and `values`, and a `link`
+  to the subject in the dashboard: the device's or gateway's page, or the dashboard itself for a
+  platform alert. A test's `data` holds a sentence and a link to Settings › Notifications.
+
+**It is signed with the Standard Webhooks headers**, so a receiver can check it with an off-the-shelf
+verifier: `webhook-id` (the event's `id`), `webhook-timestamp` (seconds since the epoch) and
+`webhook-signature`, `v1,` and the base64 HMAC-SHA256 of `id.timestamp.body` under the key's bytes.
+A receiver should refuse a timestamp more than a few minutes old.
+
+**What the dispatcher refuses.** It reads the address, the key and the hosts through
+`notification_webhook_destination()`, the service role's alone, before each pass:
+
+- **An address whose host is not on the allowed hosts** is refused before anything is posted, as a
+  failed attempt, and the delivery log says so. The match is exact: no wildcard and no suffix.
+- **A redirect is not followed.** The post uses `redirect: "manual"`, so a 3xx comes back as itself,
+  and it is a failure: its target is not on the allow-list.
+- **A receiver has 10 seconds to answer.** Any answer outside 2xx is a failure.
+- **No error names the address**, since it is a credential: the log's sentences are the
+  dispatcher's own, and the function's log line names the address's origin alone.
+
+**A test goes through the queue.** `queue_test_notification()` queues an `aber.test` row and returns
+its id, and the page reads that row until it has left `pending`. So the function is never reachable
+from a browser, and a test meets the same allow-list, signature and redirect rule as any message. It
+needs the address and a key first (`55000`).
+
+**The functions pod opens the connection.** A site with `networkPolicy.enabled` must admit the
+functions pod to each webhook host in its own `networkPolicy.extraEgress`
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-180-alerts-can-be-sent-to-a-webhook)).
+
+The file's self-check asserts each function's pin and grants, the guard's trigger, what the hosts'
+rule admits and refuses, and that a request with no person behind it is refused a key and a test and
+is shown nothing. `test_aber_sends_each_alert_to_a_webhook.py` holds the settings by role, the
+address, the key and its audit rows, the destination and the test.
+
+### The Audit Trail files a webhook's signing key (0249)
+
+`0248`'s `SIGNING_KEY_ISSUED` row is in the webhook's lane, `notification_channels`, which no table
+backs. It needs one line in the map of kinds and nothing else:
+
+- **The lane** is the security lane, by `audit_domain_for()`'s fail-closed default, as for
+  `service_logs`: an Administrator issues the key, and an Administrator and an Auditor read the act.
+- **The class** is `configuration`, by `audit_event_class()`'s rule for the security lane. The class
+  indexes are unchanged, so nothing is rebuilt.
+- **`audit_trail_action_kinds()`** lists the action on its kind. It is redeclared whole from `0232`,
+  unchanged but for that line and `0241`'s four suppression window rows, and
+  `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43). `0241` declares the map too, and replays
+  first on every boot: the last declaration stands, so this one carries `0241`'s rows.
+
+The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
+rows are still there.
+
+### A suppressed alert is held until its window ends (0250)
+
+`0240`'s suppression windows keep an alert quiet on the dashboard, and `0247`'s dispatcher sends each
+alert to the webhook. Each was built to stand alone, so `0247`'s send decision left suppression a
+marked place (`SUPPRESSION ARM`). This file fills it, and nothing else changes.
+
+- **A firing message or a reminder is held** while `platform_alert_suppressing_window()` answers a
+  window for the alert, asked with `now()` as the dashboard asks it. The row stays `pending`, is not
+  an attempt, and is decided again a minute later.
+- **When the window ends, or is ended early**, the predicate answers NULL, and the next decision
+  sends an alert that is still firing, as if it had just fired.
+- **The drops come first.** An alert that resolved, was replaced or was acknowledged inside its
+  window is dropped, not held, so it is never sent.
+- **A resolve is decided as before**: sent only if its firing message went. So an occurrence that
+  resolved inside its window sends neither message. One whose firing message went before the
+  window opened still sends its resolve, so the receiver is not left holding an alert that never
+  ends.
+- **The occurrence's stamp is not read.** `suppression_window_id` says which window first covered
+  an occurrence, for history; the predicate says whether one covers it now.
+
+`platform_alert_send_decision()` is redeclared whole from `0247`, unchanged but for the arm and its
+comment. The file's self-check asserts that the function asks the predicate after the
+acknowledgement's drop, keeps its volatility, `SECURITY DEFINER`, pin and grants, and drops a message
+about an occurrence that is gone. `test_aber_sends_each_alert_to_a_webhook.py` holds a firing
+message held inside a window and sent once it is ended early, a reminder held, and an occurrence that
+resolved inside its window sending nothing.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

@@ -1238,6 +1238,16 @@ export const SUITES = {
       'during and after it and keeps its columns; that an occurrence records the window that first ' +
       "covered it and nothing clears it; and the audit rows in the subject's lane.",
   },
+  'supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py': {
+    lanes: ['db'],
+    why:
+      '0247 to 0250 -- that an alert is queued once as it starts firing and once as it resolves, ' +
+      'and never on a repeat upsert or a stamp; every arm of the send decision, and that a ' +
+      'suppressed alert is held until its window ends; that reminders ' +
+      'stop when the alert is acknowledged, resolved or no longer confirmed by its writer; the ' +
+      'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
+      'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1413,6 +1423,16 @@ export const SUITES = {
       'lease does nothing and answers 200, and every test holds the lease so the report it reads ' +
       'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch.py': {
+    lanes: ['stack'],
+    why:
+      'Aber\'s dispatcher end to end (0247, 0248): a firing alert written with psql reaches a ' +
+      'receiver pod signed with the Standard Webhooks headers; an acknowledgement before the ' +
+      'reminder stops it, an unacknowledged alert is reminded, a resolve follows its firing ' +
+      'message, and an address whose host is not allowed is refused before anything is posted. ' +
+      'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
+      'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],

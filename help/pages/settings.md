@@ -19,6 +19,51 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 - **A read-only setting** shows **Set by** and where it is set, in a greyed field, and **Fixed at install** in Actions. The Sparkplug group and the archive site key are fixed when Aber is installed, and cannot be changed here. Changing the group would change the address of every gateway.
 - **When the page is narrow** each setting stacks. The name and key come first, then the value and actions, then the description.
 
+## The Notifications tab
+
+This tab says where Aber sends each alert, besides the dashboard. Today that is one webhook: an
+address on your network, or a chat service's, that receives a message for each alert.
+
+**To set up the webhook** (an Administrator):
+
+1. Select **Set up the webhook** at the right of the toolbar.
+2. Type the address the receiver gave you. It is stored in the vault and never shown again.
+3. Under **Allowed hosts**, list the address's host, such as `hooks.example.net`. The dialog offers
+   to add it for you.
+4. Select **Save**.
+5. Select **Issue signing key**, then **Issue Key**. Copy the key into the receiver: it is shown
+   once.
+6. Select **Send a test**. A toast says how it went, and the delivery log gets a row.
+
+**What is sent, and when:**
+
+- **A message when an alert starts firing, and one when it resolves.** Only an alert at the lowest
+  severity the webhook sends, or above, is sent.
+- **A reminder** every **Remind every (hours)**, 12 by default, while the alert fires and nobody has
+  acknowledged it. Acknowledging an alert stops its reminders. Its resolve is still sent.
+- **A suppressed alert waits.** While a [suppression window](devices.md#suppression-windows) covers
+  it, its message stays **Waiting** in the log. If it still fires when the window ends, the message
+  is sent then. If it fires and resolves inside the window, nothing is sent.
+- **No alert about a machine identity's token is sent.** Only an Administrator can see those, and
+  the webhook's readers are not known.
+- **Each message is signed** with the signing key, so the receiver can check it came from this site.
+  **Rotate signing key** makes a new one, and the old one stops working at once. Give the receiver the
+  new key straight away.
+
+**The delivery log** lists the newest 50 messages, newest first, for every role. Each row says when
+it was queued, what it was about and what became of it:
+
+- **Sent**: the receiver accepted it.
+- **Waiting** or **Retrying**: it is queued, or a post failed and it is tried again. A message is
+  tried for about three hours before it is marked **Failed**.
+- **Not sent**: it no longer applied when it was due. For example, the alert resolved or was
+  acknowledged first.
+- **Last error** says why a post failed, such as an answer that was not a success, a redirect, or a
+  host that is not allowed. It never shows the address.
+
+Only an Administrator sees the webhook's toolbar and its allowed hosts. Every role sees the lowest
+severity, the reminder interval and the log.
+
 ## What the states mean
 
 - A setting shows the value in force now.
@@ -28,6 +73,6 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 
 ## What is not here
 
-**Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings. They are kept in the deployment's own secret store. The S3 secret keys are set in the destination dialogs on the Cold Storage and Backups pages. Broker credentials are issued on Access Control. Keeping secrets apart means a routine settings change never looks like a credential change in the Audit Trail.
+**Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings. They are kept in the deployment's own secret store. The S3 secret keys are set in the destination dialogs on the Cold Storage and Backups pages. Broker credentials are issued on Access Control. The webhook's address is set in its dialog on the Notifications tab, and its signing key is shown once. Keeping secrets apart means a routine settings change never looks like a credential change in the Audit Trail.
 
 Alert thresholds are not here either. Grafana owns them, along with silences and alert state history. Aber links to Grafana rather than copying them, so there is only one place a threshold can be wrong.

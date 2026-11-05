@@ -101,10 +101,10 @@ A few things to know:
 
 1. **Read**: a service's logs read on the System page, a gateway's credential shown again, a capture's download link issued, and a device exported.
 2. **Operational**: an alert acknowledged from the alert counter, or its acknowledgement withdrawn.
-3. **Configuration**: every other change in the security lane, which is people, access, machine identities, apps, settings and backups. Also a schema rejection, a token minted or revoked, and a schema attached to or detached from a device.
+3. **Configuration**: every other change in the security lane, which is people, access, machine identities, apps, settings, backups and the webhook's signing key. Also a schema rejection, a token minted or revoked, and a schema attached to or detached from a device.
 4. **Created** for something made, and **Lifecycle** for something deleted. A recording or playback started counts as made, and a capture deleted as deleted.
 5. For any other change, what changed decides. Archived, quarantined or deprecated is **Lifecycle**. A schema, configuration, connection method or address that changed is **Configuration**. Anything else is **Operational**.
 
-**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
+**Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings, backups, the webhook's signing key and reads of a service's logs. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 
 Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](../../deploy/k8s/README.md#trimming-the-audit-trail).

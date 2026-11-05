@@ -8,12 +8,15 @@
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
+import { WEBHOOK_DIALOG_KEYS } from './utils/notifications'
 import { pageTabsOf } from './navigation'
 
 /** Settings a page's own destination dialog edits, with the page a search for one opens. */
 const EDITED_ON = new Map([
   ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
-  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }])
+  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }]),
+  // The webhook's dialog is on Settings itself, on the tab its toolbar is.
+  ...WEBHOOK_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }])
 ])
 
 /**
