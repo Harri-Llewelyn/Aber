@@ -1,6 +1,6 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
 import { personUrl } from '../routes'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
@@ -684,6 +684,42 @@ describe('ending a person\'s sessions', () => {
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'End Sessions' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith('insufficient privileges to end a person\'s sessions', 'error'))
+  })
+})
+
+// The deployment's config.js, as the chart writes it; studioEnabled() reads it per call.
+describe('the confirmations name Studio only where the site runs it', () => {
+  const CONFIG = '__ABER_CONFIG__'
+  afterEach(() => { delete globalThis[CONFIG] })
+
+  async function dialogFor(action, studio) {
+    globalThis[CONFIG] = { VITE_STUDIO_ENABLED: studio }
+    window.history.replaceState(null, '', '/access-control')
+    renderPeople()
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: action }))
+    return screen.findByRole('dialog')
+  }
+
+  it('Remove Access names Studio\'s sessions with Studio on, and leaves them out with it off', async () => {
+    const on = await dialogFor('Remove Access', 'true')
+    expect(on).toHaveTextContent('Sessions they already have, here or in Node-RED, Grafana and Studio, end on their own')
+    cleanup()
+
+    const off = await dialogFor('Remove Access', 'false')
+    expect(off).toHaveTextContent('Sessions they already have, here or in Node-RED and Grafana, end on their own')
+    expect(off).not.toHaveTextContent('Studio')
+  })
+
+  it('End Sessions names Studio among what ends with Studio on, and leaves it out with it off', async () => {
+    const on = await dialogFor('End Sessions', 'true')
+    expect(on).toHaveTextContent('the dashboard in each browser, and Studio, the forge, Node-RED and Grafana.')
+    expect(on).toHaveTextContent('The API refuses their access at once, and Studio and the forge at their next request.')
+    cleanup()
+
+    const off = await dialogFor('End Sessions', 'false')
+    expect(off).toHaveTextContent('the dashboard in each browser, and the forge, Node-RED and Grafana.')
+    expect(off).toHaveTextContent('The API refuses their access at once, and the forge at their next request.')
+    expect(off).not.toHaveTextContent('Studio')
   })
 })
 

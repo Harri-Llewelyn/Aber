@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
+import { studioEnabled } from '../../config'
 import { EmptyState } from '../common/EmptyState'
 import { IconLogOut, IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
@@ -126,7 +127,7 @@ export function SessionsSection({ isPerson = true, showToast }) {
         <ConfirmModal
           title="Sign Out of All Other Sessions"
           icon={<IconLogOut size={18} />}
-          message="This ends every session but the one you are using: your other browsers and programs, and your Grafana, Node-RED, Studio and forge sign-ins, in this browser too. This browser stays signed in to the dashboard."
+          message={`This ends every session but the one you are using: your other browsers and programs, and your Grafana, Node-RED${studioEnabled() ? ', Studio' : ''} and forge sign-ins, in this browser too. This browser stays signed in to the dashboard.`}
           confirmLabel="Sign Out of All Other Sessions"
           pendingLabel="Signing out…"
           onConfirm={endOthers}

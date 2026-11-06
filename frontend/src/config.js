@@ -23,8 +23,8 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
-  // supabaseStudio.enabled. 'false' means the chart runs no Studio, so studioDoorUrl() names no
-  // door. Absent reads as on.
+  // supabaseStudio.enabled, read by studioEnabled(). 'false' means the chart runs no Studio, so
+  // studioDoorUrl() names no door and no text names Studio's sign-ins. Absent reads as on.
   'VITE_STUDIO_ENABLED',
   // Supabase Studio's door; the only consumer is sign-out (utils/studioSignOut.js). The host half
   // is load-bearing: cookies are scoped by host and ignore the port, so `localhost` and
@@ -139,12 +139,18 @@ export const readFlag = (name, fallback = false) => {
 export const playbackWorkerDeployed = () => readFlag('VITE_PLAYBACK_ENABLED', true);
 
 /**
- * Studio's door as the browser reaches it, or null where the chart runs no Studio
- * (VITE_STUDIO_ENABLED 'false'), with no fallback. Absent or any other value reads as on, as the
- * Vite dev server and an older config.js name no such key: a blank address then takes `fallback`.
+ * Whether the chart runs Studio (supabaseStudio.enabled). Only 'false' reads as off: absent or any
+ * other value reads as on, as the Vite dev server and an older config.js name no such key. Read per
+ * call, so a test can set it.
+ */
+export const studioEnabled = () => readSetting('VITE_STUDIO_ENABLED')?.toLowerCase() !== 'false';
+
+/**
+ * Studio's door as the browser reaches it, or null where the chart runs no Studio, with no
+ * fallback. With Studio on, a blank address takes `fallback`.
  */
 export function studioDoorUrl(fallback) {
-  if (readSetting('VITE_STUDIO_ENABLED')?.toLowerCase() === 'false') return null;
+  if (!studioEnabled()) return null;
   return readSetting('VITE_STUDIO_URL', fallback);
 }
 

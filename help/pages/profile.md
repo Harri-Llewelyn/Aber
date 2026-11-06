@@ -23,7 +23,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sign Out of All Other Sessions**, on the **Sessions** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
 - **MFA** (multi-factor authentication) lists the authenticator apps you have added. **Add Authenticator** adds one, and **Remove** on a row removes it. **Your MFA**, below, says how, and what it changes when you sign in.
 - **Allowed Apps** lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
-- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Sessions** tab.
+- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of the forge in every browser, and of Studio where your site runs it. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Sessions** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself

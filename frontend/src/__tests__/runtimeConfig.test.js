@@ -167,6 +167,21 @@ describe("Studio's door", () => {
     const { studioDoorUrl } = await loadConfig(undefined)
     expect(studioDoorUrl('http://127.0.0.1:54323')).toBe('http://127.0.0.1:54323')
   })
+
+  it('agrees with studioEnabled(), which reads off only for false, in any case', async () => {
+    for (const [injected, on] of [
+      [{ VITE_STUDIO_ENABLED: 'false' }, false],
+      [{ VITE_STUDIO_ENABLED: 'FALSE' }, false],
+      [{ VITE_STUDIO_ENABLED: 'true' }, true],
+      [{ VITE_STUDIO_ENABLED: '' }, true],
+      [{}, true],
+      [undefined, true],
+    ]) {
+      const { studioEnabled, studioDoorUrl } = await loadConfig(injected)
+      expect(studioEnabled()).toBe(on)
+      expect(studioDoorUrl(DOOR) !== null).toBe(on)
+    }
+  })
 })
 
 describe('public/config.js placeholder', () => {
