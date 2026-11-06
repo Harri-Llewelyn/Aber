@@ -128,7 +128,7 @@ Refreshing by itself works only while the window reaches now, such as **Last 24 
 
 Each chart is titled with the metric's name, with its unit in brackets when the Metrics page gives it one.
 
-- **Latest**, at the right of the title line, is the newest reading in the window, for example **Latest 21.3 °C · 4 Nov 12:40**. The time is the start of the bucket the reading arrived in, not the moment it was sent. A carried bucket never counts, so a quiet machine shows its last real reading. A window with only carried buckets says **No reading in this window**.
+- **Latest**, at the right of the title line, is the newest reading in the window, for example **Latest 21.3 °C · 4 Nov 12:40**. The time is the start of the bucket the reading arrived in, not the moment it was sent. A carried bucket never counts, so a quiet machine shows its last real reading. A window with only carried buckets says **No reading in this window**. A text or flag chart showing every change says since when its value has held instead.
 - **Pointing at a chart** shows that bucket instead: its time, its average, and its lowest to highest reading.
 
 - **A bucket** is a stretch of time, such as five minutes. A reading arrives whenever the machine sends one, which can be many times a minute. So each chart groups the readings into buckets of equal length, and draws one point for each.
@@ -136,10 +136,10 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **The shaded band** around it runs from the bucket's lowest reading to its highest. A narrow band means the reading held steady; a wide one means it moved within the bucket.
 - **A dashed line** means no reading arrived in those buckets. Machines send a reading only when a value changes, so a quiet stretch means the value stayed the same. The dashed line carries the last reading forward until the next one arrives. This is called **carried forward**.
 - **The valid range** is a dotted line labelled **valid range**, where the device's schema sets a lowest or highest value. It is not an alarm limit. A reading outside it usually means a faulty sensor or a schema that is wrong for the machine. The range is also written beside the chart's title.
-- **A flag**, a value that is true or false, steps between the two.
-- **A state**, such as **ACTIVE** or **READY**, is a strip of boxes, one for each stretch the device held that state, with its name inside. A state's colour comes from its name, so it is the same on every chart and every device, and a new name gets a colour of its own. Two states can have similar colours, and a colour means nothing about the state, so the name is always written inside the box. A hatched part of a box was carried forward.
+- **A flag**, a value that is true or false, steps between the two. It steps at the moment the value changed: see [Text and flags: every change](#text-and-flags-every-change).
+- **A state**, such as **ACTIVE** or **READY**, is a strip of boxes, one for each stretch the device held that state, with its name inside. A state's colour comes from its name, so it is the same on every chart and every device, and a new name gets a colour of its own. Two states can have similar colours, and a colour means nothing about the state, so the name is always written inside the box. A hatched part of a box was carried forward. A box too narrow for its name keeps its colour only.
 - **The key** under a state's strip lists each state with its colour and its share of the charted time, the most first. Time after now does not count. The key names the six states with the most time; the rest are counted together as **others**.
-- **Pointing at a state's strip** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward.
+- **Pointing at a state's strip** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward. A stretch of a few seconds is found from a few pixels away.
 - **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched and says **No readings yet**.
 - **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
 - **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab. A state's strip is not shaded.
@@ -159,9 +159,40 @@ The page picks the smallest size that keeps one read to at most 5,000 points. A 
 
 **Buckets** also offers each size. A larger size than **Auto** picks is always on. A smaller one would need more than 5,000 points, so it is listed but off; point at it to see why. A link that asks for one is charted at the size **Auto** picks, and the line above the charts says so.
 
-**Text charts get wider buckets under Auto.** In small buckets, the names in a state's strip run together and cannot be read. So under **Auto**, a text chart, such as a state, takes the smallest size whose buckets are each at least 3 pixels wide on the chart. A narrow screen or a long window gets larger buckets. The line above the charts says when text uses another size, for example **3 metrics, in 1-minute buckets; text in 5-minute buckets**. A larger bucket shows only the last value in it, so a state that lasted only part of a bucket may not show. To see every change, zoom in, or choose a size in **Buckets**, which every chart then uses, text included.
+**Text charts get wider buckets under Auto.** In small buckets, the names in a state's strip run together and cannot be read. So under **Auto**, a text chart, such as a state, takes the smallest size whose buckets are each at least 3 pixels wide on the chart. A narrow screen or a long window gets larger buckets. Text and flag charts usually show every change instead, whatever the bucket size: see [Text and flags: every change](#text-and-flags-every-change). The buckets are what they fall back to.
 
 When even 1-day buckets would be too many for all the metrics at once, the page reads them in parts and says so. A window too long for one metric in 1-day buckets is not charted, and the page asks for a shorter one.
+
+## Text and flags: every change
+
+A text chart, such as a state, and a flag chart show **every change**, each at the moment it happened. A state the device held for ten seconds is drawn at its own time, even on **Last 24 hours**. The line above the charts says so, for example **3 metrics, in 5-minute buckets; text and flags show every change**.
+
+- **A state's box** runs from the moment the device reported that state to the moment it reported the next one.
+- **A flag** steps at the moment it changed.
+- **Pointing at either** shows the stretch to the second, for example **4 Nov 10:05:12 – 10:05:47 · false, 35 s**.
+- **Latest**, at the right of the title line, says since when the value has held, for example **Latest RUNNING · since 4 Nov 12:40:05**.
+- **A hatched or dashed start** is the value carried in from before the window, up to the first reading in it.
+
+Every change needs the readings exactly as the device sent them, the raw readings. The historian keeps raw readings for 14 days by default, and its summaries for much longer. Machines also send an unchanged value again every few minutes, and those repeats are left out.
+
+### When a chart shows its buckets instead
+
+A text or flag chart shows **the last value in each bucket** instead in three cases:
+
+- **More than 2,000 changes** of one metric in the window.
+- **More than 20,000 readings** of one metric in the window, such as a value sent every second whether it changed or not.
+- **The window is older than the raw readings kept.**
+
+The line above the charts says which, for example **text and flags show the last value in each 1-hour bucket, past the 2,000-change cap**. A chart that shows something different from that line says so in its own title line.
+
+A bucket shows only the last value in it. So in the first two cases, the page also marks each bucket that held more than one value:
+
+- **On a state's strip**, the bucket is dotted along its foot. The key says **more than one value in the bucket**. Point at it to read how many values it held, for example **10:05 – 10:10 · 3 values in this bucket, RUNNING last**.
+- **On a flag's chart**, the bucket is shaded from false to true, and pointing at it says **both values in this bucket**.
+
+To see every change again, zoom in, or choose a shorter window. A window older than the raw readings has no marks, because the summaries keep only each bucket's last value.
+
+**Export CSV** is not affected. Its **Raw samples** are every reading, changes and repeats alike.
 
 ## Exporting readings
 

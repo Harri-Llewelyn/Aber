@@ -664,6 +664,15 @@ export const SUITES = {
       'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
       'carried past now, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py': {
+    lanes: ['db'],
+    why:
+      "0254's telemetry_changes(), over local tables standing in for raw telemetry and the rollups: " +
+      'a state held for seconds inside one minute is returned with its times, a refresh of an ' +
+      'unchanged value collapses, the value in force at the start is carried in, past either cap ' +
+      'it says so and marks each bucket that held more than one value, a window whose raw readings ' +
+      'were dropped says so, bad bounds are refused before any read, and it reads as the caller.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:

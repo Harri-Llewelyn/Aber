@@ -4186,6 +4186,75 @@ change among the three dashboard-issued types, an unchanged type, an archived ga
 row, a token refused for a gateway that is not Remote, and the clean-up leaving a Remote gateway
 alone and changing nothing a second time.
 
+### History reads every change of a text or a flag (0254)
+
+The bucket read keeps a text's or a flag's last value in each bucket (`last(val_string, time)` and
+`last(val_bool, time)`, `timescaledb/aggregates.sql`), so a state that begins and ends inside one
+bucket is not in it. On a state metric the brief change is usually the event: a fault, a robot off
+its path, a program that ran for a minute ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
+Under report by exception such a metric sends a row when it changes and a refresh every couple of
+minutes, so raw telemetry over a day holds few of them.
+**`telemetry_changes(from_ts, to_ts, bucket, asset_ids, metric_names, max_changes)`** reads them.
+
+- **One row per series**, every pair of the two lists, in asset and metric order. `read` says how
+  its chart is drawn: `changes`, `change_cap`, `reading_cap` or `retention`.
+- **`changes` comes from raw telemetry.** `change_ts`, `val_string` and `val_bool` hold the first
+  reading in the window, then each reading whose value differs from the one before, oldest first.
+  `lag()` over the series' raw rows drops the refreshes here, so only changes cross to the browser.
+  The first reading stays even when it repeats the value before the window: it is where that value
+  stops being carried in. `n_changes` counts them.
+- **The value in force at `from_ts`** is `carried_string` or `carried_bool`: the newest raw reading
+  before it in the bucket holding `from_ts`, else the 1-minute rollup's last value in the day before
+  that bucket, else `telemetry_1h`'s, as `telemetry_carried()` seeds. A rollup bucket wholly before
+  the window ends on the last reading in it, so this is the value raw would give.
+- **`change_cap`** is more than `max_changes` changes, 2,000 unless given and at most 5,000.
+  **`reading_cap`** is more than 20,000 readings of one series in the window, such as a metric
+  published every second whether it changed or not; none of them crosses. For both, `marked_ts`
+  and `marked_values` name each bucket of `bucket` that held more than one value, and how many,
+  counted from raw with `count(DISTINCT)`. The chart marks that bucket instead of showing its last
+  value as if it held all of it. Over 1,000,000 readings the historian is not asked to count.
+- **`retention`**: the historian has dropped raw readings of the series inside the window.
+  `telemetry_raw_retention()` drops raw a chunk at a time, oldest first (14 days by default,
+  `timescaledb.retention.retainFor`), so raw is complete from its oldest reading on. `raw_from` is
+  that reading, on every row. A window starting before it is `retention` only when `telemetry_1h`
+  holds the series in the hours between, so a series that began later, or a young stack with
+  nothing dropped, is still read from raw. Nothing is marked: the rollups keep a last value only.
+- **Text and flags only.** It compares `val_string` and `val_bool`. A number's values are never
+  compared, since nearly every reading of one is a change.
+- **Its bounds** are 50 series, 50,000 buckets times series as `telemetry_carried()` takes,
+  `max_changes` 1 to 5,000, and that function's window and bucket rules (`22023`), all refused
+  before anything is read.
+
+**Why a count bounds the raw read, not a `LIMIT`.** postgres_fdw sends a `LIMIT` only when it is
+under its own row estimate, and with no statistics it estimates one row for a series over a window.
+Measured: `ORDER BY time LIMIT 5001`, and `LIMIT 1`, over one series came back as a remote `WHERE`
+and a local sort, so every matching row would cross. The 1-minute rollup's `sum(n_rows)` over the
+window's buckets, one remote aggregate for every series, decides first whether a series' rows may
+cross at all. They then cross once (a materialised CTE), and the changes, the value carried in and
+the marks are all computed from them here. The seeds, the guard and `reading_cap`'s marks are
+aggregates (`(array_agg(... ORDER BY ...))[1]`, `sum`, `count(DISTINCT)` with its `HAVING`), which
+postgres_fdw sends whole; the retention probe is an `EXISTS` on `telemetry_1h`.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression), warm,
+as `authenticated`, over 10 days of the tutorial device's simulation (a flag and a text, a tick every
+5 s, a refresh every 120 s):
+
+| Read | Readings | Changes | Warm |
+| :--- | ---: | ---: | ---: |
+| The flag and the text, Last 24 hours, in 5-minute buckets | 1,336 + 1,473 | 935 + 1,473 | 21 ms |
+| The same two, the bucket read (`telemetry_carried()`) | | | 11 ms |
+| Those two, a quiet mode and a flag published every second, Last 24 hours | + 720 + 86,400 | the last `reading_cap` | 60 ms |
+| The flag published every second alone, its marks counted on the historian | 86,400 | 288 buckets marked | 39 ms |
+| The tutorial's flag and text over a week, in 1-hour buckets | 9,324 + 10,314 | 6,503 + 10,314, `change_cap`, 168 marked | 97 ms |
+
+`test_history_reads_every_change_of_a_text_or_a_flag.py` holds every rule above with local tables
+standing in for raw telemetry and the rollups. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

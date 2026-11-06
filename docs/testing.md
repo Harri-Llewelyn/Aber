@@ -586,6 +586,15 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
 # reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_each_series_carried_forward.py
+# History reads every change of a text or a flag (0254). Local tables stand in for raw telemetry
+# and the rollups. While raw holds the window, a state held for seconds inside one minute comes back
+# with its times, a refresh of an unchanged value collapses, the first reading in the window is
+# kept, and the value in force at the start is carried in from raw, the 1-minute rollup or
+# telemetry_1h. Past max_changes, or past 20,000 readings, it says so and marks each bucket that held
+# more than one value; a window whose raw readings were dropped says so, and a series with nothing
+# dropped is still read from raw. Bad bounds and more than 50 series are refused before any read;
+# anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider

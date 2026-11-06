@@ -6071,6 +6071,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 .history-chart-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
 .history-chart-range { font-size: 12px; color: var(--warning-text); }
+/* Which read a state chart shows, when the status line says another: "the last value in each 5-minute bucket, …". */
+.history-chart-read { font-size: 12px; color: var(--text-muted); }
 .history-chart-hover { min-width: 0; margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
 .chart-frame { position: relative; min-width: 0; }
 .chart-box { position: relative; width: 100%; min-width: 0; overflow: hidden; }
@@ -6114,6 +6116,18 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   color: var(--text-primary);
 }
 .chart-state > .overflow-text { position: relative; }
+/* A run too narrow to name: its own width, at least 2px, a fill and a leading edge, so a change of
+   seconds over a day still shows; the head names it under the pointer. */
+.chart-state.chart-state-thin { min-width: 2px; padding: 0; border-width: 0 0 0 1px; border-radius: 0; }
+/* A bucket that held more than one value, past the change read's cap: dotted along the strip's foot,
+   over the box that shows the bucket's last value. */
+.chart-state-mixed {
+  position: absolute;
+  bottom: 0;
+  height: 4px;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px);
+}
 .chart-state-carried {
   position: absolute;
   top: 0;
@@ -6147,6 +6161,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 .chart-state-swatch-carried {
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
+}
+.chart-state-swatch-mixed {
+  background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px) bottom / 100% 4px no-repeat, var(--bg-card);
 }
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
 /* Which alerts were firing at the pointer, at the plot's foot (alertBands.js): opaque over the

@@ -1062,6 +1062,53 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 69. History's change read, one rule in two places. telemetry_changes() (0254) falls back past
+// its default max_changes and past the raw readings one series may bring across, and reads at most
+// so many series; api.js states the same for the page, which passes that cap, names both in its
+// words and reads in parts of that many series. A value only one side has is a chart labelled with
+// a cap the function does not hold, or a read the function refuses.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_changes(', '$fn$;', 'telemetry_changes()');
+  const api = read('frontend/src/api.js');
+  const changes = need(api, /^export const HISTORY_MAX_CHANGES = (\d+);$/m, 'HISTORY_MAX_CHANGES in frontend/src/api.js');
+  const readings = need(api, /^export const HISTORY_CHANGE_READINGS = (\d+);$/m, 'HISTORY_CHANGE_READINGS in frontend/src/api.js');
+  const series = need(api, /^export const HISTORY_CHANGE_SERIES = (\d+);$/m, 'HISTORY_CHANGE_SERIES in frontend/src/api.js');
+  if (def && changes && readings && series) {
+    const sqlDefault = need(def.body, /max_changes integer DEFAULT (\d+)/, `max_changes' default in ${def.file}`);
+    const sqlMost = need(def.body, /c_max_changes\s+CONSTANT integer := (\d+);/, `the most max_changes may be in ${def.file}`);
+    const sqlReadings = need(def.body, /c_max_readings CONSTANT bigint := (\d+);/, `the readings bound in ${def.file}`);
+    const sqlSeries = need(def.body, /c_max_series\s+CONSTANT integer := (\d+);/, `the series bound in ${def.file}`);
+    if (sqlDefault && sqlMost && sqlReadings && sqlSeries) {
+      compare('changeRead', 'the changes past which a chart shows its buckets, in api.js and telemetry_changes()', changes[1], sqlDefault[1]);
+      compare('changeRead', 'the readings one series may bring across, in api.js and telemetry_changes()', readings[1], sqlReadings[1]);
+      compare('changeRead', 'the series one read may carry, in api.js and telemetry_changes()', series[1], sqlSeries[1]);
+      if (Number(changes[1]) > Number(sqlMost[1])) {
+        problems.push(`changeRead: the page's cap (${changes[1]}) is over the ${sqlMost[1]} telemetry_changes() takes, so every read is refused`);
+      } else {
+        ok.push(`changeRead: the page's cap (${changes[1]}) is one telemetry_changes() takes (1 to ${sqlMost[1]})`);
+      }
+    }
+  }
+}
+
+// 70. What History's change read says of a series, one closed set in three places: the values
+// telemetry_changes() (0254) gives `read`, CHANGE_READS in utils/history.js, which the page draws
+// each by, and the API reference's TelemetryChangesRow enum. A value only the function gives is a
+// chart the page draws from the wrong read.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_changes(', '$fn$;', 'telemetry_changes()');
+  const js = need(read('frontend/src/utils/history.js'), /export const CHANGE_READS = Object\.freeze\(\{([\s\S]*?)\}\)/,
+    'CHANGE_READS in frontend/src/utils/history.js');
+  const spec = need(read('docs/openapi.yaml'), /\n {4}TelemetryChangesRow:\n[\s\S]*?\n {8}read: \{ type: string, enum: \[([^\]]*)\]/,
+    "TelemetryChangesRow's read enum in docs/openapi.yaml");
+  if (def && js && spec) {
+    const sorted = (values) => [...new Set(values)].sort().join(', ');
+    const sql = sorted([...def.body.matchAll(/\bread := '([a-z_]+)';/g)].map((m) => m[1]));
+    compare('changeReads', 'the reads the page draws by', sorted([...js[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])), sql);
+    compare('changeReads', 'the reads the API reference names', sorted(spec[1].split(',').map((v) => v.trim())), sql);
+  }
+}
+
 // 56. History's Overview read, one rule in two places. telemetry_coverage() (0245) caps a read's
 // devices, lets only a small selection sum a block, reads a larger one at the device rollups' own
 // widths, and bounds the buckets it reads; api.js states the same for the page, which reads in parts

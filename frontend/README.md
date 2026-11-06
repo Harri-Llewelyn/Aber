@@ -1500,7 +1500,8 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
 - **The window** is the shared `TimeWindowControl` with every rolling range (`TIME_PRESETS`) and
   every span, and no All time. It falls back to Last 24 hours (`DEFAULT_HISTORY_WINDOW`).
 - **The read** is `api.readCarriedTelemetry()`, the RPC `telemetry_carried()` (`0233`): one row per
-  metric per bucket, a bucket with no reading carried forward and marked `is_carried`.
+  metric per bucket, a bucket with no reading carried forward and marked `is_carried`. Text and
+  flags take the change read beside it (below).
 - **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
   (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
   the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
@@ -1520,8 +1521,20 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   change of width settles for 300 ms and reads the text again only when it changes their pick.
   Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
   count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
-  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included. A
-  coarser bucket keeps only its last value, so a state held inside one is not drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
+  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included.
+- **Text and flags take the change read too** (`readPlan()`'s `changes`, whatever the buckets):
+  `api.readTelemetryChanges()`, the RPC `telemetry_changes()` (`0254`), beside the bucket read, in
+  parts of `HISTORY_CHANGE_SERIES` (50), on each group's buckets. A row that is every change is
+  drawn from it (`changeSeries()`); `change_cap` (past `HISTORY_MAX_CHANGES`, 2,000),
+  `reading_cap` (past `HISTORY_CHANGE_READINGS`, 20,000) and `retention` draw the bucket read,
+  the first two with the buckets that held more than one value marked (`markBuckets()`). A bucket
+  keeps only its last value, so without the change read a state held inside one would not be
+  drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)). The status line names the
+  state charts' read (`stateReadLine()`): "…; text and flags show every change", else the first
+  chart's fallback, "the last value in each 5-minute bucket, past the 2,000-change cap"
+  (`readWords()`), and a chart reading otherwise says its own in its head (`note`). A metric with
+  no change row, the catalog not knowing it, keeps the bucket read and the old wording. Export CSV
+  does not follow it.
 - **The metrics** are those the device's last birth declared and those its schemas model
   (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
   (`validRanges()`), and its unit the catalog's. **Metrics** in the toolbar is a `FilterDropdown`
@@ -1656,8 +1669,18 @@ flag steps between false and true, and a state is a strip of its runs in text.
   not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
   allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
   is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
-  and counts the rest as others. The head reads the run under the pointer (`runWords()`). The data
-  read is the same as a number's: a state held only inside one bucket is not shown.
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). A box
+  under 24px keeps its colour and edge at its own width, at least 2px, and no name
+  (`chart-state-thin`), so a change of seconds over a day still shows and none is drawn wider than
+  its time.
+- **Every change** (`changeSeries()`): a text's or a flag's series laid on its changes' own times,
+  with `runs`, `exact`, each value's real stretch. `starts` are the window's start when a value was
+  carried in, each change, and where the last run stops, so a flag's stepped line steps when the
+  value did, and its carried start is dashed. The head reads the run at the pointer's time
+  (`runNear()`, which prefers a run thinner than 8px within 4px of it) to the second. A bucket
+  series may carry `marked` (`markBuckets()`): a flag's bucket that held both values is the band
+  from false to true, and a state's is dotted along the strip's foot (`chart-state-mixed`), named
+  in the key and read under the pointer (`markWords()`).
 
 | Prop | What it is |
 | :--- | :--- |
@@ -1673,6 +1696,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |
 | `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
+| `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
 
 - **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
 - **Colours and the font are the theme's tokens** (`chartPalette()`), read again when

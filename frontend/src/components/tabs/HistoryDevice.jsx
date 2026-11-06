@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { api } from '../../api'
+import { HISTORY_CHANGE_SERIES, api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { ToolbarPopover } from '../common/FiltersPopover'
@@ -29,8 +29,9 @@ import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
-  HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, chartSeries, chartSummary, datatypeKind, deviceMatches,
-  deviceMetrics, inReads, metricGroups, pickResolution, pickedAddress, readPlan, readableResolution, validRanges,
+  HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
+  deviceMatches, deviceMetrics, inReads, markBuckets, metricGroups, pickResolution, pickedAddress, readPlan, readWords,
+  readableResolution, stateReadLine, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -145,16 +146,18 @@ function writeClosedGroups(keys) {
 const ALL_METRICS = Object.freeze([])
 
 /**
- * The status line: how many metrics are charted, of how many, in which buckets, and the text
- * charts' when they read apart in others.
+ * The status line: how many metrics are charted, of how many, in which buckets, the text charts'
+ * when they read apart in others, and which read the text and flag charts show (`stateLine`,
+ * stateReadLine()) when the change read answered for them.
  */
-function metaWords({ names, total, groups, refused, reads }) {
+function metaWords({ names, total, groups, refused, reads, stateLine, textRead }) {
   const count = names.length < total ? `${names.length} of ${total} metrics` : `${total} metric${total === 1 ? '' : 's'}`
   const main = groups.find(g => !g.text) ?? groups[0]
-  const text = groups.find(g => g.text && g !== main && g.resolution.id !== main.resolution.id)
+  const text = !textRead && groups.find(g => g.text && g !== main && g.resolution.id !== main.resolution.id)
   const why = refused ? `: ${refused.words} are too many for this window` : ''
   const parts = reads > groups.length ? `, read in ${reads} parts` : ''
-  return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}`
+  const states = stateLine ? `; ${stateLine.line}` : ''
+  return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}${states}`
 }
 
 /**
@@ -180,7 +183,10 @@ const WIDTH_SETTLE_MS = 300
  * The Device tab with a device chosen: one chart per metric over the window, stacked on one time
  * axis. The toolbar's Metrics filter narrows the charts, and Buckets takes Auto, the finest the row
  * cap allows for the metrics chosen, or a coarser one. Both are in the address, with the window.
- * The page says which resolution it shows. A read is made again when the device, the window, the
+ * The page says which resolution it shows. Text and flag metrics take the change read
+ * (telemetry_changes()) beside the bucket read, and draw every change at its own time while raw
+ * telemetry holds the window and the cap allows; otherwise their buckets, marked, and the status
+ * line or the chart says why. A read is made again when the device, the window, the
  * metrics or the buckets change, on Refresh, and on the refresh timer while the window reaches
  * now; never on a re-render. `every` is the timer, in seconds, held by the page so it outlasts a
  * change of device. Export CSV downloads what the page shows: this device, the metrics chosen and
@@ -213,6 +219,8 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   const latestRead = useRef(0)
 
   const textNames = useMemo(() => new Set(names.filter(n => kinds.get(n) === 'text')), [names, kinds])
+  // Text and flags take the change read too: every change, while raw telemetry holds the window.
+  const stateNames = useMemo(() => new Set(names.filter(n => ['text', 'flag'].includes(kinds.get(n)))), [names, kinds])
 
   /** The width a strip is drawn at: a chart's, else the page's less its insets, else a default. */
   const chartPx = () => {
@@ -225,6 +233,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   const namesKey = names.join('\n')
   const textKey = [...textNames].join('\n')
+  const statesKey = [...stateNames].join('\n')
   const windowKey = JSON.stringify(win)
   const read = useCallback(async (signal) => {
     const id = ++latestRead.current
@@ -234,7 +243,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       setReading({ problem: 'Set both ends of the custom range to chart it.' })
       return
     }
-    const plan = readPlan(start.getTime(), end.getTime(), { names, textNames, bucket, widthPx: chartPx() })
+    const plan = readPlan(start.getTime(), end.getTime(), { names, textNames, stateNames, bucket, widthPx: chartPx() })
     if (plan.problem) {
       setReading({ problem: 'This window is too long to chart. At 1-day buckets, one metric would need more buckets than one read may carry. Choose a shorter window.' })
       return
@@ -243,26 +252,31 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     const resolutionOf = new Map(groups.flatMap(g => g.names.map(n => [n, g.resolution])))
     const span = { start: start.getTime(), end: end.getTime(), groups, resolutionOf, refused, at, names, windowText: windowWords(win, at) }
     if (names.length === 0) {
-      setReading({ ...span, byMetric: new Map(), reads: 0 })
+      setReading({ ...span, byMetric: new Map(), changes: new Map(), reads: 0 })
       return
     }
     setReading(r => ({ ...(r?.byMetric ? r : {}), loading: true }))
     const reads = groups.flatMap(g => inReads(g.names, g.resolution.perRead).map(part => ({ part, resolution: g.resolution })))
+    // Beside the bucket read, which a chart falls back to: its marks are on the group's buckets.
+    const changeReads = groups.flatMap(g => inReads(g.changes, HISTORY_CHANGE_SERIES).map(part => ({ part, resolution: g.resolution })))
+    const bounds = { from: start.toISOString(), to: end.toISOString(), assetIds: [device.asset_id] }
     try {
-      const parts = await Promise.all(reads.map(({ part, resolution }) => api.readCarriedTelemetry({
-        from: start.toISOString(),
-        to: end.toISOString(),
-        bucketMinutes: resolution.minutes,
-        assetIds: [device.asset_id],
-        metricNames: part,
-      }, { signal })))
+      const [parts, changeParts] = await Promise.all([
+        Promise.all(reads.map(({ part, resolution }) => api.readCarriedTelemetry({
+          ...bounds, bucketMinutes: resolution.minutes, metricNames: part,
+        }, { signal }))),
+        Promise.all(changeReads.map(({ part, resolution }) => api.readTelemetryChanges({
+          ...bounds, bucketMinutes: resolution.minutes, metricNames: part,
+        }, { signal }))),
+      ])
       if (id !== latestRead.current) return
       const byMetric = new Map()
       for (const row of parts.flat()) {
         if (!byMetric.has(row.metric_name)) byMetric.set(row.metric_name, [])
         byMetric.get(row.metric_name).push(row)
       }
-      setReading({ ...span, byMetric, reads: reads.length })
+      const changes = new Map(changeParts.flat().map(row => [row.metric_name, row]))
+      setReading({ ...span, byMetric, changes, reads: reads.length })
     } catch (e) {
       if (e?.name !== 'AbortError' && !signal?.aborted && id === latestRead.current) {
         setReading({ ...span, error: e?.message || 'The readings could not be read.' })
@@ -272,7 +286,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     }
     // The window and the metrics by value: a new object of the same window is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.asset_id, namesKey, textKey, windowKey, bucket])
+  }, [device.asset_id, namesKey, textKey, statesKey, windowKey, bucket])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -344,21 +358,25 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     if (!reading?.byMetric) return []
     // Each resolution's bucket starts, once: the text charts may read at their own.
     const startsOf = new Map(reading.groups.map(g => [g.resolution.id, bucketStarts(reading.start, reading.end, g.resolution.minutes)]))
+    const span = { start: reading.start, end: reading.end, now: reading.at }
     return reading.names.map(name => {
       const resolution = reading.resolutionOf.get(name)
-      const starts = startsOf.get(resolution.id)
-      const series = chartSeries(reading.byMetric.get(name) || [], starts)
+      // Every change when the change read has them; else the buckets, marked where it counted more than one value.
+      const change = reading.changes?.get(name) ?? null
+      const every = changeSeries(change, span)
+      const starts = every ? every.starts : startsOf.get(resolution.id)
+      const series = every ? every.series : markBuckets(chartSeries(reading.byMetric.get(name) || [], starts), starts, change)
+      const read = readWords(change, resolution)
       const unit = units.get(name) ?? null
       const validRange = ranges.get(name) ?? null
       return {
-        name, unit, series, validRange, resolution, starts,
-        summary: chartSummary({
-          metric: name, unit, windowText: reading.windowText, resolution, series, validRange, starts,
-          span: { start: reading.start, end: reading.end, now: reading.at },
-        }),
+        name, unit, series, validRange, resolution, starts, read, kind: kinds.get(name),
+        summary: chartSummary({ metric: name, unit, windowText: reading.windowText, resolution, series, validRange, starts, span, read }),
       }
     })
-  }, [reading, units, ranges])
+  }, [reading, units, ranges, kinds])
+  // What the status line says the text and flag charts show; a chart reading otherwise says its own.
+  const stateLine = useMemo(() => stateReadLine(charts.filter(c => c.read).map(c => ({ kind: c.kind, words: c.read }))), [charts])
   const chartGroups = useMemo(() => {
     const byName = new Map(charts.map(c => [c.name, c]))
     return metricGroups(charts.map(c => c.name), catalog).map(g => ({ ...g, charts: g.names.map(n => byName.get(n)) }))
@@ -452,7 +470,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
               disabled={groups.length === 0}
             />
             <p className="history-meta" role="status">
-              {metaWords({ names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads })}
+              {metaWords({
+                names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads,
+                stateLine, textRead: charts.some(c => c.read && c.kind === 'text'),
+              })}
               {reading.loading && ' · reading again…'}
             </p>
             {alerts.bands.length > 0 && (
@@ -495,6 +516,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                         syncKey={`history-${device.asset_id}`}
                         band={shownBand}
                         plugins={alerts.plugins}
+                        note={c.read && c.read !== stateLine?.words ? c.read : null}
                       />
                     ))}
                   </div>
