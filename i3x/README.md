@@ -953,7 +953,7 @@ with the Directory's:
 | 12v | an area counts its cells and devices, as the Directory does, with no components (#496) |
 | 12w | history is a metric's scalars, or a device's maps naming its metrics (#500) |
 | 12x | a device's map carries forward a value set before the window (#500) |
-| 12y | a series cut by `limit` is a 206 naming where to resume; malformed windows are 400s (#500, #501) |
+| 12y | the historian holds a metric's two samples as two rows; `limit` 1 cuts at the older one's stored instant with a 206, and resuming there returns it; malformed windows are 400s (#500, #501) |
 | 12z | archiving a subscribed device withdraws it once, with a 206 (#518); runs last and restores it |
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.

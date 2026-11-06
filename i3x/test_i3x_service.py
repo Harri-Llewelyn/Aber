@@ -4768,6 +4768,24 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
                        "nothing at or before 2026-09-28T10:20:00.000000Z")
         self.assertEqual(self.reads(pg)[0][1]["limit"], "4", "one row past the limit shows there is more")
 
+    def test_resuming_between_millisecond_samples_returns_the_older_one(self):
+        # validate.py check 12y's shape: two samples two seconds apart, stamped to the millisecond
+        # as Sparkplug sends them, in a window given to the millisecond. The cut names the older
+        # sample's stored instant to the microsecond, and an endTime there includes it.
+        rows = _telemetry(("2026-11-04T09:27:01.044+00:00", "Temp", 21.0),
+                          ("2026-11-04T09:27:03.044+00:00", "Temp", 21.5))
+        body = {"elementIds": [f"{SID}/Temp"], "limit": 1,
+                "startTime": "2026-11-04T09:27:00.044Z", "endTime": "2026-11-04T09:27:04.044Z"}
+        req, _ = self.history(body, rows)
+        self.assertEqual([v["value"] for v in self.only(req)["values"]], [21.5])
+        self.assertCut(req, f"{SID}/Temp", "nothing at or before 2026-11-04T09:27:01.044000Z was returned")
+        req, pg = self.history({**body, "endTime": "2026-11-04T09:27:01.044000Z"}, rows)
+        self.assertEqual(req.status, 200)
+        self.assertIsNone(req.detail)
+        self.assertEqual([(v["timestamp"], v["value"]) for v in self.only(req)["values"]],
+                         [("2026-11-04T09:27:01.044Z", 21.0)])
+        self.assertEqual(self.reads(pg)[0][1]["and"], "(time.lte.2026-11-04T09:27:01.044000Z)")
+
     def test_the_limit_field_lowers_the_server_limit_and_never_raises_it(self):
         with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 2):
             req, pg = self.history({"elementIds": [f"{SID}/Temp"], "limit": 100}, self.TEMPS)
