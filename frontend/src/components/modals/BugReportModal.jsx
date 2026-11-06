@@ -93,7 +93,7 @@ ${desc || 'No detailed steps provided.'}
       </div>
 
       <div className="form-group">
-        <label className="form-label">Description & Steps to Reproduce</label>
+        <label className="form-label">Description &amp; Steps to Reproduce</label>
         <textarea className="form-control" rows={4} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Describe the unexpected behavior or steps to reproduce…" style={{ resize: 'vertical' }} />
       </div>
 
