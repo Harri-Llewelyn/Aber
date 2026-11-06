@@ -11,6 +11,7 @@
 --     revoked as archiving revokes it, and its kept copy is forgotten. A gateway that leaves Remote
 --     mid-enrolment, or becomes Remote, reads OFFLINE. Host, Simulated and Third-party all hold a
 --     credential issued in the dashboard, so a change among them ends nothing.
+--     `credential_revoked_at`'s column comment is restated to say who stamps and clears it now.
 --   * consume_gateway_enrollment_token() and its read-only twin peek_gateway_enrollment_token()
 --     refuse a gateway that is not Remote, with the same no rows as an archived one. Both are
 --     redeclared whole from 0001, unchanged but for that line and its comment.
@@ -161,6 +162,10 @@ COMMENT ON FUNCTION public.clean_up_after_a_gateway_type_change() IS 'Trigger fu
 SELECT public.replay_trigger('public.gateways', 'trg_gateways_type_change_cleans_up', $ddl$
 CREATE TRIGGER trg_gateways_type_change_cleans_up BEFORE UPDATE OF deployment, is_simulated ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clean_up_after_a_gateway_type_change();
 $ddl$);
+
+-- 0001's comment said re-enrolment clears the stamp, which nothing does, and that only an archived
+-- gateway carries one, which the trigger above makes false. Stated after 0001, so this one stands.
+COMMENT ON COLUMN public.gateways.credential_revoked_at IS 'When this gateway''s broker account was last disabled at the broker, which is how this platform revokes. Stamped as the revocation is asked, optimistically, when the gateway is archived or its type crosses Remote''s boundary (0252); deleting one revokes it too, and leaves no row. The sweep clears an archived gateway''s stamp if the call failed, and restoring the gateway clears it (clear_credential_revoked_on_enrolment). A credential issued after the stamp outranks it in gateway_has_broker_credential(), and one issued or enrolled after it in the dashboard''s credentialState().';
 
 -- -------------------------------------------------------------------------------------------------
 -- 3. Once: what earlier type changes left behind

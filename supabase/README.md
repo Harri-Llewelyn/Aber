@@ -4167,6 +4167,11 @@ issued under, and revoking on a guess could cut off a gateway that works.
   as no enrolment standing (`enrolmentStands()` in `utils/credentialState.js`), and a credential
   issued or enrolled after the stamp as the one the gateway holds.
 
+**`credential_revoked_at`'s column comment is restated.** `0001`'s said re-enrolment clears the
+stamp, which nothing does, and that only an archived gateway carries one. It now says the stamp is
+written by an archive or a change of type across Remote's boundary, cleared by the sweep or a
+restore, and outranked by a credential issued, or enrolled, after it.
+
 The file's self-check asserts that both token functions refuse a gateway that is not Remote and
 that no browser-facing role may run them, that the trigger is `BEFORE UPDATE OF deployment,
 is_simulated`, and that `anon` may not run its function.

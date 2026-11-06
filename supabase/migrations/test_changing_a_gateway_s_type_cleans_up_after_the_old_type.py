@@ -319,6 +319,19 @@ class TheAuditTrail(TypeChangeBase):
         self.assertIsNotNone(new_data["credential_revoked_at"])
 
 
+class TheStampsComment(TypeChangeBase):
+
+    def test_it_says_a_type_change_stamps_it_and_not_that_re_enrolment_clears_it(self):
+        # 0001 replays its own comment first on every boot; 0252's must be the one that stands.
+        self.cur.execute(
+            "SELECT col_description('public.gateways'::regclass, attnum) FROM pg_attribute"
+            " WHERE attrelid = 'public.gateways'::regclass AND attname = 'credential_revoked_at';"
+        )
+        comment = self.cur.fetchone()[0]
+        self.assertIn("(0252)", comment)
+        self.assertNotIn("re-enrolment", comment)
+
+
 class RedeemingAToken(TypeChangeBase):
     """The second lock: a token written before this file, or by any path, for a gateway not Remote."""
 
