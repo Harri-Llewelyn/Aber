@@ -52,21 +52,21 @@ async function upcomingWindowStarts() {
 /**
  * Where an alert's toast leads: the page in the dashboard that alertPage() names, such as a machine
  * identity on Access Control or a job on the Capture page; for any other alert, its rule in Grafana
- * Alerting, where its thresholds, silences and history are.
+ * Alerting, where its thresholds are set.
  */
 export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
 
 /**
- * The live set of firing Grafana alerts, machine and platform alike, with a toast on each
- * transition. Grafana posts to the grafana-alert-webhook function, which writes
- * `public.platform_alerts`; this hook reads the `platform_alerts_active` view and subscribes to the
- * table, because a view cannot be in a publication. The initial fetch primes the known set so a
- * page load does not toast everything already firing.
+ * The live set of firing alerts, machine and platform alike, with a toast on each transition. It
+ * reads the `platform_alerts_active` view and subscribes to `public.platform_alerts`, because a view
+ * cannot be in a publication; grafana-alert-webhook writes that table as Grafana posts its rules'
+ * alerts. The initial fetch primes the known set so a page load does not toast everything already
+ * firing.
  *
  * A firing toast carries the alert name only; the summary is in the alert counter's list. Both
  * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link where
  * alertToastUrl() says. Neither is recorded in the bell's history: the alert counter shows what is
- * firing, and Grafana keeps what has fired.
+ * firing, and History's Alerts tab what has fired.
  *
  * A suppressed alert toasts nothing, firing or resolved. When its window ends while it still fires
  * it toasts as if it had just fired. Whether an alert is suppressed changes at a window's start and

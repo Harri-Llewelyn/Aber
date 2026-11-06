@@ -2035,7 +2035,7 @@ one exists (a gateway's Launch UI); otherwise Restore when archived; otherwise E
 `showToast(msg, type)` (`hooks/useToast.js`) is the one call every page makes, with `type` one of
 `success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
 corner and records the same message in the history behind the bell in the top bar, unless it
-passes `{ record: false }`, as a Grafana alert does.
+passes `{ record: false }`, as an alert's toast does.
 
 - **Three groups, and the group is not the severity.** Every message is in one group: **Info**
   (routine news, successes included), **Warning** (the dashboard's own failures and warnings) or
@@ -2106,9 +2106,9 @@ passes `{ record: false }`, as a Grafana alert does.
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **Grafana alerts are toasts only.** `usePlatformAlerts` passes `{ group: 'alert', record: false }`
+- **Alerts are toasts only.** `usePlatformAlerts` passes `{ group: 'alert', record: false }`
   for a firing and a resolved alert. The toast shows, with the Alert group's icon and colour and a
-  link to the rule, but nothing is recorded, so the bell's badge never counts what the alert
+  link where `alertToastUrl()` says, but nothing is recorded, so the bell's badge never counts what the alert
   counter already counts. `readStoredHistory` drops any Alert entry a tab stored before this. The
   counter shows what is firing now. History's Alerts tab, linked from the counter's footer
   (**Alert history**), is the record of what fired and cleared, including an alert that came and

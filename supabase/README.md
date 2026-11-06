@@ -3447,8 +3447,8 @@ rows, that `0232`'s rows are still there, and who may run it.
 ### History lists the alerts that fired (0243)
 
 The alert counter shows what is firing now, and until this the record of what fired and cleared was
-Grafana's Alerting > History. Grafana never sees an alert that Aber's own evaluator raises
-([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and leaves the default install by 2.0.
+Grafana's Alerting > History. Grafana won't see the alerts Aber's own evaluator is to raise
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and is to leave the default install by 2.0.
 So History has an Alerts tab, and its charts shade the periods an alert was firing. Both read
 **`alert_occurrences(p_from, p_to, p_sparkplug_ids, p_limit)`**, over `platform_alerts` from every
 writer.
@@ -4486,7 +4486,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `user_settings` | own row only, `Administrator` included (`0188`) | own row: `INSERT`, `UPDATE`; no `DELETE` — the row goes with the account |
 | `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
-| `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes as `service_role` |
+| `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes the alert as `service_role`; `acknowledge_alert()` and `withdraw_alert_acknowledgement()` the acknowledgement (`0231`); the database the suppression stamp (`0240`) |
 | `alert_suppression_windows` | `authenticated` (`0240`) | none — `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and `end_alert_suppression_window()`, as `Administrator` / `Shopfloor_Manager` |
 | `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |

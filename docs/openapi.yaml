@@ -2926,18 +2926,20 @@ paths:
   /rest/v1/platform_alerts:
     get:
       tags: [Registry]
-      summary: Read the Grafana alert occurrence log
+      summary: Read the alert occurrence log
       description: |
-        One row per alert **occurrence**, written by the `grafana-alert-webhook` edge function when
-        Grafana notifies. Append-only on `(fingerprint, starts_at)`: a Grafana fingerprint is a hash
-        of the alert instance's labels and is stable across every fire → resolve → fire cycle, so
-        pairing it with `starts_at` is what makes this a history rather than a latest-state table.
-        An occurrence transitions `firing` → `resolved` in place.
+        One row per alert **occurrence**. Grafana evaluates the platform's own rules
+        (`grafana/provisioning/alerting/`) and posts each notification to the `grafana-alert-webhook`
+        edge function, which writes the row. Append-only on `(fingerprint, starts_at)`: a Grafana
+        fingerprint is a hash of the alert instance's labels and is stable across every fire →
+        resolve → fire cycle, so pairing it with `starts_at` is what makes this a history rather than
+        a latest-state table. An occurrence transitions `firing` → `resolved` in place.
 
-        **Nothing in this platform evaluates alert conditions.** Grafana owns the rules, the
-        evaluation interval, the state history and the silences — see
-        `grafana/provisioning/alerting/`. This table is the landing record, and it is what the
-        dashboard subscribes to over Realtime.
+        **Aber holds the record.** This table keeps each occurrence with its acknowledgement and the
+        suppression window that covered it, for `alerts.retention_days` (90 by default, `0244`).
+        History's Alerts tab reads it through `/rest/v1/rpc/alert_occurrences`, Aber's dispatcher
+        sends it on (`/functions/v1/notification-dispatch`), and the dashboard subscribes to it over
+        Realtime.
 
         `sparkplug_id` is the immutable wire identity, never the device name. `entity_id` is resolved
         at write time and is nullable: an alert that fired is a thing that happened, and it is kept
@@ -7652,7 +7654,10 @@ components:
     DeviceAlert:
       type: object
       description: |
-        One Grafana alert occurrence. Written by `grafana-alert-webhook`; never by a user.
+        One alert occurrence. `grafana-alert-webhook` writes the alert itself. A person writes the
+        acknowledgement columns through `/rest/v1/rpc/acknowledge_alert` and
+        `/rest/v1/rpc/withdraw_alert_acknowledgement`, and the database stamps
+        `suppression_window_id`. No role writes the table directly.
       properties:
         id: { type: string, format: uuid }
         fingerprint:

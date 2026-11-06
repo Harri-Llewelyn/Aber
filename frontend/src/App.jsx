@@ -568,9 +568,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
   useQuarantineAlerts(showToast)
 
-  // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
-  // visible whichever page is open. Each alert's toast links to its rule in Grafana. The counter,
-  // the title and the favicon count the ones nobody has acknowledged and no window suppresses; the
+  // The firing alerts, from platform_alerts_active. Owned by App rather than a tab so an alert is
+  // visible whichever page is open. Each toast links where alertToastUrl() says. The counter, the
+  // title and the favicon count the ones nobody has acknowledged and no window suppresses; the
   // pages and the counter's list are handed them all.
   const firingAlerts = usePlatformAlerts(showToast)
   const countedCount = countedAlerts(firingAlerts).length
