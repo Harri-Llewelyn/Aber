@@ -31,7 +31,8 @@ export function usePendingKey() {
  * Tracks one button's in-flight state and refuses to start the action twice: `pending` disables the
  * button, and the ref covers the gap before React commits the disabled attribute. The mounted ref
  * exists because a successful mutation usually unmounts the button before its `finally` runs. `run`
- * propagates whatever the action threw; every call site catches and reports through showToast.
+ * propagates whatever the action threw; every call site catches and reports it: a dialog in its
+ * error slot, where a toast would be drawn behind it, and anything else through showToast.
  * Usage: `const [saving, runSave] = usePendingAction()`, then `runSave(save)` from the button's
  * onClick with `pending={saving}`.
  */

@@ -174,12 +174,18 @@ describe('adding one', () => {
     expect(code).toHaveValue('')
   })
 
-  it('refuses something that is not six digits before asking GoTrue', async () => {
+  it('refuses something that is not six digits before asking GoTrue, and says so', async () => {
     const dialog = await openAdd()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
-    fireEvent.change(await within(dialog).findByLabelText('Code'), { target: { value: '12345' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Authenticator' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter the 6-digit code your app shows.')
+    const code = await within(dialog).findByLabelText('Code')
+    const confirm = within(dialog).getByRole('button', { name: 'Add Authenticator' })
+    // The name typed at the first step does not make the code step scold before its own edit.
+    expect(dialog.querySelector('.modal-problem')).toHaveTextContent(/^$/)
+    expect(confirm).toHaveClass('btn-disabled')
+    fireEvent.change(code, { target: { value: '12345' } })
+    expect(dialog.querySelector('.modal-problem')).toHaveTextContent('Enter the 6-digit code your app shows')
+    expect(confirm).toBeDisabled()
+    fireEvent.keyDown(code, { key: 'Enter' })
     expect(api.verifyFactorCode).not.toHaveBeenCalled()
   })
 

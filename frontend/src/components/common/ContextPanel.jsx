@@ -194,8 +194,8 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
                     </a>
                   </Tooltip>
                 ) : (
-                  // `pending` and `disabled` are separate: btn-disabled means not permitted, which
-                  // is the wrong thing to say about an action that is running.
+                  // `pending` and `disabled` are separate: btn-disabled means it cannot go ahead,
+                  // which is the wrong thing to say about an action that is running.
                   <Tooltip key={i} text={a.title}>
                     <button
                       className={`${cls}${a.disabled ? ' btn-disabled' : ''}${a.pending ? ' btn-loading' : ''}`}

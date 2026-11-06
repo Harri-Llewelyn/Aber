@@ -464,7 +464,9 @@ describe('Detail modal — read-only vs draft', () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.post).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith('schema is active and immutable', 'error')
+    // Said in the dialog, which stays open with the edits: a toast would be drawn behind it.
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('schema is active and immutable')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   describe('a save keeps what the dialog does not edit', () => {

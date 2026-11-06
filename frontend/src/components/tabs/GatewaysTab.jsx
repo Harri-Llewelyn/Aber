@@ -36,6 +36,7 @@ import { EmptyState } from '../common/EmptyState'
 import { HelpLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -99,6 +100,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [cells, setCells]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
+  // A refusal of the form's save, shown in the dialog as the database worded it.
+  const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
   // The archived gateway whose Restore dialog is open.
@@ -181,6 +184,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [rebirthingId, runRebirth] = usePendingKey()
 
   const save = async () => {
+    setFormError(null)
     try {
       // Proposing changes an existing gateway only: registering one issues setup, which cannot be queued.
       if (proposeMode) {
@@ -237,25 +241,24 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       } else {
         showToast(`Gateway '${createdName}' created`, 'success', { to: createdTo })
       }
-    } catch (e) { showToast(e.message, 'error') }
+    } catch (e) { setFormError(e.message) }
   }
+
+  const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
 
   const archiveGateway = async (days) => {
-    try {
-      await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
-      // Closes after the request, so ArchiveModal holds its pending state for the whole round trip.
-      setArchiveTarget(null); load()
-      showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success', { to: gatewayUrl(archiveTarget.gateway_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
+    // Closes after the request, so ArchiveModal holds its pending state for the whole round trip,
+    // and only once it succeeded: a refusal is shown in the dialog.
+    setArchiveTarget(null); load()
+    showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success', { to: gatewayUrl(archiveTarget.gateway_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
+  // Run from the Restore dialog, which shows a refusal and stays open.
   const restoreGateway = async (gatewayId, name) => {
-    try {
-      await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
-      load(); showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
+    setRestoreTarget(null); load()
+    showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
   }
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
@@ -298,6 +301,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const offeredGroup = editingMismatch && !proposeMode && form.sparkplug_group !== editingMismatch.observed
     ? editingMismatch.observed : null
   const groupChanged = groupEdited && !groupProblem
+  // Why Save is off and nothing beside a field says so: the type's hint says why a Remote gateway
+  // is withheld, and the group's field says what is wrong with it. The database refuses Area-Wide
+  // with no area; it would take an empty name.
+  const formProblem = !(form.gateway_name || '').trim() ? 'Give the gateway a name'
+    : locationIncomplete(form) ? 'Choose which area the gateway serves'
+      : null
   const groupFollowsTheNode = groupChanged && form.sparkplug_group === editing.observed_sparkplug_group
 
   /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
@@ -646,22 +655,23 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         <Modal
           title={editing ? 'Edit Gateway' : 'Register Gateway'}
           size="md"
-          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          onClose={closeForm}
+          problem={formProblem}
+          error={formError}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
+              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form) || remoteWithheld || !!groupProblem}
+                disabled={formProblem !== null || remoteWithheld || !!groupProblem}
                 title={remoteWithheld
                   ? 'Remote gateways cannot be enrolled on this deployment yet'
                   : groupProblem
                   ? groupProblem
-                  : locationIncomplete(form)
-                  ? 'Choose which area the gateway serves'
+                  : formProblem
+                  ? formProblem
                   : proposeMode
                     ? 'Ask for these changes — an approver applies them, or says why not'
                     : undefined}
@@ -672,8 +682,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           }
         >
         <div className="form-group">
-          <label className="form-label" htmlFor="gateway-name">Gateway Name</label>
-          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" />
+          <label className="form-label" htmlFor="gateway-name">Gateway Name <RequiredMark /></label>
+          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" aria-required="true" />
           <div className="form-hint">
             A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
           </div>

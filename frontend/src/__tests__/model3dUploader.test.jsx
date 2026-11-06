@@ -162,14 +162,14 @@ describe('Model3DUploader', () => {
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     })
 
-    it('closes on a failure, which is said under the model', async () => {
+    it('stays open on a failure, which is said in the dialog', async () => {
       api.removeDeviceModel.mockRejectedValue(new Error('The model could not be deleted from storage.'))
       const dialog = await openRemove()
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
 
-      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-      expect(screen.getByText('The model could not be deleted from storage.')).toBeInTheDocument()
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('The model could not be deleted from storage.')
+      expect(screen.getByRole('dialog')).toBe(dialog)
     })
   })
 

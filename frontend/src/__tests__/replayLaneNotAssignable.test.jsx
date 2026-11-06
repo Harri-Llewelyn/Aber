@@ -198,7 +198,8 @@ describe("the device form's gateway picker", () => {
   it('says why the option is unavailable', async () => {
     await show([device()])
     openEdit()
-    expect(screen.getByText(/replay lanes, minted when a capture is played/i)).toBeTruthy()
+    // It names Playback: shown under any selection, "Its devices" alone read as the selection's.
+    expect(screen.getByText(/^The Playback gateway is not offered\. Its devices are replay lanes, minted when a capture is played/)).toBeTruthy()
   })
 })
 

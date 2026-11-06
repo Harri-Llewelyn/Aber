@@ -70,6 +70,8 @@ export function SchemaDetailModal({
   // Which write is running, not merely whether one is -- see `run` below.
   const [busyAction, setBusyAction] = useState(null)
   const busy = busyAction !== null
+  // A refusal of a save or a publish, as the database worded it.
+  const [error, setError] = useState(null)
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -202,14 +204,12 @@ export function SchemaDetailModal({
   const run = async (name, fn) => {
     if (busy) return
     setBusyAction(name)
+    setError(null)
     try {
       await fn()
     } catch (e) {
-      // Terminates the promise chain: `run` is invoked from onClick, and handleSaveDraft in
-      // SchemasTab rethrows after toasting so the publish sequence aborts. Swallowed because the
-      // error was already shown; logged so a future caller that does not report is still
-      // diagnosable.
-      console.error('Schema action failed:', e)
+      // Ends the promise chain here: a refused save throws, so the publish after it never runs.
+      setError(e.message)
     } finally {
       setBusyAction(null)
     }
@@ -228,6 +228,10 @@ export function SchemaDetailModal({
 
   const canSaveDraft = editable && canManage && selectedNames.size > 0 && badRanges.length === 0
   const rangeTitle = badRanges.length > 0 ? `Fix the range of ${badRanges.join(' ')}` : null
+  // A bad range is said above the list; an empty list is said here. Only for someone who may save.
+  const problem = editable && canManage
+    ? (selectedNames.size === 0 ? 'Tick at least one metric. A version with none constrains nothing.' : null)
+    : undefined
 
   const footer = (
     <>
@@ -253,7 +257,7 @@ export function SchemaDetailModal({
       {/* Both write buttons are locked by `busy`, but only the one clicked spins. */}
       {editable && (
         <ActionButton
-          className={`btn btn-ghost ${!canSaveDraft || !dirty ? 'btn-disabled' : ''}`}
+          className="btn btn-ghost"
           disabled={!canSaveDraft || !dirty || busy}
           pending={busyAction === 'save'}
           pendingLabel="Saving…"
@@ -268,7 +272,7 @@ export function SchemaDetailModal({
 
       {editable && (
         <ActionButton
-          className={`btn btn-primary ${!canSaveDraft ? 'btn-disabled' : ''}`}
+          className="btn btn-primary"
           disabled={!canSaveDraft || busy}
           pending={busyAction === 'publish'}
           pendingLabel="Publishing…"
@@ -286,18 +290,17 @@ export function SchemaDetailModal({
       {/* The other way out of a draft: without it the only exit was to publish. Danger, not
           primary, and rightmost. */}
       {editable && onDiscard && (
-        <Tooltip text={!canManage
-          ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-          : `Delete draft v${schemaVersion(schema)} and leave its predecessor exactly as it is`}>
-          <button
-            type="button"
-            className="btn btn-danger"
-            disabled={!canManage || busy}
-            onClick={onDiscard}
-          >
-            <IconTrash size={13} /> Discard Draft
-          </button>
-        </Tooltip>
+        <ActionButton
+          type="button"
+          className="btn btn-danger"
+          permitted={canManage}
+          deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+          disabled={busy}
+          title={`Delete draft v${schemaVersion(schema)} and leave its predecessor exactly as it is`}
+          onClick={onDiscard}
+        >
+          <IconTrash size={13} /> Discard Draft
+        </ActionButton>
       )}
 
       {/* The single primary action on a read-only version; disabled with the reason rather than
@@ -332,6 +335,8 @@ export function SchemaDetailModal({
       size="lg"
       fill={editable}
       onClose={onClose}
+      problem={problem}
+      error={error}
       footer={footer}
     >
       {/* Why this version exists, before what it contains. */}
@@ -429,8 +434,8 @@ export function SchemaDetailModal({
           </p>
         )}
         {editable && badRanges.length > 0 && (
-          <div role="alert" style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '4px' }}>
-            Fix the range of {badRanges.join(' ')}
+          <div role="alert" className="form-hint hint-danger" style={{ margin: '0 0 4px' }}>
+            <IconAlertTriangle size={12} /> Fix the range of {badRanges.join(' ')}
           </div>
         )}
 

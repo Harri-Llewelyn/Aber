@@ -121,16 +121,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
-  /** Save a schema the builder composed. A device is given its schema on the Devices page. */
+  /**
+   * Save a schema the builder composed. A device is given its schema on the Devices page. This and
+   * the handlers below run from a dialog, which shows a refusal as the database worded it and stays
+   * open, so each throws one rather than toasting it behind the dialog.
+   */
   const handleBuilderSubmit = async (schemaPayload) => {
-    try {
-      const created = await api.post('/api/v1/schemas', schemaPayload)
-      showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
-      setShowBuilderModal(false)
-      load()
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const created = await api.post('/api/v1/schemas', schemaPayload)
+    showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
+    setShowBuilderModal(false)
+    load()
   }
 
   /**
@@ -140,78 +140,62 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
    */
   const handleFork = async (changeDescription) => {
     const parent = forkTarget
-    try {
-      const draft = await api.post(`/api/v1/schemas/${parent.schema_uuid}/versions`, {
-        change_description: changeDescription
-      })
-      setForkTarget(null)
-      const refreshed = await api.get('/api/v1/schemas')
-      setSchemas(refreshed)
-      setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
-      showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success', { to: schemaUrl(draft.schema_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const draft = await api.post(`/api/v1/schemas/${parent.schema_uuid}/versions`, {
+      change_description: changeDescription
+    })
+    setForkTarget(null)
+    const refreshed = await api.get('/api/v1/schemas')
+    setSchemas(refreshed)
+    setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
+    showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success', { to: schemaUrl(draft.schema_uuid) })
   }
 
   const handleSaveDraft = async (patch) => {
     if (!detailSchema) return
-    try {
-      await api.put(`/api/v1/schemas/${detailSchema.schema_uuid}`, patch)
-      const refreshed = await api.get('/api/v1/schemas')
-      setSchemas(refreshed)
-      setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
-      showToast(`Draft '${detailSchema.schema_name}' saved`, 'success', { to: schemaUrl(detailSchema.schema_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-      // Rethrown so the modal's publish path does not activate a version whose edits were rejected.
-      throw e
-    }
+    // A refusal is thrown, so the dialog's publish path does not activate a version whose edits
+    // were rejected.
+    await api.put(`/api/v1/schemas/${detailSchema.schema_uuid}`, patch)
+    const refreshed = await api.get('/api/v1/schemas')
+    setSchemas(refreshed)
+    setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
+    showToast(`Draft '${detailSchema.schema_name}' saved`, 'success', { to: schemaUrl(detailSchema.schema_uuid) })
   }
 
   const handlePublish = async () => {
     if (!detailSchema) return
     // The draft becomes the active version, under the same id.
     const published = detailSchema
-    try {
-      const result = await api.post(`/api/v1/schemas/${published.schema_uuid}/publish`, {})
-      setDetailSchema(null)
-      // Devices carry the schema binding, so both lists are stale after a publish.
-      load()
-      const moved = result.devices_rebound || 0
-      showToast(
-        `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
-        (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
-        'success',
-        { to: schemaUrl(published.schema_uuid) }
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const result = await api.post(`/api/v1/schemas/${published.schema_uuid}/publish`, {})
+    setDetailSchema(null)
+    // Devices carry the schema binding, so both lists are stale after a publish.
+    load()
+    const moved = result.devices_rebound || 0
+    showToast(
+      `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
+      (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
+      'success',
+      { to: schemaUrl(published.schema_uuid) }
+    )
   }
 
   /** Discard the open draft. One draft may exist per lineage, so this is the way out besides publishing. */
   const handleDiscardDraft = async () => {
     if (!discardTarget) return
-    try {
-      const result = await api.post(`/api/v1/schemas/${discardTarget.schema_uuid}/discard`, {})
-      setDiscardTarget(null)
-      setDetailSchema(null)
-      // The lineage moved and so may device bindings, so both lists are stale.
-      load()
-      const detached = result.devices_detached || 0
-      showToast(
-        `Draft v${result.version} of '${discardTarget.schema_name}' discarded` +
-        (detached > 0
-          // Said out loud rather than left to be discovered: a draft can be attached to a machine
-          // to try it out, and those attachments go with it.
-          ? ` — ${plural(detached, 'device')} detached`
-          : ''),
-        'success'
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const result = await api.post(`/api/v1/schemas/${discardTarget.schema_uuid}/discard`, {})
+    setDiscardTarget(null)
+    setDetailSchema(null)
+    // The lineage moved and so may device bindings, so both lists are stale.
+    load()
+    const detached = result.devices_detached || 0
+    showToast(
+      `Draft v${result.version} of '${discardTarget.schema_name}' discarded` +
+      (detached > 0
+        // Said out loud rather than left to be discovered: a draft can be attached to a machine
+        // to try it out, and those attachments go with it.
+        ? ` — ${plural(detached, 'device')} detached`
+        : ''),
+      'success'
+    )
   }
 
   /**

@@ -38,19 +38,18 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
 
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
+  // Run from the Revoke dialog, which shows a refusal and stays open. Read again either way.
   const revoke = async () => {
     const app = appLabel(confirming.client_name)
     try {
       await api.revokeMyAppApproval(confirming.client_id)
+      setConfirming(null)
       showToast?.(
         `${app} is revoked. Its sessions for you have ended, and it asks you to allow it again next time.`,
         'success',
         { to: APPS_URL },
       )
-    } catch (err) {
-      showToast?.(err.message, 'error')
     } finally {
-      setConfirming(null)
       await load()
     }
   }

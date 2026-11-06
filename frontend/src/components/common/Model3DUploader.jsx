@@ -104,21 +104,18 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     }
   }, [deviceId, deviceName, onChange, showToast])
 
-  // Run from the Remove dialog, which closes either way so a failure shows under the model.
+  // Run from the Remove dialog, which shows a refusal and stays open.
   const handleRemove = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
       await api.removeDeviceModel(deviceId, path)
+      setConfirmRemove(false)
       setSize(null)
       showToast?.(`3D model removed${deviceName ? ` from '${deviceName}'` : ''}`, 'success', { to: deviceUrl(deviceId) })
       onChange?.(null)
-    } catch (err) {
-      setError(err.message)
-      showToast?.(err.message, 'error')
     } finally {
       setBusy(false)
-      setConfirmRemove(false)
     }
   }, [deviceId, deviceName, path, onChange, showToast])
 

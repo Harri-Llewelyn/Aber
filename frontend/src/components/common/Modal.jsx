@@ -1,5 +1,6 @@
-import React, { useId, useLayoutEffect, useRef } from 'react'
+import React, { useId, useLayoutEffect, useRef, useState } from 'react'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { FormProblem } from './FormProblem'
 import { IconAlertTriangle, IconX } from './Icons'
 import { Tooltip } from './Tooltip'
 
@@ -72,8 +73,8 @@ function returnFocus(dialog) {
  * The frame every dialog shares: a native `<dialog>` opened with `showModal()`, holding the box
  * (header row with icon, title and close button, an optional lead paragraph, the body, an error
  * slot and a footer). The header and the footer stay in view: only the body (the lead and the
- * children, in `.modal-body`) scrolls when the dialog is taller than the window, and the error slot
- * sits above the footer outside it.
+ * children, in `.modal-body`) scrolls when the dialog is taller than the window, and the problem
+ * line and the error slot sit above the footer outside it.
  *
  * The browser draws an open dialog above the page and makes the rest of the page inert, so Tab and
  * Shift+Tab stay inside it. Opening moves focus to the dialog itself, which is named by the title
@@ -89,11 +90,13 @@ function returnFocus(dialog) {
  *   onClose={() => setOpen(false)}
  *   lead="The name is shown on the Site Map and in the Audit Trail."
  *   initialFocus={nameRef}
+ *   problem={name.trim() ? null : 'Give the area a name'}
  *   error={saveError}
  *   footer={
  *     <>
  *       <button className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
- *       <ActionButton className="btn btn-primary" pending={saving} onClick={save}>Save</ActionButton>
+ *       <ActionButton className="btn btn-primary" pending={saving} disabled={!name.trim()}
+ *         onClick={save}>Save</ActionButton>
  *     </>
  *   }
  * >
@@ -126,9 +129,18 @@ function returnFocus(dialog) {
  * revokes or overwrites. Read once, as the dialog opens; `autoFocus` inside a dialog does not work,
  * because the control is focused before the dialog is shown.
  *
+ * @param {string|null} [problem] Why the confirm is off, for a dialog whose confirm can be: the
+ * first problem, or null when there is none. Shown above the footer in the form's warning hint, in
+ * a live region, once the person has edited a field in the body, so a dialog that has just opened
+ * does not scold. Leave it out on a dialog that never refuses, and the line is not drawn.
+ *
+ * @param {boolean} [touched] Replaces "once the person has edited a field": for a dialog with steps,
+ * where the edits of one step do not count for the next, or one that waits for a particular field.
+ *
  * @param {React.ReactNode} [error] The failure to show, in the danger box above the footer. Falsy
  * renders nothing. Show a failure here rather than only in a toast: the toasts are behind an open
- * dialog, where they can be neither read nor heard.
+ * dialog, where they can be neither read nor heard. A refusal from the database or a function goes
+ * here as it was worded.
  *
  * @param {boolean} [fill] Makes the body a flex column, so one child with class `modal-fill` takes the
  * height left over (and scrolls inside itself) instead of its own height guess. Without it the body
@@ -152,6 +164,8 @@ export function Modal({
   onClose,
   lead = null,
   initialFocus,
+  problem,
+  touched,
   error = null,
   footer = null,
   closeOnOverlay = false,
@@ -166,6 +180,9 @@ export function Modal({
   const latest = useRef(null)
   latest.current = { onClose, initialFocus }
   useEscapeKey(onClose)
+  // Set by the first change a field in the body raises: React's onChange bubbles to the body.
+  const [edited, setEdited] = useState(false)
+  const problemShown = touched ?? edited
 
   useLayoutEffect(() => {
     const dialog = ref.current
@@ -229,10 +246,14 @@ export function Modal({
           </div>
         </div>
 
-        <div className={`modal-body${fill ? ' modal-body-fill' : ''}`}>
+        <div className={`modal-body${fill ? ' modal-body-fill' : ''}`} onChange={() => setEdited(true)}>
           {lead && <p className="modal-lead" id={leadId}>{lead}</p>}
           {children}
         </div>
+
+        {problem !== undefined && (
+          <FormProblem problem={problemShown ? problem : null} className="modal-problem" />
+        )}
 
         {error && (
           <div className="modal-error" role="alert">

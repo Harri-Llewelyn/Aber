@@ -155,7 +155,8 @@ describe('ArchivesTab permanent delete', () => {
 
     await confirmPurge()
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('foreign key violation', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('foreign key violation')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   it('is gated on the same permission as restore', async () => {
@@ -330,9 +331,9 @@ describe('ArchivesTab restore asks first', () => {
     fireEvent.click(restoreButton())
     fireEvent.click(await confirmRestoreButton())
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('row level security', 'error'))
-    // Closed, so the toast is not left behind the dialog; the row is still there to try again.
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // In the dialog, which stays open to try again or cancel; the row is still there.
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('row level security')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
   })
 

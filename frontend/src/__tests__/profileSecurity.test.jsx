@@ -188,9 +188,9 @@ describe('End', () => {
     const { showToast } = renderSessions()
     await loaded()
     fireEvent.click(within(await askToEnd('Grafana')).getByRole('button', { name: 'End Session' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('session s-grafana not found', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('session s-grafana not found')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     await waitFor(() => expect(api.listMySessions).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 
@@ -300,7 +300,8 @@ describe('Sign Out of All Other Sessions', () => {
     await loaded()
     fireEvent.click(button())
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign Out of All Other Sessions' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(refusal, 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent(refusal)
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     await waitFor(() => expect(api.listMySessions).toHaveBeenCalledTimes(2))
   })
 

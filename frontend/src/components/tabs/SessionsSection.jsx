@@ -42,15 +42,14 @@ export function SessionsSection({ isPerson = true, showToast }) {
 
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
+  // Both run from a dialog, which shows a refusal and stays open. Read again either way.
   const end = async () => {
     const session = confirmingEnd
     try {
       await api.endMySession(session.id)
-      showToast?.(`Session ended: ${sessionLabel(session)}.`, 'success', { to: SESSIONS_URL })
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
       setConfirmingEnd(null)
+      showToast?.(`Session ended: ${sessionLabel(session)}.`, 'success', { to: SESSIONS_URL })
+    } finally {
       await load()
     }
   }
@@ -58,15 +57,13 @@ export function SessionsSection({ isPerson = true, showToast }) {
   const endOthers = async () => {
     try {
       const ended = await api.signOutOtherSessions()
+      setConfirmingOthers(false)
       showToast?.(
         ended > 0 ? `Signed out of ${plural(ended, 'other session')}.` : 'You had no other sessions to sign out of.',
         ended > 0 ? 'success' : 'info',
         { to: SESSIONS_URL },
       )
-    } catch (err) {
-      showToast?.(err.message, 'error')
     } finally {
-      setConfirmingOthers(false)
       await load()
     }
   }

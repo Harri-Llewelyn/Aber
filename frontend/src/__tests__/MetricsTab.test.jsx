@@ -457,15 +457,16 @@ describe('Restore Metric', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('reports a refused restore and leaves the dialog open', async () => {
+  it('reports a refused restore in the dialog, which stays open', async () => {
     api.post.mockRejectedValueOnce(new Error('Metric not restored — it may no longer exist, or you may not have permission to change the catalog.'))
     const showToast = await setup()
     openRestore('temperature')
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Metric not restored/), 'error'))
-    expect(document.querySelector('.modal')).toBeTruthy()
+    // In the dialog: a toast would be drawn behind it.
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent(/^Metric not restored/)
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   it('names Restore in the toast a deprecation leaves', async () => {
@@ -600,7 +601,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/cleared/), 'success', { to: metricUrl('m2') }))
   })
 
-  it('reports a refused edit and leaves the dialog open', async () => {
+  it('reports a refused edit in the dialog, which stays open', async () => {
     api.put.mockRejectedValueOnce(new Error('Metric not changed — it may no longer exist, or you may not have permission to change the catalog.'))
     const showToast = await setup()
     const modal = openEdit('Controller/EXECUTION')
@@ -608,8 +609,8 @@ describe('Edit Metric — correcting a semantic id', () => {
     fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: IEC_CDD } })
     fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^Metric not changed/), 'error'))
-    expect(document.querySelector('.modal')).toBeTruthy()
+    expect(await modal.findByRole('alert')).toHaveTextContent(/^Metric not changed/)
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   it('writes nothing when cancelled', async () => {

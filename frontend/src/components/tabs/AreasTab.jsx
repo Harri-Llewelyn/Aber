@@ -22,7 +22,7 @@ import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
 import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { CellIcon } from '../../utils/cellIcon'
 import { AreaIcon, AREA_ICONS, DEFAULT_AREA_ICON } from '../../utils/areaIcon'
-import { unsBridgeOn, unsPathIndex, unsTopicRoot } from '../../utils/unsPath'
+import { placeNameProblem, unsBridgeOn, unsPathIndex, unsTopicRoot } from '../../utils/unsPath'
 import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { ActionButton } from '../common/ActionButton'
@@ -35,6 +35,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { plural } from '../../utils/format'
 import { AreaPlanPanel } from '../common/AreaPlanPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -141,6 +142,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   // Every control that is off its default: the lifecycle filter opens on Active.
   const activeFilterCount = (searchQuery ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
+  // Why the form's save is off; the database refuses the same names.
+  const formProblem = placeNameProblem(formVal.area_name, 'area')
+
   const openForm = (area, seed) => {
     setEditing(area); setFormVal(seed); setFormError(null); setShowForm(true)
   }
@@ -176,21 +180,18 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
    * Archived Entities page, which is where deleting it lives.
    */
   const archiveArea = async (days) => {
-    try {
-      await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
-      // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
-      setArchiveTarget(null); setSelectedId(null); loadAll()
-      showToast(`Area '${archiveTarget.area_name}' archived`, 'success', { to: areaUrl(archiveTarget.area_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
+    // Closed after the request, so ArchiveModal holds its Archiving state for the round trip, and
+    // only once it succeeded: a refusal is shown in the dialog.
+    setArchiveTarget(null); setSelectedId(null); loadAll()
+    showToast(`Area '${archiveTarget.area_name}' archived`, 'success', { to: areaUrl(archiveTarget.area_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
+  // Run from the Restore dialog, which shows a refusal and stays open.
   const restoreArea = async (area) => {
-    try {
-      await api.post(`/api/v1/areas/${area.area_id}/restore`, {})
-      loadAll(); showToast(`Area '${area.area_name}' restored to active service`, 'success', { to: areaUrl(area.area_id) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/areas/${area.area_id}/restore`, {})
+    setRestoreTarget(null); loadAll()
+    showToast(`Area '${area.area_name}' restored to active service`, 'success', { to: areaUrl(area.area_id) })
   }
 
   // A dropped cell waiting on its dialog, `{ cell, areaId }`; areaId null takes it out of its area.
@@ -214,16 +215,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     return isPlaced(cell) ? `${ask} Its place on ${from}'s plan is cleared. Set a new one on the Cells page.` : ask
   }
 
-  /** File the cell the dialog asked about: one PUT naming the area, or none. */
+  /** File the cell the dialog asked about: one PUT naming the area, or none. A refusal stays in the dialog. */
   const confirmFiling = async () => {
     const { cell, areaId } = filing
-    try {
-      await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, area_id: areaId || '' })
-      setFiling(null)
-      loadAll()
-      const areaName = areas.find(a => a.area_id === areaId)?.area_name
-      showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success', { to: cellUrl(cell.cell_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.put(`/api/v1/cells/${cell.cell_id}`, { cell_name: cell.cell_name, area_id: areaId || '' })
+    setFiling(null)
+    loadAll()
+    const areaName = areas.find(a => a.area_id === areaId)?.area_name
+    showToast(areaName ? `'${cell.cell_name}' → ${areaName}` : `'${cell.cell_name}' unfiled`, 'success', { to: cellUrl(cell.cell_id) })
   }
 
   const handleDragStart = (e, cell) => {
@@ -475,6 +474,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         <Modal
           title={editing ? 'Edit Area' : 'New Area'}
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          problem={formProblem}
           error={formError}
           footer={
             <>
@@ -483,12 +483,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                disabled={!formVal.area_name.trim() || /[/+#]/.test(formVal.area_name)}
-                title={/[/+#]/.test(formVal.area_name)
-                  ? 'The name cannot contain / + or #'
-                  : proposeMode
-                    ? 'File this as a proposal for an approver to decide'
-                    : undefined}
+                disabled={formProblem !== null}
+                title={formProblem ?? (proposeMode
+                  ? 'File this as a proposal for an approver to decide'
+                  : undefined)}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -496,8 +494,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           }
         >
           <div className="form-group">
-            <label className="form-label" htmlFor="area-name">Area Name</label>
-            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" />
+            <label className="form-label" htmlFor="area-name">Area Name <RequiredMark /></label>
+            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" aria-required="true" />
             <div className="form-hint">
               Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">{unsTopicRoot()}/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
             </div>

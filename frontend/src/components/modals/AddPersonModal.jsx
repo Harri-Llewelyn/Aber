@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconCheck, IconPlus, IconUser } from '../common/Icons'
 import { EMAIL, PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
@@ -26,7 +27,11 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   const emailRef = useRef(null)
 
   const nameProblem = displayNameProblem(displayName)
-  const valid = EMAIL.test(email.trim()) && !nameProblem
+  // The name's problem is said under its field; the address's above the buttons.
+  const emailProblem = !email.trim() ? 'Enter their email address'
+    : !EMAIL.test(email.trim()) ? 'That is not an email address'
+      : null
+  const valid = !emailProblem && !nameProblem
 
   const add = useCallback(async () => {
     setBusy(true)
@@ -91,6 +96,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       onClose={busy ? () => {} : close}
       lead="They sign in to the dashboard with this email address, and can do what the role allows."
       initialFocus={emailRef}
+      problem={emailProblem}
       error={error}
       footer={(
         <>
@@ -101,7 +107,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
             className="btn btn-primary"
             onClick={add}
             disabled={!valid}
-            title={valid ? undefined : nameProblem || 'Enter an email address first'}
+            title={emailProblem || nameProblem || undefined}
           >
             <IconPlus size={14} /> Add Person
           </ActionButton>
@@ -109,7 +115,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       )}
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="add-person-email">Email</label>
+        <label className="form-label" htmlFor="add-person-email">Email <RequiredMark /></label>
         <input
           id="add-person-email"
           className="form-control"
@@ -120,6 +126,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           autoComplete="off"
           disabled={busy}
           ref={emailRef}
+          aria-required="true"
         />
       </div>
 

@@ -7,6 +7,10 @@ import { Tooltip } from './Tooltip'
  * the double-submit guard usePendingAction opens. `className` is passed in whole rather than
  * composed from variant props.
  *
+ * A button that cannot go ahead looks refused: `disabled` adds `btn-disabled`, the greyed look,
+ * unless it is pending, where `btn-loading` keeps the label legible. Say why where the person is
+ * looking as well (Modal's `problem`); `title`, its tooltip, is never the only place.
+ *
  * `permitted` is for a button the signed-in role may not use: `permitted={false}` disables it,
  * adds `btn-disabled`, shows `deniedTitle` as its tooltip and never calls `onClick`. It replaces
  * the `btn-disabled` + `disabled` + `can && fn` triple. `title` is its tooltip otherwise: the
@@ -29,10 +33,13 @@ export function ActionButton({
   ...rest
 }) {
   const denied = permitted === false
+  const refused = denied || (disabled && !pending)
+  // Added once, whether or not the caller's className already carries it.
+  const greyed = refused && !className.split(/\s+/).includes('btn-disabled')
   return (
     <Tooltip text={denied ? deniedTitle : title}>
       <button
-        className={`${className}${denied ? ' btn-disabled' : ''}${pending ? ' btn-loading' : ''}`}
+        className={`${className}${greyed ? ' btn-disabled' : ''}${pending ? ' btn-loading' : ''}`}
         disabled={pending || disabled || denied}
         onClick={denied ? undefined : onClick}
         // Announced to assistive tech as busy, so the state is not carried by the label alone.

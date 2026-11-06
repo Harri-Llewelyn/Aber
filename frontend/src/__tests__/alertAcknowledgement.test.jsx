@@ -137,20 +137,33 @@ describe('acknowledging', () => {
   it('asks for a reason before it can be confirmed, and Other for a note', () => {
     const { dialog } = openDialog()
     const confirm = within(dialog).getByRole('button', { name: 'Acknowledge alert' })
-    expect(confirm).toHaveClass('btn-primary')
+    const problem = dialog.querySelector('.modal-problem')
+    expect(confirm).toHaveClass('btn-primary', 'btn-disabled')
     expect(confirm).toBeDisabled()
-    const reason = within(dialog).getByLabelText('Reason')
+    // Greyed and marked required, but not scolding before anything has been touched.
+    expect(problem).toHaveTextContent(/^$/)
+    const reason = within(dialog).getByRole('combobox', { name: 'Reason' })
+    expect(reason).toHaveAttribute('aria-required', 'true')
     expect([...reason.options].map(o => o.value)).toEqual(['', ...ALERT_ACKNOWLEDGEMENT_REASONS.map(r => r.value)])
+    fireEvent.change(within(dialog).getByLabelText('Note (optional)'), { target: { value: 'A loose wire' } })
+    expect(problem).toHaveTextContent('Choose a reason')
+    fireEvent.change(within(dialog).getByLabelText('Note (optional)'), { target: { value: '' } })
     fireEvent.change(reason, { target: { value: 'other' } })
     expect(confirm).toBeDisabled()
-    expect(within(dialog).getByLabelText('Note')).toHaveAttribute('maxLength', String(ALERT_ACKNOWLEDGEMENT_NOTE_MAX))
-    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'A loose wire' } })
+    expect(problem).toHaveTextContent('Other needs a note')
+    expect(problem).toHaveAttribute('aria-live', 'polite')
+    const note = within(dialog).getByRole('textbox', { name: 'Note' })
+    expect(note).toHaveAttribute('maxLength', String(ALERT_ACKNOWLEDGEMENT_NOTE_MAX))
+    expect(note).toHaveAttribute('aria-required', 'true')
+    fireEvent.change(note, { target: { value: 'A loose wire' } })
     expect(confirm).toBeEnabled()
+    expect(confirm).not.toHaveClass('btn-disabled')
+    expect(problem).toHaveTextContent(/^$/)
   })
 
   it('acknowledges, closes the dialog and toasts a link to the device', async () => {
     const { dialog, showToast } = openDialog()
-    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'planned_work' } })
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Reason' }), { target: { value: 'planned_work' } })
     fireEvent.change(within(dialog).getByLabelText('Note (optional)'), { target: { value: '  belt change  ' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Acknowledge alert' }))
     await waitFor(() => expect(showToast).toHaveBeenCalled())
@@ -163,7 +176,7 @@ describe('acknowledging', () => {
   it('shows the database\'s refusal in the dialog and toasts nothing', async () => {
     api.acknowledgeAlert.mockRejectedValue(new Error('Already acknowledged by mgr@aber.local at 2026-11-04 09:05 UTC.'))
     const { dialog, showToast } = openDialog()
-    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'investigating' } })
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Reason' }), { target: { value: 'investigating' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Acknowledge alert' }))
     expect(await within(dialog).findByText(/Already acknowledged by mgr@aber.local/)).toBeInTheDocument()
     expect(showToast).not.toHaveBeenCalled()
@@ -171,8 +184,8 @@ describe('acknowledging', () => {
 
   it('starts on the reason, unchosen', () => {
     render(<AcknowledgeAlertModal alert={alert()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    expect(screen.getByLabelText('Reason')).toHaveValue('')
-    expect(screen.getByLabelText('Reason')).toHaveFocus()
+    expect(screen.getByRole('combobox', { name: 'Reason' })).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: 'Reason' })).toHaveFocus()
   })
 })
 
