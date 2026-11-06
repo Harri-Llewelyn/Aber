@@ -1108,6 +1108,14 @@ Three properties of that worth keeping:
   before `0129` — is not refused, or the release introducing this would break playback on the
   rollout that delivers it.
 
+**What the stamp cannot tell.** It is taken when a report lands, and it says only that the worker
+took *some* new password. So a report that lands after a re-issue, about a password read before it,
+makes the previous password read as current. That happens to a report in flight as the re-issue
+lands, to one retried after a failed report, and to a worker restarting before the kubelet copies
+the re-issue. A playback started then fails at CONNACK until the kubelet copies the new password.
+The stack suites that replay therefore also wait until the worker's file holds what the delivery
+Secret holds (`await_playback_credential()` in [`test_playback_replay.py`](test_playback_replay.py)).
+
 **The delivered password is tried first, and the Helm value when the broker refuses it** (`0191`).
 The credential dialog's fallback, for a re-issue whose delivery failed, is to set
 `secrets.mqttPlaybackCredentials` and upgrade. The delivered file still holds the password the

@@ -4,16 +4,18 @@ Reach into the stack's own processes from a suite.
 The stack lane has a handful of assertions that cannot be made over the network: a delete spoken
 through the credential service's own admin credential, a publish over MQTTS from inside the broker,
 a psql as the database owner, a backup file's digest read where the file lives, a service taken
-down to prove the caller answers 503. Each is a `kubectl exec` against a workload and container, a
+down to prove the caller answers 503, the playback worker's credential file read beside the Secret it
+is copied from. Each is a `kubectl exec` against a workload and container, a `kubectl get`, a
 Service whose selector is patched so it has no endpoints, or a pod run with the release's labels so
 the collector picks it up.
 
-The suites name a TARGET -- "credential", "broker", "supabase-db", "backup-service" -- and this
-module resolves it. KUBE_NAMESPACE and HELM_RELEASE select the release (default aber, both).
+The suites name a TARGET -- "credential", "broker", "supabase-db", "backup-service", "playback" --
+and this module resolves it. KUBE_NAMESPACE and HELM_RELEASE select the release (default aber, both).
 
 Every suite that uses this puts test-harness/ on sys.path first, the way test_backup_service.py
 already reaches test_enroll_gateway.py.
 """
+import base64
 import hashlib
 import json
 import os
@@ -40,7 +42,11 @@ TARGETS = {
     "backup-service": {"workload": "deploy/backup-service", "container": "backup-service", "service": None},
     "forge": {"workload": "deploy/gitea", "container": "gitea", "service": "gitea"},
     "functions": {"workload": "deploy/supabase-functions", "container": "edge-runtime", "service": "supabase-functions"},
+    "playback": {"workload": "deploy/playback", "container": "playback", "service": None},
 }
+# The delivery Secret's key the credential service writes the playback worker's passwords under
+# (scripts/gateway-credential-service.mjs), as {sparkplug_id: password}.
+PLAYBACK_DELIVERY_KEY = "playback_credentials.json"
 
 
 def _kubectl(*args, **kwargs):
@@ -208,6 +214,74 @@ def publish(username, password, topic, retry_for=15.0, interval=3.0, attempt_tim
         if verdict != UNANSWERED or time.monotonic() >= deadline:
             return verdict, result
         time.sleep(interval)
+
+
+def fingerprint(value):
+    """Eight hex characters of a delivered value's SHA-256, or None: enough to tell two apart in
+    a failure, and nothing a log could be used to sign in with."""
+    return hashlib.sha256(value.encode()).hexdigest()[:8] if value else None
+
+
+def _deliveries(text, where):
+    """A delivery document as {sparkplug_id: value}. Blank is none delivered, as the chart creates it."""
+    if not text.strip():
+        return {}
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{where} is not a JSON object")
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
+def playback_deliveries():
+    """
+    ({sparkplug_id: value} in the playback worker's credential file, the same in the delivery
+    Secret). The credential service writes the Secret as it issues; the kubelet copies it into
+    the worker's projected volume about once a minute; the worker re-reads the file before each
+    job it claims. Both places are found from the worker's Deployment. Compare the values, and
+    show them only through fingerprint().
+    """
+    workload = TARGETS["playback"]["workload"]
+    got = _kubectl("get", workload, "-o", "json")
+    if got.returncode != 0:
+        raise RuntimeError(f"could not read {workload}: {got.stderr.strip()}")
+    pod = json.loads(got.stdout)["spec"]["template"]["spec"]
+    volume, item = next(
+        ((v, i) for v in pod.get("volumes") or [] for i in (v.get("secret") or {}).get("items") or []
+         if i.get("key") == PLAYBACK_DELIVERY_KEY), (None, None))
+    if volume is None:
+        raise RuntimeError(f"{workload} projects no {PLAYBACK_DELIVERY_KEY}")
+    container = next(c for c in pod["containers"] if c["name"] == TARGETS["playback"]["container"])
+    mount = next(m["mountPath"] for m in container.get("volumeMounts") or [] if m["name"] == volume["name"])
+    path = mount.rstrip("/") + "/" + item["path"]
+
+    read = run("playback", "cat", path)
+    if read.returncode != 0 and "No such file" not in read.stderr:
+        raise RuntimeError(f"could not read {path} in {describe('playback')}: {read.stderr.strip()}")
+    in_file = _deliveries(read.stdout if read.returncode == 0 else "", path)
+
+    secret = volume["secret"]["secretName"]
+    got = _kubectl("get", "secret", secret, "-o", "json")
+    if got.returncode != 0:
+        raise RuntimeError(f"could not read secret/{secret}: {got.stderr.strip()}")
+    encoded = (json.loads(got.stdout).get("data") or {}).get(PLAYBACK_DELIVERY_KEY) or ""
+    in_secret = _deliveries(base64.b64decode(encoded).decode(), f"secret/{secret}")
+    return in_file, in_secret
+
+
+def playback_delivery_gap(gateway, in_file, in_secret):
+    """
+    Why the playback worker's file does not hold what the delivery Secret holds for `gateway`, each
+    named by fingerprint(), or None when it does. A job the worker claims then connects with the
+    password the credential service last delivered, which is the broker's.
+    """
+    delivered, held = in_secret.get(gateway), in_file.get(gateway)
+    if not delivered:
+        return f"the delivery Secret holds nothing for {gateway}: no credential has been delivered"
+    if held != delivered:
+        return (f"the playback worker's file holds {fingerprint(held) or 'nothing'} for {gateway} and "
+                f"the delivery Secret {fingerprint(delivered)}: the kubelet has not copied the last "
+                f"delivery into the worker's volume yet")
+    return None
 
 
 def wait_until(target, *probe, attempts=30, interval=1.0):

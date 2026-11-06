@@ -158,7 +158,9 @@ python test-harness/test_load_generator.py
 # no seq on the NDEATH, a timestamp on every metric, and is_historical on a replay.
 python test-harness/test_load_generator_payloads.py
 # The broker verdict the stack suites read a credential from: a timeout is retried and is never a
-# refusal, so a slow runner neither fails a working credential nor passes a revocation.
+# refusal, so a slow runner neither fails a working credential nor passes a revocation. And the
+# playback worker's credential file, found from its Deployment and read beside the delivery Secret:
+# a file behind the Secret is a gap naming both by fingerprint, never by value.
 python test-harness/test_stack_exec.py
 # The sign-in every stack suite uses: a 429 is waited out within a bound, then fails naming the
 # status, and is never read as missing seed accounts.
@@ -233,7 +235,8 @@ python ingestion/test_capture_lifecycle_stack.py
 # see -- a credential nothing had issued, and a worker that read its credentials once at startup.
 # Each left every page saying the right thing and no telemetry moving. So this mints the credential
 # (which is what exercises the delivery path), waits out the kubelet's Secret refresh, replays a
-# fixture, and asserts the rows arrived. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
+# fixture, and asserts the rows arrived. Before each replay, this suite and the two capture suites
+# wait until the worker's credential file, read with kubectl, holds what the delivery Secret holds. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian. The fixture also holds the recorded
 # appliance's node heartbeat, with health and an outage report: the Playback gateway must record a

@@ -1550,8 +1550,9 @@ export const SUITES = {
       'neither can see -- a credential nothing had issued, and a worker that read its credentials ' +
       'once at startup. Each left every page saying the right thing and no telemetry moving, ' +
       'because a refused MQTT connection is invisible past CONNECT and Sparkplug publishes at ' +
-      'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits for ' +
-      'the worker to report that it holds the target, replays a fixture, and asserts the rows ' +
+      'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits until ' +
+      "the worker's credential file holds what the delivery Secret holds and the worker reports " +
+      'it, replays a fixture, and asserts the rows ' +
       'arrived. The recorded gateway and device are fixtures the suite makes, since a fresh ' +
       'install has none (#731). THE SENTINEL METRIC IS LOAD BEARING: a historian holding live ' +
       'traffic and earlier runs cannot say which rows one replay wrote, and a metric name unique to ' +

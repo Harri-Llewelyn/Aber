@@ -63,8 +63,8 @@ sys.path.insert(0, str(INGESTION.parent / "test-harness"))
 import stack_exec  # noqa: E402  -- removes the fixture gateway's broker account
 from test_playback_replay import (  # noqa: E402
     BUCKET, CONNECT_TIMEOUT, PUBLISHABLE_KEY, SUPABASE_DB_HOST, SUPABASE_DB_NAME, SUPABASE_DB_PASS,
-    SUPABASE_DB_PORT, SUPABASE_DB_USER, SUPABASE_URL, Session, _epoch_seconds, _request,
-    capture_version, historian, sign_in, skip_or_fail,
+    SUPABASE_DB_PORT, SUPABASE_DB_USER, SUPABASE_URL, Session, _request,
+    await_playback_credential, capture_version, historian, sign_in, skip_or_fail,
 )
 from test_playback_replay import setUpModule as stack_is_up  # noqa: E402
 
@@ -114,9 +114,6 @@ LIVE_BIRTH_TIMEOUT = 45
 CLAIM_TIMEOUT = 30
 REBIRTH_TIMEOUT = 15
 FINISH_TIMEOUT = 60
-# The kubelet refreshes a projected Secret about once a minute (test_playback_replay.py).
-CREDENTIAL_TIMEOUT = 240
-WORKER_STALE_SECONDS = 120
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
 HISTORIAN_SETTLE = 3
@@ -696,38 +693,10 @@ class RecordedCaptureReplays(unittest.TestCase):
         cls.rows = cls._await_historian()
 
     @classmethod
-    def _worker_holds(cls, wanted):
-        """The worker reports, recently, the Playback gateway's current credential."""
-        status, rows = cls.session.rest(
-            "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
-        if status != 200 or not rows or wanted not in (rows[0].get("held_edge_nodes") or []):
-            return False
-        if time.time() - _epoch_seconds(rows[0]["reported_at"]) > WORKER_STALE_SECONDS:
-            return False
-        status, stale = cls.session.rest("/rpc/playback_stale_credentials", method="POST", body={})
-        return status == 200 and not any(r.get("sparkplug_id") == wanted for r in (stale or []))
-
-    @classmethod
     def _ensure_worker_credential(cls):
-        """Issued only when the worker does not already hold a current one; test_playback_replay.py
-        is the suite that exercises the delivery itself."""
-        wanted = cls.playback_gateway["sparkplug_id"]
-        if cls._worker_holds(wanted):
-            return
-        status, body = _request(
-            f"{SUPABASE_URL}/functions/v1/gateway-credential", method="POST",
-            body={"gateway_id": cls.playback_gateway["id"]},
-            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {cls.session.token}",
-                     "Content-Type": "application/json"},
-        )
-        if status != 200 or (body or {}).get("playback_delivered") is not True:
-            raise AssertionError(f"could not issue and deliver the playback credential: {status} "
-                                 f"{(body or {}).get('error')} {(body or {}).get('details')} "
-                                 f"playback_delivered={(body or {}).get('playback_delivered')}")
-        if not poll(lambda: cls._worker_holds(wanted), bool, CREDENTIAL_TIMEOUT, 3):
-            raise AssertionError(
-                f"the playback worker did not report holding {wanted}'s current credential within "
-                f"{CREDENTIAL_TIMEOUT}s. Is `playback.enabled` set (values-dev.yaml sets it)?")
+        """Issued only when none has been delivered; test_playback_replay.py is the suite that
+        exercises the delivery itself."""
+        await_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _await_historian(cls):
@@ -1350,7 +1319,6 @@ class ACaptureAtTheCapFitsBothWorkers(unittest.TestCase):
     """
 
     _issue_gateway_credential = RecordedCaptureReplays.__dict__["_issue_gateway_credential"]
-    _worker_holds = RecordedCaptureReplays.__dict__["_worker_holds"]
     _ensure_worker_credential = RecordedCaptureReplays.__dict__["_ensure_worker_credential"]
 
     @classmethod
