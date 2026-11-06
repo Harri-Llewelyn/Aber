@@ -4,8 +4,10 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
+import { FormProblem } from '../common/FormProblem'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { entityUrl } from '../../routes'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { usePendingAction } from '../../hooks/usePendingAction'
@@ -98,6 +100,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [form, setForm]               = useState({ display_name: '', url: '', link_tag: 'other' })
   const [error, setError]             = useState(null)
+  // The link form's first edit, so a form that has just opened does not scold.
+  const [linkEdited, setLinkEdited]   = useState(false)
 
   const canManage = hasPermission?.(PERMISSION_UUIDS.LINK_MANAGE) ?? false
 
@@ -113,25 +117,28 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   const openNew = () => {
     setEditingLink(null)
     setForm({ display_name: '', url: '', link_tag: 'other' })
+    setLinkEdited(false)
     setShowForm(true)
   }
 
   const openEdit = (doc) => {
     setEditingLink(doc)
     setForm({ display_name: doc.display_name, url: doc.url, link_tag: doc.link_tag || 'other' })
+    setLinkEdited(false)
     setShowForm(true)
   }
 
+  const setField = (key) => (e) => { setForm(f => ({ ...f, [key]: e.target.value })); setLinkEdited(true) }
+
+  // Why Save Link is off, said above the form's buttons from its first edit.
+  const linkProblem = !form.display_name.trim() ? 'Give the link a name'
+    : !form.url.trim() ? 'Enter the address it links to'
+      : !form.url.startsWith('http://') && !form.url.startsWith('https://') ? 'The address must start with http:// or https://'
+        : null
+
   const save = async () => {
     setError(null)
-    if (!form.display_name.trim()) {
-      setError('Link name is required')
-      return
-    }
-    if (!form.url.trim() || (!form.url.startsWith('http://') && !form.url.startsWith('https://'))) {
-      setError('Please enter a valid HTTP/HTTPS URL (e.g. https://...)')
-      return
-    }
+    if (linkProblem) return
 
     try {
       if (editingLink) {
@@ -144,28 +151,20 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       setShowForm(false)
       loadLinks()
     } catch (e) {
+      // In this dialog: a toast would be drawn behind it.
       setError(e.message)
-      showToast(e.message, 'error')
     }
   }
 
+  // Run from Remove link's dialog, which shows a refusal and stays open.
   const removeLink = async (id, name) => {
-    setError(null)
-    try {
-      await api.delete(`/api/v1/links/${id}`)
-      setConfirmDelete(null)
-      loadLinks()
-      showToast(`Link '${name}' removed${entityName ? ` from '${entityName}'` : ''}`, 'success', { to: entityUrl(entityType, entityId) })
-    } catch (e) {
-      // Said in this dialog, beneath the confirmation, which closes so it can be read.
-      setConfirmDelete(null)
-      setError(e.message)
-      showToast(e.message, 'error')
-    }
+    await api.delete(`/api/v1/links/${id}`)
+    setConfirmDelete(null)
+    loadLinks()
+    showToast(`Link '${name}' removed${entityName ? ` from '${entityName}'` : ''}`, 'success', { to: entityUrl(entityType, entityId) })
   }
 
-  // The link form's Save. The validation guards above return before any request, so the pending
-  // state clears on the same tick.
+  // The link form's Save, held while linkProblem says why.
   const [savingLink, runSaveLink] = usePendingAction()
 
   return (
@@ -201,18 +200,18 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
               {editingLink ? 'Edit Link' : 'Add a New Link'}
             </div>
             <div className="form-group">
-              <label className="form-label">Display Name</label>
-              <input className="form-control" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="e.g. Operating Manual, Asset Register Entry, Measurement Data Share" />
+              <label className="form-label" htmlFor="link-name">Display Name <RequiredMark /></label>
+              <input id="link-name" className="form-control" value={form.display_name} onChange={setField('display_name')} placeholder="e.g. Operating Manual, Asset Register Entry, Measurement Data Share" aria-required="true" />
             </div>
             <div className="form-group">
-              <label className="form-label">Link URL (SharePoint, Google Drive, an asset tracker, any URL)</label>
-              <input className="form-control" type="url" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="https://company.sharepoint.com/documents/manual.pdf" />
+              <label className="form-label" htmlFor="link-url">Link URL (SharePoint, Google Drive, an asset tracker, any URL) <RequiredMark /></label>
+              <input id="link-url" className="form-control" type="url" value={form.url} onChange={setField('url')} placeholder="https://company.sharepoint.com/documents/manual.pdf" aria-required="true" />
             </div>
             <div className="form-group">
-              <label className="form-label">Tag</label>
+              <label className="form-label" htmlFor="link-tag">Tag</label>
               {/* Built from TAG_LABELS rather than written out again, so a stored tag is always
                   selectable in the form that wrote it. */}
-              <select className="form-control" value={form.link_tag} onChange={e => setForm(f => ({ ...f, link_tag: e.target.value }))}>
+              <select id="link-tag" className="form-control" value={form.link_tag} onChange={setField('link_tag')}>
                 {Object.entries(TAG_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
@@ -223,12 +222,15 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                 {TAG_HINTS[form.link_tag]}
               </div>
             </div>
+            <FormProblem problem={linkEdited ? linkProblem : null} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)} disabled={savingLink}>Cancel</button>
               <ActionButton
                 className="btn btn-primary btn-sm"
                 pending={savingLink}
                 pendingLabel="Saving…"
+                disabled={linkProblem !== null}
+                title={linkProblem ?? undefined}
                 onClick={() => runSaveLink(save)}
               >
                 Save Link
@@ -292,6 +294,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
             title="Remove link"
             icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
+            confirmLabel="Remove link"
             pendingLabel="Removing…"
             onConfirm={() => removeLink(confirmDelete.id, confirmDelete.display_name)}
             onCancel={() => setConfirmDelete(null)}

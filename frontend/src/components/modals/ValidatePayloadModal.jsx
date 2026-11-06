@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { api } from '../../api'
 import { IconCheck } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { Badge } from '../common/Badge'
 import { samplePayload } from '../../utils/payloadConformance'
@@ -108,9 +109,9 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button className="btn btn-primary" onClick={handleValidate} disabled={loading}>
-            {loading ? 'Validating…' : 'Validate Payload'}
-          </button>
+          <ActionButton className="btn btn-primary" pending={loading} pendingLabel="Validating…" onClick={handleValidate}>
+            Validate Payload
+          </ActionButton>
         </>
       }
     >

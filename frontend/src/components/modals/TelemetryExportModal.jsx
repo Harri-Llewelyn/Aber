@@ -8,6 +8,7 @@ import {
 } from '../../utils/telemetryExport'
 import { clockWords } from '../../utils/timeWindow'
 import { IconDownload, IconAlertTriangle } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { Tooltip } from '../common/Tooltip'
 
@@ -206,9 +207,9 @@ export function TelemetryExportModal({ device, metricNames, from, to, windowWord
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={runExport} disabled={busy} style={{ gap: '6px' }}>
-            <IconDownload size={13} /> {busy ? 'Exporting…' : 'Export CSV'}
-          </button>
+          <ActionButton className="btn btn-primary" pending={busy} pendingLabel="Exporting…" onClick={runExport} style={{ gap: '6px' }}>
+            <IconDownload size={13} /> Export CSV
+          </ActionButton>
         </>
       }
     >
