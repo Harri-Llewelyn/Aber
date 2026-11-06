@@ -9626,8 +9626,9 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 {
   const api = read('frontend/src/api.js');
-  const caps = ['HISTORY_MAX_CHANGES', 'HISTORY_CHANGE_READINGS', 'HISTORY_CHANGE_SERIES']
-    .map((name) => [name, Number(api.match(new RegExp(`^export const ${name} = (\\d+);$`, 'm'))?.[1])]);
+  const held = Object.fromEntries([...api.matchAll(/^export const (HISTORY_MAX_CHANGES|HISTORY_CHANGE_READINGS|HISTORY_CHANGE_SERIES) = (\d+);$/gm)]
+    .map((m) => [m[1], Number(m[2])]));
+  const caps = ['HISTORY_MAX_CHANGES', 'HISTORY_CHANGE_READINGS', 'HISTORY_CHANGE_SERIES'].map((name) => [name, held[name]]);
   const problems288 = [];
   const [changes, readings, series] = caps.map(([, n]) => n);
   for (const [name, n] of caps) if (!Number.isInteger(n)) problems288.push(`could not read ${name} out of frontend/src/api.js`);
