@@ -24,6 +24,15 @@ export const unsTopicOf = (row) => (row?.uns_path ? `${unsTopicRoot()}/${row.uns
 
 const UNSAFE = /[/+#]/
 
+/**
+ * Why an area or a cell cannot be saved under `name`, or null. areas_name_topic_safe and
+ * cells_name_topic_safe refuse an empty name and these three characters; mirror check 64 holds the
+ * characters to both CHECKs. `noun` is 'area' or 'cell'.
+ */
+export const placeNameProblem = (name, noun) => (!(name || '').trim() ? `Give the ${noun} a name`
+  : UNSAFE.test(name) ? 'The name cannot contain / + or #'
+    : null)
+
 /** Which name on the device's path a topic cannot carry, and where it is changed. */
 function unsafeName({ device, cell, area }) {
   if (UNSAFE.test(device?.asset_name || '')) return 'its name contains /, + or #. Rename it in Edit Details.'

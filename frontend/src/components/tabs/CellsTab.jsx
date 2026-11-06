@@ -17,7 +17,7 @@ import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
-import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
+import { placeNameProblem, unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
@@ -47,6 +47,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { plural } from '../../utils/format'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
@@ -166,23 +167,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     setEditing(cell); setFormVal(seed); setFormError(null); setShowForm(true)
   }
   const closeForm = () => { setShowForm(false); setEditingProposal(null) }
+  // Why the form's save is off; the database refuses the same names.
+  const formProblem = placeNameProblem(formVal.cell_name, 'cell')
 
   const archiveCell = async (days) => {
-    try {
-      await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
-      // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
-      setArchiveTarget(null); loadAll()
-      showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success', { to: cellUrl(archiveTarget.cell_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
+    // Closed after the request, so ArchiveModal holds its Archiving state for the round trip, and
+    // only once it succeeded: a refusal is shown in the dialog.
+    setArchiveTarget(null); loadAll()
+    showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success', { to: cellUrl(archiveTarget.cell_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
+  // Run from the Restore dialog, which shows a refusal and stays open.
   const restoreCell = async (cellId, name) => {
-    try {
-      await api.post(`/api/v1/cells/${cellId}/restore`, {})
-      loadAll(); showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/cells/${cellId}/restore`, {})
+    setRestoreTarget(null); loadAll()
+    showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
   }
 
   // An ID, not the cell object: this page polls, so the selection is resolved against `cells` on
@@ -495,6 +495,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
           onClose={closeForm}
+          problem={formProblem}
           error={formError}
           footer={
             <>
@@ -505,9 +506,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 // different waits and the operator knows which they asked for.
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title={proposeMode
+                disabled={formProblem !== null}
+                title={formProblem ?? (proposeMode
                   ? 'Ask for these changes — an approver applies them, or says why not'
-                  : undefined}
+                  : undefined)}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -515,8 +517,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           }
         >
           <div className="form-group">
-            <label className="form-label" htmlFor="cell-name">Cell Name</label>
-            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" />
+            <label className="form-label" htmlFor="cell-name">Cell Name <RequiredMark /></label>
+            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" aria-required="true" />
             <UnsRenameNote
               index={unsPaths}
               renamed={!!editing && (formVal.cell_name || '').trim() !== editing.cell_name}

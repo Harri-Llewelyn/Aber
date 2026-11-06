@@ -2692,8 +2692,10 @@ main:focus { outline: none; }
   margin-bottom: 7px;
 }
 
-/* The asterisk of a required field (RequiredMark). A shape as well as a colour. */
+/* The asterisk of a required field (RequiredMark): a shape as well as a colour. Drawn here, so it
+   is not in the label's text, which names the control. */
 .required-mark { color: var(--danger-text); margin-left: 3px; }
+.required-mark::before { content: '*'; }
 
 .form-control {
   width: 100%;

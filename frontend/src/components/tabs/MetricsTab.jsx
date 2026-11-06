@@ -31,6 +31,7 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
@@ -529,26 +530,20 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const usageCountFor = (metricName) =>
     schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
 
+  // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
+  // stay open; each closes its dialog once the write has succeeded.
   const handleDeprecate = async (supersededBy) => {
-    try {
-      await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
-      setDeprecateTarget(null)
-      load()
-      showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success', { to: metricUrl(deprecateTarget.metric_uuid, true) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
+    setDeprecateTarget(null)
+    load()
+    showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success', { to: metricUrl(deprecateTarget.metric_uuid, true) })
   }
 
   const handleRestore = async () => {
-    try {
-      await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
-      setRestoreTarget(null)
-      load()
-      showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
+    setRestoreTarget(null)
+    load()
+    showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
   }
 
   /** Edit's save: `change` holds only what changed, the semantic id pair, the permitted values or both. */
@@ -556,26 +551,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     const name = editTarget.name
     const pairChanged = Object.hasOwn(change, 'semantic_id')
     const valuesChanged = Object.hasOwn(change, 'permitted_values')
-    try {
-      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
-      setEditTarget(null)
-      load()
-      showToast(
-        pairChanged && valuesChanged
-          ? `Metric '${name}' saved`
-          : valuesChanged
-            ? (change.permitted_values
-              ? `Permitted values of '${name}' saved`
-              : `Permitted values of '${name}' cleared; it may report any value`)
-            : change.semantic_id
-              ? `Semantic id of '${name}' saved`
-              : `Semantic id of '${name}' cleared; the metric is now unmapped`,
-        'success',
-        { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
+    setEditTarget(null)
+    load()
+    showToast(
+      pairChanged && valuesChanged
+        ? `Metric '${name}' saved`
+        : valuesChanged
+          ? (change.permitted_values
+            ? `Permitted values of '${name}' saved`
+            : `Permitted values of '${name}' cleared; it may report any value`)
+          : change.semantic_id
+            ? `Semantic id of '${name}' saved`
+            : `Semantic id of '${name}' cleared; the metric is now unmapped`,
+      'success',
+      { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
+    )
   }
 
   // The catalog and the schema registry share `schema:manage`. The write is refused by
@@ -754,6 +745,17 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     datatypeChosen &&
     !permitted.error &&
     (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
+  // Why Add is off, where nothing in the form says so already: the name, the datatype and the
+  // permitted values each say their own problem where they are typed or chosen.
+  const addProblem = effectiveType === ''
+    ? (isCustomStandard ? 'Give the metric a name'
+      : usingCustomType ? 'Type the custom type'
+        : isIso ? 'Choose a KPI'
+          : isOpcua ? 'Choose a data point'
+            : isAshrae ? 'Choose a concept'
+              : 'Choose a data item type')
+    : newMetric.group === NEW_GROUP && newMetric.newGroup.trim() === '' ? 'Name the new group'
+      : null
 
   /**
    * Edit is on both tabs: a deprecated metric still carries its id into the schemas that model it.
@@ -1194,6 +1196,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           icon={<IconPlus size={18} />}
           size="xl"
           onClose={closeAddMetric}
+          problem={addProblem}
           error={addError}
           footer={
             <>
@@ -1203,6 +1206,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 pending={adding}
                 pendingLabel="Adding…"
                 disabled={!canAddMetric}
+                title={addProblem ?? undefined}
                 onClick={() => runAdd(handleAddMetric)}
               >
                 Add
@@ -1252,10 +1256,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {newMetric.group === NEW_GROUP && (
               <div className="form-group" style={{ flex: '0 1 170px' }}>
-                <label className="form-label" htmlFor="metric-new-group">New Group Name</label>
+                <label className="form-label" htmlFor="metric-new-group">New Group Name <RequiredMark /></label>
                 <Tooltip text="One segment of the name, so it cannot contain a slash.">
                   <input
                     id="metric-new-group"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.newGroup}
                     onChange={e => setNewMetric(m => ({ ...m, newGroup: e.target.value.replace(/\//g, '') }))}
@@ -1282,10 +1287,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 label changes with it. */}
             {isMTConnect && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label" htmlFor="metric-type">Data Item Type</label>
+                <label className="form-label" htmlFor="metric-type">Data Item Type <RequiredMark /></label>
                 <Tooltip text="SAMPLE is a continuous measurement, EVENT a discrete change of state, CONDITION a fault or warning.">
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1304,11 +1310,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isIso && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label" htmlFor="metric-type">KPI</label>
+                <label className="form-label" htmlFor="metric-type">KPI <RequiredMark /></label>
                 <Tooltip text={isoKpis.find(k => k.name === newMetric.type)?.formula
                   || 'Choosing a KPI fills in its unit, semantic id and group, which belong to the standard.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1326,11 +1333,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isOpcua && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label" htmlFor="metric-type">Data Point</label>
+                <label className="form-label" htmlFor="metric-type">Data Point <RequiredMark /></label>
                 <Tooltip text={chosenDataPoint?.description
                   || 'Choosing a data point fills in its group, its datatype and its semantic id.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={chosenDataPoint
                       ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
@@ -1364,11 +1372,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isAshrae && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label" htmlFor="metric-type">Concept</label>
+                <label className="form-label" htmlFor="metric-type">Concept <RequiredMark /></label>
                 <Tooltip text={ashraeSections.flatMap(s => s.entries).find(c => c.name === newMetric.type)?.description
                   || 'Choosing a concept fills in the group and the name. A concept names a thing, so the rest stays yours.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1388,12 +1397,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {(usingCustomType || isCustomStandard) && (
               <div className="form-group" style={{ flex: '1 1 170px' }}>
-                <label className="form-label" htmlFor="metric-custom">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
+                <label className="form-label" htmlFor="metric-custom">{isCustomStandard ? 'Metric Name' : 'Custom Type'} <RequiredMark /></label>
                 <Tooltip text={isCustomStandard
                   ? 'A local extension, with no standard behind it. It still groups and tags like every other metric.'
                   : 'A local extension. MTConnect allows these, but prefer a standard type where one fits.'}>
                   <input
                     id="metric-custom"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.customType}
                     onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
@@ -1441,10 +1451,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             </div>
 
             <div className="form-group" style={{ flex: '0 1 140px' }}>
-              <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype</label>
+              <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype <RequiredMark /></label>
               <Tooltip text="How the value is encoded on the wire. A vocabulary entry fills it where it can. It cannot change later.">
                 <select
                   id="metric-datatype"
+                  aria-required="true"
                   className="form-control"
                   value={datatypeChosen ? newMetric.datatype : ''}
                   onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}

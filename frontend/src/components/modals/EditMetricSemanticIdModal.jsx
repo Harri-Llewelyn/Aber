@@ -18,12 +18,14 @@ import { usePendingAction } from '../../hooks/usePendingAction'
  * DeprecateMetricModal does. `onConfirm` receives only what changed: the pair, `permitted_values`
  * (a list, or null to clear it), or both. `suggestion` is the pair Add Metric would suggest for the
  * metric's standard and type, which Use suggested restores; `candidates` feed the field's
- * vocabulary search (both from utils/semanticIdSources.js).
+ * vocabulary search (both from utils/semanticIdSources.js). A refusal of the save is shown in the
+ * dialog as the database worded it.
  */
 export function EditMetricSemanticIdModal({
   metric, usageCount, suggestion = null, candidates = null, onConfirm, onCancel
 }) {
   const [saving, runSave] = usePendingAction()
+  const [error, setError] = useState(null)
 
   // Escape, the close button and Cancel do nothing while the save runs, as in ConfirmModal.
   const dismiss = saving ? () => {} : onCancel
@@ -45,12 +47,25 @@ export function EditMetricSemanticIdModal({
   const changed = pairChanged || valuesChanged
   const blocked = takesValues && !!parsed.error
 
+  const save = () => runSave(async () => {
+    setError(null)
+    try {
+      await onConfirm({
+        ...(pairChanged && { semantic_id: next.semanticId, semantic_id_type: next.semanticIdType }),
+        ...(valuesChanged && { permitted_values: parsed.values })
+      })
+    } catch (err) {
+      setError(err.message)
+    }
+  })
+
   return (
     <Modal
       title={<>Edit Metric <span className="mono">{metric.name}</span></>}
       icon={<IconPencil size={18} />}
       size="md"
       onClose={dismiss}
+      error={error}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
@@ -59,10 +74,7 @@ export function EditMetricSemanticIdModal({
             disabled={!changed || blocked}
             pending={saving}
             pendingLabel="Saving…"
-            onClick={() => runSave(() => onConfirm({
-              ...(pairChanged && { semantic_id: next.semanticId, semantic_id_type: next.semanticIdType }),
-              ...(valuesChanged && { permitted_values: parsed.values })
-            }))}
+            onClick={save}
             title={blocked ? parsed.error : changed ? undefined : 'No changes to save'}
           >
             Save Metric

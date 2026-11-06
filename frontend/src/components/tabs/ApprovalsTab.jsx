@@ -22,6 +22,8 @@ import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
+import { ActionButton } from '../common/ActionButton'
+import { RequiredMark } from '../common/RequiredMark'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { canDecide } from '../../utils/proposalAuthority'
 import { cellIconEntry } from '../../utils/cellIcon'
@@ -263,33 +265,48 @@ function DiffTable({ proposal, names, replaced }) {
   )
 }
 
+/** Reject's reason, which the database requires; a refusal is shown here as it was worded. */
 function RejectDialog({ onCancel, onConfirm, busy }) {
   const [reason, setReason] = useState('')
-  const blank = reason.trim() === ''
+  const [error, setError] = useState(null)
+  const problem = reason.trim() === '' ? 'Say why it is rejected' : null
+  const reject = async () => {
+    setError(null)
+    try {
+      await onConfirm(reason.trim())
+    } catch (err) {
+      setError(err?.message || 'That was refused.')
+    }
+  }
   return (
     <Modal
       title="Reject this proposal"
       icon={<IconX size={18} />}
       size="sm"
-      onClose={onCancel}
+      onClose={busy ? () => {} : onCancel}
+      problem={problem}
+      error={error}
       footer={
         <>
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          <button
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+          <ActionButton
             type="button"
             className="btn btn-danger"
-            disabled={blank || busy}
-            onClick={() => onConfirm(reason.trim())}
+            pending={busy}
+            pendingLabel="Rejecting…"
+            disabled={problem !== null}
+            title={problem ?? undefined}
+            onClick={reject}
           >
             Reject
-          </button>
+          </ActionButton>
         </>
       }
     >
       {/* A CHECK constraint requires the reason: a rejected proposal frees its slot at once, so
           the reason is what makes a second attempt different from the first. */}
       <label className="form-label" htmlFor="reject-reason">
-        Why? The proposer sees this, and it is the only thing they get other than “no”.
+        Why? The proposer sees this, and it is the only thing they get other than “no”. <RequiredMark />
       </label>
       <textarea
         id="reject-reason"
@@ -298,6 +315,7 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
         value={reason}
         onChange={e => setReason(e.target.value)}
         placeholder="That machine is being retired next month."
+        aria-required="true"
       />
     </Modal>
   )
@@ -588,6 +606,11 @@ export function ApprovalsTab({
   }, [trailId])
   const replaced = trailId === null ? null : replacedByTrail.get(trailId)
 
+  /**
+   * Approve or reject. A refusal is the database's sentence: an approval can fail because the patch
+   * violates a CHECK, and that sentence is the one the approver needs. Reject's dialog shows it; an
+   * approval is a drawer button, so its refusal is a toast, which is in view there.
+   */
   const decide = async (proposal, action, reason) => {
     setBusyId(proposal.id)
     try {
@@ -600,8 +623,7 @@ export function ApprovalsTab({
       setRejecting(null)
       await refresh()
     } catch (e) {
-      // The message is the database's: an approval can fail because the patch violates a CHECK, and
-      // that sentence is the one the approver needs.
+      if (action === 'reject') throw e
       showToast?.(e?.message || 'That was refused.', 'error')
     } finally {
       setBusyId(null)

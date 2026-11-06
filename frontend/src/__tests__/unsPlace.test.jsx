@@ -224,14 +224,14 @@ describe('with the bridge on', () => {
   it('renaming a device says it moves its topic', async () => {
     await showDevice()
     fireEvent.click(within(panel()).getByText('Edit Details'))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Device Name' }), { target: { value: 'CNC_02' } })
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_02' } })
     expect(screen.getByText(/Renaming it moves its Unified Namespace topic\./)).toBeInTheDocument()
   })
 
   it('renaming a skipped device moves no topic, and says nothing', async () => {
     await showDevice({ paths: [{ ...PUBLISHED, uns_path: null, skip_reason: 'unassigned' }] })
     fireEvent.click(within(panel()).getByText('Edit Details'))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Device Name' }), { target: { value: 'CNC_02' } })
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_02' } })
     expect(screen.queryByText(/moves its Unified Namespace topic/)).toBeNull()
   })
 })
