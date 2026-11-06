@@ -221,6 +221,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
     load()
   }, [search, setSearch, rereadSessions, load])
 
+  // Run from the act's dialog, which shows a refusal and stays open. Read again either way.
   const confirmAct = useCallback(async () => {
     const { act, person, session } = confirming
     try {
@@ -264,10 +265,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
           { to: personUrl(person.user_id) }
         )
       }
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
       setConfirming(null)
+    } finally {
       // Each act can end sessions: a new password ends them all, and so does a removal's ban.
       rereadSessions(person.user_id)
       load()

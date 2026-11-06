@@ -106,14 +106,19 @@ describe('BugReportModal issue composition', () => {
     expect(body).toContain('**User Persona:** Operator')
   })
 
-  it('refuses an empty title instead of filing a blank issue', () => {
+  it('refuses an empty title instead of filing a blank issue, and says so in the dialog', () => {
     const { showToast, onClose } = renderModal()
+    const button = screen.getByRole('button', { name: /Submit Issue on GitHub/i })
+    expect(button).toBeDisabled()
+    expect(button).toHaveClass('btn-disabled')
     submit()
-
     expect(open).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
-    // In the dialog, not a toast: the toasts are behind an open dialog.
-    expect(screen.getByRole('alert')).toHaveTextContent('Please enter an issue title')
+
+    // In the dialog, not a toast: the toasts are behind an open dialog. From the first edit.
+    setTitle('x')
+    setTitle('  ')
+    expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the issue a title')
     expect(showToast).not.toHaveBeenCalled()
   })
 

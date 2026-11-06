@@ -191,18 +191,15 @@ export function BackupsTab({ showToast, hasPermission }) {
     }
   })
 
+  // Run from Release backup's dialog, which shows a refusal and stays open.
   const onRelease = async () => {
     const backup = releaseFor
-    setReleaseFor(null)
     await runKeyed(backup.id, async () => {
-      try {
-        const released = await api.releaseBackup(backup.id)
-        showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
-          { to: backupUrl(backup.id) })
-        await refresh()
-      } catch (err) {
-        showToast(err.message, 'error')
-      }
+      const released = await api.releaseBackup(backup.id)
+      setReleaseFor(null)
+      showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
+        { to: backupUrl(backup.id) })
+      await refresh()
     })
   }
 

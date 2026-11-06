@@ -350,22 +350,21 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     return role ? role.acls.filter(a => a.allow && a.acltype === 'subscribePattern').map(a => a.topic) : null
   }, [rolesByName])
 
-  // Delete, after the dialog names the account. Reports and closes either way: the list is read
-  // again, so a row that is gone, or still there, shows which happened.
+  // Delete, after the dialog names the account. A refusal stays in the dialog. The list is read again
+  // either way, so a row that is gone, or still there, shows which happened.
   const deleteSubscriber = useCallback(async () => {
     const account = deletingSubscriber
     try {
       const result = await api.deleteBrokerSubscriber(account.username)
+      setDeletingSubscriber(null)
       if (result?.audit_recorded === false) {
         showToast?.('Account deleted, but the Audit Trail entry could not be written. Note this.', 'error')
       } else {
         showToast?.(`Read-only account “${account.textname || account.username}” deleted`, 'success')
       }
-    } catch (err) {
-      showToast?.(err.message, 'error')
+    } finally {
+      load()
     }
-    setDeletingSubscriber(null)
-    load()
   }, [deletingSubscriber, showToast, load])
 
   const afterAction = useCallback(() => {

@@ -66,6 +66,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     }
   }
 
+  // Run from Remove area plan's dialog, which shows a refusal and stays open.
   const removePlan = async () => {
     setBusy(true)
     try {
@@ -73,8 +74,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       setConfirm(false)
       showToast?.(`Plan removed from ${area.area_name}`, 'success', { to: areaUrl(area.area_id) })
       onChanged?.()
-    } catch (e) { showToast?.(e.message, 'error') }
-    finally { setBusy(false) }
+    } finally { setBusy(false) }
   }
 
   // `direction` is 1 for a quarter turn right (clockwise), -1 for left. No request.

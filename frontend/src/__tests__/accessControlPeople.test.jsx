@@ -506,9 +506,9 @@ describe('setting a new password', () => {
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Set New Password' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      "this person's access is removed. Restore it first, then set a new password.", 'error'))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent("this person's access is removed. Restore it first, then set a new password.")
+    expect(toast).not.toHaveBeenCalledWith(expect.anything(), 'error')
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(screen.queryByLabelText('Password')).toBeNull()
   })
 })
@@ -683,7 +683,8 @@ describe('ending a person\'s sessions', () => {
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'End Sessions' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Sessions' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith('insufficient privileges to end a person\'s sessions', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('insufficient privileges to end a person\'s sessions')
+    expect(toast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 })
 
@@ -830,7 +831,8 @@ describe('a person\'s sessions, listed in their drawer', () => {
     const { list } = await openList('operator@site.test')
     fireEvent.click(within(list).getByRole('button', { name: 'End the session: Chrome on Windows' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'End Session' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(refusal, 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent(refusal)
+    expect(toast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     await waitFor(() => expect(api.personSessions).toHaveBeenCalledTimes(2))
   })
 

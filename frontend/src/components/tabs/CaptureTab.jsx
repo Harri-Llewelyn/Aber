@@ -370,15 +370,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   }
 
+  // Run from Delete capture's dialog, which shows a refusal and stays open. Read again either way.
   const onDelete = async () => {
     try {
       await api.deleteCapture(deleteFor)
+      setDeleteFor(null)
       showToast('Capture deleted.', 'success')
-    } catch (err) {
-      showToast(err.message, 'error')
+    } finally {
+      await refreshAll()
     }
-    setDeleteFor(null)
-    await refreshAll()
   }
 
   const onFilePicked = (event) => {

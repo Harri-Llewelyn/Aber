@@ -217,12 +217,13 @@ describe("an app's drawer", () => {
     await waitFor(() => expect(window.location.search).not.toContain('app='))
   })
 
-  it('shows a refusal in a toast', async () => {
+  it('shows a refusal in the dialog, which stays open', async () => {
     api.removeApp.mockRejectedValue(new Error('this app is part of Aber'))
     const showToast = renderApps()
     const drawer = await openDrawer('Shift Reports')
     fireEvent.click(drawer.getByRole('button', { name: /Remove App/ }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove App' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('this app is part of Aber', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('this app is part of Aber')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 })

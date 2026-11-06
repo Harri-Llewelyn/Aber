@@ -147,7 +147,8 @@ describe('Revoke', () => {
     api.revokeMyAppApproval.mockRejectedValue(new Error('No active grant found for this client'))
     fireEvent.click(within(rowOf('Shift Reports')).getByRole('button', { name: 'Revoke: Shift Reports' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Revoke Approval' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('No active grant found for this client', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('No active grant found for this client')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     expect(rowOf('Shift Reports')).toBeTruthy()
   })
 

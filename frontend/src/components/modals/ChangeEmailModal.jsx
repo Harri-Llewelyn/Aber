@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconUser } from '../common/Icons'
 import { EMAIL, normaliseEmail } from '../../utils/people'
 import { personUrl } from '../../routes'
@@ -49,6 +50,8 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
       onClose={busy ? () => {} : onClose}
       lead="They sign in with the new address from now on. Every session they have ends, so they will have to sign in again. Nothing is sent to either address, so tell them yourself."
       initialFocus={inputRef}
+      // What is wrong with an address typed is said under the field; an empty one, here.
+      problem={next ? null : 'Type their new email address'}
       error={error}
       footer={(
         <>
@@ -67,7 +70,7 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
       )}
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="change-email-input">New email address</label>
+        <label className="form-label" htmlFor="change-email-input">New email address <RequiredMark /></label>
         <input
           id="change-email-input"
           className="form-control"
@@ -79,6 +82,7 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
           autoComplete="off"
           disabled={busy}
           ref={inputRef}
+          aria-required="true"
           aria-invalid={problem ? 'true' : undefined}
           aria-describedby="change-email-hint"
         />

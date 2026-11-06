@@ -107,13 +107,11 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
 
   useEffect(() => { load() }, [load])
 
-  // The dialog closes either way, so a failure's toast is not left behind it.
+  // Restore and Permanent Delete run from their dialogs, which show a refusal and stay open.
   const restore = async (item) => {
-    try {
-      await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
-      load(); showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setConfirmRestore(null) }
+    await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
+    setConfirmRestore(null); load()
+    showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
   }
 
   /**
@@ -122,12 +120,10 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
    * removed here; when the auto-purge deletes an area, the hourly area-plan sweep removes it.
    */
   const purge = async (item) => {
-    try {
-      await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
-      // Dismissed after the delete, so the action runs while the confirmation is on screen.
-      setConfirmPurge(null)
-      load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
-    } catch (e) { showToast(e.message, 'error') }
+    await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
+    // Dismissed after the delete, so the action runs while the confirmation is on screen.
+    setConfirmPurge(null)
+    load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
   }
 
   const downloadExport = async (row) => {

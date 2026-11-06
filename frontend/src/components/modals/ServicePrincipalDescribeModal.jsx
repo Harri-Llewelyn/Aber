@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { identityUrl } from '../../routes'
 
 const NAME_MAX = 80
@@ -54,6 +55,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
       onClose={close}
       lead="The name and purpose only. What the identity holds is fixed at creation: a wider grant would reach every token already issued for it, so that is a new machine identity."
       initialFocus={nameRef}
+      problem={trimmedName ? null : 'Give the identity a name'}
       error={error}
       footer={
         <>
@@ -64,7 +66,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
             className="btn btn-primary"
             disabled={!canSubmit}
             onClick={submit}
-            title={unchanged ? 'Nothing has changed' : undefined}
+            title={!trimmedName ? 'Give the identity a name' : unchanged ? 'Nothing has changed' : undefined}
           >
             Save
           </ActionButton>
@@ -72,7 +74,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
       }
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="principal-describe-name">Name</label>
+        <label className="form-label" htmlFor="principal-describe-name">Name <RequiredMark /></label>
         <input
           id="principal-describe-name"
           className="form-control"
@@ -81,6 +83,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
           maxLength={NAME_MAX}
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-required="true"
         />
       </div>
 

@@ -87,6 +87,7 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
       .some(v => String(v || '').toLowerCase().includes(query))), [apps, query])
   const [shown, sort] = useSortableRows(matching, APP_SORT)
 
+  // Run from the act's dialog, which shows a refusal and stays open. Read again either way.
   const confirmAct = useCallback(async () => {
     const { act, app, person } = confirming
     const name = appLabel(app.client_name)
@@ -107,10 +108,8 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
           { to: tabUrl('access-control', 'apps') },
         )
       }
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
       setConfirming(null)
+    } finally {
       if (act === 'revoke') readPeople(app.id)
       load()
     }

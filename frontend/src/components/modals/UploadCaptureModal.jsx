@@ -3,6 +3,7 @@ import { captureManifest, captureFileProblem } from '../../api'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconShieldAlert, IconUpload } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
@@ -57,6 +58,8 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
     ? manifest.device_ids.filter(id => !knownDeviceIds.has(deviceIdKey(id)))
     : []
   const ready = !!parsed && !!subject && unknownDevices.length === 0
+  // A file that is not a capture, or records devices this site lacks, is said in a callout.
+  const problem = parsed && unknownDevices.length === 0 && !subject ? 'Choose a gateway or device to file it against' : null
 
   const submit = () => run(async () => {
     setError(null)
@@ -73,6 +76,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
       icon={<IconUpload size={18} />}
       size="sm"
       onClose={pending ? () => {} : onCancel}
+      problem={problem}
       error={error}
       footer={
         <>
@@ -148,13 +152,14 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
 
       {parsed && unknownDevices.length === 0 && (
         <div className="form-group">
-          <label className="form-label" htmlFor="upload-subject">File it against</label>
+          <label className="form-label" htmlFor="upload-subject">File it against <RequiredMark /></label>
           <select
             id="upload-subject"
             className="form-control"
             value={subjectKey}
             onChange={e => setSubjectKey(e.target.value)}
             disabled={pending}
+            aria-required="true"
           >
             <option value="">Choose a gateway or device…</option>
             <optgroup label="Gateways">

@@ -3,7 +3,8 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { IconScan } from '../common/Icons'
 import { Modal } from '../common/Modal'
-import { CODE_LENGTH, factorLabel, isCode, normaliseCode } from '../../utils/secondFactor'
+import { RequiredMark } from '../common/RequiredMark'
+import { CODE_LENGTH, factorLabel, isCode } from '../../utils/secondFactor'
 
 /**
  * Remove, on a row of Profile's MFA tab: asks first, then has GoTrue
@@ -13,16 +14,16 @@ import { CODE_LENGTH, factorLabel, isCode, normaliseCode } from '../../utils/sec
  */
 export function RemoveSecondFactorModal({ factor, others = [], needsCode = false, onRemoved, onClose }) {
   const [code, setCode] = useState('')
+  // Cleared with the code after a refusal, so the refusal is not joined by a prompt for a new code.
+  const [codeEdited, setCodeEdited] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const codeRef = useRef(null)
   const label = factorLabel(factor)
+  const problem = needsCode && !isCode(code) ? `Enter the ${CODE_LENGTH}-digit code ${label} shows` : null
 
   const remove = useCallback(async () => {
-    if (needsCode && !isCode(code)) {
-      setError(`Enter the ${CODE_LENGTH}-digit code ${label} shows.`)
-      return
-    }
+    if (needsCode && !isCode(code)) return
     setBusy(true)
     setError(null)
     try {
@@ -32,10 +33,11 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
     } catch (err) {
       setError(err.message)
       setCode('')
+      setCodeEdited(false)
       setBusy(false)
       codeRef.current?.focus()
     }
-  }, [code, factor, label, needsCode, onRemoved])
+  }, [code, factor, needsCode, onRemoved])
 
   return (
     <Modal
@@ -46,6 +48,8 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
         ? `Signing in stops accepting codes from ${label}. Your other authenticator still works. If ${label} is the one you signed in with, the dashboard asks for a code from another one straight away.`
         : `Signing in stops asking for a code: your password alone signs you in. You can set up MFA again at any time.`}
       initialFocus={needsCode ? codeRef : undefined}
+      problem={needsCode ? problem : undefined}
+      touched={codeEdited}
       error={error}
       footer={(
         <>
@@ -55,8 +59,8 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
             pendingLabel="Removing…"
             className="btn btn-danger"
             onClick={remove}
-            disabled={needsCode && !normaliseCode(code)}
-            title={needsCode && !normaliseCode(code) ? 'Enter a code first' : undefined}
+            disabled={problem !== null}
+            title={problem ?? undefined}
           >
             Remove Authenticator
           </ActionButton>
@@ -65,14 +69,15 @@ export function RemoveSecondFactorModal({ factor, others = [], needsCode = false
     >
       {needsCode && (
         <div className="form-group">
-          <label className="form-label" htmlFor="second-factor-remove-code">Code from {label}</label>
+          <label className="form-label" htmlFor="second-factor-remove-code">Code from {label} <RequiredMark /></label>
           <input
             ref={codeRef}
             id="second-factor-remove-code"
             className="form-control mono second-factor-code"
             value={code}
-            onChange={e => { setCode(e.target.value); setError(null) }}
+            onChange={e => { setCode(e.target.value); setCodeEdited(true); setError(null) }}
             onKeyDown={e => { if (e.key === 'Enter' && !busy) remove() }}
+            aria-required="true"
             inputMode="numeric"
             autoComplete="one-time-code"
             maxLength={CODE_LENGTH + 2}

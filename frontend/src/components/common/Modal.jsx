@@ -134,8 +134,8 @@ function returnFocus(dialog) {
  * a live region, once the person has edited a field in the body, so a dialog that has just opened
  * does not scold. Leave it out on a dialog that never refuses, and the line is not drawn.
  *
- * @param {boolean} [touched] Replaces "once the person has edited a field", for a dialog with
- * steps, where the edits of one step do not count for the next.
+ * @param {boolean} [touched] Replaces "once the person has edited a field": for a dialog with steps,
+ * where the edits of one step do not count for the next, or one that waits for a particular field.
  *
  * @param {React.ReactNode} [error] The failure to show, in the danger box above the footer. Falsy
  * renders nothing. Show a failure here rather than only in a toast: the toasts are behind an open

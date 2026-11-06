@@ -651,7 +651,8 @@ describe('AccessControlTab', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Delete Line 4 OEE board' }))
       const reads = api.listBrokerInventory.mock.calls.length
       await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete Account' })) })
-      await waitFor(() => expect(showToast).toHaveBeenCalledWith('The broker credential service could not delete it. Retry.', 'error'))
+      expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('The broker credential service could not delete it. Retry.')
+      expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
       expect(api.listBrokerInventory.mock.calls.length).toBe(reads + 1)
     })
 

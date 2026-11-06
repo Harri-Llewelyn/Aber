@@ -4,6 +4,7 @@ import { playbackWorkerDeployed } from '../../config'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconPlay, IconShieldAlert } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
@@ -159,6 +160,14 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
     && (worker === undefined || !workerLive || workerHoldsCurrent(target))
     && unmapped.length === 0
 
+  // Why Play back is off, where no callout above says so already: those name a missing worker, a
+  // capture with no device list, a gateway with no credential and a worker without it.
+  const problem = ready || !deployed || capturedDevices === null ? null
+    : !target ? 'Choose the Playback gateway'
+      : !target.gateway_has_broker_credential || (workerLive && !workerHoldsCurrent(target)) ? null
+        : unmapped.length > 0 ? `${plural(unmapped.length, 'device')} still to map`
+          : null
+
   const submit = () => run(async () => {
     setError(null)
     try {
@@ -180,6 +189,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
         the account that publishes it, so a capture can never be played back under the identity it
         was recorded from.
       </>}
+      problem={problem}
       error={error}
       footer={
         <>
@@ -247,7 +257,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
       )}
 
       <div className="form-group">
-        <label className="form-label" htmlFor="playback-target">Playback gateway</label>
+        <label className="form-label" htmlFor="playback-target">Playback gateway <RequiredMark /></label>
         {targets === null && <p className="form-hint">Loading the Playback gateway…</p>}
         {targets !== null && targets.length === 0 && (
           <div className="callout callout-warning">
@@ -267,6 +277,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
               value={targetId}
               onChange={e => setTargetId(e.target.value)}
               disabled={pending}
+              aria-required="true"
             >
               <option value="">Choose the Playback gateway…</option>
               {targets.map(t => (
@@ -430,6 +441,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
                           value={deviceMap[captured] || ''}
                           onChange={e => setDeviceMap(m => ({ ...m, [captured]: e.target.value }))}
                           disabled={pending}
+                          aria-required="true"
                         >
                           <option value="">Choose a device…</option>
                           {target.devices.map(d => (

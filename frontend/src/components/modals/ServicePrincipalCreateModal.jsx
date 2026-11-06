@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { GRANTABLE_PERMISSIONS, permissionReach } from '../../utils/serviceIdentities'
 import { identityUrl } from '../../routes'
 
@@ -42,6 +43,10 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   const trimmedName = name.trim()
   const canSubmit = trimmedName.length > 0 && trimmedName.length <= NAME_MAX
     && purpose.length <= PURPOSE_MAX && permissions.size > 0 && !busy
+  // The fields' maxLength holds the upper bounds; what is left to say is what is missing.
+  const problem = trimmedName.length === 0 ? 'Give the identity a name'
+    : permissions.size === 0 ? 'Choose at least one permission for it to hold'
+      : null
 
   const submit = useCallback(async () => {
     setBusy(true)
@@ -77,6 +82,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
         client is issued a broker account, not a machine identity.
       </>}
       initialFocus={nameRef}
+      problem={problem}
       error={error}
       footer={
         <>
@@ -87,7 +93,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
             className="btn btn-primary"
             disabled={!canSubmit}
             onClick={submit}
-            title="Create the identity. No token is issued until you choose to."
+            title={problem ?? 'Create the identity. No token is issued until you choose to.'}
           >
             Create Machine Identity
           </ActionButton>
@@ -95,7 +101,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
       }
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="principal-name">Name</label>
+        <label className="form-label" htmlFor="principal-name">Name <RequiredMark /></label>
         <input
           id="principal-name"
           className="form-control"
@@ -105,6 +111,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
           placeholder="e.g. Line 4 OEE report"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-required="true"
         />
         <div className="form-hint">What the page lists it as. Unique, ignoring case.</div>
       </div>
@@ -128,7 +135,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
       </div>
 
       <fieldset className="form-group" style={{ border: 'none', margin: 0, padding: 0 }}>
-        <legend className="form-label">Holds</legend>
+        <legend className="form-label">Holds <RequiredMark title="Required: at least one" /></legend>
         {GRANTABLE_PERMISSIONS.map(perm => (
           <label
             key={perm}
