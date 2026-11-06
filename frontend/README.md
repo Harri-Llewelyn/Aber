@@ -74,6 +74,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
+| `utils/unsPath.js` (`placeNameProblem()`) | the characters `areas_name_topic_safe` and `cells_name_topic_safe` refuse in a name (mirror check 64) |
 
 Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
 `sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
@@ -405,6 +406,45 @@ on the backdrop.
   its error slot, a refused copy beside the value.
 - jsdom has no `showModal()`. `src/test/setup.js` stubs it to set `open`, so the tests assert what
   `Modal` does itself; the inert page and the top layer are checked in a real browser.
+
+### A dialog says why it cannot go ahead
+
+A dialog whose confirm cannot go ahead yet says why where the person is looking. Its confirm looks
+refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dialogs a form holds.
+
+- **A held confirm is greyed.** `ActionButton` adds `btn-disabled` whenever it is disabled and not
+  pending, as it does for `permitted={false}`. A pending one keeps `btn-loading`, which stays
+  legible. The `disabled` attribute alone changes nothing in `App.css`, so a dialog's confirm is an
+  `ActionButton`, never a plain `<button disabled>`.
+- **The first problem is said above the buttons.** Pass it as `Modal`'s `problem`, or null when
+  there is none. `Modal` draws it between the body and the error slot, so it stays in view while the
+  body scrolls. It is the form's warning hint (`form-hint hint-danger`, with its icon), in a live
+  region.
+- **It appears from the person's first edit, never on open.** A dialog that has just opened does
+  not scold. A dialog with steps passes `touched` for the step it is on, and so does one that waits
+  for a particular field (Change Password waits for the new password).
+- **A form with buttons of its own** inside a dialog (Attach a link) draws `FormProblem` above them.
+- **A problem with one field's value as typed is said under that field,** in its hint: too long,
+  not an email address, a name already taken. It is not repeated above the buttons.
+- **An edit that changes nothing is not a problem.** Its confirm is greyed and its tooltip says so.
+  Nothing is said in red, because the form shows it.
+- **A required field says so on its label** with `RequiredMark`, and its control carries
+  `aria-required`. `App.css` draws the asterisk, so the label's text stays the field's name.
+- **A refusal from the database or a function is shown in `Modal`'s `error`,** worded as it came.
+  The dialog stays open with what was typed. A handler run from a dialog throws its refusal, rather
+  than toasting it behind the dialog.
+- **`ConfirmModal` shows a rejected `onConfirm` in its own error slot.** So its `onConfirm` closes
+  the dialog only once the act has succeeded.
+- **The tooltip on a held confirm can stay,** but it is never the only place the reason is.
+
+Three kinds of dialog explain themselves another way:
+
+- **A typed gate** says what to type in its label: ConfirmModal's `requireTyped`, and a gateway's
+  credential and setup dialogs.
+- **The schema builder** keeps Save pressable. Pressing it reveals what is missing beside each
+  field, because its problems are spread across a long form.
+- **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
+  ([Permission gating](#permission-gating)).
 
 ### A plan and a 3D model open expanded
 
