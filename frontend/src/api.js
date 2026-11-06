@@ -174,9 +174,10 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate, which with no
-// statistics is about one row for a read naming a device. Then every row inside the time bound
-// crosses before the limit trims it: this caps what a page returns, and the time bound what crosses.
+// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate. With no
+// statistics each condition shrinks that estimate, to about one row for a read naming a device and a
+// metric; then every row inside the time bound crosses before the limit trims it. So this caps what a
+// page returns, and the time bound caps what crosses.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
@@ -248,7 +249,7 @@ export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 /**
  * The lower time bound applied when a caller supplies none.
  *
- * `public.telemetry` is a postgres_fdw projection whose LIMIT is usually applied here, not on the
+ * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
  * historian (TELEMETRY_MAX_ROWS), so a query with no time predicate can drag an asset's entire
  * history across the wrapper before `.range()` applies. Every live caller already passes a window; this exists so the next caller
  * cannot reintroduce the unbounded scan by omitting an argument.
