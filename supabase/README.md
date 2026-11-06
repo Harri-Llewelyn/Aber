@@ -4108,6 +4108,79 @@ and the sessions that end with their refresh tokens. In the stack lane,
 and the ending of a Node-RED session with a throwaway person and a computed TOTP code, and
 `check-gateway-surface.mjs --runtime --consent` holds the gate's decisions at the live gateway.
 
+### Changing a gateway's type cleans up after the old type (0252)
+
+The Edit form's Type select writes `deployment` and `is_simulated`, and before this file nothing
+followed it. The clean-up triggers fire on archive and delete alone. So a Remote gateway edited to
+Host kept `PENDING_ENROLLMENT` and a setup token an appliance could still redeem for a broker
+credential, and a Host gateway edited to Remote kept a working credential the dashboard no longer
+offered.
+
+**`trg_gateways_type_change_cleans_up`** runs `clean_up_after_a_gateway_type_change()` `BEFORE
+UPDATE OF deployment, is_simulated`, on every path that writes the type: the Edit form, an approved
+proposal and any later writer. Only crossing Remote's boundary ends anything. Host, Simulated and
+Third-party all hold a credential issued in the dashboard, so a change among them, or an UPDATE that
+names the columns without changing them, does nothing. Nor does any change to an archived gateway,
+whose archive ended it all already. Crossing either way:
+
+- **Every unredeemed setup token is burned**, as `withdraw_gateway_enrollment_tokens()` burns it on
+  archive.
+- **The credential the OLD row holds is revoked.** `gateway_has_broker_credential()` decides by the
+  row's `deployment`, so it is asked about OLD: NEW would be asked for the new type's record, which a
+  gateway that has just changed type lacks. The call is `revoke_gateway_credential()`, and the stamp
+  `credential_revoked_at` is written optimistically, as archiving writes it.
+- **The kept copy of a dashboard-issued password is forgotten**, as `forget_gateway_credential()`
+  forgets it on archive (0164). A Remote gateway keeps none.
+- **A gateway that becomes Remote reads `OFFLINE`** until Set up issues a token. One that leaves
+  Remote reads `OFFLINE` if it was `PENDING_ENROLLMENT` or `AWAITING_BIRTH`, as a new gateway of its
+  type starts. Any other status is the gateway's own word, which its NDEATH replaces once the broker
+  drops the session.
+
+**One audited UPDATE.** The status and the stamp are written into NEW, so the Audit Trail holds one
+row for the change and what it ended. Archiving writes its stamp in a second UPDATE, so it holds two.
+A burned token leaves no row of its own on either path: `gateway_enrollment_tokens` is not audited,
+and no new action kind is added.
+
+**The second lock.** `consume_gateway_enrollment_token()` and its read-only twin
+`peek_gateway_enrollment_token()` refuse a gateway that is not Remote, with the no rows an archived
+one gets. A refused token is not burned. Both are redeclared whole from `0001`, unchanged but for
+that line and its comment, and ahead of the trigger and the clean-up, so a token cannot be redeemed
+for the new type while they run. During a boot, `0001`'s older bodies serve between `0001` and this
+file, and the tokens the trigger burned are not live for them to redeem.
+
+**Once, for the rows earlier changes left.** A gateway that is not Remote reads `OFFLINE` rather than
+an enrolment state, and its unredeemed tokens are burned. Each statement matches nothing once it has
+run, so a replay changes nothing. Nothing is revoked here: no record says which type a credential was
+issued under, and revoking on a guess could cut off a gateway that works.
+
+**What it does not reach.**
+
+- **The forge repository** of a Remote gateway that enrolled is kept, with the deploy key its
+  appliance registered. Archiving archives the repository and removes the key; a type change does
+  neither, so the old appliance can still read its repository until the key is removed in the
+  forge.
+- **The revocation sweep judges archived gateways alone.** Its first statement drops the request
+  row of a gateway that is not archived, so a type change's stamp is never judged and a failed call
+  is not asked again. Retrying it as the sweep retries an archive is not safe as it stands: a
+  credential issued to the new type since, under the same account name, would be disabled.
+- **`enrolled_at` is kept** when a gateway leaves Remote. The dashboard reads a revocation after it
+  as no enrolment standing (`enrolmentStands()` in `utils/credentialState.js`), and a credential
+  issued or enrolled after the stamp as the one the gateway holds.
+
+**`credential_revoked_at`'s column comment is restated.** `0001`'s said re-enrolment clears the
+stamp, which nothing does, and that only an archived gateway carries one. It now says the stamp is
+written by an archive or a change of type across Remote's boundary, cleared by the sweep or a
+restore, and outranked by a credential issued, or enrolled, after it.
+
+The file's self-check asserts that both token functions refuse a gateway that is not Remote and
+that no browser-facing role may run them, that the trigger is `BEFORE UPDATE OF deployment,
+is_simulated`, and that `anon` may not run its function.
+`test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py` holds each crossing before and
+after: the status, the tokens, the stamp, the queued request and the kept copy. It also holds a
+change among the three dashboard-issued types, an unchanged type, an archived gateway, the one audit
+row, a token refused for a gateway that is not Remote, and the clean-up leaving a Remote gateway
+alone and changing nothing a second time.
+
 ### History reads every change of a text or a flag (0254)
 
 The bucket read keeps a text's or a flag's last value in each bucket (`last(val_string, time)` and
@@ -8617,9 +8690,9 @@ the appliance's `.env` (rendered by [`_shared/gatewayEnv.ts`](functions/_shared/
 which the ZIP bundle now shares). Nothing on that route is cacheable.
 
 **A token can be checked without being spent.** `peek_gateway_enrollment_token()` is the
-read-only twin of `consume_gateway_enrollment_token()`: the same shape check, the same four
-refusals (unknown, expired, consumed, archived gateway) answered identically with no rows, and no
-UPDATE. `service_role` alone, like the consumer, because a signed-in user who could call it could
+read-only twin of `consume_gateway_enrollment_token()`: the same shape check, the same refusals
+(unknown, expired, consumed, archived gateway, and since `0252` one that is not Remote) answered
+identically with no rows, and no UPDATE. `service_role` alone, like the consumer, because a signed-in user who could call it could
 enumerate which token values exist. Only enrolment spends the token, and the credential secret in
 the `.env` is generated per fetch: the installer writes the file once, so a retry before enrolment
 costs nothing and a fetch after changes nothing. `test_gateway_enrollment.py` proves the check

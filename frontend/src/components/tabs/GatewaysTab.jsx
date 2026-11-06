@@ -16,7 +16,9 @@ import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplug
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
+  gatewayTypeChange, gatewayTypeChangeHint,
 } from '../../utils/gatewayType'
+import { enrolmentStands } from '../../utils/credentialState'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
@@ -43,6 +45,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
@@ -103,6 +106,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // A refusal of the form's save, shown in the dialog as the database worded it.
   const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
+  // Whether the gateway being edited holds a broker credential, which a change of type would end.
+  // Null until a Host, Simulated or Third-party gateway's answer arrives, or when the read failed.
+  const [editingHoldsCredential, setEditingHoldsCredential] = useState(null)
+  // Save's question before a change of type that ends a credential.
+  const [confirmTypeChange, setConfirmTypeChange] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState(null)
   // The archived gateway whose Restore dialog is open.
   const [restoreTarget, setRestoreTarget] = useState(null)
@@ -183,6 +191,26 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Keyed: a bare boolean would spin the button of whichever gateway is selected when the request settles.
   const [rebirthingId, runRebirth] = usePendingKey()
 
+  // Throws a refusal, so whichever dialog asked shows it: the form's error slot, or the question's.
+  const saveEdit = async () => {
+    // The group only when it was changed: it is half of the gateway's address, and sending the
+    // copy the dialog opened with would undo a change made meanwhile.
+    const { sparkplug_group: group, ...unchanged } = form
+    const saved = await api.put(`/api/v1/gateways/${editing.gateway_id}`, group === editing.sparkplug_group ? unchanged : form)
+    setConfirmTypeChange(false); setShowForm(false); load()
+    // What ended, as the database answered: a revocation is stamped only once it was asked for.
+    const ended = [
+      typeChange?.setup && 'its unused setup command is cancelled',
+      saved?.credential_revoked_at && saved.credential_revoked_at !== editing.credential_revoked_at
+        && 'its broker credential is ended',
+    ].filter(Boolean)
+    const next = typeChange?.toRemote ? '. Set it up from its drawer to finish' : ''
+    showToast(
+      `Gateway '${form.gateway_name}' saved${ended.length ? ` — ${ended.join(' and ')}` : ''}${next}`,
+      'success', { to: gatewayUrl(editing.gateway_id) }
+    )
+  }
+
   const save = async () => {
     setFormError(null)
     try {
@@ -201,12 +229,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       }
 
       if (editing) {
-        // The group only when it was changed: it is half of the gateway's address, and sending the
-        // copy the dialog opened with would undo a change made meanwhile.
-        const { sparkplug_group: group, ...unchanged } = form
-        await api.put(`/api/v1/gateways/${editing.gateway_id}`, group === editing.sparkplug_group ? unchanged : form)
-        setShowForm(false); load()
-        showToast(`Gateway '${form.gateway_name}' saved`, 'success', { to: gatewayUrl(editing.gateway_id) })
+        await saveEdit()
         return
       }
 
@@ -244,7 +267,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     } catch (e) { setFormError(e.message) }
   }
 
-  const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
+  const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null); setConfirmTypeChange(false) }
 
   const archiveGateway = async (days) => {
     await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
@@ -288,6 +311,27 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // one, or an existing gateway moved to Remote. Renaming a Remote gateway is not that.
   const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
     && (!editing || editing.deployment !== 'remote')
+
+  // A Remote gateway holds the credential it enrolled for, the remote arm of
+  // gateway_has_broker_credential(). The other types' answer reads the Audit Trail, so it is asked
+  // for the one gateway whose dialog opens.
+  const editingId = showForm && editing && !proposeMode ? editing.gateway_id : null
+  const editingRemote = editing?.deployment === 'remote'
+  useEffect(() => {
+    setEditingHoldsCredential(null)
+    if (!editingId || editingRemote) return undefined
+    let cancelled = false
+    Promise.resolve()
+      .then(() => api.gatewayHoldsBrokerCredential(editingId))
+      .then(held => { if (!cancelled) setEditingHoldsCredential(held) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [editingId, editingRemote])
+  const holdsCredential = editingRemote ? !!editing.enrolled_at : editingHoldsCredential
+  // What saving the chosen type ends, said in the Type hint and asked before Save where a
+  // credential ends. Null when registering, proposing, or keeping the type.
+  const typeChange = editingId ? gatewayTypeChange(editing, formType, holdsCredential) : null
+  const typeChangeHint = gatewayTypeChangeHint(typeChange, holdsCredential)
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   const withheldFields = nonProposableFields('gateway')
@@ -402,7 +446,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // The panel's one primary: setup while pending, else the console, else Restore when archived,
   // else Edit. The Playback gateway cannot be edited, so its credential takes Edit's place.
   const selectedPending = !!selected && isGatewayPending(selected)
-  const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && selectedPending && canManage
+  // Setup while it is unfinished, and for a Remote gateway with no enrolment standing, as one just
+  // changed to Remote has, unless it is online: setting it up would replace a working credential.
+  const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && canManage
+    && (selectedPending || (!enrolmentStands(selected) && !isGatewayOnline(selected)))
   const offersCredential = !!selected && !selected.is_archived && credentialIssuedHere(selected) && canManage
   // Administrator only, as show_gateway_credential() is; never the Playback gateway, which keeps no copy.
   const offersShownCredential = offersCredential && !selected.is_shadow && userRole === 'Administrator'
@@ -664,7 +711,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                onClick={() => runSave(save)}
+                // A credential is not ended without a question, as it is not replaced without one.
+                onClick={() => (typeChange?.credential ? setConfirmTypeChange(true) : runSave(save))}
                 disabled={formProblem !== null || remoteWithheld || !!groupProblem}
                 title={remoteWithheld
                   ? 'Remote gateways cannot be enrolled on this deployment yet'
@@ -736,6 +784,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 : !editing && formType === GATEWAY_TYPES.THIRD_PARTY
                 && ' On save you will be given its broker credential and every setting its edge node needs.'}
           </div>
+          {/* What saving a new type ends, from the stored row, before Save is pressed. */}
+          {typeChangeHint && (
+            <div className={typeChange.setup || typeChange.credential ? 'form-hint hint-warning' : 'form-hint'}>
+              {typeChangeHint}
+            </div>
+          )}
         </div>
         {/* One exclusive scope, then the cell or area it calls for. A simulated gateway reads as In a
             cell with none chosen whatever is stored, since its lane resolves ahead of the stored
@@ -830,6 +884,29 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         )}
         </Modal>
+      )}
+
+      {/* Over the form, which stays open behind it, so Cancel goes back to the edit. */}
+      {showForm && confirmTypeChange && typeChange && (
+        <ConfirmModal
+          title="Change gateway type"
+          icon={<IconShieldAlert size={18} />}
+          size="md"
+          message={<>
+            Saving <strong>{editing.gateway_name}</strong> as {gatewayTypeLabel(formType)} ends{' '}
+            {holdsCredential === null ? 'any' : 'the'} broker credential{' '}
+            {typeChange.toRemote ? 'it holds, and whatever uses it' : 'its appliance holds, and the appliance'} is
+            cut off at once, as archiving would.
+            {typeChange.setup && ' It also cancels the unused setup command.'}{' '}
+            {typeChange.toRemote
+              ? 'Once saved, set it up from its drawer: the appliance is issued a new credential when it enrols.'
+              : 'Once saved, issue it a broker credential from its drawer.'}
+          </>}
+          confirmLabel="Change type"
+          pendingLabel="Saving…"
+          onConfirm={saveEdit}
+          onCancel={() => setConfirmTypeChange(false)}
+        />
       )}
 
       {archiveTarget && (

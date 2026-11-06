@@ -1,10 +1,10 @@
 /**
  * What the platform recorded about a gateway's broker credential, and what the broker says. The
- * platform's record is `enrolled_at` (an appliance enrolled), `credential_revoked_at` (archive or
- * delete disabled the account) or a CREDENTIAL_ISSUED row (issued to a Host or Third-party gateway
- * through the UI). The broker's state is read live from its Dynamic Security plugin
- * (api.listBrokerInventory). The two can disagree and both are shown: an account issued by script
- * is `unrecorded` here and Active at the broker.
+ * platform's record is `enrolled_at` (an appliance enrolled), `credential_revoked_at` (an archive
+ * or a type change disabled the account) or a CREDENTIAL_ISSUED row (issued to a Host or
+ * Third-party gateway through the UI). The broker's state is read live from its Dynamic Security
+ * plugin (api.listBrokerInventory). The two can disagree and both are shown: an account issued by
+ * script is `unrecorded` here and Active at the broker.
  */
 import { credentialIssuedHere } from './gatewayType';
 
@@ -30,17 +30,32 @@ const TONES = {
   [CREDENTIAL_STATES.UNRECORDED]: 'unknown',
 };
 
+/** Whether `later` is a time after `earlier`; false when either is missing. */
+const after = (later, earlier) => !!later && !!earlier && new Date(later).getTime() > new Date(earlier).getTime();
+
+/**
+ * Whether a Remote gateway's enrolment still stands: it enrolled, and no revocation came after.
+ * A type change that left Remote and came back revokes without clearing `enrolled_at`.
+ */
+export function enrolmentStands(gateway) {
+  return !!gateway?.enrolled_at
+    && (!gateway.credential_revoked_at || after(gateway.enrolled_at, gateway.credential_revoked_at));
+}
+
 /**
  * `issuedAt` is the latest CREDENTIAL_ISSUED row for this gateway, or null.
  */
 export function credentialState(gateway, issuedAt = null) {
   if (!gateway) return CREDENTIAL_STATES.UNRECORDED;
 
-  // Ordered deliberately: a gateway carrying both a revocation and an issue record was issued first.
-  if (gateway.credential_revoked_at) return CREDENTIAL_STATES.REVOKED;
+  // A revocation outranks the issue before it. A type change revokes without archiving, so a
+  // credential issued or enrolled after the revocation, for the new type, outranks it in turn.
+  const revoked = gateway.credential_revoked_at;
+  if (revoked && !after(issuedAt, revoked) && !after(gateway.enrolled_at, revoked)) {
+    return CREDENTIAL_STATES.REVOKED;
+  }
 
-  // A Host or Third-party gateway's only record is the audit row: enroll-gateway refuses it, so
-  // `enrolled_at` is NULL by construction.
+  // A Host or Third-party gateway's record is the audit row: enroll-gateway refuses it.
   if (issuedAt) return CREDENTIAL_STATES.ISSUED;
 
   if (gateway.enrolled_at) return CREDENTIAL_STATES.ISSUED;
@@ -67,7 +82,7 @@ export function credentialStateTone(state) {
 export function credentialStateExplanation(state, gateway) {
   switch (state) {
     case CREDENTIAL_STATES.REVOKED:
-      return 'Disabled at the broker when this gateway was archived or deleted: its session was '
+      return 'Disabled at the broker when this gateway was archived or changed type: its session was '
         + 'dropped and its next connection is refused. Issuing a new credential re-enables it.';
     case CREDENTIAL_STATES.ISSUED:
       return credentialIssuedHere(gateway)

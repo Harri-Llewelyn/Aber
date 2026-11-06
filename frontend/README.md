@@ -75,6 +75,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
 | `utils/unsPath.js` (`placeNameProblem()`) | the characters `areas_name_topic_safe` and `cells_name_topic_safe` refuse in a name (mirror check 64) |
+| `utils/gatewayType.js` (`gatewayTypeChange()`) | what `clean_up_after_a_gateway_type_change()` ends when a gateway's type crosses Remote's boundary: the setup state, the enrolment states, and the remote arm of `gateway_has_broker_credential()` (mirror check 68) |
 
 Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
 `sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
