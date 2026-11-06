@@ -836,6 +836,47 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/telemetry_changes:
+    post:
+      tags: [Telemetry]
+      summary: Read every change of a text or a flag, each at its own time
+      description: |
+        What the History page reads for a text or a flag (`0254`). One row per series, a series
+        being one asset and one metric, every pair of the two lists. `read` says what it holds.
+        **`changes`**: while raw telemetry holds the window, the first reading in it and then each
+        reading whose value differs from the one before, with its time. A refresh of an unchanged
+        value is not returned. The value in force at `from_ts` is `carried_string` or
+        `carried_bool`. **`change_cap`** is more than `max_changes` changes, and **`reading_cap`**
+        more than 20,000 readings of one series in the window. For both, `marked_ts` and
+        `marked_values` name each bucket of `bucket` that held more than one value, and how many.
+        **`retention`**: the historian has dropped raw readings of the series inside the window.
+        Chart the last three from `/rest/v1/rpc/telemetry_carried` instead.
+
+        Only text (`val_string`) and flag (`val_bool`) values are compared. `SECURITY INVOKER`, so
+        it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '00:05:00', description: 'The buckets a mark names, as `telemetry_carried` takes them: a whole number of minutes, at least one, with no months.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id).' }
+                metric_names: { type: array, items: { type: string }, example: [MotionDevice/OnPath], description: 'At most 50 series a read, assets times metrics.' }
+                max_changes: { type: integer, minimum: 1, maximum: 5000, default: 2000, description: 'Past this many changes, `read` is `change_cap`.' }
+      responses:
+        '200':
+          description: One row per series, ordered by asset and metric.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryChangesRow' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, more than 50 series, `max_changes` outside 1 to 5,000, or more than 50,000 buckets times series, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/rpc/telemetry_coverage:
     post:
       tags: [Telemetry]
@@ -6857,6 +6898,24 @@ components:
         last_bool: { type: boolean, nullable: true }
         n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
         is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
+
+    TelemetryChangesRow:
+      type: object
+      description: |
+        One series from `/rest/v1/rpc/telemetry_changes`: every change in the window, or why not.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: MotionDevice/OnPath }
+        read: { type: string, enum: [changes, change_cap, reading_cap, retention], description: 'What the row holds: every change, or which bound stopped it.' }
+        change_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'For `changes`: the first reading in the window, then each that changed the value, oldest first.' }
+        val_string: { type: array, nullable: true, items: { type: string, nullable: true }, description: 'The text that starts at each of `change_ts`.' }
+        val_bool: { type: array, nullable: true, items: { type: boolean, nullable: true }, description: 'The flag that starts at each of `change_ts`.' }
+        carried_string: { type: string, nullable: true, description: 'For `changes`: the text in force at `from_ts`, from before the window.' }
+        carried_bool: { type: boolean, nullable: true, description: 'For `changes`: the flag in force at `from_ts`, from before the window.' }
+        n_changes: { type: integer, nullable: true, description: 'How many changes the window holds; null for `reading_cap` and `retention`.' }
+        marked_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'Past a cap: the start of each bucket that held more than one value.' }
+        marked_values: { type: array, nullable: true, items: { type: integer }, description: 'How many values each of `marked_ts` held.' }
+        raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds.' }
 
     TelemetryCoverageRow:
       type: object
