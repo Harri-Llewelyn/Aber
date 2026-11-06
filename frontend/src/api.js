@@ -226,6 +226,15 @@ export const HISTORY_RESOLUTIONS = Object.freeze([
 export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 
 /**
+ * History's read of every change of a text or a flag, telemetry_changes() (0254), as its bounds
+ * are: past HISTORY_MAX_CHANGES changes of one metric, or HISTORY_CHANGE_READINGS readings, a chart
+ * shows its buckets instead. At most HISTORY_CHANGE_SERIES series a read.
+ */
+export const HISTORY_MAX_CHANGES = 2000;
+export const HISTORY_CHANGE_READINGS = 20000;
+export const HISTORY_CHANGE_SERIES = 50;
+
+/**
  * The most alert occurrences History's Alerts tab lists for one window. It asks
  * alert_occurrences() (0243) for one more, to say when more fired; the function's own bound is
  * 5,000.
@@ -1354,6 +1363,33 @@ const apiMethods = {
     if (signal) call = call.abortSignal(signal);
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read the readings');
+    return data || [];
+  },
+
+  /**
+   * History's read of a text or a flag (0254): one row per series of `assetIds` times
+   * `metricNames`. `read` is `changes` (every change in [from, to), each at its time, and the value
+   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, the first two with the
+   * buckets of `bucketMinutes` that held more than one value. Throws on a refusal or a historian it
+   * cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, metric_name: string, read: string,
+   *   change_ts: ?string[], val_string: ?Array<?string>, val_bool: ?Array<?boolean>,
+   *   carried_string: ?string, carried_bool: ?boolean, n_changes: ?number, marked_ts: ?string[],
+   *   marked_values: ?number[], raw_from: ?string }>>}
+   */
+  readTelemetryChanges: async ({ from, to, bucketMinutes, assetIds, metricNames, maxChanges = HISTORY_MAX_CHANGES }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_changes', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames,
+      max_changes: maxChanges
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the changes');
     return data || [];
   },
 

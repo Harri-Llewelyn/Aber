@@ -9619,6 +9619,65 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 288. History's help and both READMEs name the change read's caps as api.js holds them
+// (HISTORY_MAX_CHANGES, HISTORY_CHANGE_READINGS, HISTORY_CHANGE_SERIES), the caps past which a text
+// or flag chart shows its buckets instead of every change. Mirror check 69 holds api.js to the
+// function; a page naming another cap tells a reader when a chart falls back, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const caps = ['HISTORY_MAX_CHANGES', 'HISTORY_CHANGE_READINGS', 'HISTORY_CHANGE_SERIES']
+    .map((name) => [name, Number(api.match(new RegExp(`^export const ${name} = (\\d+);$`, 'm'))?.[1])]);
+  const problems288 = [];
+  const [changes, readings, series] = caps.map(([, n]) => n);
+  for (const [name, n] of caps) if (!Number.isInteger(n)) problems288.push(`could not read ${name} out of frontend/src/api.js`);
+  if (!problems288.length) {
+    const words = (n) => n.toLocaleString('en-GB');
+    const claims = [
+      ['help/pages/history.md', `**More than ${words(changes)} changes**`],
+      ['help/pages/history.md', `**More than ${words(readings)} readings**`],
+      ['frontend/README.md', `\`HISTORY_MAX_CHANGES\`, ${words(changes)}`],
+      ['frontend/README.md', `\`HISTORY_CHANGE_READINGS\`, ${words(readings)}`],
+      ['frontend/README.md', `\`HISTORY_CHANGE_SERIES\` (${series})`],
+      ['supabase/README.md', `${words(changes)} unless given`],
+      ['supabase/README.md', `more than ${words(readings)} readings of one series`],
+    ];
+    for (const [file, said] of claims) if (!read(file).includes(said)) problems288.push(`${file} does not say "${said}"`);
+  }
+  if (problems288.length) {
+    fail('History\'s docs name the change read\'s caps otherwise than api.js holds them:\n' +
+      problems288.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs name the change read's caps, ${changes} changes, ${readings} readings and ${series} series, as api.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 289. History's help and the 0254 section say how long raw telemetry is kept by default as the
+// chart holds it (timescaledb.retention.retainFor). Past it a text or flag chart can no longer show
+// every change, so a page naming another figure tells a reader the wrong window.
+// -------------------------------------------------------------------------------------------------
+{
+  const kept = CHART_VALUES.match(/^ {4}retainFor: "([^"]+)"$/m)?.[1];
+  const problems289 = [];
+  if (!kept) problems289.push('could not read timescaledb.retention.retainFor out of deploy/helm/aber/values.yaml');
+  else {
+    const claims = [
+      ['help/pages/history.md', `The historian keeps raw readings for ${kept} by default`],
+      ['supabase/README.md', `(${kept} by default, \`timescaledb.retention.retainFor\`)`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems289.push(`${file} does not say "${said}"`);
+  }
+  if (problems289.length) {
+    fail('History\'s docs say how long raw telemetry is kept otherwise than the chart does:\n' +
+      problems289.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the 0254 section keep raw telemetry ${kept} by default, as values.yaml's retainFor does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
 // partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
 // OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also

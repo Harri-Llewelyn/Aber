@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
+import { HISTORY_CHANGE_READINGS, HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS } from '../api'
 import { pathSegments } from '../hooks/useUrlState'
 import { windowFromQuery, windowToQuery } from '../utils/timeWindow'
 import {
@@ -8,7 +8,8 @@ import {
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
   shareWords, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
-  OTHER_GROUP, metricGroups,
+  OTHER_GROUP, metricGroups, changeSeries, markBuckets, markedStretches, momentSecondsWords, readWords, runNear, spanWords,
+  stateReadLine,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -477,5 +478,122 @@ describe("a chart's colours", () => {
     expect(withAlpha('#0284c7', 0.5)).toBe('rgba(2, 132, 199, 0.5)')
     expect(withAlpha('#fff', 1)).toBe('rgba(255, 255, 255, 1)')
     expect(withAlpha('rgba(1, 2, 3, 0.4)', 0.5)).toBe('rgba(1, 2, 3, 0.4)')
+  })
+})
+
+describe('every change of a text or a flag', () => {
+  const at = (ms) => new Date(T0 + ms).toISOString()
+  const span = { start: T0, end: T0 + HOUR, now: T0 + DAY }
+  const flagRow = (extra = {}) => ({
+    metric_name: 'Door/OPEN', read: 'changes', change_ts: [at(5 * MINUTE), at(5 * MINUTE + 20000), at(30 * MINUTE)],
+    val_bool: [true, false, true], val_string: [null, null, null], carried_bool: false, carried_string: null, n_changes: 3, ...extra,
+  })
+
+  it('chooses the change read for the text and the flags, whatever the buckets', () => {
+    const states = new Set(['S', 'F'])
+    const auto = readPlan(T0, T0 + DAY, { names: ['A', 'F', 'S'], textNames: new Set(['S']), stateNames: states, widthPx: 960 })
+    expect(auto.groups.map(g => [g.names, g.resolution.id, g.changes])).toEqual([[['A', 'F'], '1m', ['F']], [['S'], '5m', ['S']]])
+    const chosen = readPlan(T0, T0 + DAY, { names: ['A', 'F', 'S'], textNames: new Set(['S']), stateNames: states, bucket: '1h' })
+    expect(chosen.groups.map(g => [g.resolution.id, g.changes])).toEqual([['1h', ['F', 'S']]])
+    // Without kinds, nothing takes it.
+    expect(readPlan(T0, T0 + DAY, { names: ['A'] }).groups[0].changes).toEqual([])
+  })
+
+  it("lays a flag's steps on its changes' own times, the value carried in up to the first", () => {
+    const { starts, series } = changeSeries(flagRow(), span)
+    expect(starts.map(s => s * 1000 - T0)).toEqual([0, 5 * MINUTE, 5 * MINUTE + 20000, 30 * MINUTE, HOUR])
+    expect(series.kind).toBe('flag')
+    expect(series.avg).toEqual([0, 1, 0, 1, 1])
+    expect(series.carried).toEqual([true, false, false, false, false])
+    expect(splitCarried(series)).toEqual({ read: [null, 1, 0, 1, 1], held: [0, 1, null, null, null] })
+    expect(series.runs.map(r => [r.state, r.startMs - T0, r.endMs - T0, r.carried.length])).toEqual([
+      [false, 0, 5 * MINUTE, 1], [true, 5 * MINUTE, 5 * MINUTE + 20000, 0], [false, 5 * MINUTE + 20000, 30 * MINUTE, 0], [true, 30 * MINUTE, HOUR, 0],
+    ])
+    expect(series.changes).toBe(3)
+  })
+
+  it("draws a text's runs from their real start to their real end, a first reading of the value carried in continuing its run", () => {
+    const row = {
+      read: 'changes', carried_string: 'IDLE', change_ts: [at(2 * MINUTE), at(10 * MINUTE), at(10 * MINUTE + 30000)],
+      val_string: ['IDLE', 'RUNNING', 'FAULT'], val_bool: [null, null, null],
+    }
+    const { series } = changeSeries(row, { ...span, now: T0 + 20 * MINUTE })
+    expect(series.kind).toBe('state')
+    expect(series.runs.map(r => [r.state, (r.startMs - T0) / 1000, (r.endMs - T0) / 1000])).toEqual([
+      ['IDLE', 0, 600], ['RUNNING', 600, 630], ['FAULT', 630, 1200],
+    ])
+    // IDLE was carried in until its first reading at 2 min, then read.
+    expect(series.runs[0].carried.map(c => [(c.startMs - T0) / MINUTE, (c.endMs - T0) / MINUTE])).toEqual([[0, 2]])
+    expect(series.changes).toBe(2)
+  })
+
+  it('stops at now, takes no carried point under a first reading at the start, and is null for any other read', () => {
+    const { starts, series } = changeSeries(flagRow({ change_ts: [at(0), at(50 * MINUTE)], val_bool: [true, false] }), { ...span, now: T0 + 40 * MINUTE })
+    expect(starts.map(s => s * 1000 - T0)).toEqual([0, 40 * MINUTE])
+    expect(series.carried).toEqual([false, false])
+    expect(series.runs).toHaveLength(1)
+    expect(changeSeries({ read: 'change_cap' }, span)).toBeNull()
+    expect(changeSeries(null, span)).toBeNull()
+    expect(changeSeries({ read: 'changes', change_ts: null, val_bool: null, val_string: null }, span).series.kind).toBe('none')
+  })
+
+  it('finds a run of seconds from a few pixels away, and otherwise the run under the pointer', () => {
+    const { series } = changeSeries(flagRow(), span)
+    const runs = series.runs
+    // 20 s of true at 5 min: found from 5:30 only with 15 s of slack, not with 4.
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 4000).state).toBe(false)
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 15000).state).toBe(true)
+    expect(runNear(runs, T0 + 20 * MINUTE)).toBe(runs[2])
+    expect(runNear(runs, T0 + 2 * HOUR)).toBeNull()
+  })
+
+  it('tells a run of every change to the second, and the latest value since when it held', () => {
+    const { starts, series } = changeSeries(flagRow(), span)
+    const [, open] = series.runs
+    const clock = (ms) => new Date(T0 + ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    expect(runWords(open, 1)).toBe(`${momentSecondsWords(T0 + 5 * MINUTE)} – ${clock(5 * MINUTE + 20000)} · true, 20 s`)
+    expect(spanWords(20000)).toBe('20 s')
+    expect(spanWords(35 * MINUTE)).toBe('35 min')
+    expect(latestWords(series, starts, 1)).toBe(`Latest true · since ${momentSecondsWords(T0 + 30 * MINUTE)}`)
+    const quiet = changeSeries(flagRow({ change_ts: [at(MINUTE)], val_bool: [false] }), span).series
+    expect(latestWords(quiet, [], 1)).toBe('Latest false · since before this window')
+    const none = changeSeries(flagRow({ change_ts: null, val_bool: null }), span).series
+    expect(latestWords(none, [], 1)).toBe('No reading in this window')
+  })
+
+  it('marks a bucket that held more than one value, a flag as a band from false to true', () => {
+    const starts = bucketStarts(T0, T0 + 4 * MINUTE, 1)
+    const flag = chartSeries(starts.map((s, i) => ({ bucket_ts: new Date(s * 1000).toISOString(), last_bool: i % 2 === 0, n_rows: 1 })), starts)
+    const marked = markBuckets(flag, starts, { read: 'change_cap', marked_ts: [at(MINUTE)], marked_values: [2] })
+    expect(marked.marked).toEqual([0, 2, 0, 0])
+    expect([marked.min, marked.max]).toEqual([[1, 0, 1, 0], [1, 1, 1, 0]])
+    const state = chartSeries(starts.map(s => ({ bucket_ts: new Date(s * 1000).toISOString(), last_string: 'RUN', n_rows: 1 })), starts)
+    const text = markBuckets(state, starts, { read: 'reading_cap', marked_ts: [at(2 * MINUTE)], marked_values: [3] })
+    expect(markedStretches(text, starts, { ...span, minutes: 1 }).map(m => [(m.startMs - T0) / MINUTE, (m.endMs - T0) / MINUTE, m.values, m.last]))
+      .toEqual([[2, 3, 3, 'RUN']])
+    expect(markBuckets(state, starts, { read: 'retention' })).toBe(state)
+  })
+
+  it('says which read a chart shows, and why it is not every change', () => {
+    const fiveMinutes = HISTORY_RESOLUTIONS.find(r => r.id === '5m')
+    expect(readWords({ read: 'changes' }, fiveMinutes)).toBe('every change')
+    expect(readWords({ read: 'change_cap' }, fiveMinutes)).toBe(`the last value in each 5-minute bucket, past the ${HISTORY_MAX_CHANGES.toLocaleString()}-change cap`)
+    expect(readWords({ read: 'reading_cap' }, fiveMinutes)).toBe(`the last value in each 5-minute bucket, past the ${HISTORY_CHANGE_READINGS.toLocaleString()}-reading cap`)
+    const kept = new Date(T0).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    expect(readWords({ read: 'retention', raw_from: at(0) }, fiveMinutes)).toBe(`the last value in each 5-minute bucket, older than raw retention (kept from ${kept})`)
+    expect(readWords(null, fiveMinutes)).toBeNull()
+    expect(stateReadLine([])).toBeNull()
+    expect(stateReadLine([{ kind: 'text', words: 'every change' }])).toEqual({ line: 'text shows every change', words: 'every change' })
+    expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'flag', words: 'every change' }]).line).toBe('flags show every change')
+    expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'text', words: 'y' }])).toEqual({ line: 'text and flags show x', words: 'x' })
+  })
+
+  it("gives a screen reader every change's count and each value's share", () => {
+    const { starts, series } = changeSeries(flagRow(), span)
+    const summary = chartSummary({ metric: 'Door/OPEN', windowText: 'Last hour', resolution: HISTORY_RESOLUTIONS[0], series, starts, span })
+    expect(summary).toMatch(/^Door\/OPEN, Last hour, every change\. Latest true, since .+\. 3 changes in this window\. Time in each value: /)
+    const read = 'the last value in each 1-minute bucket, past the 2,000-change cap'
+    const bucketed = chartSummary({ metric: 'X', windowText: 'Last hour', resolution: HISTORY_RESOLUTIONS[0], series: chartSeries([], []), starts: [], read })
+    expect(bucketed).toBe(`X, Last hour, ${read}. No readings in this window, and none before it.`)
   })
 })

@@ -42,7 +42,7 @@ vi.mock('uplot', () => {
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), readCarriedTelemetry: vi.fn() } }
+  return { ...actual, api: { get: vi.fn(), readCarriedTelemetry: vi.fn(), readTelemetryChanges: vi.fn() } }
 })
 
 const LATHE = '2b3e0c4a-1111-4000-8000-000000000001'
@@ -107,6 +107,8 @@ beforeEach(() => {
   polls.length = 0
   api.get.mockImplementation(routeGet)
   api.readCarriedTelemetry.mockImplementation(readings)
+  // No change read answers unless a test says so, so a chart draws its buckets.
+  api.readTelemetryChanges.mockResolvedValue([])
   document.documentElement.setAttribute('data-theme', 'dark')
   document.documentElement.style.setProperty('--accent', '#00d4ff')
 })
@@ -615,7 +617,9 @@ describe("a text chart's buckets under Auto", () => {
   let originalWidth
   beforeEach(() => { originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth') })
   afterEach(() => {
+    // jsdom's own clientWidth is Element's, so the override on HTMLElement goes rather than stays.
     if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
+    else delete HTMLElement.prototype.clientWidth
     delete window.ResizeObserver
   })
   /** Every chart box `px` wide, and the page 32 px wider, as its insets make it. */
@@ -673,6 +677,147 @@ describe("a text chart's buckets under Auto", () => {
   })
 })
 
+describe('every change of a text or a flag', () => {
+  const CELL = '2b3e0c4a-8888-4000-8000-000000000008'
+  const cellDevice = { asset_id: CELL, asset_name: 'Robot cell', last_birth_metrics: ['Arm/TORQUE', 'Controller/EXECUTION', 'Door/OPEN'] }
+  const cellCatalog = [
+    { name: 'Arm/TORQUE', datatype: 10 }, { name: 'Controller/EXECUTION', datatype: 12 }, { name: 'Door/OPEN', datatype: 11 },
+  ]
+  const MIN = 60000
+  /** The bucket read: a number, a flag that is true in odd buckets, and RUNNING throughout. */
+  const buckets = ({ from, bucketMinutes, metricNames }) => {
+    const width = bucketMinutes * MIN
+    const first = Math.floor(Date.parse(from) / width) * width
+    return Promise.resolve(metricNames.flatMap(name => Array.from({ length: 60 }, (_, i) => ({
+      bucket_ts: new Date(first + i * width).toISOString(), asset_id: 'dev', metric_name: name,
+      avg_double: name === 'Arm/TORQUE' ? 5 : null, min_double: name === 'Arm/TORQUE' ? 5 : null, max_double: name === 'Arm/TORQUE' ? 5 : null,
+      last_double: name === 'Arm/TORQUE' ? 5 : null, last_string: name === 'Controller/EXECUTION' ? 'RUNNING' : null,
+      last_bool: name === 'Door/OPEN' ? i % 2 === 1 : null, n_rows: 1, is_carried: false,
+    }))))
+  }
+  /** Every change: the door opens for 20 s at 5 min and again at 30; the program idles for 30 s at 10 min. */
+  const everyChange = ({ from, metricNames }) => {
+    const at = (ms) => new Date(Date.parse(from) + ms).toISOString()
+    return Promise.resolve(metricNames.map(name => (name === 'Door/OPEN'
+      ? { metric_name: name, read: 'changes', change_ts: [at(5 * MIN), at(5 * MIN + 20000), at(30 * MIN)], val_bool: [true, false, true], val_string: [null, null, null], carried_bool: false, carried_string: null, n_changes: 3, raw_from: at(-DAY) }
+      : { metric_name: name, read: 'changes', change_ts: [at(MIN), at(10 * MIN), at(10 * MIN + 30000)], val_string: ['RUNNING', 'IDLE', 'RUNNING'], val_bool: [null, null, null], carried_string: 'RUNNING', carried_bool: null, n_changes: 3, raw_from: at(-DAY) })))
+  }
+  const DAY = 24 * 60 * MIN
+  const flagPlot = () => plots.find(p => p.opts.scales.y.range?.[0] === -0.2 && !p.destroyed)
+  const lastChangeRead = () => api.readTelemetryChanges.mock.calls.at(-1)[0]
+
+  beforeEach(() => {
+    api.get.mockImplementation((p) => {
+      if (p.startsWith('/api/v1/devices')) return Promise.resolve([cellDevice])
+      if (p.startsWith('/api/v1/metric-catalog')) return Promise.resolve(cellCatalog)
+      return Promise.resolve([])
+    })
+    api.readCarriedTelemetry.mockImplementation(buckets)
+    api.readTelemetryChanges.mockImplementation(everyChange)
+  })
+
+  it('asks for the changes of the text and the flags, on the buckets each reads at, beside the bucket read', async () => {
+    await visit(`/history/device/${CELL}?range=1h`)
+    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show every change')).toBeInTheDocument()
+    expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Door/OPEN'], 1], [['Controller/EXECUTION'], 1]])
+    expect(api.readCarriedTelemetry.mock.calls.map(([a]) => a.metricNames)).toEqual([['Arm/TORQUE', 'Door/OPEN'], ['Controller/EXECUTION']])
+    // Whatever the buckets: a choice reads them at it, and the changes still.
+    cleanup()
+    api.readTelemetryChanges.mockClear()
+    await visit(`/history/device/${CELL}?range=1h&bucket=1h`)
+    expect(await screen.findByText('3 metrics, in 1-hour buckets; text and flags show every change')).toBeInTheDocument()
+    expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Controller/EXECUTION', 'Door/OPEN'], 60]])
+  })
+
+  it("steps a flag at each change's own time, the value carried in dashed up to the first", async () => {
+    await visit(`/history/device/${CELL}?range=1h`)
+    await screen.findByText(/text and flags show every change/)
+    const from = Date.parse(lastChangeRead().from) / 1000
+    const { data, opts } = flagPlot()
+    const [xs, , , read, held] = data
+    expect(xs.slice(0, 4).map(x => x - from)).toEqual([0, 300, 320, 1800])
+    expect(xs).toHaveLength(5)
+    expect(read).toEqual([null, 1, 0, 1, 1])
+    expect(held).toEqual([0, 1, null, null, null])
+    // No band: a flag of every change holds one value at a time.
+    expect(opts.bands).toEqual([])
+    // The run at the pointer's time, not the change nearest it, to the second.
+    const figure = screen.getByRole('figure', { name: 'Door/OPEN' })
+    const u = { cursor: { idx: 2, left: 310 }, posToVal: (px) => from + px }
+    act(() => { opts.hooks.setCursor[0](u) })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · true, 20 s$/)
+    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: null } }) })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/^Latest true · since /)
+  })
+
+  it('draws each run of a text from its real start to its real end, and says it is every change', async () => {
+    await visit(`/history/device/${CELL}?range=1h`)
+    const figure = await screen.findByRole('figure', { name: 'Controller/EXECUTION' })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-state')).toHaveLength(3))
+    const runs = [...figure.querySelectorAll('.chart-state')].map(r => [r.textContent, parseFloat(r.style.left), parseFloat(r.style.width)])
+    expect(runs.map(r => r[0])).toEqual(['RUNNING', 'IDLE', 'RUNNING'])
+    // IDLE from 10:00 to 10:30 into the hour: 30 s of it, at its own place.
+    expect(runs[1][1]).toBeCloseTo((10 / 60) * 100, 1)
+    expect(runs[1][2]).toBeCloseTo((0.5 / 60) * 100, 1)
+    expect(runs[0][1]).toBe(0)
+    // Carried in from before the window, hatched up to the first reading at 1 min.
+    const held = figure.querySelector('.chart-state .chart-state-carried')
+    expect(parseFloat(held.style.width)).toBeCloseTo(10, 0)
+    expect(figure.querySelector('.history-chart-read')).toBeNull()
+    expect(screen.getByRole('img', { name: 'Controller/EXECUTION' })).toHaveAccessibleDescription(/, every change\. .* 2 changes in this window\./)
+  })
+
+  it('falls back to the buckets past the cap, marks each bucket that held more than one value, and says so on the chart', async () => {
+    api.readTelemetryChanges.mockImplementation(({ from, metricNames }) => everyChange({ from, metricNames }).then(rows => rows.map(r => {
+      if (r.metric_name !== 'Controller/EXECUTION') return r
+      const first = Math.floor(Date.parse(from) / MIN) * MIN
+      return { metric_name: r.metric_name, read: 'change_cap', n_changes: 2500, marked_ts: [new Date(first + 10 * MIN).toISOString()], marked_values: [3], raw_from: r.raw_from }
+    })))
+    await visit(`/history/device/${CELL}?range=1h`)
+    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show every change')).toBeInTheDocument()
+    const figure = screen.getByRole('figure', { name: 'Controller/EXECUTION' })
+    expect(figure.querySelector('.history-chart-read')).toHaveTextContent('the last value in each 1-minute bucket, past the 2,000-change cap')
+    const marks = figure.querySelectorAll('.chart-state-mixed')
+    expect(marks).toHaveLength(1)
+    expect([...figure.querySelectorAll('.chart-state-key li')].map(li => li.textContent)).toContain('more than one value in the bucket')
+    // Under the pointer the mark names what it hides.
+    const box = figure.querySelector('.chart-box-states')
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 34, right: 600, bottom: 34 })
+    fireEvent.pointerMove(box, { clientX: (parseFloat(marks[0].style.left) + parseFloat(marks[0].style.width) / 2) * 6 })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · 3 values in this bucket, RUNNING last$/)
+    expect(screen.getByRole('img', { name: 'Controller/EXECUTION' }))
+      .toHaveAccessibleDescription(/, the last value in each 1-minute bucket, past the 2,000-change cap\. .*1 of \d+ buckets held more than one value, and show the last\./)
+  })
+
+  it("marks a flag's bucket that held both values as a band from false to true", async () => {
+    api.readTelemetryChanges.mockImplementation(({ from, bucketMinutes, metricNames }) => Promise.resolve(metricNames.map(name => {
+      const first = Math.floor(Date.parse(from) / (bucketMinutes * MIN)) * bucketMinutes * MIN
+      return { metric_name: name, read: 'reading_cap', marked_ts: [new Date(first + 2 * MIN).toISOString()], marked_values: [2] }
+    })))
+    await visit(`/history/device/${CELL}?range=1h`)
+    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show the last value in each 1-minute bucket, past the 20,000-reading cap')).toBeInTheDocument()
+    expect(document.querySelector('.history-chart-read')).toBeNull()
+    const { data, opts } = flagPlot()
+    expect(opts.bands).toHaveLength(1)
+    const [, max, min] = data
+    // Bucket 2 held both; bucket 1 held only true, and bucket 3 only true.
+    expect([max[2], min[2]]).toEqual([1, 0])
+    expect([max[1], min[1], max[3], min[3]]).toEqual([1, 1, 1, 1])
+    const figure = screen.getByRole('figure', { name: 'Door/OPEN' })
+    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: 2 } }) })
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · false, both values in this bucket$/)
+  })
+
+  it('says a window older than raw retention shows the last value in each bucket, and when raw starts', async () => {
+    api.readTelemetryChanges.mockImplementation(({ metricNames }) => Promise.resolve(metricNames.map(name => (
+      { metric_name: name, read: 'retention', raw_from: new Date(2026, 9, 23, 6).toISOString() }))))
+    await visit(`/history/device/${CELL}?range=1h`)
+    const kept = new Date(2026, 9, 23, 6).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    expect(await screen.findByText(`3 metrics, in 1-minute buckets; text and flags show the last value in each 1-minute bucket, older than raw retention (kept from ${kept})`)).toBeInTheDocument()
+    expect(document.querySelectorAll('.chart-state-mixed')).toHaveLength(0)
+  })
+})
+
 describe("the charts' groups", () => {
   const CELL = '2b3e0c4a-6666-4000-8000-000000000006'
   const cellDevice = {
@@ -720,7 +865,7 @@ describe("the charts' groups", () => {
     expect(chartsIn('String')).toEqual([])
     expect(screen.getAllByRole('figure')).toHaveLength(4)
     // Closing a group is not a filter: the line still counts every metric.
-    expect(screen.getByText('5 metrics, in 5-minute buckets; text in 1-hour buckets')).toBeInTheDocument()
+    expect(screen.getByText('5 metrics, in 5-minute buckets')).toBeInTheDocument()
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(reads)
     expect(window.location.pathname + window.location.search).toBe(address)
     expect(JSON.parse(window.localStorage.getItem(CLOSED_GROUPS_KEY))).toEqual(['12'])

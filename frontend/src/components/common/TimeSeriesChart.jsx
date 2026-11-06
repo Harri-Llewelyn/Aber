@@ -30,14 +30,20 @@ import 'uplot/dist/uPlot.min.css'
 import { OverflowText } from './OverflowText'
 import { clockWords } from '../../utils/timeWindow'
 import {
-  chartPalette, chartTitle, latestWords, momentWords, nowFraction, readingWords, runWords, shareWords, splitCarried,
-  stateHue, stateKey, stateRuns, stateShares, validRangeWords,
+  chartPalette, chartTitle, latestWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
+  runWords, shareWords, splitCarried, stateHue, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
 const DAY_S = 24 * 60 * 60
 
 /** No plugins: hoisted, so a chart without any is not drawn again on each render. */
 const NO_PLUGINS = Object.freeze([])
+
+/** How near the pointer, in pixels, a run thinner than this either side is found (runNear()). */
+const HOVER_SLACK_PX = 4
+
+/** Under this many pixels a state's box keeps its colour and edge but no name, which could not show. */
+const NAMED_RUN_PX = 24
 
 /**
  * The theme's chart colours, read again whenever `<html data-theme>` changes, so a chart follows a
@@ -102,6 +108,8 @@ export const PLOT_RIGHT_PX = 28
  */
 function plotOptions({ width, height, series, start, end, validRange, palette, syncKey, onHover, plugins }) {
   const flag = series.kind === 'flag'
+  // A flag's bucket that held both values is a band from false to true (markBuckets()).
+  const banded = !flag || (series.marked || []).some(n => n > 1)
   const axis = { stroke: palette.text, font: palette.font, grid: { stroke: palette.grid, width: 1 }, ticks: { stroke: palette.grid, width: 1 } }
   const line = { stroke: palette.line, width: 1.5, spanGaps: false, ...(flag ? { paths: uPlot.paths.stepped({ align: 1 }) } : {}) }
   return {
@@ -133,10 +141,15 @@ function plotOptions({ width, height, series, start, end, validRange, palette, s
       { label: 'Average', ...line },
       { label: 'Carried forward', ...line, dash: [5, 4], points: { show: false } },
     ],
-    bands: flag ? [] : [{ series: [1, 2], fill: palette.band }],
+    bands: banded ? [{ series: [1, 2], fill: palette.band }] : [],
     hooks: {
       draw: [drawValidRange(validRange, palette)],
-      setCursor: [(u) => onHover(u.cursor.idx ?? null)],
+      // The point under the pointer, and its time and slack in seconds for a chart of every change.
+      setCursor: [(u) => {
+        const left = u.cursor.left
+        const at = Number.isFinite(left) && left >= 0 && u.posToVal ? u.posToVal(left, 'x') : null
+        onHover(u.cursor.idx ?? null, at, at === null ? 0 : u.posToVal(left + HOVER_SLACK_PX, 'x') - at)
+      }],
     },
   }
 }
@@ -177,31 +190,46 @@ const hueOf = (state) => ({ '--state-hue': stateHue(state) })
 /**
  * A state metric as runs of its value across the window: text, which no line can draw. Each value
  * takes the hue its text hashes to, at the theme's lightness and chroma, and keeps its name, and a
- * carried stretch is hatched, as a number chart dashes one.
+ * carried stretch is hatched, as a number chart dashes one. A box under NAMED_RUN_PX keeps its
+ * colour and edge at its own width, at least 2px, without the name; the head names it under the
+ * pointer. A bucket that held more than one value (`marks`) is dotted along its foot.
  */
-function StateStrip({ runs, start, end }) {
+function StateStrip({ runs, marks, start, end }) {
+  const ref = useRef(null)
+  const [px, setPx] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    setPx(el.clientWidth)
+    if (typeof ResizeObserver !== 'function') return undefined
+    const watcher = new ResizeObserver(() => setPx(el.clientWidth))
+    watcher.observe(el)
+    return () => watcher.disconnect()
+  }, [])
   const span = end - start
   const part = (from, to, of) => ({ left: `${((from - of.from) / of.span) * 100}%`, width: `${((to - from) / of.span) * 100}%` })
   const whole = { from: start, span }
   return (
-    <div className="chart-states">
+    <div className="chart-states" ref={ref}>
       {runs.map(r => {
         const own = { from: r.startMs, span: r.endMs - r.startMs }
+        const thin = px > 0 && ((r.endMs - r.startMs) / span) * px < NAMED_RUN_PX
         return (
-          <span key={r.from} className="chart-state" style={{ ...part(r.startMs, r.endMs, whole), ...hueOf(r.state) }}>
+          <span key={r.from} className={`chart-state${thin ? ' chart-state-thin' : ''}`} style={{ ...part(r.startMs, r.endMs, whole), ...hueOf(r.state) }}>
             {r.carried.map(c => (
               <span key={c.startMs} className="chart-state-carried" style={part(c.startMs, c.endMs, own)} />
             ))}
-            <OverflowText>{r.state}</OverflowText>
+            {!thin && <OverflowText>{r.state}</OverflowText>}
           </span>
         )
       })}
+      {marks.map(m => <span key={m.startMs} className="chart-state-mixed" style={part(m.startMs, m.endMs, whole)} />)}
     </div>
   )
 }
 
 /** Under a state chart: each value with its colour and its share of the charted time, then the others. */
-function StateKey({ stateKey: key, carried }) {
+function StateKey({ stateKey: key, carried, mixed }) {
   return (
     <ul className="chart-state-key">
       {key.shown.map(s => (
@@ -224,6 +252,12 @@ function StateKey({ stateKey: key, carried }) {
           <span className="chart-state-key-name">carried forward</span>
         </li>
       )}
+      {mixed && (
+        <li className="chart-state-key-plain">
+          <span className="chart-state-swatch chart-state-swatch-mixed" aria-hidden="true" />
+          <span className="chart-state-key-name">more than one value in the bucket</span>
+        </li>
+      )}
     </ul>
   )
 }
@@ -236,8 +270,12 @@ function StateKey({ stateKey: key, carried }) {
  * line labelled "valid range". Where the window reaches past now, a Now line and a hatched "No
  * readings yet" mark the rest. A flag steps between false and true; a state is a strip of its runs,
  * a colour a value with its name kept, carried stretches hatched, and a key of each value's share
- * of the time under it. The head reads the bucket under the pointer, or the run under it on a
- * state strip, and otherwise the latest reading (latestWords()). `band` is a drag's band, which the
+ * of the time under it. A series of every change (changeSeries()) is laid on its changes' own
+ * times instead of buckets, so a flag steps and a run starts and stops when the value did; a bucket
+ * series may carry marks (markBuckets()), a flag's as a band from false to true and a state's as a
+ * dotted foot. `note` says which read the chart shows when the status line says otherwise. The head
+ * reads the bucket under the pointer, or the run under it on a state strip or a flag of every
+ * change, and otherwise the latest reading (latestWords()). `band` is a drag's band, which the
  * page shades on every chart; uPlot's own drag selection stays off. `plugins` are uPlot plugins
  * the page adds to a number or flag chart, such as the periods an alert was firing; a state strip
  * is not drawn by uPlot and takes none. Pass the same array while they are the same: a new one
@@ -252,7 +290,7 @@ function StateKey({ stateKey: key, carried }) {
  */
 export function TimeSeriesChart({
   metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
-  plugins = NO_PLUGINS,
+  plugins = NO_PLUGINS, note = null,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -260,11 +298,17 @@ export function TimeSeriesChart({
   const [failed, setFailed] = useState(false)
   const [hover, setHover] = useState(null)
   const [runHover, setRunHover] = useState(null)
+  const [markHover, setMarkHover] = useState(null)
   const palette = useChartPalette()
   const drawn = series.kind === 'number' || series.kind === 'flag'
   const isState = series.kind === 'state'
+  // A chart of every change carries its runs (changeSeries()); a bucket read's are worked out here.
   const runs = useMemo(
-    () => (isState ? stateRuns(series, starts, { start, end, now, minutes }) : []),
+    () => series.runs ?? (isState ? stateRuns(series, starts, { start, end, now, minutes }) : []),
+    [isState, series, starts, start, end, now, minutes]
+  )
+  const marks = useMemo(
+    () => (isState ? markedStretches(series, starts, { start, end, now, minutes }) : []),
     [isState, series, starts, start, end, now, minutes]
   )
   const key = useMemo(() => (isState ? stateKey(stateShares(runs)) : null), [isState, runs])
@@ -273,10 +317,11 @@ export function TimeSeriesChart({
     const box = boxRef.current
     if (!drawn || !box) return undefined
     const { read, held } = splitCarried(series)
+    const onHover = (idx, at, slack) => setHover(idx === null ? null : { idx, at, slack })
     let plot
     try {
       plot = new uPlot(
-        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, palette, syncKey, onHover: setHover, plugins }),
+        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, palette, syncKey, onHover, plugins }),
         [starts, series.max, series.min, read, held],
         box,
       )
@@ -299,17 +344,30 @@ export function TimeSeriesChart({
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
+  /** A flag of every change: the run at the pointer's time, not the change nearest it. */
+  const flagRun = () => {
+    const run = hover?.at === null || hover?.at === undefined ? null : runNear(runs, hover.at * 1000, hover.slack * 1000)
+    return run ? runWords(run, minutes) : null
+  }
   const hovered = isState
-    ? (runHover ? runWords(runHover, minutes) : null)
-    : hover !== null && starts[hover] !== undefined ? hoverWords(starts[hover], series, hover, unit, minutes) : null
+    ? (markHover ? markWords(markHover, minutes) : runHover ? runWords(runHover, minutes) : null)
+    : hover === null ? null
+      : series.runs ? flagRun()
+        : starts[hover.idx] !== undefined ? hoverWords(starts[hover.idx], series, hover.idx, unit, minutes) : null
   const headWords = hovered ?? latestWords(series, starts, minutes, unit)
 
-  /** The run under the pointer, from where it is across the strip, which is the window's width. */
+  /**
+   * The run under the pointer, from where it is across the strip, which is the window's width, or
+   * the marked bucket there: a thin run is found from a few pixels away (runNear()).
+   */
   const pointAt = (e) => {
     const box = e.currentTarget.getBoundingClientRect()
     if (!(box.width > 0)) return
-    const t = start + ((e.clientX - box.left) / box.width) * (end - start)
-    setRunHover(runs.find(r => t >= r.startMs && t < r.endMs) ?? null)
+    const msPerPx = (end - start) / box.width
+    const t = start + (e.clientX - box.left) * msPerPx
+    const mark = marks.find(m => t >= m.startMs && t < m.endMs) ?? null
+    setMarkHover(mark)
+    setRunHover(mark ? null : runNear(runs, t, HOVER_SLACK_PX * msPerPx))
   }
 
   return (
@@ -317,6 +375,7 @@ export function TimeSeriesChart({
       <figcaption className="history-chart-head">
         <span className="history-chart-title" id={`${id}-title`}>{chartTitle(metric, unit)}</span>
         {range && <span className="history-chart-range">{range}</span>}
+        {note && <span className="history-chart-read">{note}</span>}
         <span className="history-chart-hover" aria-hidden="true">{headWords}</span>
       </figcaption>
       <div className="chart-frame" role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-summary`}>
@@ -326,9 +385,9 @@ export function TimeSeriesChart({
             className="chart-box chart-box-states"
             style={{ marginLeft: PLOT_LEFT_PX, marginRight: PLOT_RIGHT_PX, width: 'auto' }}
             onPointerMove={pointAt}
-            onPointerLeave={() => setRunHover(null)}
+            onPointerLeave={() => { setRunHover(null); setMarkHover(null) }}
           >
-            <StateStrip runs={runs} start={start} end={end} />
+            <StateStrip runs={runs} marks={marks} start={start} end={end} />
             {(fraction !== null || band) && (
               <div className="chart-overlay">
                 {fraction !== null && <NowMarker fraction={fraction} now={now} />}
@@ -350,7 +409,9 @@ export function TimeSeriesChart({
           over,
         )}
       </div>
-      {isState && key.shown.length > 0 && <StateKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} />}
+      {isState && key.shown.length > 0 && (
+        <StateKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} mixed={marks.length > 0} />
+      )}
       <p className="sr-only" id={`${id}-summary`}>{summary}</p>
     </figure>
   )
@@ -361,7 +422,10 @@ function hoverWords(x, series, i, unit, minutes) {
   const when = momentWords(x * 1000, minutes)
   const v = series.avg[i]
   if (v === null) return `${when} · no reading yet`
-  if (series.kind === 'flag') return `${when} · ${v ? 'true' : 'false'}${series.carried[i] ? ', carried forward' : ''}`
+  if (series.kind === 'flag') {
+    const both = series.marked?.[i] > 1 ? ', both values in this bucket' : ''
+    return `${when} · ${v ? 'true' : 'false'}${series.carried[i] ? ', carried forward' : ''}${both}`
+  }
   if (series.carried[i]) return `${when} · ${readingWords(v, unit)}, carried forward`
   const lo = series.min[i]
   const hi = series.max[i]
