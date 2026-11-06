@@ -22,8 +22,9 @@
 -- -------------------------------------------------------------------------------------------------
 -- The bounds and lists reach the historian as parameters, so postgres_fdw ships every WHERE and
 -- aggregate; now() and a lateral join would be evaluated here and pull rows across. The seed is one
--- query over the lookback, then one LIMIT 1 query for each series that read nothing in it: a
--- parameterised join cannot carry a LIMIT to the historian.
+-- query over the lookback, then one aggregate for each series that read nothing in it. Not ORDER BY
+-- ... LIMIT 1: postgres_fdw sends a LIMIT only under its row estimate, about one row for a series,
+-- so the series' whole past would cross to be sorted here.
 CREATE OR REPLACE FUNCTION public.telemetry_carried(
     from_ts timestamp with time zone,
     to_ts timestamp with time zone,
@@ -123,6 +124,8 @@ BEGIN
     v_d := coalesce(v_d, '{}'); v_s := coalesce(v_s, '{}'); v_b := coalesce(v_b, '{}');
 
     -- Every other series on its own: its newest bucket before the lookback, else telemetry_1h's.
+    -- That bucket's three values, null or not, from one remote aggregate; count(*) says whether
+    -- there was one.
     FOR v_pair IN
         SELECT DISTINCT a.aid, m.mname
           FROM unnest(asset_ids) AS a(aid) CROSS JOIN unnest(metric_names) AS m(mname)
@@ -130,20 +133,23 @@ BEGIN
                             WHERE k.aid = a.aid AND k.mname = m.mname)
     LOOP
         EXECUTE format($q$
-          SELECT t.last_double, t.last_string, t.last_bool
+          SELECT (array_agg(t.last_double ORDER BY t.bucket DESC))[1],
+                 (array_agg(t.last_string ORDER BY t.bucket DESC))[1],
+                 (array_agg(t.last_bool   ORDER BY t.bucket DESC))[1],
+                 count(*)
             FROM timescale.%I t
            WHERE t.asset_id = $1 AND t.metric_name = $2 AND t.bucket < $3
-           ORDER BY t.bucket DESC LIMIT 1
         $q$, v_source)
-        INTO v_sd, v_ss, v_sb USING v_pair.aid, v_pair.mname, v_back;
-        GET DIAGNOSTICS v_found = ROW_COUNT;
+        INTO v_sd, v_ss, v_sb, v_found USING v_pair.aid, v_pair.mname, v_back;
         IF v_found = 0 AND v_source <> 'telemetry_1h' THEN
-            SELECT t.last_double, t.last_string, t.last_bool INTO v_sd, v_ss, v_sb
+            SELECT (array_agg(t.last_double ORDER BY t.bucket DESC))[1],
+                   (array_agg(t.last_string ORDER BY t.bucket DESC))[1],
+                   (array_agg(t.last_bool   ORDER BY t.bucket DESC))[1],
+                   count(*)
+              INTO v_sd, v_ss, v_sb, v_found
               FROM timescale.telemetry_1h t
              WHERE t.asset_id = v_pair.aid AND t.metric_name = v_pair.mname
-               AND t.bucket < date_bin(interval '1 hour', v_back, timestamptz 'epoch')
-             ORDER BY t.bucket DESC LIMIT 1;
-            GET DIAGNOSTICS v_found = ROW_COUNT;
+               AND t.bucket < date_bin(interval '1 hour', v_back, timestamptz 'epoch');
         END IF;
         IF v_found > 0 THEN
             v_aid := v_aid || v_pair.aid; v_mname := v_mname || v_pair.mname;

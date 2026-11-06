@@ -174,8 +174,10 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw ships a LIMIT to TimescaleDB only below about 6,300 rows; past that every matching
-// row crosses the wrapper before it is trimmed. Stay under it.
+// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate. With no
+// statistics each condition shrinks that estimate, to about one row for a read naming a device and a
+// metric; then every row inside the time bound crosses before the limit trims it. So this caps what a
+// page returns, and the time bound caps what crosses.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
@@ -233,8 +235,8 @@ export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 export const ALERT_HISTORY_LIMIT = 1000;
 
 /**
- * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so the
- * 6,300-row LIMIT threshold above does not apply. At most COVERAGE_MAX_DEVICES a read. More than
+ * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so no
+ * LIMIT is involved (see TELEMETRY_MAX_ROWS). At most COVERAGE_MAX_DEVICES a read. More than
  * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
  * and the page shows them at most COVERAGE_LARGE_MAX_HOURS at once; that many or fewer may take
  * any block width.
@@ -247,9 +249,9 @@ export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 /**
  * The lower time bound applied when a caller supplies none.
  *
- * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
- * a query with no time predicate can drag an asset's entire history across the wrapper before
- * `.range()` applies. Every live caller already passes a window; this exists so the next caller
+ * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
+ * historian (TELEMETRY_MAX_ROWS), so a query with no time predicate can drag an asset's entire
+ * history across the wrapper before `.range()` applies. Every live caller already passes a window; this exists so the next caller
  * cannot reintroduce the unbounded scan by omitting an argument.
  */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;

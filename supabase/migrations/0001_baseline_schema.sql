@@ -14008,7 +14008,7 @@ ALTER VIEW public.telemetry OWNER TO postgres;
 --
 
 -- VIEW telemetry :: COMMENT
-COMMENT ON VIEW public.telemetry IS 'Read-only PostgREST projection of the standalone TimescaleDB telemetry hypertable, reached over postgres_fdw. Filter with asset_id / metric_name / time and always pass a limit -- postgres_fdw pushes WHERE clauses to the remote but not LIMIT, so an unbounded query materialises the whole matching range locally.';
+COMMENT ON VIEW public.telemetry IS 'Read-only PostgREST projection of the standalone TimescaleDB telemetry hypertable, reached over postgres_fdw. Always bound the time. postgres_fdw sends the WHERE to the historian, but a LIMIT only when it is under the planner''s row estimate, and the foreign table has no statistics, so each condition shrinks that estimate: a read naming a device and a metric estimates about one row and is sent no LIMIT, so every row inside its time bound crosses before the limit applies.';
 
 --
 
