@@ -806,6 +806,13 @@ python supabase/migrations/test_replay_recreates_only_what_differs.py
 # holding an account once issued so the archive disables it, and kept by a replay of 0001's CHECK.
 # Remote and Host answer as before. Every test rolls back.
 python supabase/migrations/test_third_party_gateway.py
+# Changing a gateway's type (0252): a move across Remote's boundary burns the setup token, revokes
+# and stamps the credential the old type held, forgets its kept copy and leaves the gateway OFFLINE
+# where it was mid-enrolment or has become Remote. A move among Host, Simulated and Third-party, or
+# to the type it already had, ends nothing. A token for a gateway that is not Remote is refused
+# unspent. The one-off clean-up leaves a Remote gateway alone and changes nothing a second time.
+# Every test rolls back.
+python supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.

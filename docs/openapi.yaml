@@ -417,6 +417,12 @@ paths:
     patch:
       tags: [Assets]
       summary: Update gateways matching a filter
+      description: |
+        A change of `deployment` that crosses Remote's boundary ends what the old type held (0252):
+        any unredeemed enrolment token is burned, the broker credential the gateway held is disabled
+        and `credential_revoked_at` stamped, and a gateway that becomes Remote, or leaves it
+        mid-enrolment, is set `OFFLINE`. The returned row carries both. A change among `host`,
+        `third_party` and `is_simulated` ends nothing.
       parameters:
         - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Prefer'
@@ -5086,9 +5092,9 @@ paths:
         '400': { description: Body is not JSON. }
         '401':
           description: >-
-            The token is unknown, expired, or already redeemed. The three are deliberately
-            indistinguishable — reporting which would let an enumerator learn that a token value
-            once existed.
+            The token is unknown, expired or already redeemed, or its gateway is archived or no
+            longer Remote. They are deliberately indistinguishable — reporting which would let an
+            enumerator learn that a token value once existed.
         '405': { description: Method not allowed. }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
@@ -5112,9 +5118,9 @@ paths:
 
         The apikey passes the gateway's key check as on every function; the token is what
         authorises. Refused identically (401) for a missing header, a malformed token, an unknown,
-        expired or spent one, and an archived gateway. Refused outright (503) on a deployment whose
-        public URL is plain HTTP, unless the development values allow it: the route carries a
-        token and a secret.
+        expired or spent one, and a gateway that is archived or not Remote. Refused outright (503)
+        on a deployment whose public URL is plain HTTP, unless the development values allow it: the
+        route carries a token and a secret.
       parameters:
         - in: header
           name: X-Enrolment-Token

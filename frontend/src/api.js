@@ -2467,6 +2467,21 @@ const apiMethods = {
   },
 
   /**
+   * Whether this gateway holds a broker credential, as gateway_has_broker_credential() decides it:
+   * the question a type change asks about the stored row before it revokes (0252). Read for one
+   * gateway, when its Edit dialog opens, because a Host gateway's answer reads the Audit Trail.
+   */
+  gatewayHoldsBrokerCredential: async (gatewayId) => {
+    const { data, error } = await supabase
+      .from('gateways')
+      .select('gateway_has_broker_credential')
+      .eq('id', gatewayId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read whether the gateway holds a credential');
+    return data?.gateway_has_broker_credential === true;
+  },
+
+  /**
    * Find or create one replay lane per device in a capture, and return the map to publish under.
    *
    * A write, hung off an explicit click rather than off opening a dialog. Idempotent: a lane is

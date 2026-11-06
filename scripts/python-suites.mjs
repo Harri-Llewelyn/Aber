@@ -1383,6 +1383,14 @@ export const SUITES = {
       'issued a bundle, and counts as holding an account once issued, so archiving disables it; ' +
       'Remote and Host answer as before, and a replay of 0001 keeps the widened CHECK.',
   },
+  'supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py': {
+    lanes: ['db'],
+    why:
+      'A type change across Remote\'s boundary (0252) burns the setup token, revokes the credential ' +
+      'the old type held and leaves the gateway OFFLINE; a change among Host, Simulated and ' +
+      'Third-party ends nothing. Missing either half fails silently: a redeemable token for a ' +
+      'gateway with no appliance, or a credential the dashboard no longer offers working on.',
+  },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
     // its assertions is made AS a seeded demo account, and the db lane deliberately applies no

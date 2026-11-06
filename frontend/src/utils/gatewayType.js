@@ -112,6 +112,52 @@ export function gatewayTypeFields(type) {
 }
 
 /**
+ * What saving a change of type ends, read from the stored row, or null when the type is unchanged.
+ * Mirrors clean_up_after_a_gateway_type_change() (0252): only crossing Remote's boundary ends
+ * anything. Leaving Remote cancels an unused setup command (PENDING_ENROLLMENT), and crossing either
+ * way ends the broker credential the stored row holds. `holdsCredential` is that row's
+ * gateway_has_broker_credential(), or null while unknown, which counts as holding one.
+ *
+ * @returns {{ toRemote: boolean, crosses: boolean, setup: boolean, credential: boolean, keeps: boolean } | null}
+ */
+export function gatewayTypeChange(stored, chosenType, holdsCredential) {
+  if (!stored || gatewayType(stored) === chosenType) return null
+  const wasRemote = stored.deployment === 'remote'
+  const toRemote = gatewayTypeFields(chosenType).deployment === 'remote'
+  const crosses = wasRemote !== toRemote
+  return {
+    toRemote,
+    crosses,
+    setup: crosses && wasRemote && stored.status === 'PENDING_ENROLLMENT',
+    credential: crosses && holdsCredential !== false,
+    keeps: !crosses && holdsCredential === true,
+  }
+}
+
+/**
+ * The Type hint's sentences for a change of type, said before Save. Null when nothing ends or
+ * follows. `holdsCredential` null reads "any broker credential", since the row could not be asked.
+ */
+export function gatewayTypeChangeHint(change, holdsCredential) {
+  if (!change) return null
+  const which = holdsCredential === null ? 'any broker credential' : 'the broker credential'
+  const parts = []
+  if (change.setup) parts.push('Saving cancels the unused setup command.')
+  if (change.credential) {
+    parts.push(change.toRemote
+      ? `Saving ends ${which} this gateway holds, and whatever uses it is cut off.`
+      : `Saving ends ${which} its appliance holds, and the appliance is cut off.`)
+  }
+  if (change.keeps) parts.push('Saving keeps the broker credential this gateway holds.')
+  if (change.crosses) {
+    parts.push(change.toRemote
+      ? 'Once saved, set it up from its drawer: the appliance is issued a new credential when it enrols.'
+      : 'Once saved, issue it a broker credential from its drawer.')
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
+/**
  * Whether a device may be assigned to this gateway. Mirrors the database gate: a shadow gateway's
  * devices are replay lanes minted by `ensure_shadow_devices()` with a `shadow_of`, and a device
  * assigned by hand would be a shadow with no provenance. Null-safe in the permissive direction: no

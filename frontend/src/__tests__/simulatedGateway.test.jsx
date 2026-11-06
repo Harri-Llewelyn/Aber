@@ -162,6 +162,8 @@ describe('the Type control', () => {
     openEdit()
     fireEvent.change(typeSelect(), { target: { value: 'remote' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    // Leaving Simulated for Remote ends any credential it holds, so Save asks first.
+    fireEvent.click(await screen.findByRole('button', { name: 'Change type' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]
