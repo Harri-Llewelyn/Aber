@@ -7575,6 +7575,23 @@ SELECT public.seed_setting(
     'the p_retain default in prune_platform_alerts()'
 );
 
+-- How long a suppression window may last. A window ends by itself, so this is how long a forgotten
+-- one can keep a machine quiet. The writers read it (0240); supabase/README.md, "An alert stays
+-- quiet during planned work (0240)".
+SELECT public.seed_setting(
+    'alerts.suppression_max_days',
+    to_jsonb(7),
+    'number',
+    'Retention',
+    'Longest suppression window (days)',
+    'The most days a suppression window may last, from its start to its end, 7 unless changed '
+    'here. A Shopfloor Manager or an Administrator schedules a window on a device, a gateway or '
+    'a cell, and its alerts are recorded but not counted or sent until it ends. A longer window '
+    'is refused when it is scheduled or its times change. Lowering this leaves the windows '
+    'already scheduled as they are: each still ends by itself.',
+    'seven days, in check_alert_suppression_window_length()'
+);
+
 -- ---------------------------------------------------------------------------------------------
 -- Approvals
 -- ---------------------------------------------------------------------------------------------
@@ -8037,6 +8054,13 @@ UPDATE public.system_settings
    SET min_value = 1, max_value = 3650
  WHERE key = 'alerts.retention_days'
    AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 3650);
+
+-- MIN 1, NOT 0: zero would refuse every window. MAX 90: a season, past which a window is the
+-- maintenance switch it must not be.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 90
+ WHERE key = 'alerts.suppression_max_days'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 90);
 
 -- Bounds set by UPDATE, not by extra arguments: adding parameters to seed_setting() creates an
 -- overload. MIN 1, not 0: zero would export every chunk the moment it closes. The ceiling is a

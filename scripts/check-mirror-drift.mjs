@@ -1257,6 +1257,44 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   if (refused && js) compare('suppressionReasonMax', `the reason's limit schedule_alert_suppression_window() refuses past (${fn.file}) and the dialog`, js[1], refused[1]);
 }
 
+// 62. The longest suppression window, one default and one range in three places: 0002's seed and
+// bounds, the writers' check, which falls back to the default outside the range, and the dialog,
+// which does the same where the setting cannot be read. A dialog with another default offers an
+// end the writers refuse, or refuses one they would keep.
+{
+  const seed = need(SCHEMA, /seed_setting\(\s*'alerts\.suppression_max_days',\s*to_jsonb\((\d+)\)/,
+    "alerts.suppression_max_days' seed in 0002");
+  const bounds = need(SCHEMA, /SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'alerts\.suppression_max_days'/,
+    "alerts.suppression_max_days' bounds in 0002");
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(', '$$;',
+    'check_alert_suppression_window_length()');
+  const fallback = fn && need(fn.body, /IF v_days IS NULL OR v_days < (\d+) OR v_days > (\d+) THEN\s+v_days := (\d+);/,
+    `check_alert_suppression_window_length()'s fallback (${fn.file})`);
+  const js = read('frontend/src/utils/alertSuppression.js');
+  const jsDays = need(js, /export const SUPPRESSION_MAX_DAYS = (\d+)$/m, 'SUPPRESSION_MAX_DAYS in utils/alertSuppression.js');
+  const jsMin = need(js, /export const SUPPRESSION_MAX_DAYS_MIN = (\d+)$/m, 'SUPPRESSION_MAX_DAYS_MIN in utils/alertSuppression.js');
+  const jsMax = need(js, /export const SUPPRESSION_MAX_DAYS_MAX = (\d+)$/m, 'SUPPRESSION_MAX_DAYS_MAX in utils/alertSuppression.js');
+  if (seed && jsDays) compare('suppressionMaxDays', 'the longest window the dialog falls back to and 0002 seeds', jsDays[1], seed[1]);
+  if (fallback && jsDays) compare('suppressionMaxDays', `the longest window the dialog and the writers' check (${fn.file}) fall back to`, jsDays[1], fallback[3]);
+  if (bounds && jsMin && jsMax) compare('suppressionMaxDays', "the setting's range in the dialog and 0002's bounds", `${jsMin[1]} to ${jsMax[1]}`, `${bounds[1]} to ${bounds[2]}`);
+  if (fallback && jsMin && jsMax) compare('suppressionMaxDays', `the setting's range in the dialog and the writers' check (${fn.file})`, `${jsMin[1]} to ${jsMax[1]}`, `${fallback[1]} to ${fallback[2]}`);
+}
+
+// 63. Where the longest suppression window is set, named in two places as 0002 files it: the
+// writers' refusal and the hint under the dialog's end field. A key moved to another category
+// leaves both pointing at a tab that no longer holds it.
+{
+  const seeded = need(SCHEMA, /seed_setting\(\s*'alerts\.suppression_max_days',\s*to_jsonb\(\d+\),\s*'number',\s*'([^']+)'/,
+    "alerts.suppression_max_days' category in 0002");
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(', '$$;',
+    'check_alert_suppression_window_length()');
+  const refused = fn && need(fn.body, /set on Settings › ([^.']+)\./, `the tab check_alert_suppression_window_length()'s sentence names (${fn.file})`);
+  const js = need(read('frontend/src/utils/alertSuppression.js'), /export const SUPPRESSION_MAX_DAYS_PLACE = 'Settings › ([^']+)'/,
+    'SUPPRESSION_MAX_DAYS_PLACE in utils/alertSuppression.js');
+  if (seeded && js) compare('suppressionMaxDaysPlace', "the Settings tab the dialog names and 0002's category", js[1], seeded[1]);
+  if (seeded && refused) compare('suppressionMaxDaysPlace', `the Settings tab the writers' refusal names (${fn.file}) and 0002's category`, refused[1], seeded[1]);
+}
+
 // 55. History's alerts, two numbers in two places. The Alerts tab asks alert_occurrences() (0243)
 // for ALERT_HISTORY_LIMIT and one more, which must fit under the function's bound, or every read is
 // refused. Where alerts.retention_days cannot be read, the tab says alerts are kept for

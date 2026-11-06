@@ -14,6 +14,30 @@ export const SUPPRESSION_WINDOW_ROLES = ['Administrator', 'Shopfloor_Manager']
 /** The reason's limit, as `alert_suppression_windows_reason_valid` holds it (mirror check 54). */
 export const SUPPRESSION_REASON_MAX = 200
 
+/** The setting that holds the longest a window may last, in days, from its start. */
+export const SUPPRESSION_MAX_DAYS_KEY = 'alerts.suppression_max_days'
+
+/**
+ * The longest window where the setting cannot be read or is out of its bounds, and those bounds:
+ * 0002's seed, and what the writers fall back to (mirror check 62).
+ */
+export const SUPPRESSION_MAX_DAYS = 7
+export const SUPPRESSION_MAX_DAYS_MIN = 1
+export const SUPPRESSION_MAX_DAYS_MAX = 90
+
+/** Where the limit is set, as the writers' refusal names it (mirror check 63). */
+export const SUPPRESSION_MAX_DAYS_PLACE = 'Settings › Retention'
+
+/** The longest window in days, from the setting's stored value, as the writers read it. */
+export function suppressionMaxDays(value) {
+  return typeof value === 'number' && value >= SUPPRESSION_MAX_DAYS_MIN && value <= SUPPRESSION_MAX_DAYS_MAX
+    ? value
+    : SUPPRESSION_MAX_DAYS
+}
+
+/** "7 days", or "1 day". */
+export const dayWords = (days) => `${days} ${days === 1 ? 'day' : 'days'}`
+
 export const maySuppress = (role) => SUPPRESSION_WINDOW_ROLES.includes(role)
 
 /** Whether a window covers the alert now, as platform_alerts_active answered when it was read. */

@@ -47,11 +47,13 @@ To schedule a window:
 
 1. Open the device's details panel, and select **Schedule window…**.
 2. Give a reason. Everyone who can see the alerts reads it.
-3. Choose a start and an end, in your local time. A start already past is now.
+3. Choose a start and an end, in your local time. A start already past is now. The end can be at most 7 days after the start, unless your site has changed that.
 4. Select **Schedule window**.
 
 **Change…** changes a window's end or its reason, and its start if it has not started. **End now** ends a window early, so its alerts count again. A window that has not started has **Cancel window** instead. Both ask first. When a window ends while an alert is still firing, the alert counts again, as if it had just fired.
 
-Shopfloor Managers and Administrators can schedule, change and end windows. Everyone else can see them. Each is recorded in the Audit Trail, in the device's lane. A window can be as long as you like, so check its end.
+Shopfloor Managers and Administrators can schedule, change and end windows. Everyone else can see them. Each is recorded in the Audit Trail, in the device's lane.
+
+**A window lasts at most 7 days** unless an Administrator changes the limit, so a forgotten one still ends soon. The dialog names the limit under **End**. The limit is on the **Settings** page, on the **Retention** tab: **Longest suppression window (days)**, from 1 to 90. A change to a window's start or end is held to the limit too, counted from the window's own start. Lowering the limit leaves windows already scheduled as they are. Each still ends by itself.
 
 The alert at the top of the details panel says whether it is firing, acknowledged or suppressed, and since when. An acknowledged one says who acknowledged it and why. A suppressed one says until when, and the window's reason.

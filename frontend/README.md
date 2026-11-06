@@ -516,7 +516,11 @@ height is not known, and above the actions it could push Edit Details off the dr
   Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
   (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
   custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
-  The section reads again at its next window's start or end.
+  The end field's `max` is the window's own start plus `alerts.suppression_max_days` (`useSetting`,
+  falling back to `SUPPRESSION_MAX_DAYS`, 7), and a hint under it names the limit and its Settings
+  tab. An end past it is refused inline, as an end in the past is; a change of the reason alone is
+  not measured, as the writer does not measure it. The section reads again at its next window's
+  start or end.
 - **The alert names no evaluator.** The banner above the fields (`ContextPanel`'s `alert`) says
   Alert firing, Alert acknowledged or Alert suppressed, since when, with the counter's lines under
   it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one

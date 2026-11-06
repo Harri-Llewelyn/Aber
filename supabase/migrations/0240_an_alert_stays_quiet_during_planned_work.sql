@@ -15,6 +15,10 @@
 --     Administrator or a Shopfloor Manager acts, and every other caller is refused. Each act writes
 --     one Audit Trail row in the subject's own lane. A start in the past is taken as now. Ending a
 --     window that has not started cancels it: it covered nothing, so it is deleted.
+--   * A window lasts at most alerts.suppression_max_days from its start (0002: 7, from 1 to 90),
+--     so a forgotten one still ends soon. check_alert_suppression_window_length() refuses a longer
+--     one for both writers. A change of the times is measured from the window's own start. A
+--     window already longer keeps its end.
 --   * platform_alerts.suppression_window_id records the window that first covered an occurrence,
 --     for history, and is never cleared. A BEFORE INSERT trigger stamps an occurrence that starts
 --     in a window; stamp_platform_alerts_suppression() stamps one already firing when a window
@@ -288,6 +292,41 @@ COMMENT ON FUNCTION public.alert_suppression_window_audit_identity(public.alert_
 -- -------------------------------------------------------------------------------------------------
 -- 4. Scheduling
 -- -------------------------------------------------------------------------------------------------
+-- The longest window, for both writers. A missing row, or a value outside 0002's bounds, is the
+-- seeded 7 days, so the limit never stops windows altogether. A part day is taken as it is, as the
+-- other day settings take one. The sentence names the Settings tab the key is on (mirror check 63).
+CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(p_starts_at timestamp with time zone,
+                                                                        p_ends_at timestamp with time zone)
+RETURNS void
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  v_days numeric;
+BEGIN
+  SELECT (value #>> '{}')::numeric INTO v_days
+    FROM public.system_settings
+   WHERE key = 'alerts.suppression_max_days';
+  IF v_days IS NULL OR v_days < 1 OR v_days > 90 THEN
+    v_days := 7;
+  END IF;
+  IF p_ends_at > p_starts_at + make_interval(secs => v_days::double precision * 86400.0) THEN
+    RAISE EXCEPTION 'A window can last at most % %, set on Settings › Retention.',
+      trim_scale(v_days), CASE WHEN v_days = 1 THEN 'day' ELSE 'days' END
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+END
+$$;
+
+ALTER FUNCTION public.check_alert_suppression_window_length(timestamp with time zone, timestamp with time zone) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.check_alert_suppression_window_length(timestamp with time zone, timestamp with time zone) FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.check_alert_suppression_window_length(timestamp with time zone, timestamp with time zone) IS
+  'Refuses a window that ends more than alerts.suppression_max_days after its start (22023), with '
+  'a sentence naming the limit and Settings › Retention. A missing setting, or one outside 1 to '
+  '90, is 7 days. Called by schedule_alert_suppression_window() and '
+  'change_alert_suppression_window() (0240).';
+
 -- A person's act: a machine identity holds no role, so it is refused with every other caller
 -- outside the two roles. The refusals come before anything is written, each with a sentence the
 -- dashboard shows. The audit row is in the subject's lane, each lane's INSERT with its kind written
@@ -321,6 +360,7 @@ BEGIN
   IF p_ends_at <= v_start THEN
     RAISE EXCEPTION 'A window must end after it starts, and after now.' USING ERRCODE = 'invalid_parameter_value';
   END IF;
+  PERFORM public.check_alert_suppression_window_length(v_start, p_ends_at);
   IF v_reason IS NULL THEN
     RAISE EXCEPTION 'A window needs a reason.' USING ERRCODE = 'invalid_parameter_value';
   END IF;
@@ -384,17 +424,19 @@ ALTER FUNCTION public.schedule_alert_suppression_window(text, uuid, timestamp wi
 COMMENT ON FUNCTION public.schedule_alert_suppression_window(text, uuid, timestamp with time zone, timestamp with time zone, text) IS
   'Schedules a suppression window on a device, a gateway or a cell (p_subject_kind device, gateway '
   'or cell): a Shopfloor Manager or an Administrator (42501 otherwise). p_starts_at NULL or in the '
-  'past is now; p_ends_at is required and after the start; p_reason is trimmed and 1 to 200 '
-  'characters (22023 otherwise). A subject that does not exist is 404. Writes one '
-  'SUPPRESSION_WINDOW_SCHEDULED audit row in the subject''s lane, stamps the alerts it covers now, '
-  'and returns the window (0240).';
+  'past is now; p_ends_at is required, after the start and at most alerts.suppression_max_days '
+  'after it; p_reason is trimmed and 1 to 200 characters (22023 otherwise). A subject that does '
+  'not exist is 404. Writes one SUPPRESSION_WINDOW_SCHEDULED audit row in the subject''s lane, '
+  'stamps the alerts it covers now, and returns the window (0240).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 5. Changing
 -- -------------------------------------------------------------------------------------------------
 -- A NULL argument keeps what the window has, so the dashboard sends only what changed. A window
 -- that has started keeps its start, and one that has ended is kept as it was: both are history.
--- Changing nothing writes nothing.
+-- Changing nothing writes nothing. A change of the times is held to the longest window from the
+-- window's own start, so the end cannot creep out a day at a time; a change of the reason alone is
+-- not, so a window longer than a since-lowered limit keeps its end.
 CREATE OR REPLACE FUNCTION public.change_alert_suppression_window(p_window_id uuid,
                                                                   p_starts_at timestamp with time zone,
                                                                   p_ends_at timestamp with time zone,
@@ -443,6 +485,9 @@ BEGIN
   END IF;
   IF v_end <= v_start THEN
     RAISE EXCEPTION 'A window must end after it starts.' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF v_start <> v_window.starts_at OR v_end <> v_window.ends_at THEN
+    PERFORM public.check_alert_suppression_window_length(v_start, v_end);
   END IF;
   v_reason := v_window.reason;
   IF p_reason IS NOT NULL THEN
@@ -508,8 +553,10 @@ COMMENT ON FUNCTION public.change_alert_suppression_window(uuid, timestamp with 
   'Changes a window''s start, end or reason; a NULL argument keeps what it has. A Shopfloor Manager '
   'or an Administrator (42501 otherwise), on a window that exists (404). An ended window, and the '
   'start of a started one, are 23514. A start in the past is now; the end must be after now and the '
-  'start, and the reason 1 to 200 characters (22023). Writes one SUPPRESSION_WINDOW_CHANGED audit row '
-  'with the window before and after, or nothing when nothing changed, and returns the window (0240).';
+  'start, and, when the times change, at most alerts.suppression_max_days after the start, the new '
+  'one or the window''s own; the reason is 1 to 200 characters (22023). Writes one '
+  'SUPPRESSION_WINDOW_CHANGED audit row with the window before and after, or nothing when nothing '
+  'changed, and returns the window (0240).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 6. Ending
@@ -751,12 +798,27 @@ BEGIN
     END IF;
   END LOOP;
   FOREACH v_fn IN ARRAY ARRAY['public.platform_alerts_stamp_suppression()', 'public.stamp_platform_alerts_suppression()',
-                              'public.alert_suppression_window_audit_identity(public.alert_suppression_windows)'] LOOP
+                              'public.alert_suppression_window_audit_identity(public.alert_suppression_windows)',
+                              'public.check_alert_suppression_window_length(timestamp with time zone, timestamp with time zone)'] LOOP
     IF has_function_privilege('authenticated', v_fn, 'EXECUTE') OR has_function_privilege('anon', v_fn, 'EXECUTE')
        OR has_function_privilege('service_role', v_fn, 'EXECUTE') THEN
       RAISE EXCEPTION '0240: % is callable from outside the database', v_fn;
     END IF;
   END LOOP;
+
+  -- The longest window: the setting 0002 declares, and a limit that admits a day and refuses past
+  -- 90 days whatever value is stored.
+  IF NOT EXISTS (SELECT 1 FROM public.system_settings
+                  WHERE key = 'alerts.suppression_max_days' AND value_type = 'number'
+                    AND min_value = 1 AND max_value = 90) THEN
+    RAISE EXCEPTION '0240: alerts.suppression_max_days is not a number from 1 to 90; 0002 declares it';
+  END IF;
+  PERFORM public.check_alert_suppression_window_length(now(), now() + interval '24 hours');
+  BEGIN
+    PERFORM public.check_alert_suppression_window_length(now(), now() + interval '2160 hours 1 minute');
+    RAISE EXCEPTION '0240: check_alert_suppression_window_length() let a window last past 90 days';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
 
   -- A request with no person behind it is refused before anything is read.
   PERFORM set_config('request.jwt.claims', '', true);
