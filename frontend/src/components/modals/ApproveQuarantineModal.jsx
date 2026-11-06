@@ -12,6 +12,16 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
   // One key space across both buttons: approving as new and merging into the suggested match are
   // two answers to the same question, so running one locks the other.
   const [busy, runBusy] = usePendingKey()
+  // A refusal from approve-quarantine, as it worded it. The dialog stays open on one.
+  const [error, setError] = useState(null)
+  const decide = (key, act) => runBusy(key, async () => {
+    setError(null)
+    try {
+      await act()
+    } catch (err) {
+      setError(err.message)
+    }
+  })
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
@@ -40,7 +50,10 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
   // operator is told that leaving the picker alone leaves the device without a cell.
   const willBeUnassigned = scope === SCOPE_CELL && !cellId && !selectedGateway?.cell_id
 
-  const handleSave = () => runBusy('approve', () => onApprove(item.asset_id, {
+  // Area-Wide with no area named would be refused by the database; held here.
+  const problem = !isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : null
+
+  const handleSave = () => decide('approve', () => onApprove(item.asset_id, {
     asset_name: assetName,
     connection_method: connMethod,
     active_gateway_id: gatewayId,
@@ -49,7 +62,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
     location_scope: scope
   }))
 
-  const handleAcceptMatch = () => runBusy('merge', () => onMerge(item.asset_id, suggestion.candidateId))
+  const handleAcceptMatch = () => decide('merge', () => onMerge(item.asset_id, suggestion.candidateId))
 
   return (
     // Escape, the close button and Cancel do nothing while a decision is in flight.
@@ -58,16 +71,17 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       icon={<IconShieldAlert size={18} />}
       size="md"
       onClose={busy ? () => {} : onCancel}
+      problem={problem}
+      error={error}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
           <ActionButton
             pending={busy === 'approve'}
             pendingLabel="Approving…"
-            // Area-Wide with no area named would be refused by the database; held here.
-            disabled={busy === 'merge' || (!isGateway && locationIncomplete(location))}
+            disabled={busy === 'merge' || problem !== null}
             onClick={handleSave}
-            title={!isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : undefined}
+            title={problem ?? undefined}
           >
             Approve &amp; Onboard
           </ActionButton>

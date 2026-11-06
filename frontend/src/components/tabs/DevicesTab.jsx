@@ -21,6 +21,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -154,6 +155,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [quarantine, setQuarantine] = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
+  // A refusal of the form's save, shown in the dialog as the database or the function worded it.
+  const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
   const [approveItem, setApproveItem] = useState(null)
   // The quarantined device whose Reject dialog is open, and the archived one whose Restore is.
@@ -314,6 +317,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   useRealtimeTable(['devices', 'gateways', 'cells'], loadAll, { enabled: REALTIME_ENABLED })
 
   const save = async () => {
+    setFormError(null)
     try {
       const payload = {
         asset_name: form.asset_name,
@@ -374,8 +378,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       }
       setShowForm(false); loadAll()
       showToast(`Device '${payload.asset_name}' ${editing ? 'saved' : 'created'}`, 'success', { to: deviceUrl(deviceId) })
-    } catch (e) { showToast(e.message, 'error') }
+    } catch (e) { setFormError(e.message) }
   }
+
+  const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
+
+  // Why the form's save is off, in the order the fields appear. The database refuses Area-Wide with
+  // no area; it would take an empty name, which every list would then show as a blank row.
+  const formProblem = !(form.asset_name || '').trim() ? 'Give the device a name'
+    : locationIncomplete(form) ? 'Choose which area the device serves'
+      : null
 
   /** Tick or untick one schema in the form's set. */
   const toggleSchema = (schemaId) => setForm(f => {
@@ -392,96 +404,79 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // In-flight state for the form. Reject's and Restore's are their dialogs'.
   const [saving, runSave] = usePendingAction()
 
+  // Approve and merge are run from ApproveQuarantineModal, which shows a refusal as it was worded.
   const approveQuarantine = async (assetId, body) => {
     const targetGateway = body?.active_gateway_id || body?.gateway_id || null
 
-    try {
-      // trackRequest, because this calls the edge function on the supabase client directly and
-      // bypasses the `api` wrapper that feeds the activity line.
-      const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
-        // `asset_name` is the operator's correction to the announced label. `cell_id` and
-        // `location_scope` are the modal's location answer; '' is Inherit, and the edge function
-        // writes NULL for it.
-        body: {
-          device_id: assetId,
-          gateway_id: targetGateway,
-          asset_name: body?.asset_name,
-          cell_id: body?.cell_id ?? '',
-          area_id: body?.area_id ?? '',
-          location_scope: body?.location_scope || 'cell'
-        }
-      }))
-
-      if (error) {
-        // error.message is always generic on a non-2xx; the real reason (e.g.
-        // "Forbidden: Insufficient privileges") lives in the response body.
-        const detail = await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed')
-        // Edge functions validate the session with the auth server, so a session PostgREST still
-        // accepts first shows up as dead here. Sign out rather than stay half-authenticated.
-        showToast(await describeAuthFailure(detail, detail), 'error')
-        return
+    // trackRequest, because this calls the edge function on the supabase client directly and
+    // bypasses the `api` wrapper that feeds the activity line.
+    const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
+      // `asset_name` is the operator's correction to the announced label. `cell_id` and
+      // `location_scope` are the modal's location answer; '' is Inherit, and the edge function
+      // writes NULL for it.
+      body: {
+        device_id: assetId,
+        gateway_id: targetGateway,
+        asset_name: body?.asset_name,
+        cell_id: body?.cell_id ?? '',
+        area_id: body?.area_id ?? '',
+        location_scope: body?.location_scope || 'cell'
       }
+    }))
 
-      if (!data?.success) {
-        showToast(data?.error || 'Quarantine approval failed', 'error')
-        return
-      }
+    if (error) {
+      // error.message is always generic on a non-2xx; the real reason (e.g.
+      // "Forbidden: Insufficient privileges") lives in the response body.
+      const detail = await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed')
+      // Edge functions validate the session with the auth server, so a session PostgREST still
+      // accepts first shows up as dead here. Sign out rather than stay half-authenticated.
+      throw new Error(await describeAuthFailure(detail, detail))
+    }
 
-      setApproveItem(null)
-      loadAll()
-      // Report the friendly name, not the UUID the edge function is addressed by.
-      showToast(`Device '${approveItem?.asset_name || assetId}' approved and onboarded`, 'success', { to: deviceUrl(assetId) })
-    } catch (e) { showToast(e.message, 'error') }
+    if (!data?.success) throw new Error(data?.error || 'Quarantine approval failed')
+
+    setApproveItem(null)
+    loadAll()
+    // Report the friendly name, not the UUID the edge function is addressed by.
+    showToast(`Device '${approveItem?.asset_name || assetId}' approved and onboarded`, 'success', { to: deviceUrl(assetId) })
   }
 
   const mergeQuarantine = async (assetId, candidateId) => {
-    try {
-      // Tracked for the same reason as approveQuarantine above.
-      const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
-        body: { device_id: assetId, merge_into_device_id: candidateId }
-      }))
+    // Tracked for the same reason as approveQuarantine above.
+    const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
+      body: { device_id: assetId, merge_into_device_id: candidateId }
+    }))
 
-      if (error) {
-        const detail = await edgeFunctionErrorMessage(error, 'Quarantine match acceptance denied or failed')
-        showToast(await describeAuthFailure(detail, detail), 'error')
-        return
-      }
+    if (error) {
+      const detail = await edgeFunctionErrorMessage(error, 'Quarantine match acceptance denied or failed')
+      throw new Error(await describeAuthFailure(detail, detail))
+    }
 
-      if (!data?.success) {
-        showToast(data?.error || 'Quarantine match acceptance failed', 'error')
-        return
-      }
+    if (!data?.success) throw new Error(data?.error || 'Quarantine match acceptance failed')
 
-      setApproveItem(null)
-      loadAll()
-      showToast(`Device '${approveItem?.asset_name || assetId}' matched and merged into the provisioned device`, 'success', { to: deviceUrl(candidateId) })
-    } catch (e) { showToast(e.message, 'error') }
+    setApproveItem(null)
+    loadAll()
+    showToast(`Device '${approveItem?.asset_name || assetId}' matched and merged into the provisioned device`, 'success', { to: deviceUrl(candidateId) })
   }
 
-  // Run from the Reject dialog, which closes either way so a failure's toast is not left behind it.
+  // Reject, Archive and Restore are run from a ConfirmModal, which closes only once the act has
+  // succeeded and otherwise shows the refusal in the dialog.
   const rejectQuarantine = async (item) => {
-    try {
-      await api.post(`/api/v1/quarantine/${item.asset_id}/reject`, {})
-      loadAll(); showToast(`Quarantined device '${item.asset_name}' rejected`, 'success')
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRejectTarget(null) }
+    await api.post(`/api/v1/quarantine/${item.asset_id}/reject`, {})
+    setRejectTarget(null); loadAll()
+    showToast(`Quarantined device '${item.asset_name}' rejected`, 'success')
   }
 
   const archiveDevice = async (days) => {
-    try {
-      await api.post(`/api/v1/devices/${archiveTarget.asset_id}/archive`, { auto_delete_days: days })
-      setArchiveTarget(null); loadAll()
-      showToast(`Device '${archiveTarget.asset_name}' archived`, 'success', { to: deviceUrl(archiveTarget.asset_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/devices/${archiveTarget.asset_id}/archive`, { auto_delete_days: days })
+    setArchiveTarget(null); loadAll()
+    showToast(`Device '${archiveTarget.asset_name}' archived`, 'success', { to: deviceUrl(archiveTarget.asset_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
   const restoreDevice = async (assetId, name) => {
-    try {
-      await api.post(`/api/v1/devices/${assetId}/restore`, {})
-      loadAll(); showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/devices/${assetId}/restore`, {})
+    setRestoreTarget(null); loadAll()
+    showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
   }
 
   const canApprove = hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)
@@ -1179,21 +1174,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         <Modal
           title={editing ? 'Edit Device Configuration' : 'Register New Device'}
           size="md"
-          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          onClose={closeForm}
+          problem={formProblem}
+          error={formError}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
+              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form)}
-                title={locationIncomplete(form)
-                  ? 'Choose which area the device serves'
-                  : proposeMode
-                    ? 'Ask for these changes — an approver applies them, or says why not'
-                    : undefined}
+                disabled={formProblem !== null}
+                title={formProblem ?? (proposeMode
+                  ? 'Ask for these changes — an approver applies them, or says why not'
+                  : undefined)}
               >
                 {proposeMode
                   ? (editingProposal ? 'Update your proposal' : 'Propose a change')
@@ -1205,8 +1199,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             {/* Every field here is editable. The identifiers and the topic helper are facts, and
                 live on the drawer where they are copyable. */}
             <div className="form-group">
-              <label className="form-label" htmlFor="device-name">Device Name</label>
-              <input id="device-name" className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} placeholder="e.g. CNC Mill 01" />
+              <label className="form-label" htmlFor="device-name">Device Name <RequiredMark /></label>
+              <input id="device-name" className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} placeholder="e.g. CNC Mill 01" aria-required="true" />
               <div className="form-hint">
                 A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>

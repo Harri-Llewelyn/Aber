@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconCheck, IconX } from '../common/Icons'
 import {
   ALERT_ACKNOWLEDGEMENT_REASONS, ALERT_ACKNOWLEDGEMENT_NOTE_MAX,
@@ -9,7 +10,8 @@ import {
 
 /**
  * Acknowledge a firing alert: a reason from the closed set, and a note. The reason starts unchosen,
- * so nobody files Investigating by default; Other needs the note, as the database does. A refusal
+ * so nobody files Investigating by default; Other needs the note, as the database does. Both are
+ * said in the dialog from the first edit, while the confirm is greyed. A refusal
  * (someone else acknowledged it first, or it resolved meanwhile) is shown in the dialog as the
  * database worded it.
  */
@@ -21,7 +23,9 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
   const reasonRef = useRef(null)
 
   const needsNote = reason === 'other'
-  const ready = reason !== '' && (!needsNote || note.trim() !== '')
+  const problem = reason === '' ? 'Choose a reason'
+    : needsNote && note.trim() === '' ? 'Other needs a note'
+      : null
 
   const submit = () => run(async () => {
     setError(null)
@@ -43,6 +47,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
         stops counting in the top bar until it resolves.
       </>}
       initialFocus={reasonRef}
+      problem={problem}
       error={error}
       footer={
         <>
@@ -51,8 +56,8 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
             className="btn btn-primary"
             pending={pending}
             pendingLabel="Acknowledging…"
-            disabled={!ready}
-            title={ready ? undefined : needsNote ? 'Other needs a note' : 'Choose a reason first'}
+            disabled={problem !== null}
+            title={problem ?? undefined}
             onClick={submit}
           >
             Acknowledge alert
@@ -61,7 +66,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
       }
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="acknowledge-reason">Reason</label>
+        <label className="form-label" htmlFor="acknowledge-reason">Reason <RequiredMark /></label>
         <select
           id="acknowledge-reason"
           className="form-control"
@@ -69,6 +74,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
           onChange={e => setReason(e.target.value)}
           disabled={pending}
           ref={reasonRef}
+          aria-required="true"
         >
           <option value="" disabled>Choose a reason…</option>
           {ALERT_ACKNOWLEDGEMENT_REASONS.map(r => (
@@ -78,7 +84,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
       </div>
       <div className="form-group">
         <label className="form-label" htmlFor="acknowledge-note">
-          {needsNote ? 'Note' : 'Note (optional)'}
+          {needsNote ? <>Note <RequiredMark /></> : 'Note (optional)'}
         </label>
         <textarea
           id="acknowledge-note"
@@ -89,6 +95,7 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
           disabled={pending}
           maxLength={ALERT_ACKNOWLEDGEMENT_NOTE_MAX}
           placeholder="Feeder belt change until 14:00"
+          aria-required={needsNote || undefined}
         />
         <p className="form-hint">
           Everyone who can see the alert reads it. Say what you know, so nobody else goes to look.
