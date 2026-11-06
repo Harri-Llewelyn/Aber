@@ -20,7 +20,7 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 - **Security** holds **Require MFA to change the platform**. It is off when Aber is installed. Only an Administrator can turn it on or off.
 - While it is on, an Administrator or a Shopfloor Manager needs [MFA](../guides/glossary.md#mfa-multi-factor-authentication) to change anything: a save, an approval, a new credential, a change on People. They need it to sign in to Node-RED, Studio and the forge too.
 - Reading is never refused, and Grafana, Operators and Auditors are never asked. Someone refused is told to add an authenticator on **Profile › MFA**.
-- **Turning it on signs every Administrator and Shopfloor Manager out of Node-RED, Studio and the forge.** Their next sign-in there asks for MFA. Grafana stays signed in.
+- **Turning it on signs every Administrator and Shopfloor Manager out of Node-RED and the forge, and Studio where your site runs it.** Their next sign-in there asks for MFA. Grafana stays signed in.
 - Turning it off needs MFA too, once it is on. Add an authenticator on your **Profile** page first.
 - **When the page is narrow** each setting stacks. The name and key come first, then the value and actions, then the description.
 

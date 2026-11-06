@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { api } from '../../api'
+import { studioEnabled } from '../../config'
 import { Badge } from '../common/Badge'
 import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -118,6 +119,8 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
   const [naming, setNaming] = useState(null)
   const [readdressing, setReaddressing] = useState(null)
   const [reroling, setReroling] = useState(null)
+  // The confirmations name Studio's sign-ins only where the chart runs Studio.
+  const studio = studioEnabled()
   // The open drawer's session count, for the person it was read for.
   const [sessions, setSessions] = useState({ userId: null, summary: null, error: null })
   // The drawer's list of sessions while it is open: whose, the rows (undefined until the first read
@@ -627,9 +630,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
               They can no longer sign in, and their role
               {confirming.person.role ? ` (${personRoleLabel(confirming.person.role)})` : ''} is
               removed at once, so nothing that needs a role works for them here. Sessions they
-              already have, here or in Node-RED, Grafana and Studio, end on their own rather than at
-              once; the page help says when. Their account and its history stay, and Restore Access
-              gives the role back.
+              already have, here or in {studio ? 'Node-RED, Grafana and Studio' : 'Node-RED and Grafana'},
+              end on their own rather than at once; the page help says when. Their account and its
+              history stay, and Restore Access gives the role back.
             </>
           )}
           confirmLabel="Remove Access"
@@ -662,9 +665,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
           title={`End every session for ${personLabel(confirming.person)}`}
           message={(
             <>
-              Every sign-in they have ends: the dashboard in each browser, and Studio, the forge,
-              Node-RED and Grafana. The API refuses their access at once, and Studio and the forge
-              at their next request. Node-RED signs them out within a minute, and Grafana within
+              Every sign-in they have ends: the dashboard in each browser, and {studio && 'Studio, '}the
+              forge, Node-RED and Grafana. The API refuses their access at once, and {studio && 'Studio and '}the
+              forge at their next request. Node-RED signs them out within a minute, and Grafana within
               the hour. They keep their role and can sign in again. To stop them signing in, use
               Remove Access.
             </>

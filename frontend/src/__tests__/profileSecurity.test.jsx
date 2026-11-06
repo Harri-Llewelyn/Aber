@@ -243,6 +243,26 @@ describe('Sign Out of All Other Sessions', () => {
     expect(api.signOutOtherSessions).not.toHaveBeenCalled()
   })
 
+  // The deployment's config.js, as the chart writes it; studioEnabled() reads it per call.
+  it('names Studio\'s sign-ins with Studio on, and leaves them out with it off', async () => {
+    const dialogWith = async (studio) => {
+      globalThis.__ABER_CONFIG__ = { VITE_STUDIO_ENABLED: studio }
+      renderSessions()
+      await loaded()
+      fireEvent.click(button())
+      return screen.findByRole('dialog')
+    }
+    try {
+      expect(await dialogWith('true')).toHaveTextContent('and your Grafana, Node-RED, Studio and forge sign-ins, in this browser too.')
+      cleanup()
+      const off = await dialogWith('false')
+      expect(off).toHaveTextContent('and your Grafana, Node-RED and forge sign-ins, in this browser too.')
+      expect(off).not.toHaveTextContent('Studio')
+    } finally {
+      delete globalThis.__ABER_CONFIG__
+    }
+  })
+
   it('names its button for the act, and starts on the dialog, not on that button', async () => {
     renderSessions()
     await loaded()
