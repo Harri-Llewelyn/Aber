@@ -2427,6 +2427,8 @@ td.row-actions, th.row-actions {
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 
+/* A button that cannot go ahead: not permitted, or held until a form is complete. ActionButton adds
+   it whenever it is disabled and not pending; the `disabled` attribute alone changes nothing here. */
 .btn-disabled {
   opacity: 0.45 !important;
   cursor: not-allowed !important;
@@ -2440,8 +2442,8 @@ td.row-actions, th.row-actions {
   transform: none !important;
 }
 
-/* Button pending state: a button whose action is in flight. Not `.btn-disabled`, which means not
-   permitted and greys the control; this one has to stay legible. ActionButton sets the `disabled`
+/* Button pending state: a button whose action is in flight. Not `.btn-disabled`, which means it
+   cannot go ahead and greys the control; this one has to stay legible. ActionButton sets the `disabled`
    attribute alongside this class as the double-submit guard. `cursor: wait` still applies on a
    disabled button. */
 .btn-loading {
@@ -2660,6 +2662,13 @@ main:focus { outline: none; }
   line-height: 1.5;
 }
 
+/* Why the confirm is off (Modal's `problem`), between the body and the error slot. It stays in the
+   box while empty, as a live region, and takes no height then. */
+.modal-problem {
+  flex: none;
+  margin: 0;
+}
+
 /* One paragraph under the header saying what the dialog will do. */
 .modal-lead {
   margin: 0 0 16px;
@@ -2682,6 +2691,9 @@ main:focus { outline: none; }
   color: var(--text-muted);
   margin-bottom: 7px;
 }
+
+/* The asterisk of a required field (RequiredMark). A shape as well as a colour. */
+.required-mark { color: var(--danger-text); margin-left: 3px; }
 
 .form-control {
   width: 100%;

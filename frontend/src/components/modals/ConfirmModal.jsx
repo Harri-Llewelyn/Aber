@@ -8,6 +8,10 @@ import { Modal } from '../common/Modal'
  * A dialog that needs more than a question, such as a field for one option, passes it as
  * `children`; one that needs a different frame uses `<Modal>` directly.
  *
+ * A refusal stays in the dialog: when `onConfirm` rejects, its message is shown in the error slot
+ * as it was worded, and the dialog stays open for Cancel or another try. So `onConfirm` closes the
+ * dialog only once the act has succeeded, and lets a failure throw rather than toasting it.
+ *
  * @param {React.ReactNode} [title] Names the act ("Delete backup"), not "Confirm".
  *
  * @param {React.ReactNode} [icon] A sized icon element shown before the title.
@@ -48,6 +52,16 @@ export function ConfirmModal({
 }) {
   const [pending, runConfirm] = usePendingAction()
   const [typed, setTyped] = useState('')
+  const [error, setError] = useState(null)
+
+  const confirm = () => runConfirm(async () => {
+    setError(null)
+    try {
+      await onConfirm()
+    } catch (err) {
+      setError(err.message)
+    }
+  })
 
   /**
    * Opt-in, not the default: most callers guard something reversible, and friction only buys
@@ -69,6 +83,7 @@ export function ConfirmModal({
       size={size}
       lead={message}
       onClose={dismiss}
+      error={error}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
@@ -80,7 +95,7 @@ export function ConfirmModal({
             // Stated rather than left to be inferred from a greyed-out button, which explains
             // nothing about WHY it is greyed out.
             title={satisfied ? undefined : `Type the ${requireTypedLabel} above to enable this`}
-            onClick={() => runConfirm(() => onConfirm())}
+            onClick={confirm}
           >
             {confirmLabel}
           </ActionButton>
@@ -115,6 +130,7 @@ export function ConfirmModal({
           <p
             id="confirm-typed-hint"
             style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}
+            aria-live="polite"
           >
             {satisfied
               ? 'Matches — the action below is now enabled.'
