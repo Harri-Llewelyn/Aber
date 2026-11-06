@@ -229,6 +229,28 @@ class Seeding(CarriedBase):
         rows = self.read(T0, T0 + minutes(3), metrics=("Controller/MODE",))
         self.assertEqual([r["last_string"] for r in rows], ["MANUAL"] * 3)
 
+    def test_a_series_quiet_longer_than_the_lookback_seeds_from_its_newest_bucket_as_it_is(self):
+        # 3,000 numeric buckets from a day back, then a newer one holding only a text, 10 hours
+        # back: past the 288-minute lookback, so the series is read on its own. Its seed is that
+        # newest bucket's values as they are, its number empty, not the newest number further back.
+        self.cur.execute(
+            "INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, sum_double, n_double,"
+            " min_double, max_double, last_double, n_rows)"
+            " SELECT %s - make_interval(mins => g), %s, 'Spindle/LOAD', g, 1, g, g, g, 1"
+            "   FROM generate_series(0, 2999) g;", (T0 - timedelta(days=1), DEVICE))
+        self.bucket("telemetry_1m", T0 - timedelta(hours=10), text="IDLE")
+        rows = self.read(T0, T0 + minutes(2))
+        self.assertEqual([(r["last_double"], r["last_string"], r["is_carried"]) for r in rows],
+                         [(None, "IDLE", True), (None, "IDLE", True)])
+        # Kept in telemetry_1h alone, the newest of many hourly buckets seeds it.
+        self.cur.execute(
+            "INSERT INTO timescale.telemetry_1h (bucket, asset_id, metric_name, sum_double, n_double,"
+            " min_double, max_double, last_double, n_rows)"
+            " SELECT %s - make_interval(hours => g), %s, 'Arm/TORQUE', g, 1, g, g, g, 1"
+            "   FROM generate_series(0, 2999) g;", (T0 - timedelta(days=200), DEVICE))
+        rows = self.read(T0, T0 + minutes(2), metrics=("Arm/TORQUE",))
+        self.assertEqual([r["last_double"] for r in rows], [0, 0])
+
     def test_the_seed_is_the_newest_value_before_the_window(self):
         self.bucket("telemetry_1m", T0 - minutes(20), 10)
         self.bucket("telemetry_1m", T0 - minutes(10), 20)

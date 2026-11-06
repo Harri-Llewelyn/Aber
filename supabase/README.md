@@ -3194,8 +3194,10 @@ rather than carry values a second time, so its contract stays plain:
 - **Each series is seeded from the rollups, never from raw**, which the historian drops after 14
   days by default (`timescaledb.retention.retainFor`): a series silent for longer would otherwise
   seed empty. One query takes the newest values of every series in the 288 source buckets before
-  the window (a day of 5-minute buckets). Each series it misses is then read on its own, with
-  `ORDER BY bucket DESC LIMIT 1`, and from `telemetry_1h` when its own rollup has nothing.
+  the window (a day of 5-minute buckets). Each series it misses is then read on its own: its
+  newest bucket's values, null or not, as one remote aggregate
+  (`(array_agg(... ORDER BY bucket DESC))[1]` and `count(*)`), and from `telemetry_1h` when its
+  own rollup has nothing.
 - **Nothing is carried past now**, and a series with no value at or before a bucket has no row
   for it, so an unknown is never drawn as a value. A window may still end after now: a Day ends at
   midnight.
@@ -3214,10 +3216,13 @@ the same roles read through the `timescale` foreign tables and the `FOR PUBLIC` 
 parameters and each window read is one remote aggregate. Three things it does not ship, each found
 while measuring: `now()` (evaluated here, so a bound written with it would pull every row across),
 a lateral join (planned once per outer row: a seed written as one ran 2,535 remote queries for one
-chart, 10 s), and a `LIMIT` on a parameterised scan (the per-series seed is therefore its
-own statement, not a join). The 6,338-row `LIMIT` threshold in `api.js` governs a `LIMIT` on a
-view; none of these reads carries one, and a `LIMIT` a client puts on the RPC trims the result
-after the work is done, which is why the function bounds itself.
+chart, 10 s), and a `LIMIT` it does not expect to cut. postgres_fdw sends `ORDER BY ... LIMIT` only
+when the limit is under its own row estimate, and with no statistics it estimates one row for one
+series, so it sorts and limits here, after the series' every matching row has crossed. The
+per-series seed is therefore an aggregate: one row crosses. Written as `ORDER BY bucket DESC
+LIMIT 1`, a series quiet 6 hours, with 12 days of 1-minute buckets behind it, brought 16,950 rows
+across for its one value (measured; the aggregate brings 1). A `LIMIT` a client puts on the RPC
+trims the result after the work is done, which is why the function bounds itself.
 
 **Measured** for #324's spike, on a private historian (TimescaleDB 2.31, the chart's retention and
 compression, 20 devices of 15 metrics over 10 days, 3.06 million `telemetry_1m` rows), warm, median
