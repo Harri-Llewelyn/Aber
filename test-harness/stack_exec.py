@@ -259,22 +259,22 @@ def playback_deliveries():
         raise RuntimeError(f"could not read {path} in {describe('playback')}: {read.stderr.strip()}")
     in_file = _deliveries(read.stdout if read.returncode == 0 else "", path)
 
-    secret = volume["secret"]["secretName"]
-    got = _kubectl("get", "secret", secret, "-o", "json")
+    holder = volume["secret"]["secretName"]
+    got = _kubectl("get", "secret", holder, "-o", "json")
     if got.returncode != 0:
-        raise RuntimeError(f"could not read secret/{secret}: {got.stderr.strip()}")
+        raise RuntimeError(f"could not read secret/{holder}: {got.stderr.strip()}")
     encoded = (json.loads(got.stdout).get("data") or {}).get(PLAYBACK_DELIVERY_KEY) or ""
-    in_secret = _deliveries(base64.b64decode(encoded).decode(), f"secret/{secret}")
-    return in_file, in_secret
+    in_delivery = _deliveries(base64.b64decode(encoded).decode(), f"secret/{holder}")
+    return in_file, in_delivery
 
 
-def playback_delivery_gap(gateway, in_file, in_secret):
+def playback_delivery_gap(gateway, in_file, in_delivery):
     """
     Why the playback worker's file does not hold what the delivery Secret holds for `gateway`, each
     named by fingerprint(), or None when it does. A job the worker claims then connects with the
     password the credential service last delivered, which is the broker's.
     """
-    delivered, held = in_secret.get(gateway), in_file.get(gateway)
+    delivered, held = in_delivery.get(gateway), in_file.get(gateway)
     if not delivered:
         return f"the delivery Secret holds nothing for {gateway}: no credential has been delivered"
     if held != delivered:

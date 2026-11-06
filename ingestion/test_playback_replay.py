@@ -307,11 +307,15 @@ def await_playback_credential(session, gateway, timeout=CREDENTIAL_TIMEOUT):
         if body.get("playback_delivered") is not True:
             raise AssertionError(f"{sid}'s credential was issued but not delivered: playback_delivered="
                                  f"{body.get('playback_delivered')}")
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline, first = started + timeout, None
     while True:
         missing, row = playback_credential_state(session, gateway)
         if missing is None:
+            if first:
+                print(f"waited {time.monotonic() - started:.0f}s for {sid}'s credential; at first {first}")
             return row
+        first = first or missing
         if time.monotonic() >= deadline:
             raise AssertionError(
                 f"the playback worker did not hold {sid}'s current broker credential within "

@@ -155,18 +155,18 @@ DEPLOYMENT = {"spec": {"template": {"spec": {
 }}}}
 
 
-def secret_holding(document):
+def delivery_object(document):
     data = {"playback_credentials.json": base64.b64encode(document.encode()).decode()}
     return json.dumps({"data": data})
 
 
 class TestPlaybackDelivery(unittest.TestCase):
-    def read(self, in_file, in_secret, cat_error=""):
+    def read(self, in_file, in_delivery, cat_error=""):
         """playback_deliveries() over a cluster whose file and Secret hold these documents."""
         cats = []
 
         def kubectl(*args, **_):
-            out = json.dumps(DEPLOYMENT) if args[:2] == ("get", "deploy/playback") else secret_holding(in_secret)
+            out = json.dumps(DEPLOYMENT) if args[:2] == ("get", "deploy/playback") else delivery_object(in_delivery)
             return subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
 
         def run(target, *args, **_):
@@ -180,13 +180,13 @@ class TestPlaybackDelivery(unittest.TestCase):
             return stack_exec.playback_deliveries(), cats
 
     def test_the_file_is_found_where_the_deployment_mounts_the_delivery_key(self):
-        (in_file, in_secret), cats = self.read(json.dumps({GATEWAY: EARLIER}), json.dumps({GATEWAY: LATER}))
+        (in_file, in_delivery), cats = self.read(json.dumps({GATEWAY: EARLIER}), json.dumps({GATEWAY: LATER}))
         self.assertEqual(cats, [("playback", ("cat", "/var/lib/aber/playback/credentials.json"))])
-        self.assertEqual((in_file, in_secret), ({GATEWAY: EARLIER}, {GATEWAY: LATER}))
+        self.assertEqual((in_file, in_delivery), ({GATEWAY: EARLIER}, {GATEWAY: LATER}))
 
     def test_blank_or_absent_is_nothing_delivered(self):
-        (in_file, in_secret), _ = self.read("\n", "")
-        self.assertEqual((in_file, in_secret), ({}, {}))
+        (in_file, in_delivery), _ = self.read("\n", "")
+        self.assertEqual((in_file, in_delivery), ({}, {}))
         (in_file, _), _ = self.read("", json.dumps({GATEWAY: LATER}),
                                     cat_error="cat: /var/lib/aber/playback/credentials.json: No such file or directory")
         self.assertEqual(in_file, {})
