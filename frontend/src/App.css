@@ -6044,7 +6044,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 /* A closed group's charts take no space: display: flex above would otherwise outrank [hidden]. */
 .history-charts[hidden] { display: none; }
-.history-chart { margin: 0; min-width: 0; }
+/* Positioned so the chart's absolute screen-reader summary (.sr-only) is placed, clipped and scrolled
+   inside the Device tab's scroller; placed against the page instead, it lengthens the page. */
+.history-chart { position: relative; margin: 0; min-width: 0; }
 .history-chart-head {
   display: flex;
   flex-wrap: wrap;

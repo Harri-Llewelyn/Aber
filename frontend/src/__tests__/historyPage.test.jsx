@@ -815,6 +815,8 @@ describe('more charts than the card holds', () => {
     expect(body.parentElement).toHaveClass('card-fill')
     const scroller = body.querySelector(':scope > .trail-scroll')
     expect([...body.children].map(c => c.className)).toEqual(['history-header', 'trail-scroll'])
+    // Each chart's screen-reader summary sits inside its chart, which positions it (App.css).
+    expect(scroller.querySelectorAll('.history-chart > .sr-only')).toHaveLength(12)
 
     // Every chart and every group heading scrolls; the toolbar and the header row do not.
     for (const figure of screen.getAllByRole('figure')) expect(scroller).toContainElement(figure)
@@ -838,5 +840,8 @@ describe('more charts than the card holds', () => {
     expect(head).toMatch(/top: 0;/)
     // Over a chart's band words and alert readout, which sit at z-index 2.
     expect(Number(head.match(/z-index: (\d+);/)?.[1])).toBeGreaterThan(2)
+    // A chart holds its absolute screen-reader summary, so the summary scrolls with it rather than
+    // being placed against the page, where it lengthened the page at a short window (found live).
+    expect(rule('.history-chart')).toMatch(/position: relative;/)
   })
 })
