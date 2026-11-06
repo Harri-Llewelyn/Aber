@@ -1249,11 +1249,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 ))}
               </select>
               {/* Shown always: the question is why Playback cannot be picked, asked while something
-                  else is selected. */}
+                  else is selected, so the sentence names Playback rather than the selection. */}
               <div className="form-hint">
                 {editing?.shadow_of
                   ? 'This is a replay lane. It stays on the Playback gateway, and the database refuses a move.'
-                  : noDeviceAssignmentReason({ is_shadow: true })}
+                  : `The Playback gateway is not offered. ${noDeviceAssignmentReason({ is_shadow: true })}`}
               </div>
             </div>
 
